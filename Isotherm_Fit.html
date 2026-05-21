@@ -1,0 +1,1070 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sorption Isotherm Fitter</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:wght@300;600&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --ink:#0f0e0d;--paper:#f6f1ea;--cream:#ede7d8;--pale:#e0d9cc;
+  --rule:#c5bba9;--accent:#b84a2e;
+  --mono:'DM Mono',monospace;--serif:'Fraunces',Georgia,serif;--sans:'DM Sans',sans-serif;
+}
+html,body{height:100%;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:13px}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:var(--pale)}
+::-webkit-scrollbar-thumb{background:var(--rule);border-radius:2px}
+body{display:grid;grid-template-rows:auto 1fr}
+header{border-bottom:2px solid var(--ink);padding:12px 22px;display:flex;align-items:baseline;gap:16px}
+header h1{font-family:var(--serif);font-size:23px;font-weight:600;letter-spacing:-.4px}
+header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spacing:.15em;text-transform:uppercase}
+.app{display:grid;grid-template-columns:255px 1fr 268px;height:calc(100vh - 50px);overflow:hidden}
+/* sidebar */
+.sidebar{border-right:2px solid var(--ink);overflow-y:auto;display:flex;flex-direction:column}
+.sb{padding:12px 14px;border-bottom:1px solid var(--rule)}
+.sb:last-child{border-bottom:none}
+.lbl{font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:8px}
+/* dropzone */
+.dz{border:2px dashed var(--rule);padding:12px 8px;text-align:center;cursor:default;transition:border-color .2s,background .2s;user-select:none}
+.dz.over{border-color:var(--accent);background:var(--cream)}
+.dz-ico{font-size:18px;margin-bottom:4px}
+.dz-txt{font-size:10px;color:#888;line-height:1.5}
+.dz-name{font-size:11px;font-weight:500;color:var(--accent);margin-top:3px;word-break:break-all;min-height:1em}
+#fileBtn{margin-top:7px;width:100%;padding:6px;font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;background:transparent;border:1.5px solid var(--rule);color:#666;cursor:pointer}
+#fileBtn:hover{border-color:var(--accent);color:var(--accent)}
+#fileInput{display:none}
+/* model */
+select{width:100%;background:var(--cream);border:1.5px solid var(--rule);padding:6px 8px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none;cursor:pointer;-webkit-appearance:none;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center}
+select:focus{border-color:var(--accent)}
+/* equation canvas */
+#eqCanvas{display:block;width:100%;background:var(--cream);border:1.5px solid var(--rule);margin-top:8px}
+.eq-sub{font-size:10px;color:#888;margin-top:4px;line-height:1.5}
+/* guesses */
+.pg{display:grid;grid-template-columns:1fr 82px;gap:5px 7px;align-items:center;margin-top:7px}
+.pg label{font-size:13px;color:#444;line-height:1.4}
+.pg label span{display:block;font-size:11px;color:#888}
+.pg input{background:var(--cream);border:1.5px solid var(--rule);padding:4px 6px;font-family:var(--mono);font-size:11px;color:var(--ink);width:100%;outline:none}
+.pg input:focus{border-color:var(--accent)}
+/* preview */
+.pv{max-height:120px;overflow-y:auto;border:1.5px solid var(--rule);margin-top:6px}
+.pv table{width:100%;border-collapse:collapse;font-size:11px}
+.pv th{background:var(--cream);padding:3px 8px;text-align:right;font-size:9px;text-transform:uppercase;letter-spacing:.08em;position:sticky;top:0;border-bottom:1.5px solid var(--rule)}
+.pv td{padding:3px 8px;text-align:right;border-bottom:1px solid var(--pale);font-family:var(--mono)}
+/* buttons */
+.btn{display:block;width:100%;padding:8px 12px;font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;border:2px solid var(--ink);background:var(--ink);color:var(--paper);transition:background .15s,border-color .15s}
+.btn:hover:not(:disabled){background:var(--accent);border-color:var(--accent)}
+.btn:disabled{opacity:.3;cursor:not-allowed}
+.btn.out{background:transparent;color:var(--ink)}
+.btn.out:hover:not(:disabled){background:var(--ink);color:var(--paper)}
+/* centre */
+.centre{display:flex;flex-direction:column;overflow:hidden;min-height:0;min-width:0}
+.results{padding:12px 18px;border-bottom:2px solid var(--ink);flex-shrink:0}
+.r-grid{display:grid;gap:1px;background:var(--rule);border:1.5px solid var(--rule);margin-top:7px}
+.rc{background:var(--paper);padding:11px 14px}
+.rc .rt{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#888;margin-bottom:5px;font-family:Georgia,serif;font-weight:400}
+.rc .rv{font-size:14px;font-weight:400;line-height:1.6;font-family:Georgia,serif;color:var(--ink);flex-wrap:wrap}
+.rc .rs{font-size:12px;color:var(--ink);font-family:Georgia,serif;font-weight:400;white-space:nowrap;margin-left:0.3em}
+.rc.hi{background:var(--cream)}
+.gof{display:flex;gap:16px;margin-top:9px;padding-top:9px;border-top:1px solid var(--rule);flex-wrap:wrap;align-items:baseline}
+.gi .gl{font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#aaa}
+.gi .gv{font-size:13px;font-weight:500;font-family:Georgia,serif}
+.ph{color:#bbb;font-size:12px;font-style:italic;padding:4px 0}
+.chart-area{flex:1;padding:12px 18px;display:flex;flex-direction:column;gap:9px;min-height:0;overflow:hidden}
+.cw{flex:1;min-height:0;min-width:0;width:100%;overflow:hidden}
+.cw canvas{display:block;width:100% !important;height:100% !important}
+#status{padding:4px 18px;font-family:var(--mono);font-size:10px;color:#999;border-top:1px solid var(--rule);flex-shrink:0;letter-spacing:.05em}
+#status.ok{color:#2a7a3b}#status.err{color:var(--accent)}
+@keyframes spin{to{transform:rotate(360deg)}}
+.sp{display:inline-block;width:9px;height:9px;border:2px solid var(--rule);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:5px}
+/* ---- collapsible control panel ---- */
+.cpanel{border-left:2px solid var(--ink);overflow-y:auto;flex-shrink:0}
+.cp-group{border-bottom:1px solid var(--rule)}
+.cp-head{display:flex;justify-content:space-between;align-items:center;padding:9px 13px;cursor:pointer;user-select:none;background:var(--paper);transition:background .15s}
+.cp-head:hover{background:var(--cream)}
+.cp-head .cp-title{font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent)}
+.cp-head .cp-arr{font-size:10px;color:#888;transition:transform .2s}
+.cp-group.open .cp-arr{transform:rotate(180deg)}
+.cp-body{display:none;padding:10px 13px;border-top:1px solid var(--pale)}
+.cp-group.open .cp-body{display:block}
+.cr{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:6px}
+.cr:last-child{margin-bottom:0}
+.cl{font-size:11px;color:#555;flex:1;white-space:nowrap}
+.cr input[type=number]{width:65px;background:var(--cream);border:1.5px solid var(--rule);padding:3px 5px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none}
+.cr input[type=range]{flex:1;min-width:55px;accent-color:var(--accent)}
+.cr input[type=color]{width:32px;height:22px;border:1.5px solid var(--rule);background:none;cursor:pointer;padding:1px}
+.cr input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--accent)}
+.cr select{flex:1;background:var(--cream);border:1.5px solid var(--rule);padding:3px 5px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none;appearance:none}
+.cr input[type=text]{flex:1;background:var(--cream);border:1.5px solid var(--rule);padding:3px 5px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none}
+.rv2{font-family:var(--mono);font-size:11px;min-width:28px;text-align:right}
+</style>
+</head>
+<body>
+<header>
+  <h1>Isotherm Fitter</h1>
+  <span class="sub">Sorption Isotherm Analysis &mdash; Nonlinear Least Squares</span>
+</header>
+<div class="app">
+
+<!-- LEFT SIDEBAR -->
+<aside class="sidebar">
+  <div class="sb">
+    <div class="lbl">Data</div>
+    <div class="dz" id="dz">
+      <div class="dz-ico">&#8679;</div>
+      <div class="dz-txt">Drag &amp; drop a CSV file here</div>
+      <div class="dz-name" id="dzName"></div>
+    </div>
+    <button id="fileBtn" onclick="document.getElementById('fileInput').click()">&#128194; Browse for file&hellip;</button>
+    <input type="file" id="fileInput" accept=".csv,.txt,.dat">
+  </div>
+  <div class="sb" id="prevWrap" style="display:none">
+    <div class="lbl">Preview &nbsp;<span id="nPts" style="color:#aaa;text-transform:none;letter-spacing:0;font-size:10px"></span></div>
+    <div class="pv"><table><thead><tr><th>Pressure</th><th>Uptake</th></tr></thead><tbody id="prevBody"></tbody></table></div>
+  </div>
+  <div class="sb">
+    <div class="lbl">Model</div>
+    <select id="modelSel" onchange="onModelChange()"></select>
+    <canvas id="eqCanvas" height="96"></canvas>
+    <div class="eq-sub" id="eqDesc"></div>
+  </div>
+  <div class="sb">
+    <div class="lbl">Initial Guesses</div>
+    <div class="pg" id="guessGrid"></div>
+  </div>
+  <div class="sb" style="display:flex;flex-direction:column;gap:6px">
+    <button class="btn" id="btnFit" disabled>Fit Isotherm</button>
+    <button class="btn out" id="btnExp" disabled>Export Results CSV</button>
+  </div>
+</aside>
+
+<!-- CENTRE -->
+<div class="centre">
+  <div class="results">
+    <div class="lbl">Fitted Parameters</div>
+    <div id="resContent"><div class="ph">Load a CSV file and click Fit Isotherm.</div></div>
+  </div>
+  <div class="chart-area">
+    <div class="cw" id="cw"><canvas id="myChart"></canvas></div>
+  </div>
+  <div id="status">Ready &mdash; load a CSV file to begin.</div>
+</div>
+
+<!-- RIGHT CONTROLS (collapsible) -->
+<div class="cpanel" id="cpanel">
+
+  <div class="cp-group open">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Axis Ranges</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">X min</span><input type="number" id="xmin" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">X max</span><input type="number" id="xmax" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Y min</span><input type="number" id="ymin" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Y max</span><input type="number" id="ymax" placeholder="auto" oninput="redraw()"></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Axis Labels &amp; Fonts</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">X label</span><input type="text" id="xLbl" value="Pressure" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Y label</span><input type="text" id="yLbl" value="Uptake" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Font</span>
+        <select id="fontFam" oninput="redraw()">
+          <option value="'DM Mono',monospace">DM Mono</option>
+          <option value="Arial,sans-serif" selected>Arial</option>
+          <option value="'Times New Roman',serif">Times New Roman</option>
+          <option value="'Helvetica Neue',Helvetica,sans-serif">Helvetica</option>
+          <option value="Georgia,serif">Georgia</option>
+          <option value="'Courier New',monospace">Courier New</option>
+          <option value="Verdana,sans-serif">Verdana</option>
+          <option value="Garamond,serif">Garamond</option>
+          <option value="'Palatino Linotype',serif">Palatino</option>
+          <option value="'Century Schoolbook',serif">Century Schoolbook</option>
+        </select>
+      </div>
+      <div class="cr"><span class="cl">Label size</span><input type="range" id="axSz" min="8" max="72" value="36" oninput="V(this);redraw()"><span class="rv2">36</span></div>
+      <div class="cr"><span class="cl">Tick size</span><input type="range" id="tkSz" min="8" max="64" value="30" oninput="V(this);redraw()"><span class="rv2">30</span></div>
+      <div class="cr"><span class="cl">Axis color</span><input type="color" id="axCol" value="#000000" oninput="redraw()"></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Grid, Ticks &amp; Frame</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Show grid</span><input type="checkbox" id="grid" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Grid color</span><input type="color" id="gridCol" value="#dddddd" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Grid width</span><input type="range" id="gridW" min="0.5" max="3" step=".5" value="1" oninput="V(this);redraw()"><span class="rv2">1</span></div>
+      <div class="cr"><span class="cl">Major ticks</span><input type="checkbox" id="majTick" checked oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Minor ticks</span><input type="checkbox" id="minTick" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Tick length</span><input type="range" id="tickLen" min="2" max="16" value="8" oninput="V(this);redraw()"><span class="rv2">8</span></div>
+      <div class="cr"><span class="cl">Minor tick len</span><input type="range" id="minTickLen" min="1" max="10" value="5" oninput="V(this);redraw()"><span class="rv2">5</span></div>
+      <div class="cr"><span class="cl">Major tick width</span><input type="range" id="majTickW" min="0.5" max="4" step=".5" value="3" oninput="V(this);redraw()"><span class="rv2">3</span></div>
+      <div class="cr"><span class="cl">Minor tick width</span><input type="range" id="minTickW" min="0.5" max="3" step=".5" value="2" oninput="V(this);redraw()"><span class="rv2">2</span></div>
+      <div class="cr"><span class="cl">Tick direction</span><select id="tickDir" oninput="redraw()"><option value="in">Inward</option><option value="out" selected>Outward</option><option value="both">Both</option></select></div>
+      <div class="cr"><span class="cl">Axis width</span><input type="range" id="frameW" min="0.5" max="5" step=".5" value="3" oninput="V(this);redraw()"><span class="rv2">3</span></div>
+      <div class="cr"><span class="cl">Plot box border</span><input type="checkbox" id="boxBdr" checked oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Box border width</span><input type="range" id="boxW" min="0.5" max="5" step=".5" value="3" oninput="V(this);redraw()"><span class="rv2">3</span></div>
+      <div class="cr"><span class="cl">Box border color</span><input type="color" id="boxCol" value="#000000" oninput="redraw()"></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Background &amp; Colors</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Whole chart bg</span><input type="color" id="chartBg" value="#ffffff" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Plot area bg</span><input type="color" id="plotBg" value="#ffffff" oninput="redraw()"></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Data Points</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Color</span><input type="color" id="ptCol" value="#000000" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Size</span><input type="range" id="ptSz" min="2" max="16" value="5" oninput="V(this);redraw()"><span class="rv2">5</span></div>
+      <div class="cr"><span class="cl">Style</span>
+        <select id="ptSty" oninput="redraw()"><option>circle</option><option>rect</option><option>triangle</option><option>star</option><option>cross</option><option>crossRot</option></select>
+      </div>
+      <div class="cr"><span class="cl">Opacity</span><input type="range" id="ptOp" min="0.1" max="1" step=".05" value="1" oninput="V(this,2);redraw()"><span class="rv2">1</span></div>
+      <div class="cr"><span class="cl">Border width</span><input type="range" id="ptBW" min="0" max="4" step=".5" value="1.5" oninput="V(this);redraw()"><span class="rv2">1.5</span></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Fit Line</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Color</span><input type="color" id="lnCol" value="#b84a2e" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Width</span><input type="range" id="lnW" min="0.5" max="8" step=".5" value="3" oninput="V(this);redraw()"><span class="rv2">3</span></div>
+      <div class="cr"><span class="cl">Style</span>
+        <select id="lnDash" oninput="redraw()">
+          <option value="">Solid</option><option value="6,3">Dashed</option>
+          <option value="2,3">Dotted</option><option value="8,3,2,3">Dash-dot</option>
+        </select>
+      </div>
+      <div class="cr"><span class="cl">Resolution</span><input type="range" id="fitN" min="50" max="1000" step="50" value="300" oninput="V(this);redraw()"><span class="rv2">300</span></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Legend &amp; Title</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Show legend</span><input type="checkbox" id="leg" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Legend size</span><input type="range" id="legSz" min="8" max="36" value="11" oninput="V(this);redraw()"><span class="rv2">11</span></div>
+      <div class="cr"><span class="cl">Chart title</span><input type="text" id="ttl" placeholder="none" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Title size</span><input type="range" id="ttlSz" min="10" max="60" value="15" oninput="V(this);redraw()"><span class="rv2">15</span></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Save Plot</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Width px</span><input type="number" id="expW" value="1200"></div>
+      <div class="cr"><span class="cl">Height px</span><input type="number" id="expH" value="900"></div>
+      <div class="cr"><span class="cl">Format</span>
+        <select id="expFmt"><option>PNG</option><option>JPEG</option></select>
+      </div>
+      <button class="btn out" style="margin-top:8px;width:100%" onclick="savePlot()">Save Plot Image</button>
+    </div>
+  </div>
+
+</div><!-- cpanel -->
+</div><!-- app -->
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+// ---- collapsible panels ----
+function tog(head){head.closest('.cp-group').classList.toggle('open')}
+
+// ---- helpers ----
+function V(el,dp){el.nextElementSibling.textContent=parseFloat(el.value).toFixed(dp||0)}
+function gv(id){return document.getElementById(id).value}
+function gb(id){return document.getElementById(id).checked}
+function gn(id){const v=parseFloat(gv(id));return isNaN(v)?undefined:v}
+function ha(hex,a){const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);return`rgba(${r},${g},${b},${a})`}
+function fmt(v,sig){
+  sig=sig||4;
+  if(v===undefined||v===null||isNaN(v))return'--';
+  const a=Math.abs(v);
+  if(a===0)return'0';
+  if(a>=1e5||a<1e-3)return v.toExponential(sig-1);
+  return parseFloat(v.toPrecision(sig)).toString();
+}
+// Format SE to 2 sig figs, matching exponent style of value
+function fmtSE(val,se){
+  if(se===undefined||se===null||isNaN(se)||se<0)return'(n/a)';
+  if(se===0)return'0';
+  const a=Math.abs(val);
+  if(a>=1e5||a<1e-3)return se.toExponential(1);
+  return parseFloat(se.toPrecision(2)).toString();
+}
+function st(msg,cls){const e=document.getElementById('status');e.innerHTML=msg;e.className=cls||''}
+
+// =====================================================================
+//  EQUATION RENDERER  (draws onto eqCanvas using Canvas 2D)
+// =====================================================================
+// Each model equation is described as a draw function receiving (ctx,w,h)
+// We use a mini typesetting helper:
+//   text(ctx, str, x, y, sz, style)  -- style: 'n'ormal, 'i'talic, 'b'old
+//   sub/sup shifts handled manually
+
+function drawEq(modelKey){
+  const canvas=document.getElementById('eqCanvas');
+  const W=canvas.offsetWidth||226;
+  canvas.width=W*2; canvas.height=192; // *2 for HiDPI
+  canvas.style.height='96px';
+  const ctx=canvas.getContext('2d');
+  ctx.scale(2,2); // HiDPI
+  const w=W,h=96;
+  ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--cream').trim()||'#ede7d8';
+  ctx.fillRect(0,0,w,h);
+
+  // Draw to a temp canvas to measure width, then re-draw centered
+  const fn=EQ_DRAW[modelKey]||EQ_DRAW['lf'];
+  // first pass on offscreen to measure
+  const ofc=document.createElement('canvas');
+  ofc.width=canvas.width;ofc.height=canvas.height;
+  const octx=ofc.getContext('2d');
+  octx.scale(2,2);
+  octx.fillStyle='#fff';octx.fillRect(0,0,w,h);
+  fn(octx,w,h);
+  // find drawn content bounds via pixel scan
+  const id=octx.getImageData(0,0,ofc.width,ofc.height).data;
+  let minX=ofc.width,maxX=0;
+  for(let py=0;py<ofc.height;py++){
+    for(let px=0;px<ofc.width;px++){
+      const idx=(py*ofc.width+px)*4;
+      if(id[idx]<240||id[idx+1]<240||id[idx+2]<240){
+        if(px<minX)minX=px;if(px>maxX)maxX=px;
+      }
+    }
+  }
+  // offset in logical coords (divide by 2 for HiDPI scale)
+  const drawnW=(maxX-minX)/2;
+  const offsetX=minX<ofc.width?(w-drawnW)/2-minX/2:0;
+  // second pass on real canvas with centering offset
+  ctx.save();ctx.translate(offsetX,0);
+  fn(ctx,w,h);
+  ctx.restore();
+
+}
+
+// typesetting helpers
+function T(ctx,txt,x,y,sz,italic,bold,color){
+  ctx.fillStyle=color||'#0f0e0d';
+  let f='';
+  if(bold)f+='bold ';
+  if(italic)f+='italic ';
+  f+=sz+'px ';
+  // Use selected axis font family for equation text
+  f+="'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif";
+  ctx.font=f;
+  ctx.fillText(txt,x,y);
+  return ctx.measureText(txt).width;
+}
+function hline(ctx,x1,x2,y,w,color){ctx.save();ctx.strokeStyle=color||'#0f0e0d';ctx.lineWidth=w||1;ctx.beginPath();ctx.moveTo(x1,y);ctx.lineTo(x2,y);ctx.stroke();ctx.restore()}
+
+// fraction helper: returns width
+function frac(ctx,num,den,x,cy,sz){
+  const nW=textW(ctx,num,sz,true);
+  const dW=textW(ctx,den,sz,false);
+  const fw=Math.max(nW,dW)+8;
+  const lx=x+(fw-nW)/2, dx=x+(fw-dW)/2;
+  const gap=3;
+  T(ctx,num,lx,cy-gap,sz,true);
+  T(ctx,den,dx,cy+sz+gap-2,sz,false);
+  hline(ctx,x,x+fw,cy+1,1);
+  return fw;
+}
+
+function textW(ctx,txt,sz,italic){
+  ctx.font=(italic?'italic ':'')+sz+"px 'Palatino Linotype',Palatino,'Book Antiqua',Georgia,serif";
+  return ctx.measureText(txt).width;
+}
+
+const EQ_DRAW={
+  lf(ctx,w,h){
+    const cy=h/2, sz=17, sm=13;
+    let x=8;
+    // q =
+    x+=T(ctx,'q',x,cy+4,sz,true); x+=T(ctx,' = ',x,cy+4,sz,false);
+    // fraction: nm * a * p^m over 1 + a * p^m
+    const num='n\u2098 \u00b7 a \u00b7 p';
+    const den='1 + a \u00b7 p';
+    const nW=textW(ctx,num,sz,true)+textW(ctx,'m',sm,true)+4;
+    const dW=textW(ctx,den,sz,false)+textW(ctx,'m',sm,true)+4;
+    const fw=Math.max(nW,dW)+10;
+    // numerator
+    let nx=x+(fw-nW)/2;
+    nx+=T(ctx,'n',nx,cy-5,sz,true);
+    ctx.font="italic "+sm+"px 'Palatino Linotype',Palatino,serif";
+    T(ctx,'m',nx,cy-5+4,sm,true); nx+=textW(ctx,'m',sm,true);
+    T(ctx,' \u00b7 a \u00b7 p',nx,cy-5,sz,true); nx+=textW(ctx,' \u00b7 a \u00b7 p',sz,true);
+    T(ctx,'m',nx,cy-5-5,sm,true);
+    // denominator
+    let dx2=x+(fw-dW)/2;
+    T(ctx,'1 + a \u00b7 p',dx2,cy+sz+2,sz,false); dx2+=textW(ctx,'1 + a \u00b7 p',sz,false);
+    T(ctx,'m',dx2,cy+sz+2-5,sm,true);
+    hline(ctx,x,x+fw,cy+2,1);
+    x+=fw+2;
+    // subscript note
+    T(ctx,'  (a = k',x,cy+4,10,false); x+=textW(ctx,'  (a = k',10,false);
+    T(ctx,'m',x,cy,9,true); x+=textW(ctx,'m',9,true);
+    T(ctx,')',x,cy+4,10,false);
+  },
+  langmuir(ctx,w,h){
+    const cy=h/2,sz=17,sm=13; let x=8;
+    x+=T(ctx,'q',x,cy+4,sz,true); x+=T(ctx,' = ',x,cy+4,sz,false);
+    const num='q\u2098 \u00b7 K \u00b7 p', den='1 + K \u00b7 p';
+    const nW=textW(ctx,num,sz,true), dW=textW(ctx,den,sz,false);
+    const fw=Math.max(nW,dW)+10;
+    T(ctx,num,x+(fw-nW)/2,cy-5,sz,true);
+    T(ctx,den,x+(fw-dW)/2,cy+sz+2,sz,false);
+    hline(ctx,x,x+fw,cy+2,1); x+=fw+2;
+  },
+  freundlich(ctx,w,h){
+    const cy=h/2,sz=17,sm=13; let x=8;
+    x+=T(ctx,'q',x,cy+4,sz,true); x+=T(ctx,' = K',x,cy+4,sz,false);
+    T(ctx,'f',x,cy+4+4,sm,false); x+=textW(ctx,'f',sm,false)+1;
+    x+=T(ctx,' \u00b7 p',x,cy+4,sz,true);
+    // superscript 1/n
+    const sx=x, sy=cy-2;
+    hline(ctx,sx,sx+14,sy-3,1);
+    T(ctx,'1',sx+1,sy-4,9,false);
+    T(ctx,'n',sx+1,sy+7,9,true);
+    x+=18;
+  },
+  bet(ctx,w,h){
+    const cy=h/2,sz=16,sm=12; let x=5;
+    x+=T(ctx,'q',x,cy+4,sz,true); x+=T(ctx,' = ',x,cy+4,sz,false);
+    const num='q\u2098 \u00b7 C \u00b7 p';
+    const den='(p\u2080\u2212p)(1+(C\u22121)p/p\u2080)';
+    const nW=textW(ctx,num,sz,true), dW=textW(ctx,den,sz,false);
+    const fw=Math.max(nW,dW)+6;
+    T(ctx,num,x+(fw-nW)/2,cy-5,sz,true);
+    T(ctx,den,x+(fw-dW)/2,cy+sz+2,sz,false);
+    hline(ctx,x,x+fw,cy+2,1); x+=fw;
+  },
+  toth(ctx,w,h){
+    const cy=h/2,sz=16,sm=12; let x=5;
+    x+=T(ctx,'q',x,cy+4,sz,true); x+=T(ctx,' = ',x,cy+4,sz,false);
+    T(ctx,'q\u2098 \u00b7 K \u00b7 p',x,cy-5,sz,true);
+    const nW=textW(ctx,'q\u2098 \u00b7 K \u00b7 p',sz,true);
+    const den='(1+(Kp)'; const dW=textW(ctx,den,sz,false)+20;
+    const fw=Math.max(nW,dW)+8;
+    T(ctx,den,x+(fw-dW)/2,cy+sz+2,sz,false);
+    let dx=x+(fw-dW)/2+textW(ctx,den,sz,false);
+    T(ctx,'t',dx,cy+sz-2,sm,true); dx+=textW(ctx,'t',sm,true);
+    T(ctx,')',dx,cy+sz+2,sz,false); dx+=textW(ctx,')',sz,false);
+    T(ctx,'1/t',dx,cy+sz-4,sm,false);
+    hline(ctx,x,x+fw,cy+2,1); x+=fw;
+  },
+  henry(ctx,w,h){
+    const cy=h/2,sz=18; let x=16;
+    x+=T(ctx,'q',x,cy+5,sz,true); x+=T(ctx,' = K',x,cy+5,sz,false);
+    T(ctx,'H',x,cy+5+5,11,false); x+=textW(ctx,'H',11,false)+1;
+    x+=T(ctx,' \u00b7 p',x,cy+5,sz,true);
+  },
+  lang2(ctx,w,h){
+    const cy=h/2,sz=14,sm=12; let x=4;
+    x+=T(ctx,'q',x,cy+4,sz,true); x+=T(ctx,' = ',x,cy+4,sz,false);
+    function site(q,K,xi){
+      const num=q+'\u00b7K'+'\u2081\u2082'[xi]+'\u00b7p', den='1+K'+'\u2081\u2082'[xi]+'\u00b7p';
+      const nW=textW(ctx,num,sz,false), dW=textW(ctx,den,sz,false);
+      const fw=Math.max(nW,dW)+4;
+      T(ctx,num,x+(fw-nW)/2,cy-4,sz,false);
+      T(ctx,den,x+(fw-dW)/2,cy+sz+1,sz,false);
+      hline(ctx,x,x+fw,cy+2,1); x+=fw;
+    }
+    site('q\u2081','K',0); T(ctx,' + ',x,cy+4,sz,false); x+=textW(ctx,' + ',sz,false);
+    site('q\u2082','K',1);
+  },
+  temkin(ctx,w,h){
+    const cy=h/2,sz=17,sm=13; let x=8;
+    x+=T(ctx,'q',x,cy+4,sz,true); x+=T(ctx,' = ',x,cy+4,sz,false);
+    // 1/bT fraction
+    frac(ctx,'1','b\u1d40',x,cy,sz); x+=textW(ctx,'b\u1d40',sz,false)+16;
+    x+=T(ctx,' ln(A\u1d40 \u00b7 p)',x,cy+4,sz,false);
+  },
+  dr(ctx,w,h){
+    const cy=h/2,sz=16,sm=12; let x=5;
+    x+=T(ctx,'q',x,cy+4,sz,true);
+    x+=T(ctx,' = q\u2098 \u00b7 exp(\u2212\u03b2\u03b5',x,cy+4,sz,false);
+    T(ctx,'2',x,cy-2,sm,false); x+=textW(ctx,'2',sm,false);
+    x+=T(ctx,')',x,cy+4,sz,false);
+    T(ctx,'  \u03b5 = ln(1+1/p)',x,cy+4,10,false);
+  },
+  rp(ctx,w,h){
+    const cy=h/2,sz=16,sm=12; let x=5;
+    x+=T(ctx,'q',x,cy+4,sz,true); x+=T(ctx,' = ',x,cy+4,sz,false);
+    const num='K\u1d3f \u00b7 p', den='1 + a\u1d3f \u00b7 p';
+    const nW=textW(ctx,num,sz,false), dW=textW(ctx,den,sz,false);
+    const fw=Math.max(nW,dW)+8;
+    T(ctx,num,x+(fw-nW)/2,cy-5,sz,false);
+    T(ctx,den,x+(fw-dW)/2,cy+sz+2,sz,false);
+    let px=x+(fw-dW)/2+textW(ctx,den,sz,false);
+    T(ctx,'\u03b2',px,cy+sz+2-5,sm,false);
+    hline(ctx,x,x+fw,cy+2,1); x+=fw+6;
+  },
+  hill(ctx,w,h){
+    const cy=h/2,sz=16,sm=12; let x=5;
+    x+=T(ctx,'q',x,cy+4,sz,true); x+=T(ctx,' = ',x,cy+4,sz,false);
+    const num='q\u2098 \u00b7 p';
+    const den='K\u1d30';
+    const nW=textW(ctx,num,sz,true)+14, dW=textW(ctx,den,sz,false)+14+14;
+    const fw=Math.max(nW,dW)+8;
+    T(ctx,num,x+(fw-nW)/2,cy-5,sz,true);
+    let nx=x+(fw-nW)/2+textW(ctx,num,sz,true);
+    T(ctx,'n',nx,cy-5-5,sm,true);
+    T(ctx,den,x+(fw-dW)/2,cy+sz+2,sz,false);
+    let dx=x+(fw-dW)/2+textW(ctx,den,sz,false);
+    T(ctx,'n',dx,cy+sz-4,sm,false);
+    T(ctx,' + p',dx+textW(ctx,'n',sm,false),cy+sz+2,sz,true);
+    let dx2=dx+textW(ctx,'n',sm,false)+textW(ctx,' + p',sz,true);
+    T(ctx,'n',dx2,cy+sz-4,sm,true);
+    hline(ctx,x,x+fw,cy+2,1); x+=fw;
+  },
+  sips(ctx,w,h){
+    const cy=h/2,sz=16,sm=12; let x=5;
+    x+=T(ctx,'q',x,cy+4,sz,true); x+=T(ctx,' = ',x,cy+4,sz,false);
+    const num='q\u2098 \u00b7 (Kp)';
+    const den='1 + (Kp)';
+    const nW=textW(ctx,num,sz,false)+10, dW=textW(ctx,den,sz,false)+10;
+    const fw=Math.max(nW,dW)+6;
+    T(ctx,num,x+(fw-nW)/2,cy-5,sz,false);
+    let nx=x+(fw-nW)/2+textW(ctx,num,sz,false);
+    T(ctx,'m',nx,cy-5-5,sm,true);
+    T(ctx,den,x+(fw-dW)/2,cy+sz+2,sz,false);
+    let dx=x+(fw-dW)/2+textW(ctx,den,sz,false);
+    T(ctx,'m',dx,cy+sz-4,sm,true);
+    hline(ctx,x,x+fw,cy+2,1); x+=fw;
+  },
+  radke(ctx,w,h){
+    const cy=h/2,sz=14,sm=12; let x=4;
+    x+=T(ctx,'q',x,cy+4,sz,true); x+=T(ctx,' = ',x,cy+4,sz,false);
+    const num='q\u2098 \u00b7 K \u00b7 p', den='q\u2098 + K \u00b7 p';
+    const nW=textW(ctx,num,sz,false), dW=textW(ctx,den,sz,false)+10;
+    const fw=Math.max(nW,dW)+8;
+    T(ctx,num,x+(fw-nW)/2,cy-5,sz,false);
+    T(ctx,den,x+(fw-dW)/2,cy+sz+2,sz,false);
+    let dx=x+(fw-dW)/2+textW(ctx,den,sz,false);
+    T(ctx,'1/n',dx,cy+sz-4,sm,false);
+    hline(ctx,x,x+fw,cy+2,1); x+=fw;
+  }
+};
+
+// =====================================================================
+//  MODELS
+// =====================================================================
+const MOD={
+  lf:{name:'Langmuir-Freundlich (Sips)',
+    desc:'n\u2098=max uptake, a=k\u1d50 affinity (directly fitted), m=heterogeneity (m=1 \u21d2 Langmuir)',
+    params:[{id:'mn',lbl:'n\u2098',csv:'nm',title:'MAX UPTAKE',html:'<i>n</i><sub>m</sub>',hint:'max uptake',def:10},{id:'a',lbl:'a',csv:'a (=k^m)',title:'AFFINITY',html:'<i>a</i> (= <i>k</i><sup><i>m</i></sup>)',hint:'affinity a=k^m',def:1},{id:'m',lbl:'m',csv:'m',title:'HETEROGENEITY',html:'<i>m</i>',hint:'heterogeneity',def:1}],
+    fn:(p,[mn,a,m])=>{if(p<=0)return 0;const v=a*Math.pow(p,m);return(mn*v)/(1+v)},
+    jac:(p,[mn,a,m])=>{if(p<=0)return[0,0,0];const v=a*Math.pow(p,m),d=1+v,d2=d*d,lp=Math.log(p);return[v/d,mn*Math.pow(p,m)/d2,mn*v*lp/d2]},
+    post:(par,se)=>{const[mn,a,m]=par,[,s1,s2]=se;const k=a>0&&m>0?Math.pow(a,1/m):0;let sk=0;if(a>0&&m>0){const da=s1/(m*a),dm=s2*Math.log(a)/(m*m);sk=k*Math.sqrt(da*da+dm*dm);}return[{id:'k',lbl:'k = a\u00b9\u141fm',csv:'k (=a^(1/m))',title:'AFFINITY CONST.',html:'<i>k</i> (= <i>a</i><sup>1/<i>m</i></sup>)',val:k,se:sk,note:'derived'}]}
+  },
+  langmuir:{name:'Langmuir',
+    desc:'q\u2098=monolayer capacity, K=Langmuir equilibrium constant',
+    params:[{id:'qm',lbl:'q\u2098',csv:'qm',title:'MONOLAYER CAP.',html:'<i>q</i><sub>m</sub>',hint:'monolayer cap.',def:10},{id:'K',lbl:'K',csv:'K',title:'LANGMUIR CONST.',html:'<i>K</i>',hint:'Langmuir const.',def:1}],
+    fn:(p,[qm,K])=>(qm*K*p)/(1+K*p),
+    jac:(p,[qm,K])=>{const d=1+K*p,d2=d*d;return[K*p/d,qm*p/d2]}
+  },
+  freundlich:{name:'Freundlich',
+    desc:'K\u1da0=capacity coefficient, n=heterogeneity/intensity factor',
+    params:[{id:'Kf',lbl:'K\u1da0',csv:'Kf',title:'CAPACITY COEFF.',html:'<i>K</i><sub>F</sub>',hint:'capacity coeff.',def:1},{id:'n',lbl:'n',csv:'n',title:'INTENSITY',html:'<i>n</i>',hint:'intensity',def:2}],
+    fn:(p,[Kf,n])=>p<=0?0:Kf*Math.pow(p,1/n),
+    jac:(p,[Kf,n])=>{if(p<=0)return[0,0];const pm=Math.pow(p,1/n);return[pm,-Kf*pm*Math.log(p)/(n*n)]}
+  },
+  bet:{name:'BET',
+    desc:'q\u2098=monolayer capacity, C=BET constant, p\u2080=saturation pressure',
+    params:[{id:'qm',lbl:'q\u2098',csv:'qm',hint:'monolayer cap.',def:10},{id:'C',lbl:'C',csv:'C',title:'BET CONSTANT',html:'<i>C</i>',hint:'BET constant',def:10},{id:'p0',lbl:'p\u2080',csv:'p0',title:'SAT. PRESSURE',html:'<i>p</i><sub>0</sub>',hint:'sat. pressure',def:1}],
+    fn:(p,[qm,C,p0])=>{if(p<=0||p>=p0)return 0;const x=p/p0;return(qm*C*x)/((1-x)*(1+(C-1)*x))},
+    jac:(p,[qm,C,p0])=>{
+      if(p<=0||p>=p0)return[0,0,0];
+      const x=p/p0,A=1-x,B=1+(C-1)*x,AB=A*B;
+      return[(C*x)/AB,(qm*x*(AB-C*x*(x*(C-1)-B+A*(C-1))))/AB**2,
+        -(qm*C*p/(p0**2))*((A*B+p/p0*(B+(C-1)*A))/(A*B)**2)]
+    }
+  },
+  toth:{name:'Toth',
+    desc:'q\u2098=saturation capacity, K=affinity constant, t=Toth heterogeneity exponent',
+    params:[{id:'qm',lbl:'q\u2098',csv:'qm',title:'SAT. CAPACITY',html:'<i>q</i><sub>m</sub>',hint:'sat. capacity',def:10},{id:'K',lbl:'K',csv:'K',title:'AFFINITY CONST.',html:'<i>K</i>',hint:'affinity',def:1},{id:'t',lbl:'t',csv:'t',title:'TOTH EXPONENT',html:'<i>t</i>',hint:'heterogeneity',def:1}],
+    fn:(p,[qm,K,t])=>{if(p<=0)return 0;const Kp=K*p;return(qm*Kp)/Math.pow(1+Math.pow(Kp,t),1/t)},
+    jac:(p,[qm,K,t])=>{
+      if(p<=0)return[0,0,0];
+      const Kp=K*p,Kpt=Math.pow(Kp,t),base=1+Kpt,pw=Math.pow(base,1/t),q=(qm*Kp)/pw;
+      return[q/qm,q*(1/Kp-Kpt/(t*base*Kp)),q*(Math.log(Kp)*Kpt/base+Math.log(base)/(t*t))]
+    }
+  },
+  henry:{name:'Henry (Linear)',
+    desc:'K\u1d34=Henry constant (linear adsorption regime)',
+    params:[{id:'KH',lbl:'K\u1d34',csv:'KH',title:'HENRY CONST.',html:'<i>K</i><sub>H</sub>',hint:'Henry constant',def:1}],
+    fn:(p,[KH])=>KH*p,
+    jac:(p)=>[p]
+  },
+  lang2:{name:'Dual-Site Langmuir',
+    desc:'Two adsorption sites: q\u2081,K\u2081=site 1 \u2014 q\u2082,K\u2082=site 2',
+    params:[{id:'q1',lbl:'q\u2081',csv:'q1',title:'SITE-1 CAPACITY',html:'<i>q</i><sub>1</sub>',hint:'site-1 cap.',def:5},{id:'K1',lbl:'K\u2081',csv:'K1',title:'SITE-1 CONST.',html:'<i>K</i><sub>1</sub>',hint:'site-1 const.',def:1},{id:'q2',lbl:'q\u2082',csv:'q2',title:'SITE-2 CAPACITY',html:'<i>q</i><sub>2</sub>',hint:'site-2 cap.',def:5},{id:'K2',lbl:'K\u2082',csv:'K2',title:'SITE-2 CONST.',html:'<i>K</i><sub>2</sub>',hint:'site-2 const.',def:.1}],
+    fn:(p,[q1,K1,q2,K2])=>(q1*K1*p)/(1+K1*p)+(q2*K2*p)/(1+K2*p),
+    jac:(p,[q1,K1,q2,K2])=>{const d1=1+K1*p,d2=1+K2*p;return[K1*p/d1,q1*p/d1**2,K2*p/d2,q2*p/d2**2]}
+  },
+  temkin:{name:'Temkin',
+    desc:'A\u1d40=equilibrium binding constant, b\u1d40=Temkin constant (related to heat of adsorption)',
+    params:[{id:'AT',lbl:'A\u1d40',csv:'AT',title:'BINDING CONST.',html:'<i>A</i><sub>T</sub>',hint:'binding const.',def:1},{id:'bT',lbl:'b\u1d40',csv:'bT',title:'TEMKIN CONST.',html:'<i>b</i><sub>T</sub>',hint:'heat factor',def:1}],
+    fn:(p,[AT,bT])=>p<=0||AT*p<=0?0:(1/bT)*Math.log(AT*p),
+    jac:(p,[AT,bT])=>{if(p<=0||AT*p<=0)return[0,0];return[1/(bT*AT),-Math.log(AT*p)/bT**2]}
+  },
+  dr:{name:'Dubinin-Radushkevich',
+    desc:'q\u2098=max uptake, \u03b2=activity coefficient (mol\u00b2/kJ\u00b2), \u03b5=Polanyi potential=ln(1+1/p)',
+    params:[{id:'qm',lbl:'q\u2098',csv:'qm',title:'MAX UPTAKE',html:'<i>q</i><sub>m</sub>',hint:'max uptake',def:10},{id:'beta',lbl:'\u03b2',csv:'beta',title:'ACTIVITY COEFF.',html:'&#946;',hint:'activity coeff.',def:0.01}],
+    fn:(p,[qm,b])=>{if(p<=0)return 0;const e=Math.log(1+1/p);return qm*Math.exp(-b*e*e)},
+    jac:(p,[qm,b])=>{if(p<=0)return[0,0];const e=Math.log(1+1/p),ex=Math.exp(-b*e*e);return[ex,-qm*e*e*ex]}
+  },
+  rp:{name:'Redlich-Peterson',
+    desc:'K\u1d3f,a\u1d3f=isotherm constants, \u03b2=exponent (0\u2264\u03b2\u22641; \u03b2=1 \u21d2 Langmuir)',
+    params:[{id:'KR',lbl:'K\u1d3f',csv:'KR',title:'CAPACITY CONST.',html:'<i>K</i><sub>R</sub>',hint:'capacity const.',def:5},{id:'aR',lbl:'a\u1d3f',csv:'aR',title:'AFFINITY CONST.',html:'<i>a</i><sub>R</sub>',hint:'affinity const.',def:1},{id:'beta',lbl:'\u03b2',csv:'beta',title:'EXPONENT',html:'&#946;',hint:'exponent',def:0.5}],
+    fn:(p,[KR,aR,b])=>p<=0?0:(KR*p)/(1+aR*Math.pow(p,b)),
+    jac:(p,[KR,aR,b])=>{if(p<=0)return[0,0,0];const pb=Math.pow(p,b),d=1+aR*pb,d2=d*d;return[p/d,-KR*p*pb/d2,-KR*p*aR*pb*Math.log(p)/d2]}
+  },
+  hill:{name:'Hill (Cooperative)',
+    desc:'q\u2098=max uptake, n=Hill coefficient (cooperativity), K\u1d30=half-saturation constant',
+    params:[{id:'qm',lbl:'q\u2098',csv:'qm',hint:'max uptake',def:10},{id:'n',lbl:'n',csv:'n',title:'HILL COEFF.',html:'<i>n</i>',hint:'Hill coeff.',def:1},{id:'Kd',lbl:'K\u1d30',csv:'Kd',title:'HALF-SAT. CONST.',html:'<i>K</i><sub>d</sub>',hint:'half-sat.',def:1}],
+    fn:(p,[qm,n,Kd])=>{if(p<=0)return 0;const pn=Math.pow(p,n),Kdn=Math.pow(Kd,n);return qm*pn/(Kdn+pn)},
+    jac:(p,[qm,n,Kd])=>{if(p<=0)return[0,0,0];const pn=Math.pow(p,n),Kdn=Math.pow(Kd,n),d=Kdn+pn,d2=d*d;return[pn/d,qm*pn*Math.log(p)*(d-pn)/d2,-qm*pn*n*Math.pow(Kd,n-1)/d2]}
+  },
+  sips:{name:'Sips (k-form)',
+    desc:'q\u2098=saturation, K=affinity constant, m=heterogeneity parameter',
+    params:[{id:'qm',lbl:'q\u2098',csv:'qm',title:'SATURATION',html:'<i>q</i><sub>m</sub>',hint:'saturation',def:10},{id:'K',lbl:'K',csv:'K',title:'AFFINITY CONST.',html:'<i>K</i>',hint:'affinity',def:1},{id:'m',lbl:'m',csv:'m',title:'HETEROGENEITY',html:'<i>m</i>',hint:'heterogeneity',def:1}],
+    fn:(p,[qm,K,m])=>{if(p<=0)return 0;const Kpm=Math.pow(K*p,m);return qm*Kpm/(1+Kpm)},
+    jac:(p,[qm,K,m])=>{if(p<=0)return[0,0,0];const Kp=K*p,Kpm=Math.pow(Kp,m),d=1+Kpm,d2=d*d;return[Kpm/d,qm*m*Math.pow(Kp,m-1)*p/d2,qm*Kpm*Math.log(Kp)/d2]}
+  },
+  radke:{name:'Radke-Prausnitz',
+    desc:'q\u2098=saturation, K=affinity constant, n=linearity exponent',
+    params:[{id:'qm',lbl:'q\u2098',csv:'qm',hint:'saturation',def:10},{id:'K',lbl:'K',csv:'K',title:'AFFINITY CONST.',html:'<i>K</i>',hint:'affinity',def:1},{id:'n',lbl:'n',csv:'n',title:'EXPONENT',html:'<i>n</i>',hint:'exponent',def:2}],
+    fn:(p,[qm,K,n])=>{if(p<=0)return 0;return(qm*K*p)/(qm+K*Math.pow(p,1/n))},
+    jac:(p,[qm,K,n])=>{if(p<=0)return[0,0,0];const pe=Math.pow(p,1/n),dn=qm+K*pe,dn2=dn*dn;return[(K*p*K*pe)/dn2,(qm*p*dn-qm*K*p*pe)/dn2,qm*K*p*K*pe*Math.log(p)/(n*n*dn2)]}
+  }
+};
+
+// populate model select
+const sel=document.getElementById('modelSel');
+Object.entries(MOD).forEach(([k,m])=>{const o=document.createElement('option');o.value=k;o.textContent=m.name;sel.appendChild(o)});
+
+function onModelChange(){
+  const m=MOD[sel.value];
+  document.getElementById('eqDesc').textContent=m.desc;
+  const g=document.getElementById('guessGrid');g.innerHTML='';
+  m.params.forEach(pr=>{
+    const lbl=document.createElement('label');
+    lbl.innerHTML=pr.lbl+(pr.hint?`<span>${pr.hint}</span>`:'');
+    const inp=document.createElement('input');inp.type='number';inp.id='ig_'+pr.id;inp.value=pr.def;inp.step='any';
+    g.appendChild(lbl);g.appendChild(inp);
+  });
+  drawEq(sel.value);
+}
+onModelChange();
+// redraw eq on resize
+window.addEventListener('resize',()=>{drawEq(sel.value);if(rawData.length)drawChart()});
+
+// =====================================================================
+//  FILE LOADING
+// =====================================================================
+let rawData=[],fitResult=null,chartInst=null;
+
+const dzEl=document.getElementById('dz');
+dzEl.addEventListener('dragenter',e=>{e.preventDefault();e.stopPropagation();dzEl.classList.add('over')});
+dzEl.addEventListener('dragover', e=>{e.preventDefault();e.stopPropagation();dzEl.classList.add('over')});
+dzEl.addEventListener('dragleave',e=>{e.stopPropagation();dzEl.classList.remove('over')});
+dzEl.addEventListener('drop',e=>{
+  e.preventDefault();e.stopPropagation();dzEl.classList.remove('over');
+  const f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];
+  if(f)loadFile(f);
+});
+document.getElementById('fileInput').addEventListener('change',function(){if(this.files&&this.files[0])loadFile(this.files[0])});
+
+function loadFile(file){const r=new FileReader();r.onload=e=>parseCSV(e.target.result,file.name);r.onerror=()=>st('Could not read file.','err');r.readAsText(file)}
+
+function parseCSV(txt,name){
+  const pts=[];
+  txt.split(/\r?\n/).forEach(ln=>{
+    const t=ln.trim();if(!t)return;
+    const parts=t.split(/[\t,;]+|\s{2,}/);
+    if(parts.length<2)return;
+    const p=parseFloat(parts[0].trim()),q=parseFloat(parts[1].trim());
+    if(!isNaN(p)&&!isNaN(q))pts.push({p,q});
+  });
+  if(pts.length<3){st('Error: need at least 3 numeric data points.','err');return}
+  rawData=pts;
+  document.getElementById('dzName').textContent=name;
+  document.getElementById('nPts').textContent=pts.length+' points';
+  const tb=document.getElementById('prevBody');tb.innerHTML='';
+  pts.forEach(({p,q})=>{const tr=document.createElement('tr');tr.innerHTML=`<td>${fmt(p)}</td><td>${fmt(q)}</td>`;tb.appendChild(tr)});
+  document.getElementById('prevWrap').style.display='';
+  document.getElementById('btnFit').disabled=false;
+  fitResult=null;document.getElementById('btnExp').disabled=true;
+  document.getElementById('resContent').innerHTML='<div class="ph">Data loaded \u2014 click Fit Isotherm.</div>';
+  drawChart();
+  st('Loaded '+pts.length+' data points from "'+name+'".','ok');
+}
+
+// =====================================================================
+//  MATH
+// =====================================================================
+function calcSSR(par,fn){let s=0;rawData.forEach(({p,q})=>{const r=q-fn(p,par);s+=r*r});return s}
+function matJtJ(J,n,np){const A=new Float64Array(np*np);for(let i=0;i<np;i++)for(let j=0;j<np;j++){let s=0;for(let r=0;r<n;r++)s+=J[r*np+i]*J[r*np+j];A[i*np+j]=s}return A}
+function solveN(Ain,bin,n){
+  const A=Float64Array.from(Ain),b=Float64Array.from(bin);
+  for(let k=0;k<n;k++){
+    let mx=k,mv=Math.abs(A[k*n+k]);
+    for(let i=k+1;i<n;i++)if(Math.abs(A[i*n+k])>mv){mv=Math.abs(A[i*n+k]);mx=i}
+    if(mv<1e-300)return null;
+    if(mx!==k){for(let j=0;j<n;j++){const t=A[k*n+j];A[k*n+j]=A[mx*n+j];A[mx*n+j]=t}const t=b[k];b[k]=b[mx];b[mx]=t}
+    for(let i=k+1;i<n;i++){const f=A[i*n+k]/A[k*n+k];for(let j=k;j<n;j++)A[i*n+j]-=f*A[k*n+j];b[i]-=f*b[k]}
+  }
+  for(let i=n-1;i>=0;i--){let s=b[i];for(let j=i+1;j<n;j++)s-=A[i*n+j]*b[j];b[i]=s/A[i*n+i]}
+  return b;
+}
+function levmar(par0,fn,jac){
+  const NP=par0.length,MAXI=6000;
+  let par=Float64Array.from(par0),lam=1e-3,ss=calcSSR(par,fn),conv=false,it=0;
+  for(it=1;it<=MAXI;it++){
+    const n=rawData.length,J=new Float64Array(n*NP);
+    rawData.forEach(({p},i)=>jac(p,par).forEach((v,j)=>J[i*NP+j]=v));
+    const JtJ=matJtJ(J,n,NP),JtR=new Float64Array(NP);
+    rawData.forEach(({p,q},i)=>{const r=q-fn(p,par);for(let j=0;j<NP;j++)JtR[j]+=J[i*NP+j]*r});
+    const aug=Float64Array.from(JtJ);
+    for(let i=0;i<NP;i++)aug[i*NP+i]+=lam*(JtJ[i*NP+i]+1e-10);
+    const step=solveN(aug,JtR,NP);
+    if(!step){lam*=10;continue}
+    const np=Array.from(par).map((v,i)=>Math.max(v+step[i],1e-12));
+    const ns=calcSSR(np,fn);
+    if(ns<ss){const old=ss;par=Float64Array.from(np);ss=ns;lam=Math.max(lam/10,1e-16);if(old-ss<1e-12*(1+ss)){conv=true;break}}
+    else{lam*=10;if(lam>1e16)break}
+  }
+  return{par:Array.from(par),ss,conv,it}
+}
+function computeSE(par,fn,jac,ssv){
+  const n=rawData.length,NP=par.length,J=new Float64Array(n*NP);
+  rawData.forEach(({p},i)=>jac(p,par).forEach((v,j)=>J[i*NP+j]=v));
+  const JtJ=matJtJ(J,n,NP),s2=n>NP?ssv/(n-NP):ssv;
+  // build full inverse (covariance matrix / s2)
+  const inv=[];
+  for(let j=0;j<NP;j++){
+    const e=new Float64Array(NP);e[j]=1;
+    const c=solveN(JtJ,e,NP);
+    if(!c)return{se:par.map(()=>0),cov:null,corr:null};
+    for(let i=0;i<NP;i++){if(!inv[i])inv[i]=new Array(NP).fill(0);inv[i][j]=c[i];}
+  }
+  // covariance matrix = s2 * inv
+  const cov=inv.map(row=>row.map(v=>v*s2));
+  // SE vector
+  const se=par.map((_,i)=>{const v=cov[i][i];return v>=0?Math.sqrt(v):0});
+  // correlation matrix
+  const corr=cov.map((row,i)=>row.map((v,j)=>{
+    const d=se[i]*se[j];
+    return d>0?v/d:(i===j?1:0);
+  }));
+  return{se,cov,corr};
+}
+
+// =====================================================================
+//  FIT
+// =====================================================================
+document.getElementById('btnFit').addEventListener('click',()=>{
+  if(!rawData.length)return;
+  const mod=MOD[sel.value];
+  const par0=mod.params.map(pr=>Math.max(parseFloat(document.getElementById('ig_'+pr.id).value)||pr.def,1e-12));
+  st('<span class="sp"></span>Fitting\u2026','');
+  document.getElementById('btnFit').disabled=true;
+  setTimeout(()=>{
+    try{
+      const res=levmar(par0,mod.fn,mod.jac);
+      const seResult=computeSE(res.par,mod.fn,mod.jac,res.ss);
+      const se=seResult.se;
+      const corrMatrix=seResult.corr;
+      let qmv=0;rawData.forEach(d=>qmv+=d.q);qmv/=rawData.length;
+      let sst=0,ss2=0;
+      rawData.forEach(d=>{sst+=(d.q-qmv)**2;ss2+=(d.q-mod.fn(d.p,res.par))**2});
+      const rsq=sst>0?1-ss2/sst:0;
+      const extra=mod.post?mod.post(res.par,se):[];
+      fitResult={par:res.par,se,rsq,ss:res.ss,extra,conv:res.conv,it:res.it,mod:sel.value,corr:corrMatrix};
+      showResults(fitResult,mod);drawChart();
+      document.getElementById('btnExp').disabled=false;
+      st((res.conv?'Converged in '+res.it+' iter':'Stopped at '+res.it+' iter (try different initial guesses)')+' \u2014 R\u00b2 = '+rsq.toFixed(6),'ok');
+    }catch(e){st('Fitting error: '+e.message,'err');console.error(e)}
+    document.getElementById('btnFit').disabled=false;
+  },20);
+});
+
+function showResults(r,mod){
+  const nc=mod.params.length+(r.extra||[]).length;
+  const cols=Math.min(nc,5);
+  let html=`<div class="r-grid" style="grid-template-columns:repeat(${cols},1fr)">`;
+  function rcell(title,htmlSym,val,seVal,hi){
+    const cls='rc'+(hi?' hi':'');
+    const seStr=fmtSE(val,seVal);
+    const seDisp=seStr==='(n/a)'?'':' <span class="rs">&plusmn;&thinsp;'+seStr+'</span>';
+    return `<div class="${cls}">`
+      +`<div class="rt">${title}</div>`
+      +`<div class="rv">${htmlSym} = ${fmt(val)}${seDisp}</div>`
+      +'</div>';
+  }
+  mod.params.forEach((pr,i)=>{
+    const sym=pr.html||('<i>'+pr.lbl+'</i>');
+    const ttl=pr.title||(pr.lbl.toUpperCase());
+    html+=rcell(ttl,sym,r.par[i],r.se[i],false);
+  });
+  (r.extra||[]).forEach(e=>{
+    const sym=e.html||('<i>'+e.lbl+'</i>');
+    const ttl=e.title||(e.lbl.toUpperCase());
+    html+=rcell(ttl,sym,e.val,e.se,true);
+  });
+  html+=`</div><div class="gof">
+    <div class="gi"><div class="gl">R&sup2;</div><div class="gv">${r.rsq.toFixed(5)}</div></div>
+    <div class="gi"><div class="gl">SSR</div><div class="gv">${r.ss.toExponential(3)}</div></div>
+    <div class="gi"><div class="gl">n</div><div class="gv">${rawData.length}</div></div>
+    <div class="gi"><div class="gl">Model</div><div class="gv" style="font-style:italic">${mod.name}</div></div>\n'
+  </div>`;
+  document.getElementById('resContent').innerHTML=html;
+}
+
+// =====================================================================
+//  CHART  -- Chart.js + custom tick plugin
+// =====================================================================
+
+// Custom plugin: draws major+minor ticks and optional full box border
+// using canvas 2D directly (Chart.js 4 doesn't support minor ticks natively)
+const tickPlugin={
+  id:'ticks',
+  afterDraw(chart){
+    const{ctx,chartArea:ca,scales}=chart;
+    if(!ca)return;
+    const majOn=gb('majTick'),minOn=gb('minTick');
+    const majLen=parseFloat(gv('tickLen'))||6;
+    const minLen=parseFloat(gv('minTickLen'))||3;
+    const tickDir=gv('tickDir')||'in';
+    const drawIn=(tickDir==='in'||tickDir==='both');
+    const drawOut=(tickDir==='out'||tickDir==='both');
+    const axC=gv('axCol');
+    const frameW=parseFloat(gv('frameW'))||1.5;
+    const majTW=parseFloat(gv('majTickW'))||1;
+    const minTW=parseFloat(gv('minTickW'))||0.5;
+    ctx.save();ctx.strokeStyle=axC;
+
+    if(majOn||minOn){
+    ['x','y'].forEach(axis=>{
+      const sc=scales[axis];if(!sc)return;
+      const ticks=sc.ticks;
+      // major ticks
+      if(majOn){
+        ticks.forEach(tick=>{
+          const pos=sc.getPixelForValue(tick.value);
+          ctx.beginPath();
+          ctx.lineWidth=majTW;
+          if(axis==='x'){
+            if(drawIn){ctx.moveTo(pos,ca.bottom);ctx.lineTo(pos,ca.bottom-majLen);}
+            if(drawOut){ctx.moveTo(pos,ca.bottom);ctx.lineTo(pos,ca.bottom+majLen);}
+          }else{
+            if(drawIn){ctx.moveTo(ca.left,pos);ctx.lineTo(ca.left+majLen,pos);}
+            if(drawOut){ctx.moveTo(ca.left,pos);ctx.lineTo(ca.left-majLen,pos);}
+          }
+          ctx.stroke();
+        });
+      }
+      // minor ticks: place 4 between each pair of major ticks
+      if(minOn&&ticks.length>1){
+        ctx.lineWidth=minTW;
+        for(let i=0;i<ticks.length-1;i++){
+          const v0=ticks[i].value,v1=ticks[i+1].value;
+          for(let k=1;k<5;k++){
+            const mv=v0+(v1-v0)*k/5;
+            const pos=sc.getPixelForValue(mv);
+            ctx.beginPath();
+            if(axis==='x'){
+              if(drawIn){ctx.moveTo(pos,ca.bottom);ctx.lineTo(pos,ca.bottom-minLen);}
+              if(drawOut){ctx.moveTo(pos,ca.bottom);ctx.lineTo(pos,ca.bottom+minLen);}
+            }else{
+              if(drawIn){ctx.moveTo(ca.left,pos);ctx.lineTo(ca.left+minLen,pos);}
+              if(drawOut){ctx.moveTo(ca.left,pos);ctx.lineTo(ca.left-minLen,pos);}
+            }
+            ctx.stroke();
+          }
+        }
+      }
+    });
+
+    }// end tick guard
+    // optional full box border
+    if(gb('boxBdr')){
+      ctx.strokeStyle=gv('boxCol');
+      ctx.lineWidth=parseFloat(gv('boxW'))||1.5;
+      ctx.strokeRect(ca.left,ca.top,ca.width,ca.height);
+    }
+
+    ctx.restore();
+  }
+};
+
+// background plugin: fills WHOLE canvas with chart bg, plot area with plot bg
+const bgPlugin={
+  id:'bg',
+  beforeDraw(chart){
+    const{ctx,width,height,chartArea:ca}=chart;
+    ctx.save();
+    ctx.fillStyle=gv('chartBg');ctx.fillRect(0,0,width,height);
+    if(ca){ctx.fillStyle=gv('plotBg');ctx.fillRect(ca.left,ca.top,ca.width,ca.height)}
+    ctx.restore();
+  }
+};
+
+Chart.register(bgPlugin,tickPlugin);
+
+function buildConfig(){
+  const ptC=gv('ptCol'),ptA=parseFloat(gv('ptOp')),ptS=parseFloat(gv('ptSz')),ptBW=parseFloat(gv('ptBW'));
+  const lnC=gv('lnCol'),lnW=parseFloat(gv('lnW'));
+  const axC=gv('axCol'),axSz=parseFloat(gv('axSz')),tkSz=parseFloat(gv('tkSz'));
+  const gridOn=gb('grid'),gridC=gv('gridCol'),gridW=parseFloat(gv('gridW'));
+  const frameW=parseFloat(gv('frameW'));
+  const legOn=gb('leg'),legSz=parseFloat(gv('legSz'));
+  const ttl=gv('ttl'),ttlSz=parseFloat(gv('ttlSz'));
+  const dash=gv('lnDash')?gv('lnDash').split(',').map(Number):undefined;
+  const fitN=parseInt(gv('fitN'))||300;
+  const font=gv('fontFam')||'Arial,sans-serif';
+
+  const datasets=[{
+    label:'Data',
+    data:rawData.map(d=>({x:d.p,y:d.q})),
+    type:'scatter',
+    pointStyle:gv('ptSty'),pointRadius:ptS,pointHoverRadius:ptS+2,
+    pointBackgroundColor:ha(ptC,ptA),
+    pointBorderColor:ha(ptC,Math.min(ptA+0.15,1)),
+    pointBorderWidth:ptBW,showLine:false,order:2
+  }];
+
+  if(fitResult){
+    const mod=MOD[fitResult.mod||sel.value];
+    const ps=rawData.map(d=>d.p),pMin=Math.min(...ps),pMax=Math.max(...ps);
+    const pts=[];
+    if(false){
+      const lg0=Math.log10(pMin),lg1=Math.log10(pMax);
+      for(let i=0;i<=fitN;i++)pts.push({x:Math.pow(10,lg0+(lg1-lg0)*i/fitN),y:mod.fn(Math.pow(10,lg0+(lg1-lg0)*i/fitN),fitResult.par)});
+    }else{
+      for(let i=0;i<=fitN;i++){const p=pMin+(pMax-pMin)*i/fitN;pts.push({x:p,y:mod.fn(p,fitResult.par)})}
+    }
+    datasets.push({label:(MOD[fitResult.mod||sel.value].name+' fit'),data:pts,type:'line',borderColor:lnC,borderWidth:lnW,borderDash:dash,pointRadius:0,tension:0,fill:false,order:1});
+  }
+
+  const sc={
+    grid:{display:gridOn,color:gridC,lineWidth:gridW},
+    ticks:{display:true,color:axC,font:{family:font,size:tkSz}},
+    border:{display:true,color:axC,width:frameW}
+  };
+
+  return{
+    type:'scatter',data:{datasets},
+    options:{
+      responsive:true,maintainAspectRatio:false,animation:{duration:250},
+      plugins:{
+        legend:{display:legOn,labels:{color:axC,font:{family:font,size:legSz},usePointStyle:true,pointStyleWidth:13}},
+        title:{display:!!ttl,text:ttl,color:axC,font:{family:font,size:ttlSz,weight:'normal'}},
+        tooltip:{backgroundColor:'#111',titleFont:{family:font,size:10},bodyFont:{family:font,size:11},padding:9,
+          callbacks:{label:c=>'  ('+fmt(c.parsed.x)+', '+fmt(c.parsed.y)+')'}},
+        bg:{},ticks:{}
+      },
+      scales:{
+        x:{...sc,type:'linear',min:gn('xmin'),max:gn('xmax'),title:{display:true,text:gv('xLbl'),color:axC,font:{family:font,size:axSz}}},
+        y:{...sc,type:'linear',min:gn('ymin'),max:gn('ymax'),title:{display:true,text:gv('yLbl'),color:axC,font:{family:font,size:axSz}}}
+      }
+    }
+  };
+}
+
+function drawChart(){
+  if(chartInst){chartInst.destroy();chartInst=null}
+  if(!rawData.length)return;
+  const canvas=document.getElementById('myChart');
+  canvas.removeAttribute('width');
+  canvas.removeAttribute('height');
+  canvas.style.cssText='';
+  chartInst=new Chart(canvas.getContext('2d'),buildConfig());
+}
+function redraw(){if(rawData.length)drawChart()}
+
+// Chart.js responsive mode handles canvas resizing automatically
+
+// =====================================================================
+//  SAVE PLOT
+// =====================================================================
+function savePlot(){
+  if(!chartInst){st('No chart to save.','err');return}
+  const W=parseInt(gv('expW'))||1200,H=parseInt(gv('expH'))||900;
+  const fmt2=gv('expFmt').toLowerCase();
+  const oc=document.createElement('canvas');oc.width=W;oc.height=H;
+  const cfg=buildConfig();cfg.options.animation={duration:0};cfg.options.responsive=false;cfg.options.maintainAspectRatio=false;
+  const tmp=new Chart(oc.getContext('2d'),cfg);
+  setTimeout(()=>{
+    const url=oc.toDataURL(fmt2==='jpeg'?'image/jpeg':'image/png',0.97);
+    const a=document.createElement('a');a.href=url;a.download='isotherm.'+fmt2;a.click();
+    tmp.destroy();
+  },350);
+}
+
+// =====================================================================
+//  EXPORT CSV
+// =====================================================================
+// Format a number for CSV: 6 sig figs, plain decimal or scientific notation
+// Avoids JS default toString() which can produce too many digits
+function csvNum(v){
+  if(v===undefined||v===null||isNaN(v))return'';
+  const a=Math.abs(v);
+  if(a===0)return'0';
+  // use exponential only for very large or very small
+  if(a>=1e6||a<1e-4){
+    // format as e.g. 1.2345E+06 (Excel-friendly uppercase E)
+    const s=v.toExponential(4);
+    return s.replace('e+','E+').replace('e-','E-');
+  }
+  return parseFloat(v.toPrecision(6)).toString();
+}
+function csvSE(v){
+  if(v===undefined||v===null||isNaN(v)||v<0)return'';
+  if(v===0)return'0';
+  const a=Math.abs(v);
+  if(a>=1e6||a<1e-4){
+    const s=v.toExponential(2);
+    return s.replace('e+','E+').replace('e-','E-');
+  }
+  return parseFloat(v.toPrecision(3)).toString();
+}
+
+document.getElementById('btnExp').addEventListener('click',()=>{
+  if(!fitResult||!rawData.length)return;
+  const mod=MOD[fitResult.mod||sel.value];
+  const allParams=[...mod.params.map((pr,i)=>({nm:pr.csv||pr.id,val:fitResult.par[i],se:fitResult.se[i]})),
+                   ...(fitResult.extra||[]).map(e=>({nm:e.csv||e.id||'k',val:e.val,se:e.se}))];
+  const NP=allParams.length;
+  const lines=['Sorption Isotherm Fit Results','','Model,'+mod.name,'','Parameter,Value,Std Error'];
+  allParams.forEach(p=>lines.push(p.nm+','+csvNum(p.val)+','+csvSE(p.se)));
+  lines.push('R2,'+parseFloat(fitResult.rsq.toPrecision(6))+'','SSR,'+csvNum(fitResult.ss)+'');
+  // Correlation matrix
+  if(fitResult.corr&&fitResult.corr.length>1){
+    lines.push('','Correlation Matrix');
+    const hdr=','+allParams.map(p=>p.nm).join(',');
+    lines.push(hdr);
+    fitResult.corr.forEach((row,i)=>{
+      lines.push(allParams[i].nm+','+row.map(v=>parseFloat(v.toPrecision(4))).join(','));
+    });
+  }
+  // Data table
+  lines.push('','Pressure,Uptake,Fitted,Residual');
+  rawData.forEach(d=>{
+    const fv=mod.fn(d.p,fitResult.par);
+    lines.push(csvNum(d.p)+','+csvNum(d.q)+','+csvNum(fv)+','+csvNum(d.q-fv));
+  });
+  const blob=new Blob([lines.join('\r\n')],{type:'text/csv'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='isotherm_results.csv';a.click();
+  st('CSV exported.','ok');
+});
+</script>
+</body>
+</html>
