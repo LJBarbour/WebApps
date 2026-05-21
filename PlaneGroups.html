@@ -1,0 +1,1749 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plane Groups — Crystallography Teaching Tool</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0e0f14;
+    --surface: #161820;
+    --surface2: #1e2030;
+    --border: rgba(255,255,255,0.08);
+    --border2: rgba(255,255,255,0.15);
+    --accent: #7eb8f7;
+    --accent2: #a78bfa;
+    --accent3: #6ee7b7;
+    --text: #e8eaf0;
+    --text2: #8b90a0;
+    --text3: #5a5f70;
+    --danger: #f87171;
+    --warn: #fbbf24;
+    --cell-line: rgba(126,184,247,0.25);
+    --cell-line-strong: rgba(126,184,247,0.55);
+    --motif-fill: rgba(167,139,250,0.35);
+    --motif-stroke: #a78bfa;
+    --sym-line: rgba(110,231,183,0.4);
+    --sym-line-strong: rgba(110,231,183,0.75);
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 13px;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  header {
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+
+  header h1 {
+    font-family: 'Fraunces', serif;
+    font-weight: 300;
+    font-size: 18px;
+    color: var(--text);
+    letter-spacing: 0.02em;
+  }
+
+  header span {
+    color: var(--text3);
+    font-size: 11px;
+  }
+
+  .layout {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* SIDEBAR */
+  .sidebar {
+    width: 240px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    padding: 12px;
+    gap: 16px;
+  }
+
+  .sidebar::-webkit-scrollbar { width: 4px; }
+  .sidebar::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+
+  .section-label {
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text3);
+    margin-bottom: 6px;
+  }
+
+  /* Plane group selector */
+  .pg-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+  }
+
+  .pg-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text2);
+    padding: 5px 2px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    text-align: center;
+    transition: all 0.15s;
+    line-height: 1.2;
+  }
+
+  .pg-btn:hover { border-color: var(--border2); color: var(--text); background: var(--surface2); }
+
+  .pg-btn.active {
+    background: rgba(126,184,247,0.12);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* Motif picker */
+  .motif-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 5px;
+  }
+
+  .motif-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.15s;
+  }
+
+  .motif-btn:hover { border-color: var(--border2); background: var(--surface2); }
+  .motif-btn.active { border-color: var(--accent2); background: rgba(167,139,250,0.1); }
+
+  .motif-btn canvas { display: block; }
+
+  .motif-btn span {
+    font-size: 10px;
+    color: var(--text3);
+    letter-spacing: 0.05em;
+  }
+
+  /* Controls */
+  .control-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .control-row label {
+    font-size: 11px;
+    color: var(--text2);
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .control-row label span { color: var(--accent); }
+
+  input[type=range] {
+    width: 100%;
+    accent-color: var(--accent);
+    height: 18px;
+    cursor: pointer;
+  }
+
+  /* Info panel */
+  .info-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px;
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--text2);
+  }
+
+  .info-box .pg-name {
+    font-family: 'Fraunces', serif;
+    font-size: 16px;
+    font-weight: 400;
+    color: var(--accent);
+    margin-bottom: 4px;
+  }
+
+  .info-box .sym-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 6px;
+  }
+
+  .tag {
+    background: rgba(110,231,183,0.1);
+    border: 1px solid rgba(110,231,183,0.25);
+    color: var(--accent3);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+  }
+
+  /* Toggle */
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--text2);
+  }
+
+  .toggle {
+    position: relative;
+    width: 30px;
+    height: 16px;
+  }
+
+  .toggle input { opacity: 0; width: 0; height: 0; }
+
+  .toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: 0.2s;
+  }
+
+  .toggle-slider::before {
+    content: '';
+    position: absolute;
+    width: 10px; height: 10px;
+    left: 2px; top: 2px;
+    background: var(--text3);
+    border-radius: 50%;
+    transition: 0.2s;
+  }
+
+  .toggle input:checked + .toggle-slider { background: rgba(126,184,247,0.2); border-color: var(--accent); }
+  .toggle input:checked + .toggle-slider::before { transform: translateX(14px); background: var(--accent); }
+
+  /* Main canvas area */
+  .canvas-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .canvas-toolbar {
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 11px;
+    color: var(--text3);
+    flex-shrink: 0;
+  }
+
+  .canvas-toolbar .stat {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .canvas-toolbar .stat-val {
+    color: var(--accent3);
+    font-weight: 500;
+  }
+
+  .canvas-toolbar .sep { color: var(--border2); }
+
+  #mainCanvas {
+    flex: 1;
+    display: block;
+    cursor: crosshair;
+  }
+
+  /* right panel */
+  .right-panel {
+    width: 200px;
+    flex-shrink: 0;
+    border-left: 1px solid var(--border);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    overflow-y: auto;
+  }
+
+  .sym-preview {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .sym-preview-label {
+    padding: 6px 10px;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text3);
+    border-bottom: 1px solid var(--border);
+  }
+
+  #symCanvas { display: block; }
+
+  .sym-list { font-size: 11px; color: var(--text2); line-height: 1.8; }
+  .sym-list .sym-item { display: flex; gap: 6px; align-items: flex-start; }
+  .sym-list .sym-item::before { content: '·'; color: var(--text3); flex-shrink: 0; }
+
+  .action-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text2);
+    padding: 7px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    width: 100%;
+    text-align: left;
+    transition: all 0.15s;
+  }
+
+  .action-btn:hover { border-color: var(--border2); color: var(--text); }
+
+  .action-btn.primary {
+    border-color: rgba(126,184,247,0.3);
+    color: var(--accent);
+  }
+
+  .action-btn.primary:hover { background: rgba(126,184,247,0.1); }
+
+  .kbd {
+    float: right;
+    font-size: 9px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    padding: 1px 4px;
+    border-radius: 3px;
+    color: var(--text3);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Plane Groups</h1>
+  <span>crystallography teaching tool · 17 wallpaper groups</span>
+</header>
+
+<div class="layout">
+
+  <!-- LEFT SIDEBAR -->
+  <div class="sidebar">
+
+    <div>
+      <div class="section-label">Plane Group</div>
+      <div class="pg-grid" id="pgGrid"></div>
+    </div>
+
+    <div>
+      <div class="section-label">Motif Shape</div>
+      <div class="motif-grid" id="motifGrid"></div>
+    </div>
+
+    <div>
+      <div class="section-label">Unit Cell</div>
+      <div class="control-row">
+        <label>Cell size a <span id="cellAVal">80</span>px</label>
+        <input type="range" id="cellA" min="40" max="160" value="80">
+      </div>
+      <div class="control-row" style="margin-top:8px;" id="cellBRow">
+        <label>Cell size b <span id="cellBVal">80</span>px</label>
+        <input type="range" id="cellB" min="40" max="160" value="80">
+      </div>
+      <div class="control-row" style="margin-top:8px;" id="cellGammaRow">
+        <label>Angle γ <span id="cellGammaVal">90</span>°</label>
+        <input type="range" id="cellGamma" min="60" max="120" value="90">
+      </div>
+    </div>
+
+    <div>
+      <div class="section-label">Motif</div>
+      <div class="control-row">
+        <label>Scale <span id="motifScaleVal">1.0</span></label>
+        <input type="range" id="motifScale" min="20" max="100" value="50">
+      </div>
+      <div class="control-row" style="margin-top:8px;">
+        <label>Rotation <span id="motifRotVal">0</span>°</label>
+        <input type="range" id="motifRot" min="0" max="360" value="0">
+      </div>
+    </div>
+
+    <div>
+      <div class="section-label">Display</div>
+      <div style="display:flex;flex-direction:column;gap:7px;">
+        <div class="toggle-row">
+          <span>Symmetry elements</span>
+          <label class="toggle"><input type="checkbox" id="showSym" checked><span class="toggle-slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Unit cell outline</span>
+          <label class="toggle"><input type="checkbox" id="showCell" checked><span class="toggle-slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Origin marker</span>
+          <label class="toggle"><input type="checkbox" id="showOrigin" checked><span class="toggle-slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Ghost motif</span>
+          <label class="toggle"><input type="checkbox" id="showGhost" checked><span class="toggle-slider"></span></label>
+        </div>
+      </div>
+    </div>
+
+    <div class="info-box" id="infoBox">
+      <div class="pg-name" id="infoName">p1</div>
+      <div id="infoDesc">No rotation or reflection. Only translational symmetry.</div>
+      <div class="sym-tags" id="infoTags"></div>
+    </div>
+
+  </div>
+
+  <!-- MAIN CANVAS -->
+  <div class="canvas-area">
+    <div class="canvas-toolbar">
+      <div class="stat">Group: <span class="stat-val" id="statGroup">p1</span></div>
+      <div class="sep">|</div>
+      <div class="stat">Motif pos: <span class="stat-val" id="statPos">—</span></div>
+      <div class="sep">|</div>
+      <div class="stat">Copies: <span class="stat-val" id="statCopies">—</span></div>
+      <div class="sep">|</div>
+      <div class="stat" style="margin-left:auto;color:var(--text3);font-size:10px;">drag motif · scroll to zoom · shift+drag to pan</div>
+    </div>
+    <canvas id="mainCanvas"></canvas>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="right-panel">
+    <div>
+      <div class="section-label">Symmetry Preview</div>
+      <div class="sym-preview">
+        <div class="sym-preview-label">Unit cell</div>
+        <canvas id="symCanvas" width="176" height="176"></canvas>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-label">Active Symmetries</div>
+      <div class="sym-list" id="symList"></div>
+    </div>
+
+    <div>
+      <div class="section-label">Actions</div>
+      <div style="display:flex;flex-direction:column;gap:5px;">
+        <button class="action-btn primary" onclick="resetMotifPos()">Reset position <span class="kbd">R</span></button>
+        <button class="action-btn" onclick="clearCanvas()">Clear <span class="kbd">C</span></button>
+        <button class="action-btn" onclick="exportPNG()">Export PNG</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ─── PLANE GROUP DATA ────────────────────────────────────────────────────────
+
+const PLANE_GROUPS = {
+  'p1':   { system:'oblique',      order:1,  desc:'No rotation or reflection. Translational symmetry only.', tags:['translation'], symDesc:['Translation only'] },
+  'p2':   { system:'oblique',      order:2,  desc:'2-fold rotation axes at corners, edge midpoints, and cell centre.', tags:['2-fold rotation','translation'], symDesc:['2-fold rotations','No mirrors'] },
+  'pm':   { system:'rectangular',  order:2,  desc:'Parallel mirror lines, no rotation.', tags:['mirror','translation'], symDesc:['Mirror lines (m)','No rotations'] },
+  'pg':   { system:'rectangular',  order:2,  desc:'Parallel glide reflections, no mirror or rotation.', tags:['glide reflection','translation'], symDesc:['Glide reflections (g)','No mirrors'] },
+  'cm':   { system:'rectangular',  order:2,  desc:'Mirrors with interspersed glides (centred cell).', tags:['mirror','glide reflection'], symDesc:['Mirrors + glides','Centred cell'] },
+  'p2mm': { system:'rectangular',  order:4,  desc:'Perpendicular mirrors and 2-fold rotations.', tags:['mirror','2-fold rotation'], symDesc:['Perpendicular mirrors','2-fold rotations'] },
+  'p2mg': { system:'rectangular',  order:4,  desc:'Mirrors and glide reflections perpendicular to each other.', tags:['mirror','glide','2-fold rotation'], symDesc:['Mirrors + glides','2-fold rotations'] },
+  'p2gg': { system:'rectangular',  order:4,  desc:'Two perpendicular glide reflections, 2-fold rotations.', tags:['glide reflection','2-fold rotation'], symDesc:['Perpendicular glides','2-fold rotations'] },
+  'c2mm': { system:'rectangular',  order:4,  desc:'Centred cell with mirrors and glides.', tags:['mirror','glide','2-fold','centred'], symDesc:['Mirrors + glides','Centred rectangular'] },
+  'p4':   { system:'square',       order:4,  desc:'4-fold and 2-fold rotation axes, no mirrors.', tags:['4-fold rotation','2-fold rotation'], symDesc:['4-fold rotations','2-fold rotations','No mirrors'] },
+  'p4mm': { system:'square',       order:8,  desc:'4-fold rotations with mirrors along axes and diagonals.', tags:['4-fold rotation','mirror'], symDesc:['4-fold rotations','Mirrors (axes + diag)'] },
+  'p4gm': { system:'square',       order:8,  desc:'4-fold rotations with glide reflections and mirrors.', tags:['4-fold rotation','glide','mirror'], symDesc:['4-fold rotations','Glide reflections','Diagonal mirrors'] },
+  'p3':   { system:'hexagonal',    order:3,  desc:'3-fold rotation axes only.', tags:['3-fold rotation'], symDesc:['3-fold rotations','No mirrors'] },
+  'p3m1': { system:'hexagonal',    order:6,  desc:'3-fold rotations, mirrors through rotation axes.', tags:['3-fold rotation','mirror'], symDesc:['3-fold rotations','Mirrors (3 directions)'] },
+  'p31m': { system:'hexagonal',    order:6,  desc:'3-fold rotations, mirrors not through all axes.', tags:['3-fold rotation','mirror'], symDesc:['3-fold rotations','Mirrors (alternate)'] },
+  'p6':   { system:'hexagonal',    order:6,  desc:'6-fold, 3-fold, and 2-fold rotation axes, no mirrors.', tags:['6-fold rotation','3-fold rotation','2-fold rotation'], symDesc:['6-fold rotations','3-fold rotations','2-fold rotations'] },
+  'p6mm': { system:'hexagonal',    order:12, desc:'Highest symmetry plane group: 6-fold rotations with mirrors.', tags:['6-fold rotation','mirror','glide'], symDesc:['6-fold rotations','Mirrors (6 directions)'] },
+};
+
+// ─── MOTIF SHAPES ───────────────────────────────────────────────────────────
+
+const MOTIFS = {
+  'comma': {
+    name: 'comma',
+    draw(ctx, s) {
+      ctx.beginPath();
+      ctx.arc(0, -s*0.15, s*0.32, 0, Math.PI*1.6);
+      ctx.arc(s*0.1, s*0.3, s*0.12, Math.PI*1.1, Math.PI*2.2);
+      ctx.closePath();
+    }
+  },
+  'pacman': {
+    name: 'pacman',
+    draw(ctx, s) {
+      // Body
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, s*0.52, 0.35, Math.PI*2 - 0.35);
+      ctx.closePath();
+      // Eye (hole punched via evenodd)
+      ctx.moveTo(s*0.18, -s*0.28);
+      ctx.arc(s*0.18, -s*0.28, s*0.09, 0, Math.PI*2);
+    }
+  },
+  'molecule': {
+    name: 'molecule',
+    draw(ctx, s) {
+      // Bonds first (will be stroked by caller)
+      ctx.beginPath();
+      ctx.moveTo(0, 0); ctx.lineTo(s*0.42, -s*0.40);
+      ctx.moveTo(0, 0); ctx.lineTo(-s*0.48, s*0.12);
+      ctx.moveTo(0, 0); ctx.lineTo(s*0.30, s*0.48);
+      // Central atom
+      ctx.moveTo(s*0.18, 0); ctx.arc(0, 0, s*0.18, 0, Math.PI*2);
+      // Top-right atom
+      ctx.moveTo(s*0.42+s*0.14, -s*0.40);
+      ctx.arc(s*0.42, -s*0.40, s*0.14, 0, Math.PI*2);
+      // Left atom
+      ctx.moveTo(-s*0.48+s*0.13, s*0.12);
+      ctx.arc(-s*0.48, s*0.12, s*0.13, 0, Math.PI*2);
+      // Bottom-right atom (small)
+      ctx.moveTo(s*0.30+s*0.10, s*0.48);
+      ctx.arc(s*0.30, s*0.48, s*0.10, 0, Math.PI*2);
+    }
+  },
+  'hook': {
+    name: 'hook',
+    draw(ctx, s) {
+      ctx.beginPath();
+      ctx.moveTo(-s*0.35, -s*0.4);
+      ctx.bezierCurveTo(-s*0.35, -s*0.7, s*0.5, -s*0.7, s*0.5, 0);
+      ctx.bezierCurveTo(s*0.5, s*0.45, 0, s*0.5, -s*0.1, s*0.4);
+      ctx.lineTo(s*0.15, s*0.4);
+      ctx.lineTo(s*0.15, s*0.55);
+      ctx.lineTo(-s*0.3, s*0.55);
+      ctx.bezierCurveTo(-s*0.75, s*0.3, -s*0.65, -s*0.15, -s*0.35, -s*0.4);
+      ctx.closePath();
+    }
+  },
+  'lightning': {
+    name: 'lightning',
+    draw(ctx, s) {
+      ctx.beginPath();
+      ctx.moveTo(s*0.15, -s*0.58);
+      ctx.lineTo(-s*0.25, -s*0.02);
+      ctx.lineTo(s*0.08, -s*0.02);
+      ctx.lineTo(-s*0.18, s*0.58);
+      ctx.lineTo(s*0.38, -s*0.12);
+      ctx.lineTo(s*0.05, -s*0.12);
+      ctx.closePath();
+    }
+  },
+  'fish': {
+    name: 'fish',
+    draw(ctx, s) {
+      // Body
+      ctx.beginPath();
+      ctx.moveTo(s*0.50, 0);
+      ctx.bezierCurveTo(s*0.30, -s*0.38, -s*0.40, -s*0.38, -s*0.50, 0);
+      ctx.bezierCurveTo(-s*0.40, s*0.38, s*0.30, s*0.38, s*0.50, 0);
+      ctx.closePath();
+      // Tail
+      ctx.moveTo(s*0.48, 0);
+      ctx.lineTo(s*0.72, -s*0.30);
+      ctx.lineTo(s*0.72, s*0.30);
+      ctx.closePath();
+      // Eye
+      ctx.moveTo(-s*0.28, -s*0.10);
+      ctx.arc(-s*0.28, -s*0.10, s*0.08, 0, Math.PI*2);
+    }
+  },
+  'amoeba': {
+    name: 'amoeba',
+    draw(ctx, s) {
+      const pts = [
+        [0,-0.55],[0.35,-0.35],[0.55,0.05],[0.3,0.5],
+        [-0.1,0.6],[-0.45,0.3],[-0.5,-0.1],[-0.2,-0.5]
+      ];
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0]*s, pts[0][1]*s);
+      for (let i=0;i<pts.length;i++) {
+        const p1=pts[i], p2=pts[(i+1)%pts.length];
+        const cx=(p1[0]+p2[0])/2*s, cy=(p1[1]+p2[1])/2*s;
+        ctx.quadraticCurveTo(p1[0]*s, p1[1]*s, cx, cy);
+      }
+      ctx.closePath();
+    }
+  },
+  'shield': {
+    name: 'shield',
+    draw(ctx, s) {
+      ctx.beginPath();
+      ctx.moveTo(0, -s*0.58);
+      ctx.lineTo(s*0.46, -s*0.38);
+      ctx.lineTo(s*0.46, s*0.05);
+      ctx.bezierCurveTo(s*0.46, s*0.38, s*0.18, s*0.52, 0, s*0.60);
+      ctx.bezierCurveTo(-s*0.18, s*0.52, -s*0.46, s*0.38, -s*0.46, s*0.05);
+      ctx.lineTo(-s*0.46, -s*0.38);
+      ctx.closePath();
+      // inner notch
+      ctx.moveTo(0, -s*0.32);
+      ctx.lineTo(s*0.22, -s*0.20);
+      ctx.lineTo(s*0.22, s*0.08);
+      ctx.bezierCurveTo(s*0.22, s*0.24, s*0.08, s*0.34, 0, s*0.38);
+      ctx.bezierCurveTo(-s*0.08, s*0.34, -s*0.22, s*0.24, -s*0.22, s*0.08);
+      ctx.lineTo(-s*0.22, -s*0.20);
+      ctx.closePath();
+    }
+  },
+  'arrow': {
+    name: 'arrow',
+    draw(ctx, s) {
+      ctx.beginPath();
+      ctx.moveTo(0, -s*0.55);
+      ctx.lineTo(s*0.4, s*0.1);
+      ctx.lineTo(s*0.15, s*0.05);
+      ctx.lineTo(s*0.15, s*0.55);
+      ctx.lineTo(-s*0.15, s*0.55);
+      ctx.lineTo(-s*0.15, s*0.05);
+      ctx.lineTo(-s*0.4, s*0.1);
+      ctx.closePath();
+    }
+  },
+  'footprint': {
+    name: 'footprint',
+    draw(ctx, s) {
+      ctx.beginPath();
+      ctx.ellipse(-s*0.08, 0, s*0.28, s*0.52, 0.15, 0, Math.PI*2);
+      ctx.moveTo(s*0.35, -s*0.45);
+      ctx.ellipse(s*0.35, -s*0.45, s*0.11, s*0.16, 0.5, 0, Math.PI*2);
+      ctx.moveTo(s*0.48, -s*0.15);
+      ctx.ellipse(s*0.48, -s*0.15, s*0.1, s*0.15, 0.3, 0, Math.PI*2);
+      ctx.moveTo(s*0.42, s*0.15);
+      ctx.ellipse(s*0.42, s*0.15, s*0.1, s*0.14, 0.1, 0, Math.PI*2);
+    }
+  },
+  'teardrop': {
+    name: 'teardrop',
+    draw(ctx, s) {
+      ctx.beginPath();
+      ctx.moveTo(0, -s*0.55);
+      ctx.bezierCurveTo(s*0.45, -s*0.2, s*0.45, s*0.35, 0, s*0.55);
+      ctx.bezierCurveTo(-s*0.45, s*0.35, -s*0.45, -s*0.2, 0, -s*0.55);
+      ctx.closePath();
+      ctx.moveTo(s*0.1, s*0.1);
+      ctx.arc(0, s*0.1, s*0.1, 0, Math.PI*2);
+    }
+  },
+  'lizard': {
+    name: 'lizard',
+    draw(ctx, s) {
+      // Escher-style lizard tessellation motif
+      // Head faces right, tail curves left — designed to tile under p6 / p3
+      ctx.beginPath();
+      // Head
+      ctx.moveTo(s*0.55, s*0.05);
+      ctx.bezierCurveTo(s*0.60, -s*0.10, s*0.45, -s*0.28, s*0.28, -s*0.22);
+      // Snout / jaw
+      ctx.bezierCurveTo(s*0.18, -s*0.18, s*0.12, -s*0.05, s*0.20, s*0.02);
+      // Neck into body
+      ctx.bezierCurveTo(s*0.10, s*0.08, -s*0.02, s*0.04, -s*0.08, -s*0.05);
+      // Front leg
+      ctx.bezierCurveTo(-s*0.14, -s*0.18, -s*0.28, -s*0.24, -s*0.30, -s*0.14);
+      ctx.bezierCurveTo(-s*0.32, -s*0.04, -s*0.22, s*0.02, -s*0.18, s*0.10);
+      // Belly
+      ctx.bezierCurveTo(-s*0.22, s*0.20, -s*0.18, s*0.32, -s*0.08, s*0.35);
+      // Back leg
+      ctx.bezierCurveTo(s*0.02, s*0.42, s*0.14, s*0.44, s*0.18, s*0.36);
+      ctx.bezierCurveTo(s*0.22, s*0.28, s*0.15, s*0.18, s*0.20, s*0.14);
+      // Tail curves back left
+      ctx.bezierCurveTo(s*0.35, s*0.10, s*0.50, s*0.22, s*0.42, s*0.32);
+      ctx.bezierCurveTo(s*0.34, s*0.42, s*0.14, s*0.38, s*0.08, s*0.28);
+      // Back to start along top
+      ctx.bezierCurveTo(s*0.18, s*0.18, s*0.38, s*0.18, s*0.48, s*0.12);
+      ctx.bezierCurveTo(s*0.54, s*0.10, s*0.55, s*0.08, s*0.55, s*0.05);
+      ctx.closePath();
+      // Eye
+      ctx.moveTo(s*0.38, -s*0.12);
+      ctx.arc(s*0.36, -s*0.13, s*0.05, 0, Math.PI*2);
+    }
+  },
+};
+
+// ─── STATE ───────────────────────────────────────────────────────────────────
+
+let state = {
+  group: 'p1',
+  motif: 'comma',
+  cellA: 80,
+  cellB: 80,
+  cellGamma: 90,
+  motifScale: 0.5,
+  motifRot: 0,
+  motifX: 0.25,  // fractional coordinates within cell
+  motifY: 0.25,
+  showSym: true,
+  showCell: true,
+  showOrigin: true,
+  showGhost: true,
+  panX: 0,
+  panY: 0,
+  zoom: 1,
+  dragging: false,
+  panning: false,
+  dragStartX: 0,
+  dragStartY: 0,
+  panStartX: 0,
+  panStartY: 0,
+};
+
+// ─── CANVAS SETUP ────────────────────────────────────────────────────────────
+
+const canvas = document.getElementById('mainCanvas');
+const ctx = canvas.getContext('2d');
+const symCanvas = document.getElementById('symCanvas');
+const symCtx = symCanvas.getContext('2d');
+
+function resize() {
+  const area = canvas.parentElement;
+  canvas.width = area.clientWidth;
+  canvas.height = area.clientHeight;
+  if (state.panX === 0 && state.panY === 0) {
+    state.panX = canvas.width / 2;
+    state.panY = canvas.height / 2;
+  }
+  render();
+}
+
+window.addEventListener('resize', resize);
+
+// ─── GEOMETRY HELPERS ───────────────────────────────────────────────────────
+
+function cellVectors() {
+  const a = state.cellA * state.zoom;
+  const b = state.cellB * state.zoom;
+  const g = state.cellGamma * Math.PI / 180;
+  // a along x, b at angle gamma
+  return {
+    ax: a, ay: 0,
+    bx: b * Math.cos(g), by: b * Math.sin(g)
+  };
+}
+
+function fracToScreen(fx, fy) {
+  const {ax, ay, bx, by} = cellVectors();
+  return {
+    x: state.panX + fx * ax + fy * bx,
+    y: state.panY + fx * ay + fy * by
+  };
+}
+
+function screenToFrac(sx, sy) {
+  const {ax, ay, bx, by} = cellVectors();
+  const dx = sx - state.panX, dy = sy - state.panY;
+  const det = ax * by - ay * bx;
+  return {
+    fx: (dx * by - dy * bx) / det,
+    fy: (dy * ax - dx * ay) / det
+  };
+}
+
+// ─── SYMMETRY OPERATIONS ────────────────────────────────────────────────────
+// Each op: { fx, fy, mat: [a,b,c,d] }
+// mat is the 2×2 linear part of the symmetry operation in screen space.
+// It is applied to the motif at draw time via ctx.transform(a,b,c,d,0,0).
+// Pure rotation by r:            [ cos r, sin r, -sin r, cos r ]
+// Reflect across vertical axis:  [-1, 0, 0, 1]  (x-mirror)
+// Reflect across horizontal axis:[1, 0, 0, -1]  (y-mirror)
+// Reflect across y=x diagonal:   [0, 1, 1, 0]
+// Composed ops: multiply matrices.  mat_A_then_B = matMul(B, A).
+
+function matMul(A, B) {
+  // A=[a,b,c,d], B=[e,f,g,h]  — column-major as used by canvas transform
+  // canvas transform(a,b,c,d,e,f) maps: x' = a*x + c*y,  y' = b*x + d*y
+  // so mat = [a, b, c, d]  where column 1 = (a,b), column 2 = (c,d)
+  const [a,b,c,d] = A, [e,f,g,h] = B;
+  return [a*e+c*f, b*e+d*f, a*g+c*h, b*g+d*h];
+}
+
+const MAT_ID   = [ 1, 0, 0, 1];   // identity
+const MAT_MX   = [-1, 0, 0, 1];   // mirror in x (reflect across vertical line)
+const MAT_MY   = [ 1, 0, 0,-1];   // mirror in y (reflect across horizontal line)
+const MAT_MXY  = [ 0, 1, 1, 0];   // mirror across diagonal y=x
+const MAT_180  = [-1, 0, 0,-1];   // 2-fold rotation (= MX then MY)
+
+function matRot(r) {
+  const c=Math.cos(r), s=Math.sin(r);
+  return [c, s, -s, c];
+}
+
+function getSymOps(group, fx, fy) {
+  const ops = [];
+  const w = v => ((v % 1) + 1) % 1;
+
+  // Work in Cartesian (screen) space for all rotations/reflections.
+  // Convert frac→cart, apply op, convert cart→frac.
+  const {ax, ay, bx, by} = cellVectors();
+  // frac to cart (relative to origin, no pan)
+  const f2c = (fx, fy) => [fx*ax + fy*bx, fx*ay + fy*by];
+  // cart to frac
+  const det = ax*by - ay*bx;
+  const c2f = (cx, cy) => [(cx*by - cy*bx)/det, (cy*ax - cx*ay)/det];
+
+  // Apply a 2×2 Cartesian matrix around Cartesian centre (cox,coy)
+  const applyCart = (cx, cy, mat, cox=0, coy=0) => {
+    const dx=cx-cox, dy=cy-coy;
+    const [a,b,c,d]=mat;
+    return [cox + a*dx + c*dy, coy + b*dx + d*dy];
+  };
+
+  // Add an op: fractional position + orientation matrix (in screen/Cartesian space)
+  const add = (x, y, mat) => ops.push({fx: w(x), fy: w(y), mat});
+
+  // Convert motif frac position to Cartesian
+  const [cx0, cy0] = f2c(fx, fy);
+
+  switch(group) {
+    case 'p1':
+      add(fx, fy, MAT_ID);
+      break;
+
+    case 'p2': {
+      // 2-fold at origin: negate Cartesian coords
+      add(fx, fy, MAT_ID);
+      const [cx1,cy1] = c2f(-cx0, -cy0);
+      add(cx1, cy1, MAT_180);
+      break;
+    }
+
+    // ── Rectangular ──────────────────────────────────────────────────────────
+    // For rectangular groups gamma=90, so Cartesian = fractional*cellSize.
+    // Mirror lines are at x=0, x=a/2 (pm/p2mm) or x=a/4 (pg/p2gg etc.)
+    case 'pm': {
+      add(fx, fy, MAT_ID);
+      // mirror about x=0: negate x in Cartesian
+      const [cx1,cy1] = c2f(-cx0, cy0);
+      add(cx1, cy1, MAT_MX);
+      break;
+    }
+
+    case 'pg': {
+      // vertical glide at x=a/4: reflect about x=a/4, shift +b/2 in y
+      add(fx, fy, MAT_ID);
+      const mirX = ax/2 - cx0;  // reflect about ax/4: x' = ax/2 - cx0
+      const [cx1,cy1] = c2f(mirX, cy0 + by/2);
+      add(cx1, cy1, MAT_MX);
+      break;
+    }
+
+    case 'cm': {
+      add(fx, fy, MAT_ID);
+      const [cx1,cy1] = c2f(-cx0, cy0);
+      add(cx1, cy1, MAT_MX);
+      const [cx2,cy2] = c2f(cx0 + ax/2, cy0 + by/2);
+      add(cx2, cy2, MAT_ID);
+      const [cx3,cy3] = c2f(ax/2 - cx0, cy0 + by/2);
+      add(cx3, cy3, MAT_MX);
+      break;
+    }
+
+    case 'p2mm': {
+      add(fx, fy, MAT_ID);
+      const [cx1,cy1] = c2f(-cx0,  cy0); add(cx1,cy1, MAT_MX);
+      const [cx2,cy2] = c2f( cx0, -cy0); add(cx2,cy2, MAT_MY);
+      const [cx3,cy3] = c2f(-cx0, -cy0); add(cx3,cy3, MAT_180);
+      break;
+    }
+
+    case 'p2mg': {
+      // ITA general positions:
+      // (1) x, y          -> MAT_ID
+      // (2) -x, y         -> MAT_MX   (mirror at x=0)
+      // (3) x+1/2, -y     -> MAT_MY   (glide at y=0: shift a/2, flip y)
+      // (4) -x+1/2, -y    -> MAT_180  (2-fold at x=1/4, y=0)
+      add(fx, fy, MAT_ID);
+      const [cx1,cy1] = c2f(-cx0,       cy0); add(cx1,cy1, MAT_MX);
+      const [cx2,cy2] = c2f( cx0+ax/2, -cy0); add(cx2,cy2, MAT_MY);
+      const [cx3,cy3] = c2f(-cx0+ax/2, -cy0); add(cx3,cy3, MAT_180);
+      break;
+    }
+
+    case 'p2gg': {
+      // vertical glide at x=a/4, horizontal glide at y=b/4
+      add(fx, fy, MAT_ID);
+      const [cx1,cy1] = c2f(ax/2 - cx0, cy0 + by/2); add(cx1,cy1, MAT_MX);
+      const [cx2,cy2] = c2f(cx0 + ax/2, by/2 - cy0); add(cx2,cy2, MAT_MY);
+      const [cx3,cy3] = c2f(-cx0, -cy0);               add(cx3,cy3, MAT_180);
+      break;
+    }
+
+    case 'c2mm': {
+      add(fx, fy, MAT_ID);
+      const [cx1,cy1] = c2f(-cx0,  cy0); add(cx1,cy1, MAT_MX);
+      const [cx2,cy2] = c2f( cx0, -cy0); add(cx2,cy2, MAT_MY);
+      const [cx3,cy3] = c2f(-cx0, -cy0); add(cx3,cy3, MAT_180);
+      const [cx4,cy4] = c2f(cx0+ax/2, cy0+by/2); add(cx4,cy4, MAT_ID);
+      const [cx5,cy5] = c2f(-cx0+ax/2, cy0+by/2); add(cx5,cy5, MAT_MX);
+      const [cx6,cy6] = c2f(cx0+ax/2, -cy0+by/2); add(cx6,cy6, MAT_MY);
+      const [cx7,cy7] = c2f(-cx0+ax/2, -cy0+by/2); add(cx7,cy7, MAT_180);
+      break;
+    }
+
+    // ── Square ───────────────────────────────────────────────────────────────
+    case 'p4': {
+      // ITA general positions (origin at 4-fold axis at corner):
+      // (x,y), (-y,x), (-x,-y), (y,-x)
+      const gp = [
+        [fx,   fy,  MAT_ID          ],
+        [-fy,  fx,  matRot(Math.PI/2)],
+        [-fx, -fy,  MAT_180         ],
+        [fy,  -fx,  matRot(3*Math.PI/2)],
+      ];
+      for (const [gx,gy,mat] of gp) {
+        const [scx,scy] = f2c(gx,gy);
+        const [rfx,rfy] = c2f(scx,scy);
+        add(rfx,rfy,mat);
+      }
+      break;
+    }
+
+    case 'p4mm': {
+      // ITA general positions (origin at 4mm at corner):
+      // 4 rotations + 4 mirrors (along x=0, y=0, x=y, x=-y)
+      const MAT_MNXY = [0,-1,-1,0]; // mirror across x=-y diagonal: (-y,-x)
+      const gp = [
+        [fx,   fy,  MAT_ID          ],
+        [-fy,  fx,  matRot(Math.PI/2)],
+        [-fx, -fy,  MAT_180         ],
+        [fy,  -fx,  matRot(3*Math.PI/2)],
+        [-fx,  fy,  MAT_MX          ],  // mirror x=0: (-x,y)
+        [fy,   fx,  MAT_MXY         ],  // mirror x=y: (y,x)
+        [fx,  -fy,  MAT_MY          ],  // mirror y=0: (x,-y)
+        [-fy, -fx,  MAT_MNXY        ],  // mirror x=-y: (-y,-x)
+      ];
+      for (const [gx,gy,mat] of gp) {
+        const [scx,scy] = f2c(gx,gy);
+        const [rfx,rfy] = c2f(scx,scy);
+        add(rfx,rfy,mat);
+      }
+      break;
+    }
+
+    case 'p4gm': {
+      // ITA general positions (origin at 4-fold at corner):
+      // 4 rotations + 4 reflection ops with half-cell translations.
+      // Op analysis (fixed-point method):
+      //   (-y+1/2,-x+1/2): TRUE MIRROR along anti-diagonal x+y=1/2
+      //   4-fold generates a second mirror along x=y diagonal
+      //   (-x+1/2,y+1/2): GLIDE at x=1/4 (vertical, axial)
+      //   (x+1/2,-y+1/2): GLIDE at y=1/4 (horizontal, axial)
+      //   (y+1/2,x+1/2):  GLIDE along x=y diagonal
+      // So: mirrors are DIAGONAL, glides are AXIAL — correct for p4gm.
+      const MAT_MNXY = [0,-1,-1,0]; // (-y,-x): anti-diagonal mirror
+      const gp = [
+        [fx,          fy,         MAT_ID             ],
+        [-fy,         fx,         matRot(Math.PI/2)  ],
+        [-fx,        -fy,         MAT_180            ],
+        [fy,         -fx,         matRot(3*Math.PI/2)],
+        [-fx+0.5,     fy+0.5,     MAT_MX             ],  // glide, vertical at x=1/4
+        [fy+0.5,      fx+0.5,     MAT_MXY            ],  // glide, diagonal
+        [fx+0.5,     -fy+0.5,     MAT_MY             ],  // glide, horizontal at y=1/4
+        [-fy+0.5,    -fx+0.5,     MAT_MNXY           ],  // TRUE MIRROR, anti-diagonal
+      ];
+      for (const [gx,gy,mat] of gp) {
+        const [scx,scy] = f2c(gx,gy);
+        const [rfx,rfy] = c2f(scx,scy);
+        add(rfx,rfy,mat);
+      }
+      break;
+    }
+
+    // ── Hexagonal ────────────────────────────────────────────────────────────
+    // Use ITA general positions directly in fractional coords.
+    // The orientation matrix for each copy is derived from the fractional linear part,
+    // converted to a Cartesian matrix: M_cart = T * M_frac * T^-1
+    // where T = [[ax,bx],[ay,by]] maps frac→cart.
+    // For pure rotations this always equals matRot(angle).
+    // For mirrors the Cartesian matrix depends on the cell geometry.
+    //
+    // Hexagonal cell: a along x, b at 120°.
+    //   ax=a, ay=0, bx=b*cos120=-b/2, by=b*sin120=b*√3/2
+    //   With a=b: T=a*[[1,-1/2],[0,√3/2]]
+    //
+    // ITA fractional linear parts and their Cartesian equivalents:
+    //   (x,y)       → identity      → MAT_ID
+    //   (-y, x-y)   → R+120°        → matRot(2π/3)
+    //   (-x+y, -x)  → R+240°        → matRot(4π/3)
+    //   (-y,-x)     → mirror        → see below (mirror perp to a+b diagonal)
+    //   (x-y, -y)   → mirror        → see below
+    //   (-x+y, x)   → mirror        → see below
+    // For p3m1 the mirror matrix in Cartesian coords for hexagonal cell
+    // (mirror across the line along a-axis direction, i.e. along [1,0] frac) is MAT_MY.
+
+    case 'p3': {
+      // ITA general positions: (x,y), (-y,x-y), (-x+y,-x)
+      const gp = [
+        [fx,      fy,      MAT_ID          ],
+        [-fy,     fx-fy,   matRot(2*Math.PI/3)],
+        [-fx+fy, -fx,      matRot(4*Math.PI/3)],
+      ];
+      for (const [gx,gy,mat] of gp) {
+        const [scx,scy] = f2c(gx, gy);
+        const [rfx,rfy] = c2f(scx, scy);
+        add(rfx, rfy, mat);
+      }
+      break;
+    }
+
+    case 'p3m1': {
+      // Mirrors derived by group multiplication: R120*mir, R240*mir from base (y,x)
+      // All Cartesian matrices = T·M_frac·T^-1, verified det=-1
+      const gp = [
+        [fx,        fy,      MAT_ID],
+        [-fy,       fx-fy,   matRot(2*Math.PI/3)],
+        [-fx+fy,   -fx,      matRot(4*Math.PI/3)],
+        [fy,        fx,      [-0.5, 0.8660254, 0.8660254,  0.5]],  // (y,x)
+        [-fx,      -fx+fy,   [-0.5,-0.8660254,-0.8660254,  0.5]],  // (-x,-x+y) = R120*(y,x)
+        [fx-fy,    -fy,      [ 1.0, 0.0,       0.0,       -1.0]],  // (x-y,-y)  = R240*(y,x)
+      ];
+      for (const [gx,gy,mat] of gp) {
+        const [scx,scy] = f2c(gx, gy);
+        const [rfx,rfy] = c2f(scx, scy);
+        add(rfx, rfy, mat);
+      }
+      break;
+    }
+
+    case 'p31m': {
+      // Mirrors derived by group multiplication: R120*mir, R240*mir from base (-y,-x)
+      // All Cartesian matrices = T·M_frac·T^-1, verified det=-1
+      const gp = [
+        [fx,        fy,      MAT_ID],
+        [-fy,       fx-fy,   matRot(2*Math.PI/3)],
+        [-fx+fy,   -fx,      matRot(4*Math.PI/3)],
+        [-fy,      -fx,      [ 0.5,-0.8660254,-0.8660254,-0.5]],  // (-y,-x)
+        [fx,        fx-fy,   [ 0.5, 0.8660254, 0.8660254,-0.5]],  // (x,x-y)  = R120*(-y,-x)
+        [-fx+fy,    fy,      [-1.0, 0.0,       0.0,       1.0]],  // (-x+y,y) = R240*(-y,-x)
+      ];
+      for (const [gx,gy,mat] of gp) {
+        const [scx,scy] = f2c(gx, gy);
+        const [rfx,rfy] = c2f(scx, scy);
+        add(rfx, rfy, mat);
+      }
+      break;
+    }
+
+    case 'p6': {
+      const gp = [
+        [fx,      fy,     MAT_ID             ],
+        [-fy,     fx-fy,  matRot(2*Math.PI/3)],
+        [-fx+fy, -fx,     matRot(4*Math.PI/3)],
+        [-fx,    -fy,     matRot(Math.PI)    ],
+        [fy,    -fx+fy,   matRot(5*Math.PI/3)],
+        [fx-fy,  fx,      matRot(Math.PI/3)  ],
+      ];
+      for (const [gx,gy,mat] of gp) {
+        const [scx,scy] = f2c(gx, gy);
+        const [rfx,rfy] = c2f(scx, scy);
+        add(rfx, rfy, mat);
+      }
+      break;
+    }
+
+    case 'p6mm': {
+      // 6 rotations + 3 p3m1-type mirrors + 3 p31m-type mirrors = 12 ops
+      const gp = [
+        // rotations
+        [fx,        fy,      MAT_ID             ],
+        [-fy,       fx-fy,   matRot(2*Math.PI/3)],
+        [-fx+fy,   -fx,      matRot(4*Math.PI/3)],
+        [-fx,      -fy,      matRot(Math.PI)    ],
+        [fy,       -fx+fy,   matRot(5*Math.PI/3)],
+        [fx-fy,    fx,       matRot(Math.PI/3)  ],
+        // p3m1-type mirrors
+        [fy,        fx,      [-0.5, 0.8660254, 0.8660254,  0.5]],
+        [-fx,      -fx+fy,   [-0.5,-0.8660254,-0.8660254,  0.5]],
+        [fx-fy,    -fy,      [ 1.0, 0.0,       0.0,       -1.0]],
+        // p31m-type mirrors
+        [-fy,      -fx,      [ 0.5,-0.8660254,-0.8660254, -0.5]],
+        [fx,        fx-fy,   [ 0.5, 0.8660254, 0.8660254, -0.5]],
+        [-fx+fy,    fy,      [-1.0, 0.0,       0.0,        1.0]],
+      ];
+      for (const [gx,gy,mat] of gp) {
+        const [scx,scy] = f2c(gx, gy);
+        const [rfx,rfy] = c2f(scx, scy);
+        add(rfx, rfy, mat);
+      }
+      break;
+    }
+
+    default:
+      add(fx, fy, MAT_ID);
+  }
+  return ops;
+}
+
+// ─── DRAWING ─────────────────────────────────────────────────────────────────
+
+function drawMotif(c, sx, sy, scale, mat, alpha=1) {
+  const motif = MOTIFS[state.motif];
+  const baseRot = state.motifRot * Math.PI / 180;
+  const Rb = matRot(baseRot);
+  // Final transform = mat (symmetry op) composed with base rotation
+  const T = matMul(mat, Rb);
+  const [a,b,cc,d] = T;
+  c.save();
+  c.translate(sx, sy);
+  c.transform(a, b, cc, d, 0, 0);
+  c.globalAlpha = alpha;
+  c.fillStyle = 'rgba(167,139,250,0.5)';
+  c.strokeStyle = '#a78bfa';
+  c.lineWidth = 1.5;
+  motif.draw(c, scale);
+  c.fill('evenodd');
+  c.stroke();
+  c.restore();
+}
+
+function drawSymmetryElements(c, group) {
+  if (!state.showSym) return;
+  const {ax, ay, bx, by} = cellVectors();
+  const px = state.panX, py = state.panY;
+
+  // Draw across a range of cells
+  for (let i = -3; i <= 3; i++) {
+    for (let j = -3; j <= 3; j++) {
+      const ox = px + i*ax + j*bx;
+      const oy = py + i*ay + j*by;
+      drawSymInCell(c, group, ox, oy, ax, ay, bx, by);
+    }
+  }
+}
+
+function drawSymInCell(c, group, ox, oy, ax, ay, bx, by) {
+  const rot = (fx, fy, order, angle, color) => {
+    const sx = ox + fx*ax + fy*bx;
+    const sy = oy + fx*ay + fy*by;
+    c.save();
+    c.translate(sx, sy);
+    c.strokeStyle = color;
+    c.fillStyle = color;
+    c.lineWidth = 2;
+    const r = 7;
+    if (order === 2) {
+      // Correct crystallographic symbol: filled ellipse (lens shape)
+      c.beginPath();
+      c.ellipse(0, 0, r*0.95, r*0.52, 0, 0, Math.PI*2);
+      c.fillStyle = color;
+      c.fill();
+    } else if (order === 3) {
+      c.beginPath();
+      for(let k=0;k<3;k++){c.lineTo(r*Math.cos(k*Math.PI*2/3-Math.PI/2),r*Math.sin(k*Math.PI*2/3-Math.PI/2));}
+      c.closePath(); c.fill();
+    } else if (order === 4) {
+      c.beginPath();
+      for(let k=0;k<4;k++){c.lineTo(r*Math.cos(k*Math.PI/2+Math.PI/4),r*Math.sin(k*Math.PI/2+Math.PI/4));}
+      c.closePath(); c.fill();
+    } else if (order === 6) {
+      c.beginPath();
+      for(let k=0;k<6;k++){c.lineTo(r*Math.cos(k*Math.PI/3),r*Math.sin(k*Math.PI/3));}
+      c.closePath(); c.fill();
+    }
+    c.restore();
+  };
+
+  // mirrorLine draws in SCREEN space with fixed pixel widths/dashes
+  const mirrorLine = (fx1, fy1, fx2, fy2, color, dashed=false) => {
+    const s1x = ox+fx1*ax+fy1*bx, s1y = oy+fx1*ay+fy1*by;
+    const s2x = ox+fx2*ax+fy2*bx, s2y = oy+fx2*ay+fy2*by;
+    c.save();
+    c.strokeStyle = color;
+    c.lineWidth = dashed ? 2.5 : 2.5;
+    if (dashed) {
+      // Fixed screen-space dash: 10px dash, 6px gap
+      c.setLineDash([10, 6]);
+      c.lineDashOffset = 0;
+    }
+    c.beginPath(); c.moveTo(s1x,s1y); c.lineTo(s2x,s2y); c.stroke();
+    c.setLineDash([]);
+    c.restore();
+  };
+
+  const col2 = 'rgba(251,191,36,0.9)';   // 2-fold yellow
+  const col3 = 'rgba(110,231,183,0.9)';  // 3-fold green
+  const col4 = 'rgba(126,184,247,0.9)';  // 4-fold blue
+  const col6 = 'rgba(248,113,113,0.95)'; // 6-fold red
+  const mCol = 'rgba(200,160,255,0.95)'; // mirror — bright purple, solid
+  const gCol = 'rgba(255,180,80,0.95)';  // glide — amber, dashed (distinct from mirror)
+
+  switch(group) {
+    case 'p2':
+      [[0,0],[1,0],[0,1],[1,1],[0.5,0],[0,0.5],[0.5,1],[1,0.5],[0.5,0.5]].forEach(([f,g])=>rot(f,g,2,0,col2));
+      break;
+    case 'pm':
+      mirrorLine(0,0,0,1,mCol); mirrorLine(0.5,0,0.5,1,mCol); mirrorLine(1,0,1,1,mCol);
+      break;
+    case 'pg':
+      mirrorLine(0.25,0,0.25,1,gCol,true); mirrorLine(0.75,0,0.75,1,gCol,true);
+      break;
+    case 'cm':
+      mirrorLine(0,0,0,1,mCol); mirrorLine(0.5,0,0.5,1,mCol);
+      mirrorLine(0.25,0,0.25,1,gCol,true); mirrorLine(0.75,0,0.75,1,gCol,true);
+      break;
+    case 'p2mm':
+      mirrorLine(0,0,1,0,mCol); mirrorLine(0,0.5,1,0.5,mCol); mirrorLine(0,1,1,1,mCol);
+      mirrorLine(0,0,0,1,mCol); mirrorLine(0.5,0,0.5,1,mCol); mirrorLine(1,0,1,1,mCol);
+      [[0,0],[1,0],[0,1],[1,1],[0.5,0.5],[0.5,0],[0,0.5],[1,0.5],[0.5,1]].forEach(([f,g])=>rot(f,g,2,0,col2));
+      break;
+    case 'p2mg':
+      // Vertical mirrors at x=0 and x=1/2
+      mirrorLine(0,0,0,1,mCol); mirrorLine(0.5,0,0.5,1,mCol); mirrorLine(1,0,1,1,mCol);
+      // Horizontal glides at y=0 and y=1/2 (glide translation = a/2)
+      mirrorLine(0,0,1,0,gCol,true); mirrorLine(0,0.5,1,0.5,gCol,true); mirrorLine(0,1,1,1,gCol,true);
+      // 2-fold axes at (1/4,0), (3/4,0), (1/4,1/2), (3/4,1/2)
+      [[0.25,0],[0.75,0],[0.25,0.5],[0.75,0.5],[0.25,1],[0.75,1]].forEach(([f,g])=>rot(f,g,2,0,col2));
+      break;
+    case 'p2gg':
+      mirrorLine(0.25,0,0.25,1,gCol,true); mirrorLine(0.75,0,0.75,1,gCol,true);
+      mirrorLine(0,0.25,1,0.25,gCol,true); mirrorLine(0,0.75,1,0.75,gCol,true);
+      [[0,0],[0.5,0.5],[0.5,0],[0,0.5]].forEach(([f,g])=>rot(f,g,2,0,col2));
+      break;
+    case 'c2mm':
+      mirrorLine(0,0,1,0,mCol); mirrorLine(0,0.5,1,0.5,mCol); mirrorLine(0,1,1,1,mCol);
+      mirrorLine(0,0,0,1,mCol); mirrorLine(0.5,0,0.5,1,mCol); mirrorLine(1,0,1,1,mCol);
+      mirrorLine(0.25,0,0.25,1,gCol,true); mirrorLine(0.75,0,0.75,1,gCol,true);
+      // 2-fold at mirror intersections and at centred positions
+      [[0,0],[0.5,0],[0,0.5],[0.5,0.5],[1,0],[0,1],[1,0.5],[0.5,1],[1,1]].forEach(([f,g])=>rot(f,g,2,0,col2));
+      [[0.25,0.25],[0.75,0.25],[0.25,0.75],[0.75,0.75]].forEach(([f,g])=>rot(f,g,2,0,col2));
+      break;
+    case 'p4':
+      [[0,0],[1,0],[0,1],[1,1],[0.5,0.5]].forEach(([f,g])=>rot(f,g,4,0,col4));
+      [[0.5,0],[0,0.5],[1,0.5],[0.5,1]].forEach(([f,g])=>rot(f,g,2,0,col2));
+      break;
+    case 'p4mm':
+      [[0,0],[1,0],[0,1],[1,1],[0.5,0.5]].forEach(([f,g])=>rot(f,g,4,0,col4));
+      [[0.5,0],[0,0.5],[1,0.5],[0.5,1]].forEach(([f,g])=>rot(f,g,2,0,col2));
+      // Mirrors along axes (horiz & vert) and both diagonals
+      mirrorLine(0,0,1,0,mCol); mirrorLine(0,0.5,1,0.5,mCol); mirrorLine(0,1,1,1,mCol);
+      mirrorLine(0,0,0,1,mCol); mirrorLine(0.5,0,0.5,1,mCol); mirrorLine(1,0,1,1,mCol);
+      mirrorLine(0,0,1,1,mCol); mirrorLine(1,0,0,1,mCol);
+      break;
+    case 'p4gm':
+      [[0,0],[1,0],[0,1],[1,1],[0.5,0.5]].forEach(([f,g])=>rot(f,g,4,0,col4));
+      [[0.5,0],[0,0.5],[1,0.5],[0.5,1]].forEach(([f,g])=>rot(f,g,2,0,col2));
+      // TRUE MIRRORS along edge-midpoint diagonals: x+y=1/2 and x-y=1/2 (and periodic equivalents)
+      // These connect edge midpoints, NOT corners
+      mirrorLine(0,0.5, 0.5,0, mCol);  // x+y=0.5 segment
+      mirrorLine(0.5,1, 1,0.5, mCol);  // x+y=1.5 segment (periodic)
+      mirrorLine(0.5,0, 1,0.5, mCol);  // x-y=-0.5 segment
+      mirrorLine(0,0.5, 0.5,1, mCol);  // x-y=0.5 segment (periodic)
+      // GLIDE planes along axes at x=1/4, x=3/4 and y=1/4, y=3/4 (dashed)
+      mirrorLine(0.25,0,0.25,1,gCol,true); mirrorLine(0.75,0,0.75,1,gCol,true);
+      mirrorLine(0,0.25,1,0.25,gCol,true); mirrorLine(0,0.75,1,0.75,gCol,true);
+      break;
+    case 'p3':
+      // corners: 3-fold at (0,0); interior: 3-fold at (1/3,2/3) and (2/3,1/3)
+      [[0,0],[1,0],[0,1],[1,1],[1/3,2/3],[2/3,1/3]].forEach(([f,g])=>rot(f,g,3,0,col3));
+      break;
+    case 'p3m1':
+      // 3-fold axes at corners and (1/3,2/3),(2/3,1/3)
+      [[0,0],[1,0],[0,1],[1,1],[1/3,2/3],[2/3,1/3]].forEach(([f,g])=>rot(f,g,3,0,col3));
+      // Mirrors along a (horizontal), b (left edge), and a+b diagonal
+      mirrorLine(0,0,1,0,mCol); mirrorLine(0,1,1,1,mCol);   // along a
+      mirrorLine(0,0,0,1,mCol); mirrorLine(1,0,1,1,mCol);   // along b
+      mirrorLine(0,0,1,1,mCol);                              // along a+b diagonal
+      break;
+    case 'p31m':
+      // 3-fold axes at corners and (1/3,2/3),(2/3,1/3)
+      [[0,0],[1,0],[0,1],[1,1],[1/3,2/3],[2/3,1/3]].forEach(([f,g])=>rot(f,g,3,0,col3));
+      // Mirror 1 (-y,-x): line x+y=1, passes through both interior 3-folds
+      mirrorLine(0,1,1,0,mCol);
+      // Mirror 2 (-x+y,y): line y=2x, passes through (1/3,2/3) and (2/3,1/3)
+      mirrorLine(0,0,0.5,1,mCol); mirrorLine(0.5,0,1,1,mCol);
+      // Mirror 3 (x,x-y): line x=2y, passes through (2/3,1/3) and (1/3,2/3)
+      mirrorLine(0,0,1,0.5,mCol); mirrorLine(0,0.5,1,1,mCol);
+      break;
+    case 'p6':
+      [[0,0],[1,0],[0,1],[1,1]].forEach(([f,g])=>rot(f,g,6,0,col6));
+      [[1/3,2/3],[2/3,1/3]].forEach(([f,g])=>rot(f,g,3,0,col3));
+      [[0.5,0],[0,0.5],[0.5,0.5],[1,0.5],[0.5,1]].forEach(([f,g])=>rot(f,g,2,0,col2));
+      break;
+    case 'p6mm':
+      [[0,0],[1,0],[0,1],[1,1]].forEach(([f,g])=>rot(f,g,6,0,col6));
+      [[1/3,2/3],[2/3,1/3]].forEach(([f,g])=>rot(f,g,3,0,col3));
+      [[0.5,0],[0,0.5],[0.5,0.5],[1,0.5],[0.5,1]].forEach(([f,g])=>rot(f,g,2,0,col2));
+      // p3m1-type mirrors: along cell edges and main diagonal (all through corner/origin)
+      mirrorLine(0,0,1,0,mCol);   // along a-axis (y=0)
+      mirrorLine(0,0,0,1,mCol);   // along b-axis (x=0)
+      mirrorLine(0,0,1,1,mCol);   // along a+b diagonal (y=x)
+      // p31m-type mirrors: anti-diagonal and x=2y / y=2x lines
+      mirrorLine(0,1,1,0,mCol);                              // x+y=1 (anti-diagonal)
+      mirrorLine(0,0,1,0.5,mCol); mirrorLine(0,0.5,1,1,mCol); // x=2y
+      mirrorLine(0,0,0.5,1,mCol); mirrorLine(0.5,0,1,1,mCol); // y=2x
+      break;
+  }
+}
+
+function drawGrid(c) {
+  const {ax, ay, bx, by} = cellVectors();
+  const W = canvas.width, H = canvas.height;
+  const range = 6;
+
+  c.save();
+  c.strokeStyle = state.showCell ? 'rgba(126,184,247,0.2)' : 'rgba(126,184,247,0.07)';
+  c.lineWidth = 0.5;
+
+  for (let i = -range; i <= range; i++) {
+    // lines along a direction
+    const s0x = state.panX + i*bx - range*ax, s0y = state.panY + i*by - range*ay;
+    const s1x = state.panX + i*bx + range*ax, s1y = state.panY + i*by + range*ay;
+    c.beginPath(); c.moveTo(s0x, s0y); c.lineTo(s1x, s1y); c.stroke();
+
+    // lines along b direction
+    const t0x = state.panX + i*ax - range*bx, t0y = state.panY + i*ay - range*by;
+    const t1x = state.panX + i*ax + range*bx, t1y = state.panY + i*ay + range*by;
+    c.beginPath(); c.moveTo(t0x, t0y); c.lineTo(t1x, t1y); c.stroke();
+  }
+
+  if (state.showCell) {
+    c.strokeStyle = 'rgba(126,184,247,0.85)';
+    c.lineWidth = 2.5;
+    c.setLineDash([]);
+    const o = {x: state.panX, y: state.panY};
+    const a = {x: state.panX + ax, y: state.panY + ay};
+    const b = {x: state.panX + bx, y: state.panY + by};
+    const ab = {x: state.panX + ax + bx, y: state.panY + ay + by};
+    // faint fill
+    c.fillStyle = 'rgba(126,184,247,0.04)';
+    c.beginPath();
+    c.moveTo(o.x, o.y); c.lineTo(a.x, a.y); c.lineTo(ab.x, ab.y);
+    c.lineTo(b.x, b.y); c.closePath();
+    c.fill();
+    c.stroke();
+    // Corner tick marks
+    c.lineWidth = 2;
+    c.strokeStyle = 'rgba(126,184,247,0.95)';
+    [[o,ax,ay],[a,-ax,-ay],[b,ax,ay],[ab,-ax,-ay]].forEach(([pt,dax,day])=>{
+      const len = 6;
+      const nx = -day / Math.hypot(dax,day) * len;
+      const ny =  dax / Math.hypot(dax,day) * len;
+      c.beginPath();
+      c.moveTo(pt.x+nx, pt.y+ny); c.lineTo(pt.x-nx, pt.y-ny);
+      c.stroke();
+    });
+  }
+
+  if (state.showOrigin) {
+    c.strokeStyle = 'rgba(126,184,247,0.8)';
+    c.lineWidth = 1;
+    c.beginPath();
+    c.arc(state.panX, state.panY, 4, 0, Math.PI*2);
+    c.stroke();
+    c.beginPath();
+    c.moveTo(state.panX-8, state.panY); c.lineTo(state.panX+8, state.panY);
+    c.moveTo(state.panX, state.panY-8); c.lineTo(state.panX, state.panY+8);
+    c.stroke();
+  }
+
+  c.restore();
+}
+
+function render() {
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  // Background
+  ctx.fillStyle = '#0e0f14';
+  ctx.fillRect(0, 0, W, H);
+
+  drawGrid(ctx);
+  drawSymmetryElements(ctx, state.group);
+
+  // Draw ghost motif at origin if enabled
+  if (state.showGhost) {
+    const s = fracToScreen(state.motifX, state.motifY);
+    const scale = state.motifScale * state.cellA * state.zoom * 0.5;
+    const ops = getSymOps(state.group, state.motifX, state.motifY);
+
+    // Draw all periodic copies
+    const {ax, ay, bx, by} = cellVectors();
+    const range = 4;
+    for (let i = -range; i <= range; i++) {
+      for (let j = -range; j <= range; j++) {
+        for (const op of ops) {
+          const sx = state.panX + (op.fx + i)*ax + (op.fy + j)*bx;
+          const sy = state.panY + (op.fx + i)*ay + (op.fy + j)*by;
+          const onScreen = sx > -100 && sx < W+100 && sy > -100 && sy < H+100;
+          if (!onScreen) continue;
+          const isBase = (i===0 && j===0 && op.fx===((state.motifX%1+1)%1) && op.fy===((state.motifY%1+1)%1));
+          drawMotif(ctx, sx, sy, scale, op.mat, isBase ? 1 : 0.55);
+        }
+      }
+    }
+  }
+
+  // Stats
+  const ops = getSymOps(state.group, state.motifX, state.motifY);
+  document.getElementById('statCopies').textContent = ops.length + ' / cell';
+  const s = fracToScreen(state.motifX, state.motifY);
+
+  updateSymPreview();
+}
+
+function updateSymPreview() {
+  const sc = symCanvas;
+  const sctx = symCtx;
+  const W = sc.width, H = sc.height;
+  sctx.clearRect(0,0,W,H);
+  sctx.fillStyle = '#161820';
+  sctx.fillRect(0,0,W,H);
+
+  // Draw unit cell contents
+  const margin = 20;
+  const size = W - 2*margin;
+  const {ax, ay, bx, by} = cellVectors();
+  const scale_fac = size / Math.max(state.cellA, state.cellB);
+
+  sctx.save();
+  sctx.translate(margin, margin);
+
+  // Cell outline
+  sctx.strokeStyle = 'rgba(126,184,247,0.4)';
+  sctx.lineWidth = 1;
+  const sax = state.cellA * scale_fac, say = 0;
+  const sbx = state.cellB * scale_fac * Math.cos(state.cellGamma*Math.PI/180);
+  const sby = state.cellB * scale_fac * Math.sin(state.cellGamma*Math.PI/180);
+  sctx.beginPath();
+  sctx.moveTo(0,0); sctx.lineTo(sax,say); sctx.lineTo(sax+sbx, say+sby);
+  sctx.lineTo(sbx, sby); sctx.closePath(); sctx.stroke();
+
+  // Motifs in unit cell
+  const ops = getSymOps(state.group, state.motifX, state.motifY);
+  const motifScale = state.motifScale * state.cellA * scale_fac * 0.5;
+
+  for (const op of ops) {
+    const sx = op.fx * sax + op.fy * sbx;
+    const sy = op.fx * say + op.fy * sby;
+    drawMotif(sctx, sx, sy, motifScale * 0.6, op.mat, 0.9);
+  }
+
+  sctx.restore();
+
+  // Update sym list
+  const info = PLANE_GROUPS[state.group];
+  const syms = info ? info.symDesc : [];
+  document.getElementById('symList').innerHTML = syms.map(s =>
+    `<div class="sym-item">${s}</div>`
+  ).join('');
+}
+
+// ─── MOTIF THUMBNAIL GENERATION ─────────────────────────────────────────────
+
+function drawMotifThumbnail(canvasEl, motifKey) {
+  const c = canvasEl.getContext('2d');
+  c.clearRect(0,0,48,48);
+  c.fillStyle = '#161820';
+  c.fillRect(0,0,48,48);
+  c.save();
+  c.translate(24, 24);
+  c.fillStyle = 'rgba(167,139,250,0.5)';
+  c.strokeStyle = '#a78bfa';
+  c.lineWidth = 1.5;
+  MOTIFS[motifKey].draw(c, 18);
+  c.fill('evenodd');
+  c.stroke();
+  c.restore();
+}
+
+// ─── UI INITIALIZATION ───────────────────────────────────────────────────────
+
+function initPGGrid() {
+  const grid = document.getElementById('pgGrid');
+  Object.keys(PLANE_GROUPS).forEach(pg => {
+    const btn = document.createElement('button');
+    btn.className = 'pg-btn' + (pg === state.group ? ' active' : '');
+    btn.textContent = pg;
+    btn.title = PLANE_GROUPS[pg].desc;
+    btn.onclick = () => selectGroup(pg);
+    grid.appendChild(btn);
+  });
+}
+
+function initMotifGrid() {
+  const grid = document.getElementById('motifGrid');
+  Object.keys(MOTIFS).forEach(key => {
+    const btn = document.createElement('button');
+    btn.className = 'motif-btn' + (key === state.motif ? ' active' : '');
+    btn.id = 'motif-btn-' + key;
+
+    const c = document.createElement('canvas');
+    c.width = 48; c.height = 48;
+    btn.appendChild(c);
+
+    const label = document.createElement('span');
+    label.textContent = key;
+    btn.appendChild(label);
+
+    btn.onclick = () => selectMotif(key);
+    grid.appendChild(btn);
+
+    setTimeout(() => drawMotifThumbnail(c, key), 0);
+  });
+}
+
+function selectGroup(pg) {
+  state.group = pg;
+  document.querySelectorAll('.pg-btn').forEach(b => b.classList.toggle('active', b.textContent === pg));
+  document.getElementById('statGroup').textContent = pg;
+
+  const info = PLANE_GROUPS[pg];
+  document.getElementById('infoName').textContent = pg;
+  document.getElementById('infoDesc').textContent = info.desc;
+  document.getElementById('infoTags').innerHTML = info.tags.map(t => `<span class="tag">${t}</span>`).join('');
+
+  // Show/hide controls based on cell system
+  const isHex = info.system === 'hexagonal';
+  const isSquare = info.system === 'square';
+  const gammaRow = document.getElementById('cellGammaRow');
+  const bRow = document.getElementById('cellBRow');
+
+  if (isHex) {
+    state.cellGamma = 120;
+    document.getElementById('cellGamma').value = 120;
+    document.getElementById('cellGammaVal').textContent = 120;
+    state.cellB = state.cellA;
+    document.getElementById('cellB').value = state.cellA;
+    document.getElementById('cellBVal').textContent = state.cellA;
+  } else if (isSquare) {
+    state.cellGamma = 90;
+    document.getElementById('cellGamma').value = 90;
+    document.getElementById('cellGammaVal').textContent = 90;
+    state.cellB = state.cellA;
+    document.getElementById('cellB').value = state.cellA;
+    document.getElementById('cellBVal').textContent = state.cellA;
+  } else {
+    if (state.cellGamma !== 90) {
+      state.cellGamma = 90;
+      document.getElementById('cellGamma').value = 90;
+      document.getElementById('cellGammaVal').textContent = 90;
+    }
+  }
+
+  render();
+}
+
+function selectMotif(key) {
+  state.motif = key;
+  document.querySelectorAll('.motif-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('motif-btn-' + key).classList.add('active');
+  render();
+}
+
+// ─── CONTROLS ────────────────────────────────────────────────────────────────
+
+document.getElementById('cellA').addEventListener('input', e => {
+  state.cellA = +e.target.value;
+  document.getElementById('cellAVal').textContent = state.cellA;
+  const info = PLANE_GROUPS[state.group];
+  if (info.system === 'square' || info.system === 'hexagonal') {
+    state.cellB = state.cellA;
+    document.getElementById('cellB').value = state.cellA;
+    document.getElementById('cellBVal').textContent = state.cellA;
+  }
+  render();
+});
+
+document.getElementById('cellB').addEventListener('input', e => {
+  state.cellB = +e.target.value;
+  document.getElementById('cellBVal').textContent = state.cellB;
+  render();
+});
+
+document.getElementById('cellGamma').addEventListener('input', e => {
+  state.cellGamma = +e.target.value;
+  document.getElementById('cellGammaVal').textContent = state.cellGamma;
+  render();
+});
+
+document.getElementById('motifScale').addEventListener('input', e => {
+  state.motifScale = e.target.value / 50;
+  document.getElementById('motifScaleVal').textContent = state.motifScale.toFixed(1);
+  render();
+});
+
+document.getElementById('motifRot').addEventListener('input', e => {
+  state.motifRot = +e.target.value;
+  document.getElementById('motifRotVal').textContent = state.motifRot;
+  render();
+});
+
+['showSym','showCell','showOrigin','showGhost'].forEach(id => {
+  document.getElementById(id).addEventListener('change', e => {
+    state[id] = e.target.checked;
+    render();
+  });
+});
+
+// ─── MOUSE INTERACTION ───────────────────────────────────────────────────────
+
+canvas.addEventListener('mousedown', e => {
+  if (e.shiftKey) {
+    state.panning = true;
+    state.panStartX = e.clientX - state.panX;
+    state.panStartY = e.clientY - state.panY;
+    canvas.style.cursor = 'grabbing';
+  } else {
+    // Check if clicking near the motif
+    const s = fracToScreen(state.motifX, state.motifY);
+    const scale = state.motifScale * state.cellA * state.zoom * 0.5;
+    const dist = Math.hypot(e.offsetX - s.x, e.offsetY - s.y);
+    if (dist < scale * 1.2) {
+      state.dragging = true;
+      canvas.style.cursor = 'grabbing';
+    } else {
+      // Place motif at clicked position
+      const {fx, fy} = screenToFrac(e.offsetX, e.offsetY);
+      state.motifX = ((fx % 1) + 1) % 1;
+      state.motifY = ((fy % 1) + 1) % 1;
+      document.getElementById('statPos').textContent =
+        state.motifX.toFixed(3) + ', ' + state.motifY.toFixed(3);
+      render();
+      state.dragging = true;
+    }
+  }
+});
+
+canvas.addEventListener('mousemove', e => {
+  if (state.panning) {
+    state.panX = e.clientX - state.panStartX;
+    state.panY = e.clientY - state.panStartY;
+    render();
+  } else if (state.dragging) {
+    const {fx, fy} = screenToFrac(e.offsetX, e.offsetY);
+    state.motifX = ((fx % 1) + 1) % 1;
+    state.motifY = ((fy % 1) + 1) % 1;
+    document.getElementById('statPos').textContent =
+      state.motifX.toFixed(3) + ', ' + state.motifY.toFixed(3);
+    render();
+  } else {
+    const s = fracToScreen(state.motifX, state.motifY);
+    const scale = state.motifScale * state.cellA * state.zoom * 0.5;
+    const dist = Math.hypot(e.offsetX - s.x, e.offsetY - s.y);
+    canvas.style.cursor = dist < scale * 1.2 ? 'grab' : 'crosshair';
+  }
+});
+
+canvas.addEventListener('mouseup', () => {
+  state.dragging = false;
+  state.panning = false;
+  canvas.style.cursor = 'crosshair';
+});
+
+canvas.addEventListener('mouseleave', () => {
+  state.dragging = false;
+  state.panning = false;
+});
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  const factor = e.deltaY > 0 ? 0.92 : 1.08;
+  const mx = e.offsetX, my = e.offsetY;
+  state.panX = mx + (state.panX - mx) * factor;
+  state.panY = my + (state.panY - my) * factor;
+  state.zoom *= factor;
+  state.zoom = Math.max(0.2, Math.min(5, state.zoom));
+  render();
+}, { passive: false });
+
+// ─── KEYBOARD ────────────────────────────────────────────────────────────────
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'r' || e.key === 'R') resetMotifPos();
+  if (e.key === 'c' || e.key === 'C') clearCanvas();
+  if (e.key === '+' || e.key === '=') {
+    state.zoom = Math.min(5, state.zoom * 1.15);
+    render();
+  }
+  if (e.key === '-') {
+    state.zoom = Math.max(0.2, state.zoom * 0.87);
+    render();
+  }
+});
+
+// ─── ACTIONS ─────────────────────────────────────────────────────────────────
+
+function resetMotifPos() {
+  state.motifX = 0.25;
+  state.motifY = 0.25;
+  state.panX = canvas.width / 2;
+  state.panY = canvas.height / 2;
+  state.zoom = 1;
+  render();
+}
+
+function clearCanvas() {
+  state.motifX = 0.25;
+  state.motifY = 0.25;
+  render();
+}
+
+function exportPNG() {
+  const link = document.createElement('a');
+  link.download = 'plane-group-' + state.group + '.png';
+  link.href = canvas.toDataURL();
+  link.click();
+}
+
+// ─── INIT ────────────────────────────────────────────────────────────────────
+
+initPGGrid();
+initMotifGrid();
+
+// Set initial info
+const info = PLANE_GROUPS[state.group];
+document.getElementById('infoName').textContent = state.group;
+document.getElementById('infoDesc').textContent = info.desc;
+document.getElementById('infoTags').innerHTML = info.tags.map(t => `<span class="tag">${t}</span>`).join('');
+document.getElementById('statPos').textContent = '0.250, 0.250';
+
+resize();
+
+</script>
+</body>
+</html>
