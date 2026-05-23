@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Workshop Threading Guide</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0f0f11;--surface:#161619;--surface2:#1e1e23;--border:#2a2a32;--accent:#e8a045;--accent2:#5b9cf6;--accent3:#6ee7a8;--accent4:#f06a6a;--text:#e8e8ec;--muted:#888896;--dim:#555565}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
+.hdr{padding:2rem 1.5rem 1.5rem;border-bottom:1px solid var(--border);background:var(--surface)}
+.hdr-tag{font-family:'DM Mono',monospace;font-size:.65rem;letter-spacing:.15em;text-transform:uppercase;color:var(--accent);margin-bottom:.5rem}
+.hdr h1{font-family:'DM Serif Display',serif;font-size:1.9rem;font-weight:400;line-height:1.15}
+.hdr h1 em{color:var(--accent);font-style:italic}
+.hdr p{color:var(--muted);font-size:.82rem;margin-top:.4rem;font-weight:300}
+.nav{background:var(--surface);border-bottom:1px solid var(--border);display:flex;overflow-x:auto}
+.nav::-webkit-scrollbar{display:none}
+.nav button{background:none;border:none;color:var(--muted);font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:500;padding:.85rem 1.25rem;cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent;transition:color .15s,border-color .15s}
+.nav button:hover{color:var(--text)}
+.nav button.active{color:var(--accent);border-bottom-color:var(--accent)}
+.main{max-width:1100px;margin:0 auto;padding:2rem 1.25rem 3rem}
+.sec{display:none}
+.sec.active{display:block}
+.sec-title{font-family:'DM Serif Display',serif;font-size:1.6rem;font-weight:400;margin-bottom:.3rem}
+.sec-desc{color:var(--muted);font-size:.82rem;margin-bottom:1.75rem;font-weight:300}
+
+/* Overview */
+.ov-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1.75rem;margin-bottom:1.5rem}
+@media(max-width:600px){.ov-grid{grid-template-columns:1fr}.stats{grid-template-columns:1fr}.main{padding:1.25rem .85rem 3rem}.ql-grid{grid-template-columns:1fr}.type-grid{grid-template-columns:1fr}.calc-grid{grid-template-columns:1fr}.tbl-wrap{font-size:.72rem}}
+.ov-grid h3{font-family:'DM Serif Display',serif;font-size:1.2rem;font-weight:400;margin-bottom:.6rem}
+.ov-grid p{color:var(--muted);font-size:.84rem;line-height:1.7}
+.ov-grid p+p{margin-top:.6rem}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:1.5rem}
+.stat{background:var(--surface);padding:1.25rem;text-align:center}
+.stat-val{font-family:'DM Serif Display',serif;font-size:1.5rem;color:var(--accent);line-height:1.2;margin-bottom:.25rem}
+.stat-lbl{font-size:.73rem;color:var(--muted)}
+.ql-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.75rem}
+.ql{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:1.1rem;cursor:pointer;display:flex;align-items:center;gap:.85rem;transition:border-color .15s,background .15s}
+.ql:hover{border-color:var(--accent2);background:var(--surface2)}
+.ql-icon{font-size:1.4rem;flex-shrink:0}
+.ql strong{display:block;font-size:.85rem;margin-bottom:.15rem}
+.ql span{font-size:.73rem;color:var(--muted)}
+
+/* Thread families */
+.type-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1px;background:var(--border);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:1.5rem}
+.type-card{background:var(--surface);padding:1.25rem;transition:background .15s}
+.type-card:hover{background:var(--surface2)}
+.type-badge{font-family:'DM Mono',monospace;font-size:.65rem;text-transform:uppercase;letter-spacing:.1em;padding:.18rem .5rem;border-radius:4px;display:inline-block;margin-bottom:.6rem}
+.b-metric{background:rgba(110,231,168,.12);color:var(--accent3)}
+.b-sae{background:rgba(91,156,246,.12);color:var(--accent2)}
+.b-npt{background:rgba(232,160,69,.12);color:var(--accent)}
+.b-bsp{background:rgba(240,106,106,.12);color:var(--accent4)}
+.type-name{font-weight:600;font-size:.9rem;margin-bottom:.45rem}
+.type-desc{font-size:.8rem;color:var(--muted);line-height:1.65}
+.type-spec{font-family:'DM Mono',monospace;font-size:.68rem;color:var(--dim);margin-top:.5rem}
+
+/* Thread diagram */
+.diagram-wrap{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1.5rem;margin-bottom:1.5rem}
+.diagram-wrap svg{display:block;width:100%;height:auto}
+.diagram-caption{text-align:center;font-size:.73rem;color:var(--dim);margin-top:.75rem}
+
+/* Tables */
+.subtab-row{display:flex;gap:.5rem;margin-bottom:1rem;flex-wrap:wrap}
+.stab{background:var(--surface);border:1px solid var(--border);color:var(--muted);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:500;padding:.35rem .85rem;border-radius:5px;cursor:pointer;transition:all .15s}
+.stab:hover{color:var(--text)}
+.stab.active{border-color:var(--accent);color:var(--accent);background:rgba(232,160,69,.08)}
+.tbl-label{font-family:'DM Mono',monospace;font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;color:var(--accent);margin-bottom:.5rem;margin-top:1.25rem}
+.tbl-label:first-child{margin-top:0}
+.tbl-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:1rem}
+table{width:100%;border-collapse:collapse;font-size:.78rem}
+thead{background:var(--surface2)}
+th{padding:.7rem .8rem;text-align:left;font-weight:600;font-size:.65rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:.6rem .8rem;vertical-align:middle;border-bottom:1px solid rgba(255,255,255,.04)}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover{background:var(--surface2)}
+.mono{font-family:'DM Mono',monospace;font-size:.75rem}
+.pill-type{display:inline-block;font-size:.63rem;font-family:'DM Mono',monospace;padding:.1rem .4rem;border-radius:3px}
+.pt-bspp{background:rgba(91,156,246,.15);color:#5b9cf6}
+.pt-bspt{background:rgba(232,160,69,.15);color:#e8a045}
+
+/* Lathe calculator */
+.calc-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.5rem}
+.calc-card{background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:1.25rem}
+.calc-card-title{font-weight:600;font-size:.9rem;margin-bottom:.25rem;display:flex;align-items:center;gap:.5rem}
+.calc-card-title .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.calc-sub{font-size:.78rem;color:var(--muted);margin-bottom:1rem;line-height:1.5}
+.field{margin-bottom:.75rem}
+.field label{display:block;font-size:.72rem;font-family:'DM Mono',monospace;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:.3rem}
+.field input,.field select{width:100%;padding:.38rem .7rem;font-size:.82rem;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;transition:border-color .15s}
+.field input:focus,.field select:focus{border-color:var(--accent2)}
+.field input::placeholder{color:var(--dim)}
+.field select option{background:var(--surface2)}
+.calc-btn{width:100%;padding:.45rem;background:rgba(232,160,69,.12);border:1px solid rgba(232,160,69,.35);color:var(--accent);font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:500;border-radius:5px;cursor:pointer;transition:all .15s;margin-top:.25rem}
+.calc-btn:hover{background:rgba(232,160,69,.2);border-color:var(--accent)}
+.calc-btn:active{transform:scale(.98)}
+.result-box{display:none;margin-top:.85rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:.85rem 1rem}
+.result-box.show{display:block}
+.result-row{display:flex;justify-content:space-between;align-items:baseline;padding:.22rem 0;border-bottom:1px solid rgba(255,255,255,.04)}
+.result-row:last-of-type{border-bottom:none;margin-bottom:0}
+.result-label{font-size:.73rem;color:var(--muted)}
+.result-val{font-family:'DM Mono',monospace;font-size:.82rem;color:var(--accent)}
+.result-note{font-size:.72rem;color:var(--dim);margin-top:.65rem;padding-top:.65rem;border-top:1px solid var(--border);line-height:1.55}
+
+/* Ref table section */
+.ref-cols{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.5rem}
+@media(max-width:640px){.ref-cols{grid-template-columns:1fr}}
+
+/* Theory */
+.theory-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:.85rem;margin-bottom:1.5rem}
+.theory-card{background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:1.25rem;transition:background .15s}
+.theory-card:hover{background:var(--surface2)}
+.theory-title{font-weight:600;font-size:.88rem;margin-bottom:.35rem;color:var(--accent)}
+.theory-body{font-size:.8rem;color:var(--muted);line-height:1.65}
+
+/* Misc */
+.tip-box{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:0 6px 6px 0;padding:.75rem 1rem;font-size:.78rem;color:var(--muted);line-height:1.55;margin-bottom:1.25rem}
+.tip-box strong{color:var(--text)}
+.fnote{margin-top:2rem;padding:1rem 1.25rem;background:var(--surface);border:1px solid var(--border);border-radius:7px;font-size:.75rem;color:var(--dim);line-height:1.6}
+.fnote strong{color:var(--muted)}
+.dlbl{font-family:'DM Mono',monospace;font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;color:var(--accent);margin:.85rem 0 .3rem}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div class="hdr-tag">Engineering Reference · Workshop Practice</div>
+  <h1>Workshop <em>Threading Guide</em></h1>
+  <p>Metric, SAE/Unified, NPT &amp; BSP thread tables — drill sizes, pitches, and a lathe threading calculator for single-point turning and boring.</p>
+</div>
+
+<div class="nav" id="nav">
+  <button class="active" data-target="overview">Overview</button>
+  <button data-target="metric">Metric</button>
+  <button data-target="sae">SAE / Unified</button>
+  <button data-target="pipe">NPT &amp; BSP</button>
+  <button data-target="lathe">Lathe Calculator</button>
+  <button data-target="theory">Thread Theory</button>
+</div>
+
+<div class="main">
+
+<!-- OVERVIEW -->
+<div class="sec active" id="overview">
+  <div class="sec-title">Thread Families</div>
+  <p class="sec-desc">An introduction to the four thread standards used in workshop practice, their geometry, and how to navigate this reference.</p>
+
+  <div class="ov-grid">
+    <div>
+      <h3>The Basics</h3>
+      <p>A thread is an inclined plane wrapped around a cylinder. When engaged with a mating thread it converts rotary motion into linear clamping force — or, in the case of pipe threads, forms a pressure-tight seal.</p>
+      <p>Thread geometry is defined by three key parameters: <strong style="color:var(--accent3)">pitch</strong> (crest-to-crest distance), <strong style="color:var(--accent2)">flank angle</strong> (60° for metric/SAE/NPT, 55° for BSP), and <strong style="color:var(--accent)">major diameter</strong> (nominal OD). The minor diameter and thread depth follow directly from these.</p>
+    </div>
+    <div>
+      <h3>Coarse vs Fine</h3>
+      <p><strong style="color:var(--accent3)">Coarse pitch</strong> — faster assembly, tolerates dirt and minor damage, preferred in brittle materials and for most structural fastening.</p>
+      <p><strong style="color:var(--accent2)">Fine pitch</strong> — higher clamp load per unit torque, better vibration resistance, used in thin-walled components, precision adjusters, and automotive work. More sensitive to cross-threading.</p>
+      <p><strong style="color:var(--accent)">Pipe threads</strong> — sized by nominal bore, not OD. The actual thread diameter is always larger than the nominal size on the label.</p>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="stat-val">4</div><div class="stat-lbl">Thread standards covered</div></div>
+    <div class="stat"><div class="stat-val">60° / 55°</div><div class="stat-lbl">Flank angles (Metric/SAE vs BSP)</div></div>
+    <div class="stat"><div class="stat-val">M1.6–M48</div><div class="stat-lbl">Metric coarse range</div></div>
+    <div class="stat"><div class="stat-val">#0–2″</div><div class="stat-lbl">UNC/UNF range</div></div>
+  </div>
+
+  <p style="margin-bottom:.75rem;font-size:.82rem;color:var(--muted)">Jump to a section:</p>
+  <div class="ql-grid">
+    <div class="ql" data-goto="metric">
+      <span class="ql-icon">🔩</span>
+      <div><strong>Metric (ISO)</strong><span>M1.6 – M48, coarse &amp; fine, tap drills</span></div>
+    </div>
+    <div class="ql" data-goto="sae">
+      <span class="ql-icon">🔧</span>
+      <div><strong>SAE / Unified</strong><span>UNC &amp; UNF, #0 through 2″</span></div>
+    </div>
+    <div class="ql" data-goto="pipe">
+      <span class="ql-icon">🚰</span>
+      <div><strong>NPT &amp; BSP</strong><span>Pipe threads, tapered and parallel</span></div>
+    </div>
+    <div class="ql" data-goto="lathe">
+      <span class="ql-icon">⚙️</span>
+      <div><strong>Lathe Calculator</strong><span>Turn/bore diameter before threading</span></div>
+    </div>
+  </div>
+
+  <div class="dlbl" style="margin-top:1.75rem">Thread families at a glance</div>
+  <div class="type-grid">
+    <div class="type-card">
+      <span class="type-badge b-metric">Metric ISO</span>
+      <div class="type-name">M — Metric Coarse &amp; Fine</div>
+      <div class="type-desc">60° thread angle. Pitch in mm. The universal standard for modern machinery, fasteners, and automotive. Designator format: M8×1.25 (diameter × pitch).</div>
+      <div class="type-spec">Standard: ISO 261 / ISO 965</div>
+    </div>
+    <div class="type-card">
+      <span class="type-badge b-sae">SAE / Unified</span>
+      <div class="type-name">UNC / UNF / UNEF</div>
+      <div class="type-desc">60° thread angle. Pitch in TPI (threads per inch). UNC = coarse, UNF = fine, UNEF = extra fine. Dominant in North American manufacturing.</div>
+      <div class="type-spec">Standard: ANSI B1.1</div>
+    </div>
+    <div class="type-card">
+      <span class="type-badge b-npt">NPT</span>
+      <div class="type-name">National Pipe Thread</div>
+      <div class="type-desc">60° thread angle, 1°47′ taper on diameter. American pipe standard. Thread interference creates seal; always use PTFE tape or anaerobic sealant.</div>
+      <div class="type-spec">Standard: ANSI/ASME B1.20.1</div>
+    </div>
+    <div class="type-card">
+      <span class="type-badge b-bsp">BSP</span>
+      <div class="type-name">British Standard Pipe</div>
+      <div class="type-desc">55° Whitworth flank angle. BSPP (parallel) seals on face washer or O-ring. BSPT (tapered) seals on threads. Standard in UK, Europe, and Commonwealth countries.</div>
+      <div class="type-spec">Standard: ISO 228 / BS 2779</div>
+    </div>
+  </div>
+
+  <div class="diagram-wrap">
+    <!--
+      Geometry: depth d=80px. For 60° included angle, each flank is 30° from vertical.
+      half-pitch = d * tan(30°) = 80 * 0.5774 = 46.2px  →  pitch P = 92.4px
+      Crests at y=30, roots at y=110. Starting x offset = 20.
+      Crest points (peaks): x = 20 + 46.2, 20 + 46.2 + 92.4, ... = 66.2, 158.6, 251.0, 343.4, 435.8, 528.2
+      Root points (valleys): x = 20, 20+92.4=112.4, 204.8, 297.2, 389.6, 482.0, 574.4
+    -->
+    <svg viewBox="0 0 640 155" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Thread cross-section showing crest, root, pitch, and 60 degree flank angle">
+      <title>Thread cross-section geometry</title>
+      <!-- dashed reference lines -->
+      <line x1="15" y1="30" x2="545" y2="30" stroke="#5b9cf6" stroke-width="0.8" stroke-dasharray="5,4" opacity="0.55"/>
+      <line x1="15" y1="110" x2="545" y2="110" stroke="#e8a045" stroke-width="0.8" stroke-dasharray="5,4" opacity="0.55"/>
+      <!-- thread teeth: roots at y=110, crests at y=30, pitch=92.4, half-pitch=46.2 -->
+      <polyline points="20,110 66.2,30 112.4,110 158.6,30 204.8,110 251.0,30 297.2,110 343.4,30 389.6,110 435.8,30 482.0,110 528.2,30 574.4,110"
+        fill="none" stroke="#888896" stroke-width="2" stroke-linejoin="miter"/>
+
+      <!-- pitch dimension arrow: crest1=66.2 to crest2=158.6 at y=10 -->
+      <line x1="66.2" y1="30" x2="66.2" y2="10" stroke="#5b9cf6" stroke-width="0.8"/>
+      <line x1="158.6" y1="30" x2="158.6" y2="10" stroke="#5b9cf6" stroke-width="0.8"/>
+      <line x1="66.2" y1="10" x2="158.6" y2="10" stroke="#5b9cf6" stroke-width="1"/>
+      <polygon points="66.2,8 66.2,12 70.5,10" fill="#5b9cf6"/>
+      <polygon points="158.6,8 158.6,12 154.3,10" fill="#5b9cf6"/>
+      <text x="112.4" y="7" text-anchor="middle" font-size="10" fill="#5b9cf6" font-family="DM Mono,monospace">pitch</text>
+
+      <!-- crest / root labels -->
+      <text x="12" y="27" font-size="10" fill="#5b9cf6" font-family="DM Mono,monospace" text-anchor="end">crest</text>
+      <text x="12" y="114" font-size="10" fill="#e8a045" font-family="DM Mono,monospace" text-anchor="end">root</text>
+
+      <!--
+        60° angle arc at the second crest point (158.6, 30).
+        Left flank direction: from crest toward previous root (112.4,110) → angle = atan2(110-30, 112.4-158.6) = atan2(80,-46.2) ≈ 120° from +x axis
+        Right flank direction: toward next root (204.8,110) → angle = atan2(80, 46.2) ≈ 60° from +x axis
+        Arc radius 18px. Start point at 18px along left flank from crest, end at 18px along right flank.
+        Left flank unit vector: (-46.2/92.4, 80/92.4) = (-0.5, 0.866)  → start = (158.6-9, 30+15.59) = (149.6, 45.6)
+        Right flank unit vector: (46.2/92.4, 80/92.4) = (0.5, 0.866)   → end   = (158.6+9, 30+15.59) = (167.6, 45.6)
+        Arc is small (60°<180°), sweep counterclockwise from left-flank point to right-flank point: sweep-flag=0
+      -->
+      <path d="M 149.6,45.6 A 18,18 0 0,1 167.6,45.6" fill="none" stroke="#e8a045" stroke-width="1.2"/>
+      <text x="158.6" y="62" text-anchor="middle" font-size="11" font-weight="500" fill="#e8a045" font-family="DM Sans,sans-serif">60°</text>
+      <text x="310" y="75" text-anchor="middle" font-size="10" fill="#555565" font-family="DM Sans,sans-serif">(55° for BSP / Whitworth)</text>
+
+      <!-- major diameter bracket on right -->
+      <line x1="548" y1="30" x2="562" y2="30" stroke="#888896" stroke-width="0.8"/>
+      <line x1="548" y1="110" x2="562" y2="110" stroke="#888896" stroke-width="0.8"/>
+      <line x1="557" y1="32" x2="557" y2="108" stroke="#888896" stroke-width="0.8"/>
+      <polygon points="555,32 559,32 557,29" fill="#888896"/>
+      <polygon points="555,108 559,108 557,111" fill="#888896"/>
+      <text x="566" y="74" font-size="10" fill="#888896" font-family="DM Mono,monospace" dominant-baseline="middle">⌀ major</text>
+
+      <!-- minor diameter bracket (depth indicator) on far right -->
+      <line x1="588" y1="30" x2="600" y2="30" stroke="#555565" stroke-width="0.8" stroke-dasharray="2,2"/>
+      <line x1="588" y1="110" x2="600" y2="110" stroke="#555565" stroke-width="0.8" stroke-dasharray="2,2"/>
+      <line x1="595" y1="32" x2="595" y2="108" stroke="#555565" stroke-width="0.8"/>
+      <polygon points="593,32 597,32 595,29" fill="#555565"/>
+      <polygon points="593,108 597,108 595,111" fill="#555565"/>
+      <text x="604" y="74" font-size="10" fill="#555565" font-family="DM Mono,monospace" dominant-baseline="middle">⌀ minor</text>
+    </svg>
+    <div class="diagram-caption">Thread cross-section · 60° included angle (metric / SAE / NPT) · 55° for BSP / Whitworth</div>
+  </div>
+
+  <div class="fnote"><strong>Workshop note:</strong> When single-point threading on a lathe, always cut a relief groove (undercut) at the thread runout — slightly wider than the pitch and to the minor diameter depth. This prevents tool crash and allows a clean runout on each pass. Use the Lathe Calculator tab for turning and boring diameters.</div>
+</div>
+
+<!-- METRIC -->
+<div class="sec" id="metric">
+  <div class="sec-title">Metric Threads</div>
+  <p class="sec-desc">ISO metric threads — 60° flank angle, pitch in mm. Coarse is the default; fine pitch is used where vibration resistance, higher clamp load, or thin walls are a factor.</p>
+
+  <div class="subtab-row">
+    <button class="stab active" onclick="showSub('metric','mc')">Coarse (standard)</button>
+    <button class="stab" onclick="showSub('metric','mf')">Fine</button>
+  </div>
+
+  <div id="metric-mc">
+    <div class="tbl-label">Metric coarse — tap drill and clearance drill sizes</div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th>Size</th><th>Pitch (mm)</th><th>Major ⌀ (mm)</th><th>Minor ⌀ (mm)</th>
+          <th>Tap drill (mm)</th><th>75% thread drill</th><th>Clearance (mm)</th>
+        </tr></thead>
+        <tbody id="mc-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+  <div id="metric-mf" style="display:none">
+    <div class="tbl-label">Metric fine — tap drill and clearance drill sizes</div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th>Size</th><th>Pitch (mm)</th><th>Major ⌀ (mm)</th><th>Minor ⌀ (mm)</th>
+          <th>Tap drill (mm)</th><th>Clearance (mm)</th>
+        </tr></thead>
+        <tbody id="mf-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="tip-box"><strong>Tap drill formula:</strong> Tap drill ≈ Major ⌀ − Pitch (gives ~75% thread engagement, standard for most applications). For soft materials or blind holes, 65% engagement (slightly larger drill) reduces tap breakage.</div>
+  <div class="fnote"><strong>Tolerance classes:</strong> 6H/6g is the standard fit for most work. 4H/4h is precision (tighter). 8H/8g is free fit for quick assembly or plated fasteners. Higher class number = looser fit.</div>
+</div>
+
+<!-- SAE -->
+<div class="sec" id="sae">
+  <div class="sec-title">SAE / Unified Threads</div>
+  <p class="sec-desc">Unified thread series — 60° flank angle, pitch in TPI (threads per inch). UNC for general fastening; UNF where finer pitch, higher tensile area, or vibration resistance is needed.</p>
+
+  <div class="subtab-row">
+    <button class="stab active" onclick="showSub('sae','unc')">UNC — coarse</button>
+    <button class="stab" onclick="showSub('sae','unf')">UNF — fine</button>
+  </div>
+
+  <div id="sae-unc">
+    <div class="tbl-label">UNC — unified national coarse</div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th>Size</th><th>TPI</th><th>Major ⌀ (in)</th><th>Minor ⌀ (in)</th>
+          <th>Tap drill</th><th>Tap drill (in)</th><th>Clearance drill</th>
+        </tr></thead>
+        <tbody id="unc-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+  <div id="sae-unf" style="display:none">
+    <div class="tbl-label">UNF — unified national fine</div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th>Size</th><th>TPI</th><th>Major ⌀ (in)</th><th>Minor ⌀ (in)</th>
+          <th>Tap drill</th><th>Tap drill (in)</th><th>Clearance drill</th>
+        </tr></thead>
+        <tbody id="unf-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="tip-box"><strong>Reading the drill column:</strong> Numbered drills (#1–#80) and lettered drills (A–Z) are standard in North America. Always cross-reference to decimal equivalents for accurate drill selection. The tap drill gives approximately 75% thread engagement.</div>
+  <div class="fnote"><strong>Fit classes:</strong> 1A/1B — loose, quick assembly. 2A/2B — standard (most fasteners). 3A/3B — precision, close tolerance. 'A' = external thread; 'B' = internal.</div>
+</div>
+
+<!-- PIPE -->
+<div class="sec" id="pipe">
+  <div class="sec-title">Pipe Threads — NPT &amp; BSP</div>
+  <p class="sec-desc">Pipe threads are sized by nominal bore — the actual OD is always larger. Both NPT and BSP follow this convention. Choose standard and type below.</p>
+
+  <div class="subtab-row">
+    <button class="stab active" onclick="showSub('pipe','npt')">NPT / NPS</button>
+    <button class="stab" onclick="showSub('pipe','bsp')">BSP</button>
+  </div>
+
+  <div id="pipe-npt">
+    <div class="tbl-label">NPT — national pipe taper (ANSI/ASME B1.20.1)</div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th>Nominal (in)</th><th>TPI</th><th>OD (in)</th><th>OD (mm)</th>
+          <th>Tap drill (in)</th><th>Tap drill (mm)</th>
+        </tr></thead>
+        <tbody id="npt-tbody"></tbody>
+      </table>
+    </div>
+    <div class="tip-box"><strong>NPT sealing:</strong> Taper is 1°47′24″ (1:16 on diameter). Seal forms by thread interference — always use PTFE tape or anaerobic pipe sealant. Typical engagement is 3–6 threads. NPS (straight/parallel) is the non-sealing parallel variant used for free-running mechanical joints.</div>
+  </div>
+
+  <div id="pipe-bsp" style="display:none">
+    <div class="tbl-label">BSP — british standard pipe (ISO 228 / BS 2779)</div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th>Nominal (in)</th><th>TPI</th><th>OD (in)</th><th>OD (mm)</th>
+          <th>Tap drill (mm)</th><th>Type</th>
+        </tr></thead>
+        <tbody id="bsp-tbody"></tbody>
+      </table>
+    </div>
+    <div class="tip-box"><strong>BSP sealing:</strong> BSP uses a 55° Whitworth thread form. <strong>BSPP (G designation, parallel)</strong> — seals on a bonded washer or O-ring at the thread face. Never use PTFE tape alone on BSPP. <strong>BSPT (Rp/Rc designation, tapered)</strong> — seals on threads, similar to NPT. PTFE tape or sealant is appropriate.</div>
+  </div>
+
+  <div class="fnote"><strong>NPT vs BSP interchangeability:</strong> NPT and BSP are not interchangeable even at the same nominal size. The thread angle (60° vs 55°), OD, and pitch differ. Adapters exist but should not be used in pressure-critical applications.</div>
+</div>
+
+<!-- LATHE CALCULATOR -->
+<div class="sec" id="lathe">
+  <div class="sec-title">Lathe Threading Calculator</div>
+  <p class="sec-desc">Single-point threading on the lathe. Enter diameter and pitch to find the stock diameter to turn to (external) or bore to (internal) before cutting threads. Formulas are for 60° threads (Metric &amp; SAE/Unified).</p>
+
+  <div class="tip-box"><strong>Important:</strong> These are theoretical dimensions. Always leave 0.1–0.2 mm (0.004–0.008″) stock and sneak up on final size. Verify with a gauge ring or plug, or test-fit the actual mating part.</div>
+
+  <div class="calc-grid">
+    <div class="calc-card">
+      <div class="calc-card-title"><div class="dot" style="background:#6ee7a8"></div>External Thread (OD turning)</div>
+      <div class="calc-sub">Turning a male thread. Enter the nominal diameter and pitch — get the OD to turn to before single-point threading.</div>
+      <div class="field">
+        <label>Thread standard</label>
+        <select id="ext-std" onchange="resetResult('ext-result')">
+          <option value="metric">Metric — diameter in mm, pitch in mm</option>
+          <option value="sae">SAE / Unified — diameter in inches, pitch in TPI</option>
+        </select>
+      </div>
+      <div class="field">
+        <label id="ext-d-lbl">Nominal diameter (mm)</label>
+        <input type="number" id="ext-d" placeholder="e.g. 20" step="0.01" min="0.5">
+      </div>
+      <div class="field">
+        <label id="ext-p-lbl">Pitch (mm)</label>
+        <input type="number" id="ext-p" placeholder="e.g. 2.5" step="0.01" min="0.05">
+      </div>
+      <button class="calc-btn" onclick="calcExt()">Calculate turned OD →</button>
+      <div class="result-box" id="ext-result">
+        <div class="result-row"><span class="result-label">Turn shaft to (max)</span><span class="result-val" id="ext-r-od">—</span></div>
+        <div class="result-row"><span class="result-label">Thread depth per side</span><span class="result-val" id="ext-r-dep">—</span></div>
+        <div class="result-row"><span class="result-label">Minor / root diameter</span><span class="result-val" id="ext-r-min">—</span></div>
+        <div class="result-row"><span class="result-label">Pitch diameter</span><span class="result-val" id="ext-r-pit">—</span></div>
+        <div class="result-note" id="ext-r-note"></div>
+      </div>
+    </div>
+
+    <div class="calc-card">
+      <div class="calc-card-title"><div class="dot" style="background:#5b9cf6"></div>Internal Thread (boring)</div>
+      <div class="calc-sub">Boring and threading a female hole. Enter the nominal diameter and pitch — get the bore diameter before cutting the internal thread.</div>
+      <div class="field">
+        <label>Thread standard</label>
+        <select id="int-std" onchange="resetResult('int-result')">
+          <option value="metric">Metric — diameter in mm, pitch in mm</option>
+          <option value="sae">SAE / Unified — diameter in inches, pitch in TPI</option>
+        </select>
+      </div>
+      <div class="field">
+        <label id="int-d-lbl">Nominal diameter (mm)</label>
+        <input type="number" id="int-d" placeholder="e.g. 20" step="0.01" min="0.5">
+      </div>
+      <div class="field">
+        <label id="int-p-lbl">Pitch (mm)</label>
+        <input type="number" id="int-p" placeholder="e.g. 2.5" step="0.01" min="0.05">
+      </div>
+      <button class="calc-btn" onclick="calcInt()">Calculate bore diameter →</button>
+      <div class="result-box" id="int-result">
+        <div class="result-row"><span class="result-label">Bore to (min)</span><span class="result-val" id="int-r-bor">—</span></div>
+        <div class="result-row"><span class="result-label">Thread depth per side</span><span class="result-val" id="int-r-dep">—</span></div>
+        <div class="result-row"><span class="result-label">Major diameter (nominal)</span><span class="result-val" id="int-r-maj">—</span></div>
+        <div class="result-row"><span class="result-label">Pitch diameter</span><span class="result-val" id="int-r-pit">—</span></div>
+        <div class="result-note" id="int-r-note"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dlbl">60° thread depth formulas</div>
+  <div class="ref-cols">
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Dimension</th><th>Formula</th></tr></thead>
+        <tbody>
+          <tr><td>Thread depth (full form, 60°)</td><td class="mono">0.6495 × p</td></tr>
+          <tr><td>Metric — minor ⌀ (external)</td><td class="mono">d − 1.2269 × p</td></tr>
+          <tr><td>Metric — bore ⌀ (internal)</td><td class="mono">D − 1.0825 × p</td></tr>
+          <tr><td>SAE — minor ⌀ (external)</td><td class="mono">d − 1.2994 / TPI</td></tr>
+          <tr><td>SAE — bore ⌀ (internal)</td><td class="mono">D − 1.0825 / TPI</td></tr>
+          <tr><td>Pitch diameter (all 60°)</td><td class="mono">d − 0.6495 × p</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Step</th><th>Recommendation</th></tr></thead>
+        <tbody>
+          <tr><td>Relief groove width</td><td>≥ 1× pitch</td></tr>
+          <tr><td>Relief groove depth</td><td>Below minor ⌀</td></tr>
+          <tr><td>First cut depth</td><td>0.10–0.20 mm</td></tr>
+          <tr><td>Finishing passes</td><td>0.02–0.05 mm spring cuts</td></tr>
+          <tr><td>Tool included angle</td><td>60° (55° for BSP)</td></tr>
+          <tr><td>Half-nut rule</td><td>Never disengage mid-thread</td></tr>
+          <tr><td>Cutting fluid</td><td>Always — especially on steel</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="fnote"><strong>BSP / Whitworth note:</strong> The 55° thread form gives a slightly different depth formula: thread depth = 0.6403 × p (where p = 1/TPI). Bore before internal BSP threading = D − 1.1369 × p. These calculators use the 60° form (Metric &amp; SAE/UNified) only.</div>
+</div>
+
+<!-- THEORY -->
+<div class="sec" id="theory">
+  <div class="sec-title">Thread Theory</div>
+  <p class="sec-desc">Geometry, terminology, and special thread forms — the concepts behind the numbers.</p>
+
+  <div class="theory-grid">
+    <div class="theory-card">
+      <div class="theory-title">Pitch &amp; Lead</div>
+      <div class="theory-body">Pitch = crest-to-crest distance along the axis. In metric, given in mm; in inch systems, expressed as TPI (1/pitch). Lead = axial advance per full revolution. For a single-start thread, lead = pitch. For multi-start threads (e.g. ACME leadscrews), lead = pitch × number of starts.</div>
+    </div>
+    <div class="theory-card">
+      <div class="theory-title">Thread Angle</div>
+      <div class="theory-body">The included angle between the flanks. 60° for Metric, SAE, and NPT — the most common. 55° for BSP and original Whitworth — slightly more rounded form, better for pipe sealing. 29° for ACME power screws. 7°/45° for buttress threads. Lower angles increase axial load capacity but complicate manufacture.</div>
+    </div>
+    <div class="theory-card">
+      <div class="theory-title">Major, Minor &amp; Pitch ⌀</div>
+      <div class="theory-body">Major diameter = the nominal OD (crest of external thread). Minor diameter = root of external thread (the smallest diameter). Pitch diameter = the theoretical diameter where thread thickness equals the gap — this is the functional diameter checked by thread gauges. Tolerance is specified at the pitch diameter.</div>
+    </div>
+    <div class="theory-card">
+      <div class="theory-title">Tolerance &amp; Fit Class</div>
+      <div class="theory-body">Metric uses tolerance position + grade: 6H/6g is standard; 4H/4h is precision; 8H/8g is free fit for plated or dirty conditions. Uppercase = internal (H), lowercase = external (g, h). SAE uses 1A–3A (external) and 1B–3B (internal). Class 3 is tightest.</div>
+    </div>
+    <div class="theory-card">
+      <div class="theory-title">Thread Engagement</div>
+      <div class="theory-body">The axial length over which threads interlock. Rule of thumb: 1× diameter in steel-on-steel; 1.5× in aluminium; 2× in brass, plastic, or cast iron. Beyond 2× engagement, stripping strength is essentially unchanged — adding more thread length gives diminishing returns.</div>
+    </div>
+    <div class="theory-card">
+      <div class="theory-title">Pipe Thread Sizing</div>
+      <div class="theory-body">Pipe threads are sized by nominal bore, not OD. A ½″ BSP or NPT fitting has an actual thread OD of ~20.95 mm (BSP) or 21.3 mm (NPT). The nominal size refers to the approximate bore of the pipe it fits — a convention dating to the era of iron pipes with thick walls relative to bore.</div>
+    </div>
+  </div>
+
+  <div class="dlbl">Comparing thread families</div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr>
+        <th>Property</th><th>Metric (ISO)</th><th>SAE / Unified</th><th>NPT</th><th>BSP</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>Flank angle</td><td>60°</td><td>60°</td><td>60°</td><td>55°</td></tr>
+        <tr><td>Pitch convention</td><td>mm per thread</td><td>TPI (threads/inch)</td><td>TPI</td><td>TPI</td></tr>
+        <tr><td>Taper</td><td>None</td><td>None</td><td>1:16 on diameter</td><td>BSPT tapered / BSPP parallel</td></tr>
+        <tr><td>Size reference</td><td>Thread OD</td><td>Thread OD</td><td>Nominal bore</td><td>Nominal bore</td></tr>
+        <tr><td>Seal method</td><td>N/A (fastener)</td><td>N/A (fastener)</td><td>Thread taper + sealant</td><td>Face seal (BSPP) or taper (BSPT)</td></tr>
+        <tr><td>Primary regions</td><td>Global</td><td>North America</td><td>North America</td><td>UK / Europe / Commonwealth</td></tr>
+        <tr><td>Standard body</td><td>ISO 261 / 965</td><td>ANSI B1.1</td><td>ANSI B1.20.1</td><td>ISO 228 / BS 21</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="dlbl">Special thread forms</div>
+  <div class="theory-grid">
+    <div class="theory-card">
+      <div class="theory-title">ACME (29°)</div>
+      <div class="theory-body">Trapezoidal form optimised for power transmission — leadscrews, vises, screw jacks. Easier to machine than square thread. Accommodates split half-nuts for disengagement. General purpose ACME and centralising ACME variants exist.</div>
+    </div>
+    <div class="theory-card">
+      <div class="theory-title">Square Thread</div>
+      <div class="theory-body">Maximum mechanical efficiency for power screws — no radial force component means no tendency to spread the nut. Difficult to cut precisely and cannot accommodate half-nuts. Largely replaced by ACME in practice, but still specified in some high-efficiency mechanisms.</div>
+    </div>
+    <div class="theory-card">
+      <div class="theory-title">Buttress (7° / 45°)</div>
+      <div class="theory-body">Asymmetric form — one flank near-vertical (7°), the other at 45°. Extremely high axial load in one direction with lower radial force than a square thread. Used in hydraulic cylinders, breech mechanisms, quick-release couplings, and aircraft propeller flanges.</div>
+    </div>
+    <div class="theory-card">
+      <div class="theory-title">Whitworth (55°)</div>
+      <div class="theory-body">The original standardised thread, proposed by Joseph Whitworth in 1841. Rounded crest and root, 55° angle. Forms the basis of BSP pipe threads. BSW (coarse) and BSF (fine) designators. Still found in older British machinery and legacy agricultural equipment.</div>
+    </div>
+  </div>
+
+  <div class="fnote"><strong>Sources &amp; further reading:</strong> Machinery's Handbook (Industrial Press) — comprehensive thread tables and formulae. BS EN ISO 965-1:2013 — Metric thread tolerances. ANSI B1.1 — Unified inch screw threads. ASME B1.20.1 — Pipe threads. Tubal Cain, <em>Hardening, Tempering and Heat Treatment</em> and <em>Workshop Practice Series</em> (Nexus) for lathe threading technique.</div>
+</div>
+
+</div><!-- /main -->
+
+<script>
+document.addEventListener('DOMContentLoaded',function(){
+var MC=[
+  ['M1.6','0.35',1.6,1.171,1.25,1.35,1.7],['M2','0.40',2,1.509,1.6,1.75,2.2],
+  ['M2.5','0.45',2.5,1.948,2.05,2.2,2.7],['M3','0.50',3,2.387,2.5,2.65,3.2],
+  ['M4','0.70',4,3.141,3.3,3.5,4.3],['M5','0.80',5,4.020,4.2,4.5,5.3],
+  ['M6','1.00',6,4.773,5.0,5.4,6.4],['M8','1.25',8,6.466,6.7,6.9,8.4],
+  ['M10','1.50',10,8.160,8.5,8.7,10.5],['M12','1.75',12,9.853,10.2,10.5,12.5],
+  ['M14','2.00',14,11.546,12.0,12.3,14.5],['M16','2.00',16,13.546,14.0,14.3,16.5],
+  ['M18','2.50',18,14.933,15.5,15.9,18.5],['M20','2.50',20,16.933,17.5,17.9,21.0],
+  ['M22','2.50',22,18.933,19.5,19.9,23.0],['M24','3.00',24,20.319,21.0,21.5,25.0],
+  ['M27','3.00',27,23.319,24.0,24.5,28.0],['M30','3.50',30,25.706,26.5,27.0,31.0],
+  ['M36','4.00',36,31.093,32.0,32.5,37.0],['M42','4.50',42,36.479,37.5,38.0,43.0],
+  ['M48','5.00',48,41.866,43.0,43.5,50.0]
+];
+var MF=[
+  ['M8x1','1.00',8,6.773,7.0,8.4],['M10x1','1.00',10,8.773,9.0,10.5],
+  ['M10x1.25','1.25',10,8.466,8.75,10.5],['M12x1.25','1.25',12,10.466,10.75,12.5],
+  ['M12x1.5','1.50',12,10.160,10.5,12.5],['M14x1.5','1.50',14,12.160,12.5,14.5],
+  ['M16x1.5','1.50',16,14.160,14.5,16.5],['M18x1.5','1.50',18,16.160,16.5,18.5],
+  ['M20x1.5','1.50',20,18.160,18.5,21.0],['M22x1.5','1.50',22,20.160,20.5,23.0],
+  ['M24x2','2.00',24,21.546,22.0,25.0],['M27x2','2.00',27,24.546,25.0,28.0],
+  ['M30x2','2.00',30,27.546,28.0,31.0],['M36x3','3.00',36,32.319,33.0,37.0]
+];
+var UNC=[
+  ['#1 (0.073")','64',0.073,0.0527,'#53','0.0595','1/16'],
+  ['#2 (0.086")','56',0.086,0.0628,'#50','0.0700','5/64'],
+  ['#3 (0.099")','48',0.099,0.0719,'#47','0.0785','3/32'],
+  ['#4 (0.112")','40',0.112,0.0795,'#43','0.0890','#34'],
+  ['#5 (0.125")','40',0.125,0.0925,'#38','0.1015','#29'],
+  ['#6 (0.138")','32',0.138,0.0974,'#36','0.1065','#27'],
+  ['#8 (0.164")','32',0.164,0.1234,'#29','0.1360','#18'],
+  ['#10 (0.190")','24',0.190,0.1359,'#25','0.1495','#9'],
+  ['#12 (0.216")','24',0.216,0.1619,'#16','0.1770','#2'],
+  ['1/4"','20',0.250,0.1850,'#7','0.2010','F'],
+  ['5/16"','18',0.3125,0.2403,'F','0.2570','21/64'],
+  ['3/8"','16',0.375,0.2938,'5/16','0.3125','25/64'],
+  ['7/16"','14',0.4375,0.3447,'U','0.3680','29/64'],
+  ['1/2"','13',0.500,0.4001,'27/64','0.4219','33/64'],
+  ['9/16"','12',0.5625,0.4542,'31/64','0.4844','37/64'],
+  ['5/8"','11',0.625,0.5069,'17/32','0.5312','41/64'],
+  ['3/4"','10',0.750,0.6201,'21/32','0.6562','49/64'],
+  ['7/8"','9',0.875,0.7307,'49/64','0.7656','57/64'],
+  ['1"','8',1.000,0.8376,'7/8','0.8750','1-1/16'],
+  ['1-1/4"','7',1.25,1.0747,'1-7/64','1.1094','1-5/16'],
+  ['1-1/2"','6',1.500,1.2835,'1-11/32','1.3281','1-9/16']
+];
+var UNF=[
+  ['#0 (0.060")','80',0.060,0.0447,'3/64','0.0469','1/16'],
+  ['#1 (0.073")','72',0.073,0.0560,'#53','0.0595','5/64'],
+  ['#2 (0.086")','64',0.086,0.0657,'#50','0.0700','3/32'],
+  ['#3 (0.099")','56',0.099,0.0758,'#45','0.0820','#35'],
+  ['#4 (0.112")','48',0.112,0.0849,'#42','0.0935','#31'],
+  ['#5 (0.125")','44',0.125,0.0955,'#37','0.1040','#25'],
+  ['#6 (0.138")','40',0.138,0.1055,'#33','0.1130','#21'],
+  ['#8 (0.164")','36',0.164,0.1279,'#29','0.1360','#16'],
+  ['#10 (0.190")','32',0.190,0.1494,'#21','0.1590','#10'],
+  ['#12 (0.216")','28',0.216,0.1696,'#14','0.1820','#2'],
+  ['1/4"','28',0.250,0.2062,'#3','0.2130','F'],
+  ['5/16"','24',0.3125,0.2614,'I','0.2720','Q'],
+  ['3/8"','24',0.375,0.3239,'Q','0.3320','X'],
+  ['7/16"','20',0.4375,0.3762,'25/64','0.3906','29/64'],
+  ['1/2"','20',0.500,0.4387,'29/64','0.4531','33/64'],
+  ['9/16"','18',0.5625,0.4943,'33/64','0.5156','37/64'],
+  ['5/8"','18',0.625,0.5568,'37/64','0.5781','41/64'],
+  ['3/4"','16',0.750,0.6688,'11/16','0.6875','49/64'],
+  ['7/8"','14',0.875,0.7822,'13/16','0.8125','57/64'],
+  ['1"','12',1.000,0.8917,'15/16','0.9375','1-1/16']
+];
+var NPT=[
+  ['1/16',27,0.3125,7.938,'C',7.0],['1/8',27,0.405,10.287,'R',8.9],
+  ['1/4',18,0.540,13.716,'7/16',11.1],['3/8',18,0.675,17.145,'19/32',15.1],
+  ['1/2',14,0.840,21.336,'23/32',18.3],['3/4',14,1.050,26.670,'59/64',23.6],
+  ['1',11.5,1.315,33.401,'1-5/32',29.5],['1-1/4',11.5,1.660,42.164,'1-1/2',37.3],
+  ['1-1/2',11.5,1.900,48.260,'1-47/64',42.9],['2',11.5,2.375,60.325,'2-7/32',54.0],
+  ['2-1/2',8,2.875,73.025,'2-5/8',66.7],['3',8,3.500,88.900,'3-1/4',81.8],
+  ['4',8,4.500,114.300,'4-1/4',106.4]
+];
+var BSP=[
+  ['1/16',28,0.3084,7.83,7.4,'BSPP'],['1/8',28,0.3830,9.73,9.3,'BSPP'],
+  ['1/4',19,0.5181,13.16,12.5,'BSPP'],['3/8',19,0.6561,16.66,16.0,'BSPP'],
+  ['1/2',14,0.8250,20.96,19.5,'BSPP'],['3/4',14,1.0413,26.44,24.9,'BSPP'],
+  ['1',11,1.3090,33.25,30.7,'BSPP'],['1-1/4',11,1.6500,41.91,39.2,'BSPP'],
+  ['1-1/2',11,1.8820,47.80,45.1,'BSPP'],['2',11,2.3470,59.61,56.7,'BSPP'],
+  ['1/8',28,0.3830,9.73,9.1,'BSPT'],['1/4',19,0.5181,13.16,12.0,'BSPT'],
+  ['3/8',19,0.6561,16.66,15.5,'BSPT'],['1/2',14,0.8250,20.96,18.9,'BSPT'],
+  ['3/4',14,1.0413,26.44,24.3,'BSPT'],['1',11,1.3090,33.25,30.1,'BSPT']
+];
+
+function rows(data,cols){
+  return data.map(function(r){
+    return '<tr>'+cols.map(function(c,i){
+      if(i===0) return '<td style="font-weight:600;color:var(--text)">'+r[c]+'</td>';
+      return '<td class="mono">'+r[c]+'</td>';
+    }).join('')+'</tr>';
+  }).join('');
+}
+
+document.getElementById('mc-tbody').innerHTML=rows(MC,[0,1,2,3,4,5,6]);
+document.getElementById('mf-tbody').innerHTML=rows(MF,[0,1,2,3,4,5]);
+document.getElementById('unc-tbody').innerHTML=rows(UNC,[0,1,2,3,4,5,6]);
+document.getElementById('unf-tbody').innerHTML=rows(UNF,[0,1,2,3,4,5,6]);
+document.getElementById('npt-tbody').innerHTML=NPT.map(function(r){
+  return'<tr><td style="font-weight:600;color:var(--text)">'+r[0]+'"</td>'
+    +'<td class="mono">'+r[1]+'</td><td class="mono">'+r[2]+'</td>'
+    +'<td class="mono">'+r[3].toFixed(3)+'</td><td class="mono">'+r[4]+'</td>'
+    +'<td class="mono">'+r[5]+'</td></tr>';
+}).join('');
+document.getElementById('bsp-tbody').innerHTML=BSP.map(function(r){
+  var cls=r[5]==='BSPT'?'pt-bspt':'pt-bspp';
+  return'<tr><td style="font-weight:600;color:var(--text)">'+r[0]+'"</td>'
+    +'<td class="mono">'+r[1]+'</td><td class="mono">'+r[2]+'</td>'
+    +'<td class="mono">'+r[3].toFixed(2)+'</td><td class="mono">'+r[4]+'</td>'
+    +'<td><span class="pill-type '+cls+'">'+r[5]+'</span></td></tr>';
+}).join('');
+
+function goTo(id){
+  document.querySelectorAll('.sec').forEach(function(s){s.classList.remove('active');});
+  document.querySelectorAll('.nav button').forEach(function(b){b.classList.remove('active');});
+  var sec=document.getElementById(id);
+  if(sec)sec.classList.add('active');
+  var btn=document.querySelector('.nav button[data-target="'+id+'"]');
+  if(btn)btn.classList.add('active');
+  window.scrollTo(0,0);
+}
+document.getElementById('nav').addEventListener('click',function(e){
+  var b=e.target.closest('button');
+  if(b&&b.dataset.target)goTo(b.dataset.target);
+});
+document.querySelector('.main').addEventListener('click',function(e){
+  var q=e.target.closest('[data-goto]');
+  if(q&&q.dataset.goto)goTo(q.dataset.goto);
+});
+
+function showSub(group,sub){
+  var map={metric:['mc','mf'],sae:['unc','unf'],pipe:['npt','bsp']};
+  map[group].forEach(function(k){
+    var el=document.getElementById(group+'-'+k);
+    if(el)el.style.display=k===sub?'':'none';
+  });
+  document.querySelectorAll('.stab').forEach(function(b){
+    b.classList.toggle('active',b.getAttribute('onclick').indexOf("'"+sub+"'")>-1);
+  });
+}
+
+function resetResult(id){document.getElementById(id).classList.remove('show');}
+
+function updateExtLabels(){
+  var isM=document.getElementById('ext-std').value==='metric';
+  document.getElementById('ext-d-lbl').textContent=isM?'Nominal diameter (mm)':'Nominal diameter (inches)';
+  document.getElementById('ext-p-lbl').textContent=isM?'Pitch (mm)':'Pitch (TPI -- threads per inch)';
+  document.getElementById('ext-d').placeholder=isM?'e.g. 20':'e.g. 0.500';
+  document.getElementById('ext-p').placeholder=isM?'e.g. 2.5':'e.g. 13';
+}
+function updateIntLabels(){
+  var isM=document.getElementById('int-std').value==='metric';
+  document.getElementById('int-d-lbl').textContent=isM?'Nominal diameter (mm)':'Nominal diameter (inches)';
+  document.getElementById('int-p-lbl').textContent=isM?'Pitch (mm)':'Pitch (TPI -- threads per inch)';
+  document.getElementById('int-d').placeholder=isM?'e.g. 20':'e.g. 0.500';
+  document.getElementById('int-p').placeholder=isM?'e.g. 2.5':'e.g. 13';
+}
+document.getElementById('ext-std').addEventListener('change',function(){updateExtLabels();resetResult('ext-result');});
+document.getElementById('int-std').addEventListener('change',function(){updateIntLabels();resetResult('int-result');});
+
+function calcExt(){
+  var std=document.getElementById('ext-std').value;
+  var d=parseFloat(document.getElementById('ext-d').value);
+  var pv=parseFloat(document.getElementById('ext-p').value);
+  if(isNaN(d)||isNaN(pv)||d<=0||pv<=0){alert('Please enter valid diameter and pitch values.');return;}
+  var p=std==='metric'?pv:1/pv;
+  var depth=(0.6495*p);
+  var minor=d-(std==='metric'?1.2269*p:1.2994*p);
+  var pitchD=d-0.6495*p;
+  var u=std==='metric'?'mm':'"';
+  var dp=std==='metric'?3:4;
+  function fmt(v){return v.toFixed(dp)+' '+u+(std==='sae'?' ('+( v*25.4).toFixed(3)+' mm)':'');}
+  document.getElementById('ext-r-od').textContent=d.toFixed(dp)+' '+u+' nominal';
+  document.getElementById('ext-r-dep').textContent=fmt(depth);
+  document.getElementById('ext-r-min').textContent=fmt(minor);
+  document.getElementById('ext-r-pit').textContent=fmt(pitchD);
+  document.getElementById('ext-r-note').textContent='Turn shaft to '+(d-(std==='metric'?0.08:0.003)).toFixed(dp)+' '+u+' (nominal -0.08'+(std==='metric'?' mm':'"')+' gives a good starting point). Take spring passes and check with a ring gauge or mating part.';
+  document.getElementById('ext-result').classList.add('show');
+}
+
+function calcInt(){
+  var std=document.getElementById('int-std').value;
+  var d=parseFloat(document.getElementById('int-d').value);
+  var pv=parseFloat(document.getElementById('int-p').value);
+  if(isNaN(d)||isNaN(pv)||d<=0||pv<=0){alert('Please enter valid diameter and pitch values.');return;}
+  var p=std==='metric'?pv:1/pv;
+  var depth=0.6495*p;
+  var bore=d-1.0825*p;
+  var pitchD=d-0.6495*p;
+  var u=std==='metric'?'mm':'"';
+  var dp=std==='metric'?3:4;
+  function fmt(v){return v.toFixed(dp)+' '+u+(std==='sae'?' ('+( v*25.4).toFixed(3)+' mm)':'');}
+  document.getElementById('int-r-bor').textContent=fmt(bore);
+  document.getElementById('int-r-dep').textContent=fmt(depth);
+  document.getElementById('int-r-maj').textContent=d.toFixed(dp)+' '+u;
+  document.getElementById('int-r-pit').textContent=fmt(pitchD);
+  document.getElementById('int-r-note').textContent='Bore to '+bore.toFixed(dp)+' '+u+' before threading (equivalent to the tap drill size). The threading tool removes '+depth.toFixed(dp)+' '+u+' per side. Bore slightly undersize and sneak up -- leave 0.1 '+u+' for finishing passes.';
+  document.getElementById('int-result').classList.add('show');
+}
+});
+</script>
+</body>
+</html>
