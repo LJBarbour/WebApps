@@ -1,0 +1,1458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Solid State Reaction Kinetics</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:wght@300;600&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --ink:#0f0e0d;--paper:#f6f1ea;--cream:#ede7d8;--pale:#e0d9cc;
+  --rule:#c5bba9;--accent:#b84a2e;
+  --mono:'DM Mono',monospace;--serif:'Fraunces',Georgia,serif;--sans:'DM Sans',sans-serif;
+}
+html,body{height:100%;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:13px}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:var(--pale)}
+::-webkit-scrollbar-thumb{background:var(--rule);border-radius:2px}
+body{display:grid;grid-template-rows:auto 1fr;overflow:hidden}
+header{border-bottom:2px solid var(--ink);padding:12px 22px;display:flex;align-items:baseline;gap:16px;flex-shrink:0}
+header h1{font-family:var(--serif);font-size:22px;font-weight:600;letter-spacing:-.4px}
+header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spacing:.15em;text-transform:uppercase}
+.app{display:grid;grid-template-columns:268px 1fr 268px;height:100%;overflow:hidden;min-height:0}
+
+/* ── LEFT SIDEBAR ── */
+.sidebar{border-right:2px solid var(--ink);overflow-y:auto;display:flex;flex-direction:column;min-height:0}
+.sb{padding:12px 14px;border-bottom:1px solid var(--rule)}
+.sb:last-child{border-bottom:none;flex:1}
+.lbl{font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:8px}
+.dz{border:2px dashed var(--rule);padding:12px 8px;text-align:center;cursor:default;transition:border-color .2s,background .2s;user-select:none}
+.dz.over{border-color:var(--accent);background:var(--cream)}
+.dz-ico{font-size:18px;margin-bottom:4px}
+.dz-txt{font-size:10px;color:#888;line-height:1.5}
+.dz-name{font-size:11px;font-weight:500;color:var(--accent);margin-top:3px;word-break:break-all;min-height:1em}
+#fileBtn{margin-top:7px;width:100%;padding:6px;font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;background:transparent;border:1.5px solid var(--rule);color:#666;cursor:pointer}
+#fileBtn:hover{border-color:var(--accent);color:var(--accent)}
+#fileInput{display:none}
+
+/* steps */
+.steps{display:flex;flex-direction:column;gap:5px}
+.step{display:flex;align-items:flex-start;gap:9px;padding:7px 9px;border-radius:3px;border:1px solid transparent;font-size:12px;line-height:1.4;color:#888;transition:all .2s}
+.step.active{border-color:var(--accent);background:rgba(184,74,46,.07);color:var(--ink)}
+.step.done{border-color:var(--pale);color:#aaa}
+.step-num{font-family:var(--mono);font-size:10px;font-weight:500;width:18px;height:18px;border-radius:50%;background:var(--pale);display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;color:#888}
+.step.active .step-num{background:var(--accent);color:var(--paper)}
+.step.done .step-num{background:var(--rule);color:var(--paper)}
+
+/* range inputs */
+.range-row{display:flex;gap:7px;margin-top:8px}
+.range-field{flex:1;display:flex;flex-direction:column;gap:3px}
+.range-field label{font-family:var(--mono);font-size:9px;color:#888;letter-spacing:.06em;text-transform:uppercase}
+.range-field input{background:var(--cream);border:1.5px solid var(--rule);padding:4px 7px;font-family:var(--mono);font-size:11px;color:var(--ink);width:100%;outline:none;transition:border-color .2s}
+.range-field input:focus{border-color:var(--accent)}
+
+/* model groups */
+.model-group{margin-bottom:10px}
+.model-group-title{font-family:var(--mono);font-size:9px;font-weight:500;color:var(--accent);letter-spacing:.13em;text-transform:uppercase;margin-bottom:4px;padding:0 2px}
+.model-group select{width:100%;background:var(--cream);border:1.5px solid var(--rule);padding:5px 8px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none;cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center}
+.model-group select:focus{border-color:var(--accent)}
+
+/* equation canvas */
+#eqCanvas{display:block;width:100%;background:var(--cream);border:1.5px solid var(--rule);margin-top:8px}
+
+/* results box */
+.res-box{background:var(--cream);border:1.5px solid var(--rule);padding:10px 12px;font-family:var(--mono);font-size:11px;line-height:1.9;margin-top:0}
+.res-box .rl{color:#888}
+.res-box .rv{color:#2a7a3b;font-weight:500}
+.res-box .rr{color:var(--accent);font-weight:600;font-size:12px}
+.res-ph{font-size:11px;color:#aaa;font-style:italic;padding:2px 0}
+
+/* buttons */
+.btn{display:block;width:100%;padding:7px 12px;font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;border:2px solid var(--ink);background:var(--ink);color:var(--paper);transition:background .15s,border-color .15s;margin-bottom:5px}
+.btn:last-child{margin-bottom:0}
+.btn:hover:not(:disabled){background:var(--accent);border-color:var(--accent)}
+.btn:disabled{opacity:.3;cursor:not-allowed}
+.btn.out{background:transparent;color:var(--ink)}
+.btn.out:hover:not(:disabled){background:var(--ink);color:var(--paper)}
+
+/* ── CENTRE ── */
+.centre{display:flex;flex-direction:column;overflow:hidden;min-height:0;min-width:0}
+.tab-bar{border-bottom:2px solid var(--ink);display:flex;flex-shrink:0;background:var(--paper)}
+.tab{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:10px 16px;border-bottom:3px solid transparent;cursor:pointer;color:#888;transition:all .15s;margin-bottom:-2px}
+.tab:hover{color:var(--ink)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+
+/* raw canvas area */
+.raw-area{flex:1;min-height:0;position:relative;padding:10px 14px}
+.raw-canvas-wrap{width:100%;height:100%;position:relative;background:var(--cream);border:1.5px solid var(--rule);overflow:hidden}
+.raw-canvas-wrap canvas{display:block;width:100%!important;height:100%!important;cursor:crosshair}
+.canvas-lbl{position:absolute;top:8px;left:12px;font-family:var(--mono);font-size:10px;color:#aaa;pointer-events:none;z-index:2;letter-spacing:.05em}
+.canvas-hint{position:absolute;bottom:8px;right:12px;font-family:var(--mono);font-size:9px;color:#bbb;pointer-events:none;z-index:2}
+.zoom-reset{position:absolute;top:8px;right:12px;font-family:var(--mono);font-size:9px;padding:3px 8px;background:var(--paper);border:1.5px solid var(--rule);cursor:pointer;z-index:3;color:#888;letter-spacing:.06em;text-transform:uppercase}
+.zoom-reset:hover{border-color:var(--accent);color:var(--accent)}
+
+/* chart-wrap removed — fit panel now uses raw-area canvas */
+
+#status{padding:4px 16px;font-family:var(--mono);font-size:10px;color:#aaa;border-top:1px solid var(--rule);flex-shrink:0;letter-spacing:.04em}
+#status.ok{color:#2a7a3b}#status.err{color:var(--accent)}
+
+/* ── RIGHT PANEL ── */
+.cpanel{border-left:2px solid var(--ink);overflow-y:auto;flex-shrink:0}
+.cp-group{border-bottom:1px solid var(--rule)}
+.cp-head{display:flex;justify-content:space-between;align-items:center;padding:9px 13px;cursor:pointer;user-select:none;background:var(--paper);transition:background .15s}
+.cp-head:hover{background:var(--cream)}
+.cp-head .cp-title{font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent)}
+.cp-head .cp-arr{font-size:10px;color:#888;transition:transform .2s}
+.cp-group.open .cp-arr{transform:rotate(180deg)}
+.cp-body{display:none;padding:10px 13px;border-top:1px solid var(--pale)}
+.cp-group.open .cp-body{display:block}
+.cr{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:6px}
+.cr:last-child{margin-bottom:0}
+.cl{font-size:11px;color:#555;flex:1;white-space:nowrap}
+.cr input[type=number]{width:65px;background:var(--cream);border:1.5px solid var(--rule);padding:3px 5px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none}
+.cr input[type=range]{flex:1;min-width:50px;accent-color:var(--accent)}
+.cr input[type=color]{width:32px;height:22px;border:1.5px solid var(--rule);background:none;cursor:pointer;padding:1px}
+.cr input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--accent)}
+.cr select{flex:1;background:var(--cream);border:1.5px solid var(--rule);padding:3px 5px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none;appearance:none}
+.cr input[type=text]{flex:1;background:var(--cream);border:1.5px solid var(--rule);padding:3px 5px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none}
+.rv2{font-family:var(--mono);font-size:11px;min-width:28px;text-align:right;color:#555}
+
+/* tooltip */
+#tooltip{position:fixed;background:var(--ink);border:none;border-radius:2px;padding:5px 9px;font-family:var(--mono);font-size:11px;color:var(--paper);pointer-events:none;z-index:100;display:none;line-height:1.7}
+</style>
+</head>
+<body>
+<header>
+  <h1>Kinetics Analyser</h1>
+  <span class="sub">Solid State Reaction Kinetics &mdash; f(&alpha;) = kt</span>
+</header>
+<div class="app">
+
+<!-- ══ LEFT SIDEBAR ══ -->
+<aside class="sidebar">
+  <div class="sb">
+    <div class="lbl">Data</div>
+    <div class="dz" id="dz">
+      <div class="dz-ico">&#8679;</div>
+      <div class="dz-txt">Drag &amp; drop a CSV file here</div>
+      <div class="dz-name" id="dzName"></div>
+    </div>
+    <button id="fileBtn" onclick="document.getElementById('fileInput').click()">&#128194; Browse for file&hellip;</button>
+    <input type="file" id="fileInput" accept=".csv,.txt,.dat">
+  </div>
+
+  <div class="sb">
+    <div class="lbl">Workflow</div>
+    <div class="steps">
+      <div class="step active" id="step1"><div class="step-num">1</div><div>Click the raw-data chart to mark <strong>t&#8320;</strong> (reaction start)</div></div>
+      <div class="step" id="step2"><div class="step-num">2</div><div>Click again to mark <strong>t&#8734;</strong> (equilibrium end)</div></div>
+      <div class="step" id="step3"><div class="step-num">3</div><div>Select a kinetic model to fit f(&alpha;) vs time</div></div>
+    </div>
+    <div class="range-row">
+      <div class="range-field"><label>t&#8320;</label><input type="number" id="t0inp" placeholder="click chart" step="any"></div>
+      <div class="range-field"><label>t&#8734;</label><input type="number" id="t1inp" placeholder="click chart" step="any"></div>
+      <div style="display:flex;align-items:flex-end"><button class="btn out" style="width:auto;padding:4px 10px;font-size:9px;margin:0" onclick="applyRange()">Apply</button></div>
+    </div>
+    <button class="btn out" style="margin-top:7px;font-size:9px" onclick="resetSel()">Reset Selection</button>
+  </div>
+
+  <div class="sb">
+    <div class="lbl">Kinetic Model</div>
+    <div id="modelGroups"></div>
+    <canvas id="eqCanvas" height="110"></canvas>
+  </div>
+
+  <div class="sb">
+    <div class="lbl">Regression Results</div>
+    <div id="resBox"><div class="res-ph">Select a model to see results</div></div>
+  </div>
+
+  <div class="sb" style="display:flex;flex-direction:column;gap:0;flex:0">
+    <button class="btn out" id="btnExport" onclick="exportCSV()" disabled>Export Results CSV</button>
+  </div>
+</aside>
+
+<!-- ══ CENTRE ══ -->
+<div class="centre">
+  <div class="tab-bar">
+    <div class="tab active" id="tab-raw"  onclick="switchTab('raw')">Raw Data</div>
+    <div class="tab"        id="tab-alpha" onclick="switchTab('alpha')">α(t) Curve</div>
+    <div class="tab"        id="tab-fit"  onclick="switchTab('fit')">Model Fit</div>
+  </div>
+
+  <!-- Raw data canvas panel -->
+  <div class="raw-area" id="panel-raw">
+    <div class="raw-canvas-wrap" id="rawWrap">
+      <div class="canvas-lbl" id="rawLbl">mass vs time — load a CSV to begin</div>
+      <canvas id="rawCanvas"></canvas>
+      <div class="canvas-hint">click to set reaction bounds</div>
+    </div>
+  </div>
+
+  <!-- Alpha curve canvas panel -->
+  <div class="raw-area" id="panel-alpha" style="display:none">
+    <div class="raw-canvas-wrap">
+      <div class="canvas-lbl">α vs time (t − t₀)</div>
+      <canvas id="alphaCanvas"></canvas>
+      <div class="canvas-hint">conversion vs time</div>
+    </div>
+  </div>
+
+  <!-- Chart.js fit panel -->
+  <div class="raw-area" id="panel-fit" style="display:none">
+    <div class="raw-canvas-wrap">
+      <div class="canvas-lbl" id="fitLbl">f(α) vs time — select a model first</div>
+      <div class="zoom-reset" onclick="resetZoom()">&#8635; Reset</div>
+      <canvas id="fitCanvas"></canvas>
+      <div class="canvas-hint">left-drag: zoom · right-drag: pan</div>
+    </div>
+  </div>
+
+  <div id="status">Ready &mdash; load a CSV file to begin.</div>
+</div>
+
+<!-- ══ RIGHT CONTROLS ══ -->
+<div class="cpanel">
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Axis Ranges</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">X min</span><input type="number" id="xmin" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">X max</span><input type="number" id="xmax" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Y min</span><input type="number" id="ymin" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Y max</span><input type="number" id="ymax" placeholder="auto" oninput="redraw()"></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Axis Labels &amp; Fonts</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">X label</span><input type="text" id="xLbl" value="Time (t − t₀)" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Y label</span><input type="text" id="yLbl" value="f(α)" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Font</span>
+        <select id="fontFam" oninput="redraw()">
+          <option value="'DM Mono',monospace">DM Mono</option>
+          <option value="Arial,sans-serif" selected>Arial</option>
+          <option value="'Times New Roman',serif">Times New Roman</option>
+          <option value="'Helvetica Neue',Helvetica,sans-serif">Helvetica</option>
+          <option value="Georgia,serif">Georgia</option>
+          <option value="'Courier New',monospace">Courier New</option>
+          <option value="Verdana,sans-serif">Verdana</option>
+          <option value="Garamond,serif">Garamond</option>
+          <option value="'Palatino Linotype',serif">Palatino</option>
+          <option value="'Century Schoolbook',serif">Century Schoolbook</option>
+        </select>
+      </div>
+      <div class="cr"><span class="cl">Label size</span><input type="range" id="axSz" min="8" max="72" value="36" oninput="V(this);redraw()"><span class="rv2">36</span></div>
+      <div class="cr"><span class="cl">Tick size</span><input type="range" id="tkSz" min="8" max="64" value="30" oninput="V(this);redraw()"><span class="rv2">30</span></div>
+      <div class="cr"><span class="cl">Axis color</span><input type="color" id="axCol" value="#000000" oninput="redraw()"></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Grid, Ticks &amp; Frame</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Show grid</span><input type="checkbox" id="grid" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Grid color</span><input type="color" id="gridCol" value="#dddddd" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Grid width</span><input type="range" id="gridW" min="0.5" max="3" step=".5" value="1" oninput="V(this);redraw()"><span class="rv2">1</span></div>
+      <div class="cr"><span class="cl">Tick length</span><input type="range" id="tickLen" min="2" max="16" value="8" oninput="V(this);redraw()"><span class="rv2">8</span></div>
+      <div class="cr"><span class="cl">Tick width</span><input type="range" id="majTickW" min="0.5" max="4" step=".5" value="3" oninput="V(this);redraw()"><span class="rv2">3</span></div>
+      <div class="cr"><span class="cl">Tick direction</span><select id="tickDir" oninput="redraw()"><option value="in">Inward</option><option value="out" selected>Outward</option><option value="both">Both</option></select></div>
+      <div class="cr"><span class="cl">Axis width</span><input type="range" id="frameW" min="0.5" max="5" step=".5" value="3" oninput="V(this);redraw()"><span class="rv2">3</span></div>
+      <div class="cr"><span class="cl">Plot box border</span><input type="checkbox" id="boxBdr" checked oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Box border width</span><input type="range" id="boxW" min="0.5" max="5" step=".5" value="3" oninput="V(this);redraw()"><span class="rv2">3</span></div>
+      <div class="cr"><span class="cl">Box border color</span><input type="color" id="boxCol" value="#000000" oninput="redraw()"></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Background &amp; Colors</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Whole chart bg</span><input type="color" id="chartBg" value="#ffffff" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Plot area bg</span><input type="color" id="plotBg" value="#ffffff" oninput="redraw()"></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Data Points</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Color</span><input type="color" id="ptCol" value="#000000" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Size</span><input type="range" id="ptSz" min="2" max="16" value="3" oninput="V(this);redraw()"><span class="rv2">3</span></div>
+      <div class="cr"><span class="cl">Style</span><select id="ptSty" oninput="redraw()"><option>circle</option><option>rect</option><option>triangle</option><option>star</option><option>cross</option><option>crossRot</option></select></div>
+      <div class="cr"><span class="cl">Opacity</span><input type="range" id="ptOp" min="0.1" max="1" step=".05" value="1" oninput="V(this,2);redraw()"><span class="rv2">1</span></div>
+      <div class="cr"><span class="cl">Border width</span><input type="range" id="ptBW" min="0" max="4" step=".5" value="1.5" oninput="V(this);redraw()"><span class="rv2">1.5</span></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Fit Line</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Color</span><input type="color" id="lnCol" value="#b84a2e" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Width</span><input type="range" id="lnW" min="0.5" max="8" step=".5" value="3" oninput="V(this);redraw()"><span class="rv2">3</span></div>
+      <div class="cr"><span class="cl">Style</span>
+        <select id="lnDash" oninput="redraw()">
+          <option value="">Solid</option><option value="6,3">Dashed</option>
+          <option value="2,3">Dotted</option><option value="8,3,2,3">Dash-dot</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Title</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Chart title</span><input type="text" id="ttl" placeholder="(none)" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Title size</span><input type="range" id="ttlSz" min="10" max="60" value="30" oninput="V(this);redraw()"><span class="rv2">30</span></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Save Plot</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Width px</span><input type="number" id="expW" value="1200"></div>
+      <div class="cr"><span class="cl">Height px</span><input type="number" id="expH" value="900"></div>
+      <div class="cr"><span class="cl">Format</span>
+        <select id="expFmt"><option>PNG</option><option>JPEG</option></select>
+      </div>
+      <button class="btn out" style="margin-top:8px;width:100%" onclick="savePlot()">Save Plot Image</button>
+    </div>
+  </div>
+
+</div><!-- cpanel -->
+</div><!-- app -->
+<div id="tooltip"></div>
+
+<script>
+// ════════════════════════════════════════════════════════════════
+//  MODELS
+// ════════════════════════════════════════════════════════════════
+const MODELS = {
+  nucleation: [
+    { id:'P2',  name:'Power Law n=2',        eq:'P2',  f: a => Math.sqrt(a) },
+    { id:'P3',  name:'Power Law n=3',        eq:'P3',  f: a => Math.cbrt(a) },
+    { id:'P4',  name:'Power Law n=4',        eq:'P4',  f: a => Math.pow(a,0.25) },
+    { id:'A2',  name:'Avrami-Erofeev n=2',   eq:'A2',  f: a => Math.pow(-Math.log(1-Math.min(a,0.9999)),0.5) },
+    { id:'A3',  name:'Avrami-Erofeev n=3',   eq:'A3',  f: a => Math.pow(-Math.log(1-Math.min(a,0.9999)),1/3) },
+    { id:'A4',  name:'Avrami-Erofeev n=4',   eq:'A4',  f: a => Math.pow(-Math.log(1-Math.min(a,0.9999)),0.25) },
+  ],
+  contraction: [
+    { id:'R2',  name:'Contracting Area',     eq:'R2',  f: a => 1-Math.sqrt(1-Math.min(a,0.9999)) },
+    { id:'R3',  name:'Contracting Volume',   eq:'R3',  f: a => 1-Math.cbrt(1-Math.min(a,0.9999)) },
+  ],
+  diffusion: [
+    { id:'D1',  name:'1D Diffusion',         eq:'D1',  f: a => a*a },
+    { id:'D2',  name:'2D Diffusion (Valensi)',eq:'D2', f: a => { let b=Math.min(a,0.9999); return (1-b)*Math.log(1-b)+b; } },
+    { id:'D3',  name:'3D Diffusion (Jander)',eq:'D3',  f: a => { let b=1-Math.cbrt(1-Math.min(a,0.9999)); return b*b; } },
+    { id:'D4',  name:'Ginstling-Brounstein', eq:'D4',  f: a => { let b=Math.min(a,0.9999); return 1-(2*b/3)-Math.pow(1-b,2/3); } },
+  ],
+  order: [
+    { id:'F1',  name:'First Order',          eq:'F1',  f: a => -Math.log(1-Math.min(a,0.9999)) },
+    { id:'F2',  name:'Second Order',         eq:'F2',  f: a => 1/(1-Math.min(a,0.9999))-1 },
+    { id:'F3',  name:'Third Order',          eq:'F3',  f: a => { let b=1-Math.min(a,0.9999); return (1/(b*b)-1)/2; } },
+  ],
+};
+const GROUP_LABELS = { nucleation:'Nucleation', contraction:'Geometrical Contraction', diffusion:'Diffusion', order:'Reaction Order' };
+
+// ════════════════════════════════════════════════════════════════
+//  STATE
+// ════════════════════════════════════════════════════════════════
+let rawData=[], t0=null, t1=null, alphaData=[], fitPts=[], fitReg=null;
+let selectedModel=null, clickPhase=1, currentTab='raw', chartInst=null;
+let zs={xMin:null,xMax:null,yMin:null,yMax:null};
+const zsMap={raw:{xMin:null,xMax:null,yMin:null,yMax:null}, alpha:{xMin:null,xMax:null,yMin:null,yMax:null}, fit:{xMin:null,xMax:null,yMin:null,yMax:null}};
+zs=zsMap.raw;
+const dragMap={}, isDragMap={}, rubberMap={};
+
+// ════════════════════════════════════════════════════════════════
+//  FILE LOADING
+// ════════════════════════════════════════════════════════════════
+const dz=document.getElementById('dz');
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('over')});
+dz.addEventListener('dragleave',()=>dz.classList.remove('over'));
+dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('over');if(e.dataTransfer.files[0])loadFile(e.dataTransfer.files[0])});
+document.getElementById('fileInput').addEventListener('change',e=>{if(e.target.files[0])loadFile(e.target.files[0])});
+
+function loadFile(f){
+  document.getElementById('dzName').textContent=f.name;
+  const r=new FileReader(); r.onload=e=>parseCSV(e.target.result); r.readAsText(f);
+}
+function parseCSV(txt){
+  const lines=txt.trim().split(/\r?\n/); const data=[]; let skip=0;
+  for(const ln of lines){
+    const p=ln.split(/[,;\t]+/);
+    const t=parseFloat(p[0]),m=parseFloat(p[1]);
+    if(isNaN(t)||isNaN(m)){skip++;continue;}
+    data.push({t,m});
+  }
+  if(data.length<2){st('Could not parse CSV — expected two numeric columns.','err');return}
+  data.sort((a,b)=>a.t-b.t);
+  rawData=data; t0=null;t1=null;alphaData=[];fitPts=[];fitReg=null;clickPhase=1;
+  zsMap.raw={xMin:null,xMax:null,yMin:null,yMax:null};
+  zsMap.alpha={xMin:null,xMax:null,yMin:null,yMax:null};
+  zsMap.fit={xMin:null,xMax:null,yMin:null,yMax:null};
+  zs=zsMap.raw;
+  setStepA(1);
+  st(`${data.length} points loaded${skip?` (${skip} skipped)`:''}  —  click Raw Data chart to set reaction bounds.`,'ok');
+  renderRaw();
+}
+
+// ════════════════════════════════════════════════════════════════
+//  MODEL GROUP UI
+// ════════════════════════════════════════════════════════════════
+function buildModelGroups(){
+  const cont=document.getElementById('modelGroups');
+  for(const [gk,gLabel] of Object.entries(GROUP_LABELS)){
+    const wrap=document.createElement('div'); wrap.className='model-group';
+    wrap.innerHTML=`<div class="model-group-title">${gLabel}</div>`;
+    const sel=document.createElement('select'); sel.id='grp-'+gk;
+    const blank=document.createElement('option'); blank.value=''; blank.textContent='— select —';
+    sel.appendChild(blank);
+    for(const m of MODELS[gk]){
+      const opt=document.createElement('option'); opt.value=m.id; opt.textContent=m.name;
+      sel.appendChild(opt);
+    }
+    sel.addEventListener('change',()=>{
+      if(!sel.value) return;
+      // deselect all other group selects
+      document.querySelectorAll('[id^="grp-"]').forEach(s=>{ if(s!==sel) s.value=''; });
+      const m=Object.values(MODELS).flat().find(x=>x.id===sel.value);
+      if(m) selectModel(m);
+    });
+    wrap.appendChild(sel); cont.appendChild(wrap);
+  }
+}
+function selectModel(m){
+  selectedModel=m;
+  drawEq(m.id);
+  if(alphaData.length>1){
+    computeFit();
+    switchTab('fit');
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+//  EQUATION DRAWING
+// ════════════════════════════════════════════════════════════════
+function drawEq(id){
+  const canvas=document.getElementById('eqCanvas');
+  const W=canvas.offsetWidth||240;
+  const H=110; // display height in CSS px
+  canvas.width=W*2; canvas.height=H*2;
+  canvas.style.height=H+'px';
+  const ctx=canvas.getContext('2d');
+  ctx.scale(2,2);
+  const w=W, h=H;
+  ctx.fillStyle='#ede7d8'; ctx.fillRect(0,0,w,h);
+  const fn=EQ[id]; if(!fn) return;
+
+  // Draw on offscreen canvas to measure rendered width
+  const ofc=document.createElement('canvas'); ofc.width=W*2; ofc.height=H*2;
+  const oc=ofc.getContext('2d'); oc.scale(2,2);
+  oc.fillStyle='#fff'; oc.fillRect(0,0,w,h);
+  fn(oc,w,h);
+  const id2=oc.getImageData(0,0,ofc.width,ofc.height).data;
+  let minX=ofc.width, maxX=0;
+  for(let py=0;py<ofc.height;py++) for(let px=0;px<ofc.width;px++){
+    const ix=(py*ofc.width+px)*4;
+    if(id2[ix]<240||id2[ix+1]<240||id2[ix+2]<240){
+      if(px<minX) minX=px;
+      if(px>maxX) maxX=px;
+    }
+  }
+  // minX/maxX are in physical (2×) pixels; convert to logical px for translation
+  const eqLeft = minX/2;
+  const eqRight = maxX/2;
+  const eqWidth = eqRight - eqLeft;
+  // offset so the equation is horizontally centred in w
+  const ox = (w - eqWidth) / 2 - eqLeft;
+  ctx.save(); ctx.translate(ox, 0); fn(ctx,w,h); ctx.restore();
+}
+
+function T(ctx,txt,x,y,sz,italic,bold,color){
+  ctx.fillStyle=color||'#0f0e0d';
+  ctx.font=(bold?'bold ':''+(italic?'italic ':'')+sz+"px 'Palatino Linotype',Palatino,Georgia,serif");
+  ctx.fillText(txt,x,y); return ctx.measureText(txt).width;
+}
+function TW(ctx,txt,sz,ital){
+  ctx.font=(ital?'italic ':'')+sz+"px 'Palatino Linotype',Palatino,Georgia,serif";
+  return ctx.measureText(txt).width;
+}
+function HL(ctx,x1,x2,y,lw){ctx.save();ctx.strokeStyle='#0f0e0d';ctx.lineWidth=lw||1;ctx.beginPath();ctx.moveTo(x1,y);ctx.lineTo(x2,y);ctx.stroke();ctx.restore()}
+
+// Equation renderers — draws "F(α) = <expr>" centred
+const EQ = {
+  P2(ctx,w,h){ const cy=h/2,sz=17,sm=12; let x=6;
+    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = ',x,cy+5,sz,false);
+    x+=T(ctx,'α',x,cy+5,sz,true); T(ctx,'1/2',x,cy-1,sm,false);
+  },
+  P3(ctx,w,h){ const cy=h/2,sz=17,sm=12; let x=6;
+    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = ',x,cy+5,sz,false);
+    x+=T(ctx,'α',x,cy+5,sz,true); T(ctx,'1/3',x,cy-1,sm,false);
+  },
+  P4(ctx,w,h){ const cy=h/2,sz=17,sm=12; let x=6;
+    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = ',x,cy+5,sz,false);
+    x+=T(ctx,'α',x,cy+5,sz,true); T(ctx,'1/4',x,cy-1,sm,false);
+  },
+  A2(ctx,w,h){ const cy=h/2,sz=17,sm=11; let x=6;
+    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = [−ln(1−',x,cy+5,sz,false);
+    x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,')]',x,cy+5,sz,false); T(ctx,'1/2',x,cy-1,sm,false);
+  },
+  A3(ctx,w,h){ const cy=h/2,sz=17,sm=11; let x=6;
+    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = [−ln(1−',x,cy+5,sz,false);
+    x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,')]',x,cy+5,sz,false); T(ctx,'1/3',x,cy-1,sm,false);
+  },
+  A4(ctx,w,h){ const cy=h/2,sz=17,sm=11; let x=6;
+    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = [−ln(1−',x,cy+5,sz,false);
+    x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,')]',x,cy+5,sz,false); T(ctx,'1/4',x,cy-1,sm,false);
+  },
+  R2(ctx,w,h){ const cy=h/2,sz=17,sm=11; let x=6;
+    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = 1−(1−',x,cy+5,sz,false);
+    x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,')',x,cy+5,sz,false); T(ctx,'1/2',x,cy-1,sm,false);
+  },
+  R3(ctx,w,h){ const cy=h/2,sz=17,sm=11; let x=6;
+    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = 1−(1−',x,cy+5,sz,false);
+    x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,')',x,cy+5,sz,false); T(ctx,'1/3',x,cy-1,sm,false);
+  },
+  D1(ctx,w,h){ const cy=h/2,sz=17,sm=11; let x=6;
+    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = ',x,cy+5,sz,false);
+    x+=T(ctx,'α',x,cy+5,sz,true); T(ctx,'2',x,cy-1,sm,false);
+  },
+  D2(ctx,w,h){ const cy=h/2,sz=16,sm=11; let x=4;
+    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = (1−',x,cy+5,sz,false);
+    x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') ln(1−',x,cy+5,sz,false);
+    x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') + ',x,cy+5,sz,false); T(ctx,'α',x,cy+5,sz,true);
+  },
+  D3(ctx,w,h){ const cy=h/2,sz=16,sm=11; let x=4;
+    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = [1−(1−',x,cy+5,sz,false);
+    x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,')',x,cy+5,sz,false); T(ctx,'1/3',x,cy-1,sm,false);
+    x+=TW(ctx,'1/3',sm,false)+1; x+=T(ctx,']',x,cy+5,sz,false); T(ctx,'2',x,cy-1,sm,false);
+  },
+  D4(ctx,w,h){ const cy=h/2,sz=15,sm=11; let x=4;
+    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true);
+    x+=T(ctx,') = 1−',x,cy+5,sz,false);
+    // fraction 2α/3
+    const nW=TW(ctx,'2α',sz,true), dW=TW(ctx,'3',sz,false);
+    const fw=Math.max(nW,dW)+6;
+    T(ctx,'2',x+(fw-nW)/2,cy-2,sz,false); T(ctx,'α',x+(fw-nW)/2+TW(ctx,'2',sz,false),cy-2,sz,true);
+    T(ctx,'3',x+(fw-dW)/2,cy+sz-1,sz,false);
+    HL(ctx,x,x+fw,cy+1,1); x+=fw+2;
+    x+=T(ctx,' − (1−',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true);
+    x+=T(ctx,')',x,cy+5,sz,false); T(ctx,'2/3',x,cy-1,sm,false);
+  },
+  F1(ctx,w,h){ const cy=h/2,sz=17,sm=11; let x=6;
+    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = −ln(1−',x,cy+5,sz,false);
+    x+=T(ctx,'α',x,cy+5,sz,true); T(ctx,')',x,cy+5,sz,false);
+  },
+  F2(ctx,w,h){ const cy=h/2,sz=17,sm=12; let x=6;
+    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = ',x,cy+5,sz,false);
+    const nW=TW(ctx,'1',sz,false), dW=TW(ctx,'1−α',sz,true)+2;
+    const fw=Math.max(nW,dW)+6;
+    T(ctx,'1',x+(fw-nW)/2,cy-2,sz,false);
+    T(ctx,'1−',x+(fw-dW)/2,cy+sz-1,sz,false); T(ctx,'α',x+(fw-dW)/2+TW(ctx,'1−',sz,false),cy+sz-1,sz,true);
+    HL(ctx,x,x+fw,cy+1,1); x+=fw+3;
+    T(ctx,'− 1',x,cy+5,sz,false);
+  },
+  F3(ctx,w,h){ const cy=h/2,sz=16,sm=11; let x=4;
+    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = ',x,cy+5,sz,false);
+    const nW=TW(ctx,'1',sz,false);
+    const dW=TW(ctx,'2(1−α)',sz,true)+TW(ctx,'2',sm,false)+4;
+    const fw=Math.max(nW,dW)+6;
+    T(ctx,'1',x+(fw-nW)/2,cy-2,sz,false);
+    let dx=x+(fw-dW)/2;
+    dx+=T(ctx,'2(1−',dx,cy+sz-1,sz,false); dx+=T(ctx,'α',dx,cy+sz-1,sz,true);
+    T(ctx,')',dx,cy+sz-1,sz,false); T(ctx,'2',dx+TW(ctx,')',sz,false),cy+sz-7,sm,false);
+    HL(ctx,x,x+fw,cy+1,1); x+=fw+3;
+    T(ctx,'− 1',x,cy+5,sz,false);
+  },
+};
+
+// ════════════════════════════════════════════════════════════════
+//  ALPHA + FIT COMPUTATION
+// ════════════════════════════════════════════════════════════════
+function computeAlpha(){
+  if(t0===null||t1===null||rawData.length===0) return;
+  // Snap to nearest data point in each direction
+  const snap0=rawData.reduce((b,p)=>Math.abs(p.t-t0)<Math.abs(b.t-t0)?p:b);
+  const snap1=rawData.reduce((b,p)=>Math.abs(p.t-t1)<Math.abs(b.t-t1)?p:b);
+  if(snap0===snap1) return;
+  const tLo=Math.min(snap0.t,snap1.t), tHi=Math.max(snap0.t,snap1.t);
+  // Update displayed values to reflect snapped range
+  document.getElementById('t0inp').value=tLo.toPrecision(6);
+  document.getElementById('t1inp').value=tHi.toPrecision(6);
+  const seg=rawData.filter(p=>p.t>=tLo&&p.t<=tHi);
+  if(seg.length<2) return;
+  const m0=seg[0].m, m1=seg[seg.length-1].m, rng=m1-m0;
+  if(Math.abs(rng)<1e-12) return;
+  alphaData=seg.map(p=>({t:p.t-tLo, alpha:(p.m-m0)/rng}));
+  setStepD(1); setStepD(2); setStepA(3);
+  if(selectedModel) computeFit();
+}
+
+function linReg(xs,ys){
+  const n=xs.length; if(n<2) return null;
+  let sx=0,sy=0,sx2=0,sxy=0,sy2=0;
+  for(let i=0;i<n;i++){sx+=xs[i];sy+=ys[i];sx2+=xs[i]*xs[i];sxy+=xs[i]*ys[i];sy2+=ys[i]*ys[i]}
+  const den=n*sx2-sx*sx; if(Math.abs(den)<1e-15) return null;
+  const k=(n*sxy-sx*sy)/den, b=(sy-k*sx)/n;
+  const ss=ys.reduce((a,y,i)=>a+(y-(k*xs[i]+b))**2,0);
+  const st2=ys.reduce((a,y)=>a+(y-sy/n)**2,0);
+  return {k,b,r2:st2<1e-15?1:1-ss/st2};
+}
+
+function computeFit(){
+  if(!selectedModel||alphaData.length<2) return;
+  // Build ALL transformed points from alphaData
+  const pts=alphaData.map(p=>({t:p.t,y:selectedModel.f(p.alpha)})).filter(p=>isFinite(p.y));
+  if(pts.length<2) return;
+  fitPts=pts;
+  // Reset fit zoom so full range is visible first
+  zsMap.fit={xMin:null,xMax:null,yMin:null,yMax:null};
+  // Now regress on the full set (no zoom applied yet)
+  fitReg=linReg(fitPts.map(p=>p.t),fitPts.map(p=>p.y));
+  updateResBox();
+  if(currentTab==='fit') drawFit();
+}
+
+function updateResBox(){
+  const el=document.getElementById('resBox');
+  if(!fitReg){el.innerHTML='<div class="res-ph">Insufficient data</div>';return}
+  const sign=fitReg.b>=0?'+':'−';
+  el.innerHTML=`<div class="res-box">
+    <div><span class="rl">Model  </span><span class="rv">${selectedModel.name}</span></div>
+    <div><span class="rl">k      </span><span class="rv">${fitReg.k.toExponential(4)}</span></div>
+    <div><span class="rl">b      </span><span class="rv">${fitReg.b.toExponential(4)}</span></div>
+    <div><span class="rl">R²     </span><span class="rr">${fitReg.r2.toFixed(6)}</span></div>
+    <div style="margin-top:4px;font-size:10px;color:#aaa;font-family:var(--mono)">F(α) = ${fitReg.k.toExponential(3)}·t ${sign} ${Math.abs(fitReg.b).toExponential(3)}</div>
+  </div>`;
+  document.getElementById('btnExport').disabled=false;
+}
+
+// ════════════════════════════════════════════════════════════════
+//  CANVAS RENDERING — shared helpers
+// ════════════════════════════════════════════════════════════════
+const PAD={top:28,right:22,bottom:48,left:62};
+
+// Call this ONLY when the canvas needs to be resized (load / window resize)
+function sizeCanvas(c){
+  const dpr=window.devicePixelRatio;
+  const W=c.offsetWidth, H=c.offsetHeight;
+  if(c.width!==Math.round(W*dpr)||c.height!==Math.round(H*dpr)){
+    c.width=Math.round(W*dpr); c.height=Math.round(H*dpr);
+  }
+}
+
+function getPlotDims(c, isFit){
+  const dpr=window.devicePixelRatio;
+  let padL=PAD.left, padR=PAD.right, padB=PAD.bottom, padT=PAD.top;
+  if(isFit){
+    const tkSz=parseFloat(gv('tkSz'))||30;
+    const axSz=parseFloat(gv('axSz'))||36;
+    const ttlSz=parseFloat(gv('ttlSz'))||30;
+    const hasTtl = (gv('ttl')||'').trim().length > 0;
+    padL = Math.round(tkSz*3.8 + axSz*1.5);
+    padB = Math.round(tkSz*1.4 + axSz*1.6);
+    padT = hasTtl ? Math.round(ttlSz*1.8 + axSz*0.4) : Math.round(axSz*0.8);
+    padR = Math.round(tkSz*1.0);
+  }
+  return{w:c.width,h:c.height,dpr,
+    l:padL*dpr, r:c.width-padR*dpr,
+    t:padT*dpr,  b:c.height-padB*dpr,
+    pw:c.width-(padL+padR)*dpr,
+    ph:c.height-(padT+padB)*dpr};
+}
+
+function niceR(min,max,n=5){
+  if(min===max){min-=1;max+=1;}
+  const rng=max-min;
+  const step=Math.pow(10,Math.floor(Math.log10(rng/n)));
+  const ns=[1,2,2.5,5,10].map(s=>s*step).find(s=>rng/s<=n+1)||step;
+  const lo=Math.floor(min/ns)*ns, hi=Math.ceil(max/ns)*ns;
+  const ticks=[]; for(let v=lo;v<=hi+1e-10;v+=ns) ticks.push(+v.toPrecision(10));
+  return{min:lo,max:hi,ticks};
+}
+// Format a single tick value consistently with all ticks in its set.
+// decimalPlaces is computed once per axis from the tick step.
+function tickDecimals(ticks){
+  if(!ticks||ticks.length<2) return 0;
+  const step=Math.abs(ticks[1]-ticks[0]);
+  if(step===0) return 0;
+  if(step>=10) return 0;
+  // count decimal places needed to represent the step
+  const s=step.toPrecision(2);
+  const dot=s.indexOf('.');
+  if(dot<0) return 0;
+  // strip trailing zeros from step string
+  const dec=s.slice(dot+1).replace(/0+$/,'');
+  return dec.length;
+}
+function fmtTick(v, dp){
+  if(Math.abs(v)>=1e5||(Math.abs(v)<0.001&&v!==0)) return v.toExponential(2);
+  return v.toFixed(dp);
+}
+// Legacy single-value formatter for tooltips etc.
+function fmtN(v){return(Math.abs(v)>=1e4||(Math.abs(v)<0.01&&v!==0))?v.toExponential(2):''+parseFloat((+v).toPrecision(4))}
+function toC(x,y,dims,xr,yr){return{cx:dims.l+(x-xr.min)/(xr.max-xr.min)*dims.pw, cy:dims.b-(y-yr.min)/(yr.max-yr.min)*dims.ph}}
+function toD(cx,cy,dims,xr,yr){return{x:xr.min+(cx-dims.l)/dims.pw*(xr.max-xr.min), y:yr.min+(dims.b-cy)/dims.ph*(yr.max-yr.min)}}
+
+// Draw axes, grid, box border, ticks, labels for any canvas chart
+function drawAxes(ctx,dims,xr,yr,xLabel,yLabel){
+  const{l,r,t,b,pw,ph,dpr}=dims;
+  ctx.save();
+  // light grid
+  ctx.strokeStyle='rgba(0,0,0,0.08)'; ctx.lineWidth=0.7*dpr; ctx.setLineDash([3*dpr,5*dpr]);
+  xr.ticks.forEach(v=>{const cx=l+(v-xr.min)/(xr.max-xr.min)*pw;if(cx<l-1||cx>r+1)return;
+    ctx.beginPath();ctx.moveTo(cx,t);ctx.lineTo(cx,b);ctx.stroke()});
+  yr.ticks.forEach(v=>{const cy=b-(v-yr.min)/(yr.max-yr.min)*ph;if(cy<t-1||cy>b+1)return;
+    ctx.beginPath();ctx.moveTo(l,cy);ctx.lineTo(r,cy);ctx.stroke()});
+  ctx.setLineDash([]);
+  // full box border
+  ctx.strokeStyle='#333'; ctx.lineWidth=1.5*dpr;
+  ctx.strokeRect(l,t,pw,ph);
+  // ticks (outward)
+  const TL=5*dpr;
+  ctx.fillStyle='#444'; ctx.font=`${10*dpr}px 'DM Mono',monospace`; ctx.textAlign='center';
+  xr.ticks.forEach(v=>{const cx=l+(v-xr.min)/(xr.max-xr.min)*pw;if(cx<l-0.5||cx>r+0.5)return;
+    ctx.beginPath();ctx.moveTo(cx,b);ctx.lineTo(cx,b+TL);ctx.stroke();
+    ctx.fillText(fmtN(v),cx,b+TL+11*dpr)});
+  ctx.textAlign='right';
+  yr.ticks.forEach(v=>{const cy=b-(v-yr.min)/(yr.max-yr.min)*ph;if(cy<t-0.5||cy>b+0.5)return;
+    ctx.beginPath();ctx.moveTo(l,cy);ctx.lineTo(l-TL,cy);ctx.stroke();
+    ctx.fillText(fmtN(v),l-TL-4*dpr,cy+3.5*dpr)});
+  // axis labels
+  ctx.fillStyle='#222'; ctx.textAlign='center'; ctx.font=`${11*dpr}px 'DM Sans',sans-serif`;
+  ctx.fillText(xLabel,(l+r)/2,b+TL+26*dpr);
+  ctx.save();ctx.translate(14*dpr,(t+b)/2);ctx.rotate(-Math.PI/2);ctx.fillText(yLabel,0,0);ctx.restore();
+  ctx.restore();
+}
+
+// ════════════════════════════════════════════════════════════════
+//  CANVAS SETUP
+// ════════════════════════════════════════════════════════════════
+function canvasEl(id){
+  if(id==='raw')   return document.getElementById('rawCanvas');
+  if(id==='alpha') return document.getElementById('alphaCanvas');
+  if(id==='fit')   return document.getElementById('fitCanvas');
+  return null;
+}
+
+function setupRawCanvas(){
+  const c=document.getElementById('rawCanvas');
+  c.addEventListener('mousemove', e=>{
+    const rect=c.getBoundingClientRect(), dpr=window.devicePixelRatio;
+    showTip(e,c,rect,dpr);
+  });
+  c.addEventListener('mouseleave', ()=>{ document.getElementById('tooltip').style.display='none'; });
+  c.addEventListener('click', e=>onRawClick(e));
+}
+function setupAlphaCanvas(){
+  // Alpha canvas is view-only — no zoom or pan
+}
+
+// ════════════════════════════════════════════════════════════════
+//  RANGES  (raw data coords, not pixel coords)
+// ════════════════════════════════════════════════════════════════
+function getRanges(id){
+  const z=zsMap[id]||{xMin:null,xMax:null,yMin:null,yMax:null};
+  if(id==='raw'){
+    if(!rawData.length) return{xr:niceR(0,1),yr:niceR(0,1)};
+    const allT=rawData.map(p=>p.t), allM=rawData.map(p=>p.m);
+    return{
+      xr: z.xMin!==null ? {min:z.xMin,max:z.xMax,ticks:niceR(z.xMin,z.xMax).ticks} : niceR(Math.min(...allT),Math.max(...allT)),
+      yr: z.yMin!==null ? {min:z.yMin,max:z.yMax,ticks:niceR(z.yMin,z.yMax).ticks} : niceR(Math.min(...allM),Math.max(...allM))
+    };
+  }
+  if(id==='alpha'){
+    if(!alphaData.length) return{xr:{min:0,max:1,ticks:niceR(0,1).ticks},yr:{min:-0.05,max:1.05,ticks:niceR(0,1).ticks}};
+    const allT=alphaData.map(p=>p.t);
+    const maxT=Math.max(...allT);
+    const allA=alphaData.map(p=>p.alpha);
+    const aMax=Math.max(...allA);
+    // y: fixed -0.05 to aMax+0.05, ticks from 0 to 1 in steps of 0.2
+    const yMax=Math.max(aMax+0.05, 1.05);
+    const yTicks=[0,0.2,0.4,0.6,0.8,1.0];
+    return{
+      xr: {min:0, max:maxT, ticks:niceR(0,maxT).ticks},
+      yr: {min:-0.05, max:yMax, ticks:yTicks}
+    };
+  }
+  if(id==='fit'){
+    if(!fitPts.length) return{xr:{min:0,max:1,ticks:niceR(0,1).ticks},yr:{min:0,max:1,ticks:niceR(0,1).ticks}};
+    const allT=fitPts.map(p=>p.t), allY=fitPts.map(p=>p.y);
+    const tMin=Math.min(...allT), tMax=Math.max(...allT);
+    const linYs=fitReg ? allT.map(t=>fitReg.k*t+fitReg.b) : [];
+    const allY2=[...allY,...linYs];
+    const yMin=Math.min(...allY2), yMax2=Math.max(...allY2);
+    // Use exact data extent for range (no niceR rounding), niceR only for ticks
+    const xrBase={min:tMin, max:tMax, ticks:niceR(tMin,tMax).ticks};
+    const yrBase={min:yMin, max:yMax2, ticks:niceR(yMin,yMax2).ticks};
+    return{
+      xr: z.xMin!==null ? {min:z.xMin, max:z.xMax, ticks:niceR(z.xMin,z.xMax).ticks} : xrBase,
+      yr: z.yMin!==null ? {min:z.yMin, max:z.yMax, ticks:niceR(z.yMin,z.yMax).ticks} : yrBase
+    };
+  }
+  return{xr:niceR(0,1),yr:niceR(0,1)};
+}
+
+// ════════════════════════════════════════════════════════════════
+//  MOUSE HANDLERS  (left=zoom rubber-band, right=pan)
+// ════════════════════════════════════════════════════════════════
+function onDown(e,id){
+  const c=canvasEl(id); if(!c) return;
+  const rect=c.getBoundingClientRect(), dpr=window.devicePixelRatio;
+  const cx=(e.clientX-rect.left)*dpr, cy=(e.clientY-rect.top)*dpr;
+  const dims=getPlotDims(c);
+  // must be inside plot area
+  if(cx<dims.l||cx>dims.r||cy<dims.t||cy>dims.b) return;
+  e.preventDefault();
+  if(e.button===0){
+    // left button — start rubber-band zoom
+    dragMap[id]={mode:'zoom', csx:cx, csy:cy, sx:e.clientX, sy:e.clientY};
+    rubberMap[id]=null; isDragMap[id]=false;
+  } else if(e.button===2){
+    // right button — start pan; snapshot current ranges
+    const{xr,yr}=getRanges(id);
+    dragMap[id]={mode:'pan', sx:e.clientX, sy:e.clientY,
+      xMin:xr.min, xMax:xr.max, yMin:yr.min, yMax:yr.max};
+    isDragMap[id]=false;
+  }
+}
+
+function onMove(e,id){
+  const c=canvasEl(id); if(!c) return;
+  const rect=c.getBoundingClientRect(), dpr=window.devicePixelRatio;
+
+  if(!dragMap[id]){
+    if(id==='raw') showTip(e,c,rect,dpr);
+    return;
+  }
+
+  const dx=e.clientX-dragMap[id].sx, dy=e.clientY-dragMap[id].sy;
+  if(!isDragMap[id]&&(Math.abs(dx)>3||Math.abs(dy)>3)) isDragMap[id]=true;
+  if(!isDragMap[id]) return;
+
+  document.getElementById('tooltip').style.display='none';
+  const dims=getPlotDims(c);
+
+  if(dragMap[id].mode==='zoom'){
+    // Update rubber-band rectangle (clamped to plot area)
+    const cx=Math.max(dims.l,Math.min(dims.r,(e.clientX-rect.left)*dpr));
+    const cy=Math.max(dims.t,Math.min(dims.b,(e.clientY-rect.top)*dpr));
+    rubberMap[id]={x1:dragMap[id].csx, y1:dragMap[id].csy, x2:cx, y2:cy};
+
+  } else if(dragMap[id].mode==='pan'){
+    // Translate data range by the mouse delta
+    const{pw,ph}=dims;
+    const snap=dragMap[id];
+    const xRange=snap.xMax-snap.xMin, yRange=snap.yMax-snap.yMin;
+    const panX= dx*dpr/pw * xRange;   // pixels → data units
+    const panY= dy*dpr/ph * yRange;
+    zsMap[id]={
+      xMin: snap.xMin - panX,
+      xMax: snap.xMax - panX,
+      yMin: snap.yMin + panY,   // canvas Y is inverted
+      yMax: snap.yMax + panY
+    };
+  }
+
+  if(id==='raw') drawRaw(); else if(id==='alpha') drawAlpha(); else if(id==='fit') drawFit();
+}
+
+function onUp(e,id){
+  if(isDragMap[id] && dragMap[id]){
+    if(dragMap[id].mode==='zoom' && rubberMap[id]){
+      const c=canvasEl(id);
+      const dims=getPlotDims(c);
+      const{xr,yr}=getRanges(id);
+      const rb=rubberMap[id];
+      const x1c=Math.min(rb.x1,rb.x2), x2c=Math.max(rb.x1,rb.x2);
+      const y1c=Math.min(rb.y1,rb.y2), y2c=Math.max(rb.y1,rb.y2);
+      if((x2c-x1c)>8 && (y2c-y1c)>8){
+        const p1=toD(x1c,y1c,dims,xr,yr);  // top-left  → xMin, yMax
+        const p2=toD(x2c,y2c,dims,xr,yr);  // bot-right → xMax, yMin
+        zsMap[id]={xMin:p1.x, xMax:p2.x, yMin:p2.y, yMax:p1.y};
+      }
+    }
+    // after zoom or pan on fit: recompute regression from visible window
+    if(id==='fit'){ recomputeFitFromView(); }
+  }
+  rubberMap[id]=null; dragMap[id]=null; isDragMap[id]=false;
+  if(id==='raw') drawRaw();
+  else if(id==='alpha') drawAlpha();
+  else if(id==='fit') drawFit();
+}
+
+function onLeave(e,id){
+  document.getElementById('tooltip').style.display='none';
+  if(dragMap[id] && dragMap[id].mode==='zoom'){
+    rubberMap[id]=null; dragMap[id]=null; isDragMap[id]=false;
+    if(id==='raw') drawRaw(); else if(id==='alpha') drawAlpha(); else if(id==='fit') drawFit();
+  }
+}
+
+function onRawClick(e){
+  if(isDragMap['raw']) return;    // suppress click after a drag
+  if(rawData.length===0) return;
+  if(e.button!==0) return;
+  const c=document.getElementById('rawCanvas');
+  const rect=c.getBoundingClientRect(), dpr=window.devicePixelRatio;
+  const cx=(e.clientX-rect.left)*dpr, cy=(e.clientY-rect.top)*dpr;
+  const dims=getPlotDims(c);
+  if(cx<dims.l||cx>dims.r||cy<dims.t||cy>dims.b) return;
+  const{xr,yr}=getRanges('raw');
+  const{x}=toD(cx,cy,dims,xr,yr);
+  if(clickPhase===1){
+    t0=x; t1=null; alphaData=[]; fitPts=[]; fitReg=null;
+    document.getElementById('t0inp').value=x.toPrecision(6);
+    document.getElementById('t1inp').value='';
+    setStepA(2); clickPhase=2;
+  } else {
+    if(x<=t0){ t0=x; document.getElementById('t0inp').value=x.toPrecision(6); }
+    else{
+      t1=x; document.getElementById('t1inp').value=x.toPrecision(6);
+      computeAlpha(); clickPhase=1;
+      if(currentTab==='fit') redraw();
+      if(currentTab==='alpha') drawAlpha();
+    }
+  }
+  drawRaw();
+}
+
+function showTip(e,c,rect,dpr){
+  if(rawData.length===0) return;
+  const cx=(e.clientX-rect.left)*dpr, cy=(e.clientY-rect.top)*dpr;
+  const dims=getPlotDims(c);
+  const tip=document.getElementById('tooltip');
+  if(cx<dims.l||cx>dims.r||cy<dims.t||cy>dims.b){tip.style.display='none';return}
+  const{xr,yr}=getRanges('raw');
+  const{x}=toD(cx,cy,dims,xr,yr);
+  const np=rawData.reduce((b,p)=>Math.abs(p.t-x)<Math.abs(b.t-x)?p:b);
+  tip.innerHTML=`t: ${fmtN(np.t)}<br>m: ${fmtN(np.m)}`;
+  tip.style.display='block'; tip.style.left=(e.clientX+14)+'px'; tip.style.top=(e.clientY-8)+'px';
+}
+
+// ════════════════════════════════════════════════════════════════
+//  RECOMPUTE FIT FROM VISIBLE ALPHA RANGE
+// ════════════════════════════════════════════════════════════════
+function recomputeFitFromView(){
+  if(!selectedModel||!alphaData.length) return;
+  const{xr}=getRanges('alpha');
+  // filter to only the data visible in the current x window
+  const visible=alphaData.filter(p=>p.t>=xr.min&&p.t<=xr.max);
+  if(visible.length<2) return;
+  const pts=visible.map(p=>({t:p.t,y:selectedModel.f(p.alpha)})).filter(p=>isFinite(p.y));
+  if(pts.length<2) return;
+  fitPts=pts; fitReg=linReg(pts.map(p=>p.t),pts.map(p=>p.y));
+  updateResBox();
+  if(currentTab==='fit') redraw();
+}
+
+// ════════════════════════════════════════════════════════════════
+//  DRAW FUNCTIONS  (never resize canvas here)
+// ════════════════════════════════════════════════════════════════
+function renderRaw(){ const c=document.getElementById('rawCanvas'); if(!c) return; sizeCanvas(c); drawRaw(); }
+function renderAlpha(){ const c=document.getElementById('alphaCanvas'); if(!c) return; sizeCanvas(c); drawAlpha(); }
+
+function drawRaw(){
+  const c=document.getElementById('rawCanvas'); if(!c||!c.width) return;
+  const ctx=c.getContext('2d');
+  const dims=getPlotDims(c);
+  const{w,h,l,r,t,b,pw,ph,dpr}=dims;
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle='#f6f1ea'; ctx.fillRect(0,0,w,h);
+  if(rawData.length===0){
+    document.getElementById('rawLbl').textContent='mass vs time — load a CSV to begin';
+    return;
+  }
+  const{xr,yr}=getRanges('raw');
+  ctx.fillStyle='#ffffff'; ctx.fillRect(l,t,pw,ph);
+  ctx.save(); ctx.beginPath(); ctx.rect(l,t,pw,ph); ctx.clip();
+
+  // reaction range band
+  if(t0!==null&&t1!==null){
+    const x0c=toC(t0,0,dims,xr,yr).cx, x1c=toC(t1,0,dims,xr,yr).cx;
+    ctx.fillStyle='rgba(184,74,46,0.08)';
+    ctx.fillRect(Math.max(x0c,l),t,Math.min(x1c,r)-Math.max(x0c,l),ph);
+  }
+  // data line
+  ctx.beginPath(); ctx.strokeStyle='#0f0e0d'; ctx.lineWidth=1.5*dpr;
+  let first=true;
+  rawData.forEach(p=>{const{cx,cy}=toC(p.t,p.m,dims,xr,yr);first?(ctx.moveTo(cx,cy),first=false):ctx.lineTo(cx,cy)});
+  ctx.stroke();
+  // t0 marker
+  if(t0!==null){
+    const xc=toC(t0,0,dims,xr,yr).cx;
+    ctx.save(); ctx.strokeStyle='#2a7a3b'; ctx.lineWidth=1.5*dpr; ctx.setLineDash([4*dpr,3*dpr]);
+    ctx.beginPath();ctx.moveTo(xc,t);ctx.lineTo(xc,b);ctx.stroke(); ctx.restore();
+    ctx.fillStyle='#2a7a3b'; ctx.font=`bold ${9*dpr}px 'DM Mono',monospace`; ctx.textAlign='left';
+    ctx.fillText('t₀',xc+4*dpr,t+12*dpr);
+  }
+  // t1 marker
+  if(t1!==null){
+    const xc=toC(t1,0,dims,xr,yr).cx;
+    ctx.save(); ctx.strokeStyle='#b84a2e'; ctx.lineWidth=1.5*dpr; ctx.setLineDash([4*dpr,3*dpr]);
+    ctx.beginPath();ctx.moveTo(xc,t);ctx.lineTo(xc,b);ctx.stroke(); ctx.restore();
+    ctx.fillStyle='#b84a2e'; ctx.font=`bold ${9*dpr}px 'DM Mono',monospace`; ctx.textAlign='right';
+    ctx.fillText('t∞',xc-4*dpr,t+12*dpr);
+  }
+  // rubber-band zoom rect (left-drag)
+  if(rubberMap['raw']){
+    const rb=rubberMap['raw'];
+    const rx=Math.min(rb.x1,rb.x2),ry=Math.min(rb.y1,rb.y2),rw=Math.abs(rb.x2-rb.x1),rh=Math.abs(rb.y2-rb.y1);
+    ctx.fillStyle='rgba(184,74,46,0.10)'; ctx.fillRect(rx,ry,rw,rh);
+    ctx.save(); ctx.strokeStyle='#b84a2e'; ctx.lineWidth=1.5*dpr; ctx.setLineDash([4*dpr,3*dpr]);
+    ctx.strokeRect(rx,ry,rw,rh); ctx.restore();
+  }
+  ctx.restore();
+  drawAxes(ctx,dims,xr,yr,'Time','Mass');
+  const lbl=t0===null?'mass vs time — click to set t₀ (reaction start)':
+            t1===null?'mass vs time — click to set t∞ (equilibrium end)':
+            'mass vs time — bounds set';
+  document.getElementById('rawLbl').textContent=lbl;
+}
+
+function drawAlpha(){
+  const c=document.getElementById('alphaCanvas'); if(!c||!c.width) return;
+  const ctx=c.getContext('2d');
+  const dims=getPlotDims(c);
+  const{w,h,l,r,t,b,pw,ph,dpr}=dims;
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle='#f6f1ea'; ctx.fillRect(0,0,w,h);
+  if(alphaData.length<2){
+    ctx.fillStyle='#aaa'; ctx.font=`${11*dpr}px 'DM Sans',sans-serif`; ctx.textAlign='center';
+    ctx.fillText('Set reaction bounds on Raw Data tab to see α(t)',w/2,h/2);
+    return;
+  }
+  const{xr,yr}=getRanges('alpha');
+  ctx.fillStyle='#ffffff'; ctx.fillRect(l,t,pw,ph);
+  ctx.save(); ctx.beginPath(); ctx.rect(l,t,pw,ph); ctx.clip();
+  ctx.beginPath(); ctx.strokeStyle='#0f0e0d'; ctx.lineWidth=1.5*dpr;
+  let first=true;
+  alphaData.forEach(p=>{const{cx,cy}=toC(p.t,p.alpha,dims,xr,yr);first?(ctx.moveTo(cx,cy),first=false):ctx.lineTo(cx,cy)});
+  ctx.stroke();
+  // rubber-band
+  if(rubberMap['alpha']){
+    const rb=rubberMap['alpha'];
+    const rx=Math.min(rb.x1,rb.x2),ry=Math.min(rb.y1,rb.y2),rw=Math.abs(rb.x2-rb.x1),rh=Math.abs(rb.y2-rb.y1);
+    ctx.fillStyle='rgba(184,74,46,0.10)'; ctx.fillRect(rx,ry,rw,rh);
+    ctx.save(); ctx.strokeStyle='#b84a2e'; ctx.lineWidth=1.5*dpr; ctx.setLineDash([4*dpr,3*dpr]);
+    ctx.strokeRect(rx,ry,rw,rh); ctx.restore();
+  }
+  ctx.restore();
+  drawAxes(ctx,dims,xr,yr,'Time (t − t₀)','α');
+}
+
+function resetZoom(){
+  zsMap[currentTab]={xMin:null,xMax:null,yMin:null,yMax:null};
+  if(currentTab==='raw')   drawRaw();
+  else if(currentTab==='alpha'){ drawAlpha(); }
+  else if(currentTab==='fit')  { recomputeFitFromView(); drawFit(); }
+}
+
+function applyRange(){
+  const v0=parseFloat(document.getElementById('t0inp').value);
+  const v1=parseFloat(document.getElementById('t1inp').value);
+  if(!isNaN(v0)) t0=v0; if(!isNaN(v1)) t1=v1;
+  if(t0!==null&&t1!==null&&t1>t0){
+    computeAlpha(); clickPhase=1;
+    if(currentTab==='fit') redraw();
+    if(currentTab==='alpha') drawAlpha();
+  }
+  drawRaw();
+}
+function resetSel(){
+  t0=null;t1=null;alphaData=[];fitPts=[];fitReg=null;clickPhase=1;
+  zsMap.alpha={xMin:null,xMax:null,yMin:null,yMax:null};
+  zsMap.fit  ={xMin:null,xMax:null,yMin:null,yMax:null};
+  document.getElementById('t0inp').value='';document.getElementById('t1inp').value='';
+  setStepA(1);
+  document.getElementById('resBox').innerHTML='<div class="res-ph">Select a model to see results</div>';
+  document.getElementById('btnExport').disabled=true;
+  drawRaw(); drawAlpha(); drawFit();
+}
+
+// ════════════════════════════════════════════════════════════════
+//  FIT CANVAS — zoom/pan state lives in zsMap['fit']
+// ════════════════════════════════════════════════════════════════
+// zsMap.fit is already declared in STATE block above
+
+function setupFitCanvas(){
+  const c=document.getElementById('fitCanvas'); if(!c) return;
+  c.addEventListener('contextmenu', e=>e.preventDefault());
+  c.addEventListener('mousedown',  e=>onDown(e,'fit'));
+  c.addEventListener('mousemove',  e=>onMove(e,'fit'));
+  c.addEventListener('mouseup',    e=>onUp(e,'fit'));
+  c.addEventListener('mouseleave', e=>onLeave(e,'fit'));
+}
+
+function renderFit(){ const c=document.getElementById('fitCanvas'); if(!c) return; sizeCanvas(c); drawFit(); }
+
+function drawFit(){
+  const c=document.getElementById('fitCanvas'); if(!c||!c.width) return;
+  const ctx=c.getContext('2d');
+  const dims=getPlotDims(c, true);
+  const{w,h,l,r,t,b,pw,ph,dpr}=dims;
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle=gv('chartBg')||'#ffffff'; ctx.fillRect(0,0,w,h);
+
+  if(!fitPts.length||!fitReg||!selectedModel){
+    ctx.fillStyle='#aaa'; ctx.font=`${11*dpr}px 'DM Sans',sans-serif`; ctx.textAlign='center';
+    ctx.fillText('Select a kinetic model to see the fit',w/2,h/2);
+    document.getElementById('fitLbl').textContent='f(α) vs time — select a model first';
+    return;
+  }
+
+  const{xr,yr}=getRanges('fit');
+  ctx.fillStyle=gv('plotBg')||'#ffffff'; ctx.fillRect(l,t,pw,ph);
+  ctx.save(); ctx.beginPath(); ctx.rect(l,t,pw,ph); ctx.clip();
+
+  // Regression line (drawn first, behind points)
+  if(fitReg){
+    const xL=xr.min, xR=xr.max;
+    const{cx:lx,cy:ly}=toC(xL, fitReg.k*xL+fitReg.b, dims,xr,yr);
+    const{cx:rx2,cy:ry2}=toC(xR, fitReg.k*xR+fitReg.b, dims,xr,yr);
+    ctx.save();
+    ctx.strokeStyle=gv('lnCol')||'#b84a2e';
+    ctx.lineWidth=(parseFloat(gv('lnW'))||2.5)*dpr;
+    const dashStr=gv('lnDash');
+    if(dashStr) ctx.setLineDash(dashStr.split(',').map(v=>parseFloat(v)*dpr));
+    ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(rx2,ry2); ctx.stroke();
+    ctx.restore();
+  }
+
+  // Data points
+  const ptC=gv('ptCol')||'#000000', ptS=(parseFloat(gv('ptSz'))||4)*dpr;
+  const ptA=parseFloat(gv('ptOp'))||1, ptBW=(parseFloat(gv('ptBW'))||1.5)*dpr;
+  const ptStyle=gv('ptSty')||'circle';
+  ctx.fillStyle=ha(ptC,ptA); ctx.strokeStyle=ha(ptC,Math.min(ptA+0.2,1)); ctx.lineWidth=ptBW;
+  fitPts.forEach(p=>{
+    const{cx,cy}=toC(p.t,p.y,dims,xr,yr);
+    if(cx<l-ptS||cx>r+ptS||cy<t-ptS||cy>b+ptS) return; // clip
+    ctx.beginPath();
+    if(ptStyle==='rect'){ ctx.rect(cx-ptS,cy-ptS,ptS*2,ptS*2); }
+    else if(ptStyle==='triangle'){ ctx.moveTo(cx,cy-ptS);ctx.lineTo(cx+ptS,cy+ptS);ctx.lineTo(cx-ptS,cy+ptS);ctx.closePath(); }
+    else { ctx.arc(cx,cy,ptS,0,Math.PI*2); }
+    ctx.fill(); if(ptBW>0) ctx.stroke();
+  });
+
+  // Rubber-band zoom rect
+  if(rubberMap['fit']){
+    const rb=rubberMap['fit'];
+    const rx2=Math.min(rb.x1,rb.x2),ry2=Math.min(rb.y1,rb.y2),rw=Math.abs(rb.x2-rb.x1),rh=Math.abs(rb.y2-rb.y1);
+    ctx.fillStyle='rgba(184,74,46,0.10)'; ctx.fillRect(rx2,ry2,rw,rh);
+    ctx.save(); ctx.strokeStyle='#b84a2e'; ctx.lineWidth=1.5*dpr; ctx.setLineDash([4*dpr,3*dpr]);
+    ctx.strokeRect(rx2,ry2,rw,rh); ctx.restore();
+  }
+  ctx.restore();
+
+  // Y-axis label uses model equation string
+  const yLbl = selectedModel ? `f(α)  [${selectedModel.id}]` : 'f(α)';
+  drawAxesFit(ctx,dims,xr,yr,'Time (t − t₀)',yLbl);
+
+  // R² annotation top-right
+  if(fitReg){
+    ctx.save();
+    ctx.fillStyle='#b84a2e'; ctx.textAlign='right';
+    ctx.font=`${10*dpr}px 'DM Mono',monospace`;
+    ctx.fillText(`R² = ${fitReg.r2.toFixed(5)}  k = ${fitReg.k.toExponential(3)}`,r-4*dpr,t-4*dpr);
+    ctx.restore();
+  }
+  document.getElementById('fitLbl').textContent=
+    selectedModel ? `f(α) vs time  —  ${selectedModel.name}` : 'f(α) vs time';
+}
+
+// drawAxesFit: uses right-panel style controls; slider values are px sizes at 1x dpr
+function drawAxesFit(ctx,dims,xr,yr,xLabel,yLabel){
+  const{l,r,t,b,pw,ph,dpr}=dims;
+  const axC   = gv('axCol')||'#000000';
+  const font  = gv('fontFam')||'Arial,sans-serif';
+  const axSz  = (parseFloat(gv('axSz'))||36) * dpr;
+  const tkSz  = (parseFloat(gv('tkSz'))||30) * dpr;
+  const gridOn= gb('grid');
+  const gridC = gv('gridCol')||'#dddddd';
+  const gridW = (parseFloat(gv('gridW'))||1) * dpr;
+  const frameW= (parseFloat(gv('frameW'))||3) * dpr;
+  const TL    = (parseFloat(gv('tickLen'))||8) * dpr;
+  const tickDir = gv('tickDir')||'out';
+  const majTW = (parseFloat(gv('majTickW'))||3) * dpr;
+  const boxBdr= gb('boxBdr');
+  const boxW  = (parseFloat(gv('boxW'))||3) * dpr;
+  const boxC  = gv('boxCol')||'#000000';
+  const xLblTxt = gv('xLbl')||xLabel;
+  const yLblTxt = gv('yLbl')||yLabel;
+  const ttl   = gv('ttl');
+  const ttlSz = (parseFloat(gv('ttlSz'))||30) * dpr;
+
+  // Consistent decimal places per axis
+  const xDp = tickDecimals(xr.ticks);
+  const yDp = tickDecimals(yr.ticks);
+
+  ctx.save();
+
+  // Grid
+  if(gridOn){
+    ctx.strokeStyle=gridC; ctx.lineWidth=gridW; ctx.setLineDash([3*dpr,5*dpr]);
+    xr.ticks.forEach(v=>{
+      const cx=l+(v-xr.min)/(xr.max-xr.min)*pw;
+      if(cx<l||cx>r) return;
+      ctx.beginPath();ctx.moveTo(cx,t);ctx.lineTo(cx,b);ctx.stroke();
+    });
+    yr.ticks.forEach(v=>{
+      const cy=b-(v-yr.min)/(yr.max-yr.min)*ph;
+      if(cy<t||cy>b) return;
+      ctx.beginPath();ctx.moveTo(l,cy);ctx.lineTo(r,cy);ctx.stroke();
+    });
+    ctx.setLineDash([]);
+  }
+
+  // Frame / box border
+  ctx.strokeStyle=axC; ctx.lineWidth=frameW;
+  ctx.strokeRect(l,t,pw,ph);
+  if(boxBdr){ ctx.strokeStyle=boxC; ctx.lineWidth=boxW; ctx.strokeRect(l,t,pw,ph); }
+
+  // Ticks and tick labels
+  ctx.strokeStyle=axC; ctx.lineWidth=majTW;
+  ctx.fillStyle=axC; ctx.textAlign='center'; ctx.font=`${tkSz}px ${font}`;
+  xr.ticks.forEach(v=>{
+    const cx=l+(v-xr.min)/(xr.max-xr.min)*pw;
+    if(cx<l-1||cx>r+1) return;
+    if(tickDir==='out'||tickDir==='both'){ctx.beginPath();ctx.moveTo(cx,b);ctx.lineTo(cx,b+TL);ctx.stroke();}
+    if(tickDir==='in' ||tickDir==='both'){ctx.beginPath();ctx.moveTo(cx,b);ctx.lineTo(cx,b-TL);ctx.stroke();}
+    ctx.fillText(fmtTick(v,xDp), cx, b+TL+tkSz*1.1);
+  });
+  ctx.textAlign='right';
+  yr.ticks.forEach(v=>{
+    const cy=b-(v-yr.min)/(yr.max-yr.min)*ph;
+    if(cy<t-1||cy>b+1) return;
+    if(tickDir==='out'||tickDir==='both'){ctx.beginPath();ctx.moveTo(l,cy);ctx.lineTo(l-TL,cy);ctx.stroke();}
+    if(tickDir==='in' ||tickDir==='both'){ctx.beginPath();ctx.moveTo(l,cy);ctx.lineTo(l+TL,cy);ctx.stroke();}
+    ctx.fillText(fmtTick(v,yDp), l-TL-4*dpr, cy+tkSz*0.35);
+  });
+
+  // Axis labels
+  ctx.fillStyle=axC; ctx.font=`${axSz}px ${font}`; ctx.textAlign='center';
+  ctx.fillText(xLblTxt, (l+r)/2, b+TL+tkSz*1.1+axSz*1.3);
+  // Y label: snug against tick labels — measure widest tick label
+  ctx.font=`${tkSz}px ${font}`;
+  const maxTickW = Math.max(...yr.ticks.map(v=>ctx.measureText(fmtTick(v,yDp)).width));
+  ctx.font=`${axSz}px ${font}`;
+  const yLblX = l - TL - 4*dpr - maxTickW - axSz*0.8;
+  ctx.save(); ctx.translate(yLblX,(t+b)/2); ctx.rotate(-Math.PI/2);
+  ctx.fillText(yLblTxt, 0, 0);
+  ctx.restore();
+
+  // Title (only if non-empty)
+  if(ttl && ttl.trim()){
+    ctx.fillStyle=axC; ctx.font=`${ttlSz}px ${font}`; ctx.textAlign='center';
+    ctx.fillText(ttl.trim(), (l+r)/2, t - ttlSz*0.4);
+  }
+
+  ctx.restore();
+}
+
+// Recompute fit from visible fit window (x range) and redraw
+function recomputeFitFromView(){
+  if(!selectedModel||!fitPts.length) return;
+  // all fit points within current x view
+  const{xr}=getRanges('fit');
+  const visible=fitPts.filter(p=>p.t>=xr.min&&p.t<=xr.max);
+  if(visible.length<2) return;
+  const reg=linReg(visible.map(p=>p.t),visible.map(p=>p.y));
+  if(!reg) return;
+  fitReg=reg;
+  updateResBox();
+}
+
+function gv(id){const el=document.getElementById(id);return el?el.value:'';}
+function gb(id){const el=document.getElementById(id);return el?el.checked:false;}
+function gn(id){const v=parseFloat(gv(id));return isNaN(v)?undefined:v;}
+function ha(hex,a){const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b2=parseInt(hex.slice(5,7),16);return`rgba(${r},${g},${b2},${a})`}
+function V(el,dp){if(el.nextElementSibling)el.nextElementSibling.textContent=parseFloat(el.value).toFixed(dp||0)}
+function tog(head){head.closest('.cp-group').classList.toggle('open')}
+function fmt4(v){if(v===undefined||v===null||isNaN(v))return'--';const a=Math.abs(v);if(a===0)return'0';if(a>=1e5||a<1e-3)return v.toExponential(3);return parseFloat(v.toPrecision(4)).toString()}
+
+// redraw is called by right-panel controls — redraws fit canvas
+function redraw(){ if(currentTab==='fit'){ recomputeFitFromView(); drawFit(); } }
+
+function savePlot(){
+  if(!fitPts.length||!fitReg){st('No fit to save.','err');return}
+  const W=parseInt(gv('expW'))||1200, H=parseInt(gv('expH'))||900;
+  const fmt2=(gv('expFmt')||'PNG').toLowerCase();
+
+  // Create a dedicated offscreen canvas at the export resolution
+  const oc=document.createElement('canvas');
+  oc.width=W; oc.height=H;
+  const ctx=oc.getContext('2d');
+
+  // Fill chart background
+  ctx.fillStyle=gv('chartBg')||'#ffffff';
+  ctx.fillRect(0,0,W,H);
+
+  // Compute plot dimensions using the same PAD logic but scaled to export size
+  const dpr=1; // draw at 1:1 — the canvas IS the target resolution
+  const pad={top:PAD.top, right:PAD.right, bottom:PAD.bottom, left:PAD.left};
+  // Scale padding proportionally to export size vs typical screen size
+  const scale=Math.min(W/800, H/600);
+  const l=Math.round(pad.left*scale*2.5);
+  const r2=W-Math.round(pad.right*scale*2.5);
+  const t2=Math.round(pad.top*scale*2.5);
+  const b2=H-Math.round(pad.bottom*scale*2.5);
+  const pw=r2-l, ph=b2-t2;
+
+  const dims={w:W,h:H,dpr:1,l,r:r2,t:t2,b:b2,pw,ph};
+  const{xr,yr}=getRanges('fit');
+
+  // Plot area background
+  ctx.fillStyle=gv('plotBg')||'#ffffff';
+  ctx.fillRect(l,t2,pw,ph);
+
+  ctx.save(); ctx.beginPath(); ctx.rect(l,t2,pw,ph); ctx.clip();
+
+  // Grid
+  const gridOn=gb('grid'), gridC=gv('gridCol')||'#dddddd';
+  const gridW=parseFloat(gv('gridW'))||1;
+  if(gridOn){
+    ctx.strokeStyle=gridC; ctx.lineWidth=gridW; ctx.setLineDash([3,5]);
+    xr.ticks.forEach(v=>{const cx=l+(v-xr.min)/(xr.max-xr.min)*pw;ctx.beginPath();ctx.moveTo(cx,t2);ctx.lineTo(cx,b2);ctx.stroke()});
+    yr.ticks.forEach(v=>{const cy=b2-(v-yr.min)/(yr.max-yr.min)*ph;ctx.beginPath();ctx.moveTo(l,cy);ctx.lineTo(r2,cy);ctx.stroke()});
+    ctx.setLineDash([]);
+  }
+
+  // Regression line
+  const lnC=gv('lnCol')||'#b84a2e', lnW2=parseFloat(gv('lnW'))||3;
+  const dashStr=gv('lnDash');
+  ctx.save();
+  ctx.strokeStyle=lnC; ctx.lineWidth=lnW2*scale;
+  if(dashStr) ctx.setLineDash(dashStr.split(',').map(v=>parseFloat(v)*scale));
+  const{cx:lx,cy:ly}=toC(xr.min,fitReg.k*xr.min+fitReg.b,dims,xr,yr);
+  const{cx:rx3,cy:ry3}=toC(xr.max,fitReg.k*xr.max+fitReg.b,dims,xr,yr);
+  ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(rx3,ry3); ctx.stroke();
+  ctx.restore();
+
+  // Data points
+  const ptC=gv('ptCol')||'#000000', ptS2=(parseFloat(gv('ptSz'))||5)*scale;
+  const ptA=parseFloat(gv('ptOp'))||1, ptBW2=(parseFloat(gv('ptBW'))||1.5)*scale;
+  ctx.fillStyle=ha(ptC,ptA); ctx.strokeStyle=ha(ptC,Math.min(ptA+0.2,1)); ctx.lineWidth=ptBW2;
+  fitPts.forEach(p=>{
+    const{cx,cy}=toC(p.t,p.y,dims,xr,yr);
+    if(cx<l-ptS2||cx>r2+ptS2||cy<t2-ptS2||cy>b2+ptS2) return;
+    ctx.beginPath(); ctx.arc(cx,cy,ptS2,0,Math.PI*2);
+    ctx.fill(); if(ptBW2>0) ctx.stroke();
+  });
+
+  ctx.restore(); // end clip
+
+  // Axes and labels
+  const axC=gv('axCol')||'#000000', font=gv('fontFam')||'Arial,sans-serif';
+  const axSz=(parseFloat(gv('axSz'))||36)*scale;
+  const tkSz=(parseFloat(gv('tkSz'))||30)*scale;
+  const frameW2=(parseFloat(gv('frameW'))||3)*scale;
+  const TL=(parseFloat(gv('tickLen'))||8)*scale;
+  const tickDir=gv('tickDir')||'out';
+  const majTickW2=(parseFloat(gv('majTickW'))||3)*scale;
+  const boxBdr=gb('boxBdr'), boxW2=(parseFloat(gv('boxW'))||3)*scale, boxC=gv('boxCol')||'#000000';
+  const xLblTxt=gv('xLbl')||'Time (t − t₀)', yLblTxt=gv('yLbl')||'f(α)';
+  const ttl=gv('ttl'), ttlSz=(parseFloat(gv('ttlSz'))||30)*scale;
+
+  const xDp=tickDecimals(xr.ticks), yDp=tickDecimals(yr.ticks);
+
+  // Frame
+  ctx.strokeStyle=axC; ctx.lineWidth=frameW2;
+  ctx.strokeRect(l,t2,pw,ph);
+  if(boxBdr){ ctx.strokeStyle=boxC; ctx.lineWidth=boxW2; ctx.strokeRect(l,t2,pw,ph); }
+
+  // Ticks + tick labels
+  ctx.strokeStyle=axC; ctx.lineWidth=majTickW2;
+  ctx.fillStyle=axC; ctx.font=`${tkSz}px ${font}`; ctx.textAlign='center';
+  xr.ticks.forEach(v=>{
+    const cx=l+(v-xr.min)/(xr.max-xr.min)*pw; if(cx<l-1||cx>r2+1) return;
+    if(tickDir==='out'||tickDir==='both'){ctx.beginPath();ctx.moveTo(cx,b2);ctx.lineTo(cx,b2+TL);ctx.stroke()}
+    if(tickDir==='in' ||tickDir==='both'){ctx.beginPath();ctx.moveTo(cx,b2);ctx.lineTo(cx,b2-TL);ctx.stroke()}
+    ctx.fillText(fmtTick(v,xDp),cx,b2+TL+tkSz*1.1);
+  });
+  ctx.textAlign='right';
+  yr.ticks.forEach(v=>{
+    const cy=b2-(v-yr.min)/(yr.max-yr.min)*ph; if(cy<t2-1||cy>b2+1) return;
+    if(tickDir==='out'||tickDir==='both'){ctx.beginPath();ctx.moveTo(l,cy);ctx.lineTo(l-TL,cy);ctx.stroke()}
+    if(tickDir==='in' ||tickDir==='both'){ctx.beginPath();ctx.moveTo(l,cy);ctx.lineTo(l+TL,cy);ctx.stroke()}
+    ctx.fillText(fmtTick(v,yDp),l-TL-4*scale,cy+tkSz*0.35);
+  });
+  // Axis labels
+  ctx.font=`${tkSz}px ${font}`;
+  const maxTkW=Math.max(...yr.ticks.map(v=>ctx.measureText(fmtTick(v,yDp)).width));
+  ctx.fillStyle=axC; ctx.textAlign='center'; ctx.font=`${axSz}px ${font}`;
+  ctx.fillText(xLblTxt,(l+r2)/2,b2+TL+tkSz*1.1+axSz*1.3);
+  const yLblX2=l-TL-4*scale-maxTkW-axSz*0.8;
+  ctx.save(); ctx.translate(yLblX2,(t2+b2)/2); ctx.rotate(-Math.PI/2);
+  ctx.fillText(yLblTxt,0,0); ctx.restore();
+
+  // Title
+  if(ttl&&ttl.trim()){
+    ctx.textAlign='center'; ctx.font=`${ttlSz}px ${font}`; ctx.fillStyle=axC;
+    ctx.fillText(ttl.trim(),(l+r2)/2,t2-ttlSz*0.4);
+  }
+
+  const url=oc.toDataURL(fmt2==='jpeg'?'image/jpeg':'image/png',0.97);
+  const a=document.createElement('a'); a.href=url; a.download='kinetics_fit.'+fmt2; a.click();
+  st('Plot saved.','ok');
+}
+
+// ════════════════════════════════════════════════════════════════
+//  TABS
+// ════════════════════════════════════════════════════════════════
+function switchTab(tab){
+  currentTab=tab;
+  ['raw','alpha','fit'].forEach(id=>{
+    const tb=document.getElementById('tab-'+id);
+    const pn=document.getElementById('panel-'+id);
+    if(tb) tb.classList.toggle('active',id===tab);
+    if(pn) pn.style.display=id===tab?'':'none';
+  });
+  if(tab==='raw')  { renderRaw(); }
+  else if(tab==='alpha'){ setTimeout(()=>{ renderAlpha(); setupAlphaCanvas(); },30); }
+  else if(tab==='fit')  { setTimeout(()=>{ renderFit();   setupFitCanvas();   },30); }
+}
+
+// ════════════════════════════════════════════════════════════════
+//  EXPORT CSV
+// ════════════════════════════════════════════════════════════════
+function exportCSV(){
+  if(!fitReg||!selectedModel) return;
+  const lines=['Solid State Kinetics Results','',
+    'Model,'+selectedModel.name,
+    'k,'+fitReg.k,'b,'+fitReg.b,'R2,'+fitReg.r2,'',
+    't-t0,alpha,F(alpha),residual'];
+  alphaData.forEach(p=>{
+    const fy=selectedModel.f(p.alpha);
+    const fitted=fitReg.k*p.t+fitReg.b;
+    lines.push(`${p.t},${p.alpha},${fy},${fy-fitted}`);
+  });
+  const blob=new Blob([lines.join('\r\n')],{type:'text/csv'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='kinetics_results.csv';a.click();
+  st('CSV exported.','ok');
+}
+
+// ════════════════════════════════════════════════════════════════
+//  STEP INDICATORS
+// ════════════════════════════════════════════════════════════════
+function setStepA(n){for(let i=1;i<=3;i++){const el=document.getElementById('step'+i);if(!el)continue;el.classList.toggle('active',i===n);el.classList.toggle('done',i<n)}}
+function setStepD(n){const el=document.getElementById('step'+n);if(el){el.classList.remove('active');el.classList.add('done')}}
+
+function st(msg,cls){const el=document.getElementById('status');el.textContent=msg;el.className=cls||''}
+
+window.addEventListener('resize',()=>{
+  clearTimeout(window._rt);
+  window._rt=setTimeout(()=>{
+    renderRaw();
+    if(currentTab==='alpha') renderAlpha();
+    if(currentTab==='fit')   renderFit();
+  },80);
+});
+
+buildModelGroups();
+setupRawCanvas();
+requestAnimationFrame(()=>{ renderRaw(); });
+</script>
+</body>
+</html>
