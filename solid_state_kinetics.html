@@ -62,7 +62,7 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
 #eqCanvas{display:block;width:100%;background:var(--cream);border:1.5px solid var(--rule);margin-top:8px}
 
 /* results box */
-.res-box{background:var(--cream);border:1.5px solid var(--rule);padding:10px 12px;font-family:var(--mono);font-size:11px;line-height:1.9;margin-top:0}
+.res-box{background:var(--cream);border:1.5px solid var(--rule);padding:10px 12px;font-family:var(--mono);font-size:11px;line-height:1.7;margin-top:0}
 .res-box .rl{color:#888}
 .res-box .rv{color:#2a7a3b;font-weight:500}
 .res-box .rr{color:var(--accent);font-weight:600;font-size:12px}
@@ -89,7 +89,7 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
 .raw-canvas-wrap canvas{display:block;width:100%!important;height:100%!important;cursor:crosshair}
 .canvas-lbl{position:absolute;top:8px;left:12px;font-family:var(--mono);font-size:10px;color:#aaa;pointer-events:none;z-index:2;letter-spacing:.05em}
 .canvas-hint{position:absolute;bottom:8px;right:12px;font-family:var(--mono);font-size:9px;color:#bbb;pointer-events:none;z-index:2}
-.zoom-reset{position:absolute;top:8px;right:12px;font-family:var(--mono);font-size:9px;padding:3px 8px;background:var(--paper);border:1.5px solid var(--rule);cursor:pointer;z-index:3;color:#888;letter-spacing:.06em;text-transform:uppercase}
+.zoom-reset{position:absolute;top:3px;right:12px;font-family:var(--mono);font-size:9px;padding:3px 8px;background:var(--paper);border:1.5px solid var(--rule);cursor:pointer;z-index:3;color:#888;letter-spacing:.06em;text-transform:uppercase}
 .zoom-reset:hover{border-color:var(--accent);color:var(--accent)}
 
 /* chart-wrap removed — fit panel now uses raw-area canvas */
@@ -158,6 +158,16 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
   </div>
 
   <div class="sb">
+    <div class="lbl">Units</div>
+    <div class="range-row" style="margin-top:0">
+      <div class="range-field">
+        <label>Time unit</label>
+        <input type="text" id="timeUnit" placeholder="e.g. s, min, h" style="background:var(--cream);border:1.5px solid var(--rule);padding:4px 7px;font-family:var(--mono);font-size:11px;color:var(--ink);width:100%;outline:none" oninput="updateResBox()">
+      </div>
+    </div>
+  </div>
+
+  <div class="sb">
     <div class="lbl">Kinetic Model</div>
     <div id="modelGroups"></div>
     <canvas id="eqCanvas" height="110"></canvas>
@@ -205,7 +215,7 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
       <div class="canvas-lbl" id="fitLbl">f(α) vs time — select a model first</div>
       <div class="zoom-reset" onclick="resetZoom()">&#8635; Reset</div>
       <canvas id="fitCanvas"></canvas>
-      <div class="canvas-hint">left-drag: zoom · right-drag: pan</div>
+      <div class="canvas-hint">left-drag: zoom &nbsp;·&nbsp; right-drag: pan</div>
     </div>
   </div>
 
@@ -592,13 +602,19 @@ function computeAlpha(){
 
 function linReg(xs,ys){
   const n=xs.length; if(n<2) return null;
-  let sx=0,sy=0,sx2=0,sxy=0,sy2=0;
-  for(let i=0;i<n;i++){sx+=xs[i];sy+=ys[i];sx2+=xs[i]*xs[i];sxy+=xs[i]*ys[i];sy2+=ys[i]*ys[i]}
+  let sx=0,sy=0,sx2=0,sxy=0;
+  for(let i=0;i<n;i++){sx+=xs[i];sy+=ys[i];sx2+=xs[i]*xs[i];sxy+=xs[i]*ys[i];}
   const den=n*sx2-sx*sx; if(Math.abs(den)<1e-15) return null;
   const k=(n*sxy-sx*sy)/den, b=(sy-k*sx)/n;
-  const ss=ys.reduce((a,y,i)=>a+(y-(k*xs[i]+b))**2,0);
-  const st2=ys.reduce((a,y)=>a+(y-sy/n)**2,0);
-  return {k,b,r2:st2<1e-15?1:1-ss/st2};
+  const ssres=ys.reduce((a,y,i)=>a+(y-(k*xs[i]+b))**2,0);
+  const sstot=ys.reduce((a,y)=>a+(y-sy/n)**2,0);
+  const r2=sstot<1e-15?1:1-ssres/sstot;
+  // Residual variance (unbiased)
+  const s2=n>2?ssres/(n-2):0;
+  // Standard errors of slope and intercept
+  const se_k=Math.sqrt(s2*n/den);
+  const se_b=Math.sqrt(s2*sx2/den);
+  return{k,b,r2,se_k,se_b,n};
 }
 
 function computeFit(){
@@ -618,12 +634,25 @@ function computeFit(){
 function updateResBox(){
   const el=document.getElementById('resBox');
   if(!fitReg){el.innerHTML='<div class="res-ph">Insufficient data</div>';return}
+  const tu=(document.getElementById('timeUnit').value||'').trim();
+  // k has units of [time]⁻¹; b is dimensionless (same units as f(α))
+  const kUnit = tu ? ` ${tu}⁻¹` : '';
   const sign=fitReg.b>=0?'+':'−';
+  // Format value ± esd with matching exponent
+  function fmtEsd(val, esd){
+    if(esd===0||!isFinite(esd)) return val.toExponential(4);
+    // Express both in same exponent as val
+    const exp=Math.floor(Math.log10(Math.abs(val)||1));
+    const scale=Math.pow(10,exp);
+    const vN=(val/scale), eN=(esd/scale);
+    return `(${vN.toFixed(3)} ± ${eN.toFixed(3)}) × 10<sup>${exp}</sup>`;
+  }
   el.innerHTML=`<div class="res-box">
     <div><span class="rl">Model  </span><span class="rv">${selectedModel.name}</span></div>
-    <div><span class="rl">k      </span><span class="rv">${fitReg.k.toExponential(4)}</span></div>
-    <div><span class="rl">b      </span><span class="rv">${fitReg.b.toExponential(4)}</span></div>
-    <div><span class="rl">R²     </span><span class="rr">${fitReg.r2.toFixed(6)}</span></div>
+    <div style="margin-top:4px"><span class="rl">k </span><span class="rv">${fmtEsd(fitReg.k,fitReg.se_k)}${kUnit}</span></div>
+    <div style="margin-top:2px"><span class="rl">b </span><span class="rv">${fmtEsd(fitReg.b,fitReg.se_b)}</span></div>
+    <div style="margin-top:4px"><span class="rl">R²     </span><span class="rr">${fitReg.r2.toFixed(6)}</span></div>
+    <div style="margin-top:2px;font-size:10px;color:#aaa;font-family:var(--mono)">n = ${fitReg.n} points</div>
     <div style="margin-top:4px;font-size:10px;color:#aaa;font-family:var(--mono)">F(α) = ${fitReg.k.toExponential(3)}·t ${sign} ${Math.abs(fitReg.b).toExponential(3)}</div>
   </div>`;
   document.getElementById('btnExport').disabled=false;
@@ -1150,14 +1179,6 @@ function drawFit(){
   const yLbl = selectedModel ? `f(α)  [${selectedModel.id}]` : 'f(α)';
   drawAxesFit(ctx,dims,xr,yr,'Time (t − t₀)',yLbl);
 
-  // R² annotation top-right
-  if(fitReg){
-    ctx.save();
-    ctx.fillStyle='#b84a2e'; ctx.textAlign='right';
-    ctx.font=`${10*dpr}px 'DM Mono',monospace`;
-    ctx.fillText(`R² = ${fitReg.r2.toFixed(5)}  k = ${fitReg.k.toExponential(3)}`,r-4*dpr,t-4*dpr);
-    ctx.restore();
-  }
   document.getElementById('fitLbl').textContent=
     selectedModel ? `f(α) vs time  —  ${selectedModel.name}` : 'f(α) vs time';
 }
