@@ -964,7 +964,7 @@ const MOD={
     jac:(p,[qm,K,n])=>{if(p<=0)return[0,0,0];const pe=Math.pow(p,1/n),dn=qm+K*pe,dn2=dn*dn;return[(K*p*K*pe)/dn2,(qm*p*dn-qm*K*p*pe)/dn2,qm*K*p*K*pe*Math.log(p)/(n*n*dn2)]}
   },
 
-  lf2:{name:'Dual-Site Langmuir-Freundlich',
+  lf2:{name:'Dual-Site Langmuir-Freundlich',rows:[[0,1,2],[3,4,5]],
     desc:'Two L-F sites: nm1,a1,m1 = site 1; nm2,a2,m2 = site 2',
     params:[
       {id:'nm1',lbl:'n\u2098\u2081',csv:'nm1',title:'SITE-1 MAX UPTAKE',html:'<i>n</i><sub>m1</sub>',hint:'site-1 max uptake',def:5},
@@ -1270,8 +1270,6 @@ document.getElementById('btnFit').addEventListener('click',()=>{
 
 function showResults(r,mod){
   const nc=mod.params.length+(r.extra||[]).length;
-  const cols=Math.min(nc,5);
-  let html=`<div class="r-grid" style="grid-template-columns:repeat(${cols},1fr)">`;
   function rcell(title,htmlSym,val,seVal,hi){
     const cls='rc'+(hi?' hi':'');
     const seStr=fmtSE(val,seVal);
@@ -1281,17 +1279,36 @@ function showResults(r,mod){
       +`<div class="rv">${htmlSym} = ${fmt(val)}${seDisp}</div>`
       +'</div>';
   }
-  mod.params.forEach((pr,i)=>{
-    const sym=pr.html||('<i>'+pr.lbl+'</i>');
-    const ttl=pr.title||(pr.lbl.toUpperCase());
-    html+=rcell(ttl,sym,r.par[i],r.se[i],false);
-  });
-  (r.extra||[]).forEach(e=>{
-    const sym=e.html||('<i>'+e.lbl+'</i>');
-    const ttl=e.title||(e.lbl.toUpperCase());
-    html+=rcell(ttl,sym,e.val,e.se,true);
-  });
-  html+=`</div><div class="gof">
+  // Dual-site L-F: split params into two rows of 3 (site 1 then site 2)
+  let html='';
+  if(mod.rows){
+    mod.rows.forEach(row=>{
+      const cols=row.length;
+      html+=`<div class="r-grid" style="grid-template-columns:repeat(${cols},1fr);margin-bottom:1px">`;
+      row.forEach(idx=>{
+        const pr=mod.params[idx];
+        const sym=pr.html||('<i>'+pr.lbl+'</i>');
+        const ttl=pr.title||(pr.lbl.toUpperCase());
+        html+=rcell(ttl,sym,r.par[idx],r.se[idx],false);
+      });
+      html+='</div>';
+    });
+  }else{
+    const cols=Math.min(nc,5);
+    html+=`<div class="r-grid" style="grid-template-columns:repeat(${cols},1fr)">`;
+    mod.params.forEach((pr,i)=>{
+      const sym=pr.html||('<i>'+pr.lbl+'</i>');
+      const ttl=pr.title||(pr.lbl.toUpperCase());
+      html+=rcell(ttl,sym,r.par[i],r.se[i],false);
+    });
+    (r.extra||[]).forEach(e=>{
+      const sym=e.html||('<i>'+e.lbl+'</i>');
+      const ttl=e.title||(e.lbl.toUpperCase());
+      html+=rcell(ttl,sym,e.val,e.se,true);
+    });
+    html+='</div>';
+  }
+  html+=`<div class="gof">\n'
     <div class="gi"><div class="gl">R&sup2;</div><div class="gv">${r.rsq.toFixed(5)}</div></div>
     <div class="gi"><div class="gl">SSR</div><div class="gv">${r.ss.toExponential(3)}</div></div>
     <div class="gi"><div class="gl">n</div><div class="gv">${rawData.length}</div></div>
