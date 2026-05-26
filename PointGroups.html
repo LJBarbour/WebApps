@@ -513,7 +513,7 @@ const POINT_GROUPS = [
     centrosym: true,
     ops: "E, 8C₃, 3C₂, i, 8S₆, 3σh",
     generators: ["c2z","c3_111","mxy"],
-    mirrors: [{normal:[1,0,0]},{normal:[0,1,0]},{normal:[0,0,1]}], rotAxes: [{axis:[0,0,1],order:2},{axis:[1,0,0],order:2},{axis:[0,1,0],order:2},{axis:[1,1,1],order:3},{axis:[1,-1,1],order:3},{axis:[-1,1,1],order:3},{axis:[-1,-1,1],order:3}], invAxes: [], rotInvAxes: []
+    mirrors: [{normal:[1,0,0]},{normal:[0,1,0]},{normal:[0,0,1]}], rotAxes: [{axis:[0,0,1],order:2},{axis:[1,0,0],order:2},{axis:[0,1,0],order:2}], invAxes: [], rotInvAxes: [{axis:[1,1,1],order:6},{axis:[1,-1,1],order:6},{axis:[-1,1,1],order:6},{axis:[-1,-1,1],order:6}]
   },
   {
     hm: "432", sch: "O", system: "cubic", order: 24, name: "Gyroidal",
@@ -527,14 +527,14 @@ const POINT_GROUPS = [
     centrosym: false,
     ops: "E, 8C₃, 6S₄, 6σd, 3C₂",
     generators: ["s4z","c3_111"],
-    mirrors: [{normal:[1,1,0]},{normal:[1,-1,0]},{normal:[1,0,1]},{normal:[1,0,-1]},{normal:[0,1,1]},{normal:[0,1,-1]}], rotAxes: [{axis:[1,1,1],order:3},{axis:[1,-1,1],order:3},{axis:[-1,1,1],order:3},{axis:[-1,-1,1],order:3},{axis:[0,0,1],order:2},{axis:[1,0,0],order:2},{axis:[0,1,0],order:2}], invAxes: [], rotInvAxes: [{axis:[0,0,1],order:4},{axis:[1,0,0],order:4},{axis:[0,1,0],order:4}]
+    mirrors: [{normal:[1,1,0]},{normal:[1,-1,0]},{normal:[1,0,1]},{normal:[1,0,-1]},{normal:[0,1,1]},{normal:[0,1,-1]}], rotAxes: [{axis:[1,1,1],order:3},{axis:[1,-1,1],order:3},{axis:[-1,1,1],order:3},{axis:[-1,-1,1],order:3}], invAxes: [], rotInvAxes: [{axis:[0,0,1],order:4},{axis:[1,0,0],order:4},{axis:[0,1,0],order:4}]
   },
   {
     hm: "m3̅m", sch: "Oₕ", system: "cubic", order: 48, name: "Hexoctahedral",
     centrosym: true,
     ops: "E, 8C₃, 6C₂, 6C₄, 3C₂', i, 8S₆, 6S₄, σh, 6σd",
     generators: ["c4z","c3_111","mxy"],
-    mirrors: [{normal:[0,0,1]},{normal:[1,0,0]},{normal:[0,1,0]},{normal:[1,1,0]},{normal:[1,-1,0]},{normal:[1,0,1]},{normal:[1,0,-1]},{normal:[0,1,1]},{normal:[0,1,-1]}], rotAxes: [{axis:[0,0,1],order:4},{axis:[1,0,0],order:4},{axis:[0,1,0],order:4},{axis:[1,1,0],order:2},{axis:[1,-1,0],order:2},{axis:[1,0,1],order:2},{axis:[1,0,-1],order:2},{axis:[0,1,1],order:2},{axis:[0,1,-1],order:2},{axis:[1,1,1],order:3},{axis:[1,-1,1],order:3},{axis:[-1,1,1],order:3},{axis:[-1,-1,1],order:3}], invAxes: [], rotInvAxes: []
+    mirrors: [{normal:[0,0,1]},{normal:[1,0,0]},{normal:[0,1,0]},{normal:[1,1,0]},{normal:[1,-1,0]},{normal:[1,0,1]},{normal:[1,0,-1]},{normal:[0,1,1]},{normal:[0,1,-1]}], rotAxes: [{axis:[0,0,1],order:4},{axis:[1,0,0],order:4},{axis:[0,1,0],order:4},{axis:[1,1,0],order:2},{axis:[1,-1,0],order:2},{axis:[1,0,1],order:2},{axis:[1,0,-1],order:2},{axis:[0,1,1],order:2},{axis:[0,1,-1],order:2}], invAxes: [], rotInvAxes: [{axis:[1,1,1],order:6},{axis:[1,-1,1],order:6},{axis:[-1,1,1],order:6},{axis:[-1,-1,1],order:6}]
   }
 ];
 
@@ -834,6 +834,96 @@ function drawAxisSymbol(ctx, x, y, order, color) {
   ctx.restore();
 }
 
+// Draw improper axis symbols at pole positions:
+//   '3bar': triangle with small circle inside
+//   '4bar': square with small ellipse inside
+//   '6bar': hexagon with small triangle inside
+//   '2/m':  ellipse with small circle inside
+//   '4/m':  square with small circle inside
+//   '6/m':  hexagon with small circle inside
+function drawImproperSymbol(ctx, x, y, type, color) {
+  const s = 12;
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.strokeStyle = '#0d1117';
+  ctx.lineWidth = 1;
+
+  if(type === '3bar') {
+    // Filled triangle — centroid is at y + s/3 below circumcentre for equilateral triangle
+    // pointing up (apex at top), so geometric centre is at y + s*1/3 * something
+    // For triangle with apex at (x, y-s) and base at y + s*0.5:
+    // centroid y = (y-s + y+s*0.5 + y+s*0.5)/3 = y + s*1/3*(0.5+0.5-1) = y
+    // Actually centroid = average of vertices:
+    // v0=(x, y-s), v1=(x+s*cos(30°), y+s*0.5), v2=(x-s*cos(30°), y+s*0.5)
+    // centroid = (x, y + (-s + 0.5s + 0.5s)/3) = (x, y)  ✓
+    ctx.beginPath();
+    for(let i=0;i<3;i++) {
+      const a = i*2*Math.PI/3 - Math.PI/2;
+      i===0 ? ctx.moveTo(x+s*Math.cos(a), y+s*Math.sin(a)) : ctx.lineTo(x+s*Math.cos(a), y+s*Math.sin(a));
+    }
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    // Circle centred at centroid = (x, y)
+    ctx.fillStyle = '#0d1117';
+    ctx.beginPath(); ctx.arc(x, y, s*0.3, 0, 2*Math.PI); ctx.fill();
+
+  } else if(type === '4bar') {
+    // Filled square with a longer, thinner ellipse inside for clarity
+    ctx.beginPath(); ctx.rect(x-s*0.75, y-s*0.75, s*1.5, s*1.5);
+    ctx.fill(); ctx.stroke();
+    // Tall thin ellipse
+    ctx.fillStyle = '#0d1117';
+    ctx.beginPath(); ctx.ellipse(x, y, s*0.18, s*0.52, 0, 0, 2*Math.PI); ctx.fill();
+
+  } else if(type === '6bar') {
+    // Filled hexagon
+    ctx.beginPath();
+    for(let i=0;i<6;i++) {
+      const a = i*Math.PI/3;
+      i===0 ? ctx.moveTo(x+s*Math.cos(a), y+s*Math.sin(a)) : ctx.lineTo(x+s*Math.cos(a), y+s*Math.sin(a));
+    }
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    // Larger triangle inside
+    ctx.fillStyle = '#0d1117';
+    ctx.beginPath();
+    for(let i=0;i<3;i++) {
+      const a = i*2*Math.PI/3 - Math.PI/2;
+      const r = s*0.62;
+      i===0 ? ctx.moveTo(x+r*Math.cos(a), y+r*Math.sin(a)) : ctx.lineTo(x+r*Math.cos(a), y+r*Math.sin(a));
+    }
+    ctx.closePath(); ctx.fill();
+
+  } else if(type === '2/m') {
+    // Filled ellipse (2-fold)
+    ctx.beginPath(); ctx.ellipse(x, y, s*0.45, s*1.0, 0, 0, 2*Math.PI);
+    ctx.fill(); ctx.stroke();
+    // Small circle inside
+    ctx.fillStyle = '#0d1117';
+    ctx.beginPath(); ctx.arc(x, y, s*0.28, 0, 2*Math.PI); ctx.fill();
+
+  } else if(type === '4/m') {
+    // Filled square
+    ctx.beginPath(); ctx.rect(x-s*0.75, y-s*0.75, s*1.5, s*1.5);
+    ctx.fill(); ctx.stroke();
+    // Small circle inside
+    ctx.fillStyle = '#0d1117';
+    ctx.beginPath(); ctx.arc(x, y, s*0.3, 0, 2*Math.PI); ctx.fill();
+
+  } else if(type === '6/m') {
+    // Filled hexagon
+    ctx.beginPath();
+    for(let i=0;i<6;i++) {
+      const a = i*Math.PI/3;
+      i===0 ? ctx.moveTo(x+s*Math.cos(a), y+s*Math.sin(a)) : ctx.lineTo(x+s*Math.cos(a), y+s*Math.sin(a));
+    }
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    // Small circle inside
+    ctx.fillStyle = '#0d1117';
+    ctx.beginPath(); ctx.arc(x, y, s*0.3, 0, 2*Math.PI); ctx.fill();
+  }
+
+  ctx.restore();
+}
+
 function drawScene() {
   ctx.clearRect(0, 0, W, H);
   const cx = W/2, cy = H/2;
@@ -954,34 +1044,87 @@ function drawScene() {
     }
   }
 
-  // Rotoinversion axes
+  // Rotoinversion axes — dashed line + improper symbol at both poles.
+  // S4(order=4)→4bar, S6(order=6)→3bar, S3(order=3)→6bar at the poles.
   if(toggles.sym && currentPG.rotInvAxes) {
+    const col = 'rgba(63,185,80,0.95)';
     for(const ra of currentPG.rotInvAxes) {
       const a = normalize(ra.axis);
       const p1 = mulMV(viewMat, a);
       const p2 = mulMV(viewMat, [-a[0],-a[1],-a[2]]);
       const s1x=cx+p1[0]*scale, s1y=cy-p1[1]*scale;
       const s2x=cx+p2[0]*scale, s2y=cy-p2[1]*scale;
+      // Dashed line
       ctx.save();
       ctx.strokeStyle = 'rgba(63,185,80,0.8)';
       ctx.lineWidth = 1.5;
       ctx.setLineDash([5,4]);
       ctx.beginPath(); ctx.moveTo(s1x,s1y); ctx.lineTo(s2x,s2y); ctx.stroke();
       ctx.restore();
+      // Symbol at both poles
+      const type = ra.order===4 ? '4bar' : ra.order===6 ? '3bar' : ra.order===3 ? '6bar' : null;
+      if(type) {
+        drawImproperSymbol(ctx, s1x, s1y, type, col);
+        drawImproperSymbol(ctx, s2x, s2y, type, col);
+      }
     }
   }
 
-  // Inversion center
+  // Centre symbol: n/m only (rotation axis with perpendicular mirror).
+  // These go at the centre of the sphere as they represent the horizontal mirror.
+  if(toggles.sym && currentPG.rotAxes && currentPG.mirrors) {
+    let bestOrder = 0, centreCol = null, centreType = null;
+    for(const ra of currentPG.rotAxes) {
+      if(ra.order < 2) continue;
+      const ax = normalize(ra.axis);
+      const hasPerp = (currentPG.mirrors||[]).some(m => {
+        const mn = normalize(m.normal);
+        return Math.abs(ax[0]*mn[0]+ax[1]*mn[1]+ax[2]*mn[2]) > 0.99;
+      });
+      if(hasPerp && ra.order > bestOrder) {
+        bestOrder = ra.order;
+        centreCol = ra.order===2 ? 'rgba(248,81,73,0.9)' :
+                    ra.order===4 ? 'rgba(248,200,73,1)' :
+                    'rgba(248,230,100,1)';
+        centreType = ra.order===2 ? '2/m' : ra.order===4 ? '4/m' : ra.order===6 ? '6/m' : null;
+      }
+    }
+    if(centreType && centreCol) {
+      drawImproperSymbol(ctx, cx, cy, centreType, centreCol);
+    }
+  }
+
+  // Inversion centre: only show the open circle when the group is centrosymmetric
+  // AND no other centre symbol (n/m or rotoinversion) is already drawn there.
+  // If a rotoinversion axis (3bar=S6, 6bar=S3) is present, inversion is implied.
+  // If a n/m symbol is drawn at centre, inversion is implied.
   if(toggles.sym && currentPG.centrosym) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(cx, cy, 8, 0, 2*Math.PI);
-    ctx.strokeStyle = 'rgba(188,140,255,0.9)';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.fillStyle = 'rgba(188,140,255,0.25)';
-    ctx.fill();
-    ctx.restore();
+    // Check if a n/m symbol was drawn at centre
+    const hasSlashM = currentPG.rotAxes && currentPG.mirrors &&
+      currentPG.rotAxes.some(ra => {
+        const ax = normalize(ra.axis);
+        return (currentPG.mirrors||[]).some(m => {
+          const mn = normalize(m.normal);
+          return Math.abs(ax[0]*mn[0]+ax[1]*mn[1]+ax[2]*mn[2]) > 0.99;
+        });
+      });
+    // Suppress inversion circle only if an n/m symbol is drawn at centre
+    // (rotoinversion symbols are now at the poles, so inversion circle may still show)
+    // But also suppress for 3bar (S6) and 6bar (S3) which include inversion
+    const hasRotInvCentro = currentPG.rotInvAxes && currentPG.rotInvAxes.some(ra =>
+      ra.order === 6 || ra.order === 3
+    );
+    if(!hasSlashM && !hasRotInvCentro) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cx, cy, 8, 0, 2*Math.PI);
+      ctx.strokeStyle = 'rgba(188,140,255,0.9)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(188,140,255,0.25)';
+      ctx.fill();
+      ctx.restore();
+    }
   }
 
   // Coordinate axes — use crystal-system-specific axis directions
