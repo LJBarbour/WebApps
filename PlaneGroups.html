@@ -31,6 +31,20 @@
     --sym-line-strong: rgba(110,231,183,0.75);
   }
 
+  body.light {
+    --bg: #ffffff;
+    --surface: #f4f4f6;
+    --surface2: #e8e9ed;
+    --border: rgba(0,0,0,0.10);
+    --border2: rgba(0,0,0,0.20);
+    --accent: #1a6bbf;
+    --accent2: #6d3bbf;
+    --accent3: #1a8a5a;
+    --text: #1a1c24;
+    --text2: #3a3f52;
+    --text3: #8a8fa0;
+  }
+
   body {
     background: var(--bg);
     color: var(--text);
@@ -427,6 +441,10 @@
           <span>Ghost motif</span>
           <label class="toggle"><input type="checkbox" id="showGhost" checked><span class="toggle-slider"></span></label>
         </div>
+        <div class="toggle-row">
+          <span>White background</span>
+          <label class="toggle"><input type="checkbox" id="lightMode"><span class="toggle-slider"></span></label>
+        </div>
       </div>
     </div>
 
@@ -722,6 +740,7 @@ let state = {
   showCell: true,
   showOrigin: true,
   showGhost: true,
+  lightMode: false,
   panX: 0,
   panY: 0,
   zoom: 1,
@@ -1121,6 +1140,26 @@ function getSymOps(group, fx, fy) {
 
 // ─── DRAWING ─────────────────────────────────────────────────────────────────
 
+// Returns colors appropriate for current background mode
+function colors() {
+  const light = state.lightMode;
+  return {
+    bg:          light ? '#ffffff' : '#0e0f14',
+    grid:        light ? 'rgba(0,0,0,0.08)'   : 'rgba(126,184,247,0.2)',
+    cellOutline: light ? 'rgba(30,80,180,0.7)' : 'rgba(126,184,247,0.85)',
+    cellFill:    light ? 'rgba(30,80,180,0.04)': 'rgba(126,184,247,0.04)',
+    origin:      light ? 'rgba(30,80,180,0.8)' : 'rgba(126,184,247,0.8)',
+    motifFill:   light ? 'rgba(100,60,180,0.25)': 'rgba(167,139,250,0.5)',
+    motifStroke: light ? '#5020a0' : '#a78bfa',
+    col2:        light ? 'rgba(180,120,0,0.9)'  : 'rgba(251,191,36,0.9)',
+    col3:        light ? 'rgba(0,130,80,0.9)'   : 'rgba(110,231,183,0.9)',
+    col4:        light ? 'rgba(20,80,180,0.9)'  : 'rgba(126,184,247,0.9)',
+    col6:        light ? 'rgba(180,30,30,0.95)' : 'rgba(248,113,113,0.95)',
+    mirror:      light ? 'rgba(120,40,200,0.9)' : 'rgba(200,160,255,0.95)',
+    glide:       light ? 'rgba(180,100,0,0.9)'  : 'rgba(255,180,80,0.95)',
+  };
+}
+
 function drawMotif(c, sx, sy, scale, mat, alpha=1) {
   const motif = MOTIFS[state.motif];
   const baseRot = state.motifRot * Math.PI / 180;
@@ -1132,8 +1171,8 @@ function drawMotif(c, sx, sy, scale, mat, alpha=1) {
   c.translate(sx, sy);
   c.transform(a, b, cc, d, 0, 0);
   c.globalAlpha = alpha;
-  c.fillStyle = 'rgba(167,139,250,0.5)';
-  c.strokeStyle = '#a78bfa';
+  c.fillStyle = colors().motifFill;
+  c.strokeStyle = colors().motifStroke;
   c.lineWidth = 1.5;
   motif.draw(c, scale);
   c.fill('evenodd');
@@ -1205,12 +1244,12 @@ function drawSymInCell(c, group, ox, oy, ax, ay, bx, by) {
     c.restore();
   };
 
-  const col2 = 'rgba(251,191,36,0.9)';   // 2-fold yellow
-  const col3 = 'rgba(110,231,183,0.9)';  // 3-fold green
-  const col4 = 'rgba(126,184,247,0.9)';  // 4-fold blue
-  const col6 = 'rgba(248,113,113,0.95)'; // 6-fold red
-  const mCol = 'rgba(200,160,255,0.95)'; // mirror — bright purple, solid
-  const gCol = 'rgba(255,180,80,0.95)';  // glide — amber, dashed (distinct from mirror)
+  const col2 = colors().col2;
+  const col3 = colors().col3;
+  const col4 = colors().col4;
+  const col6 = colors().col6;
+  const mCol = colors().mirror;
+  const gCol = colors().glide;
 
   switch(group) {
     case 'p2':
@@ -1326,7 +1365,7 @@ function drawGrid(c) {
   const range = 6;
 
   c.save();
-  c.strokeStyle = state.showCell ? 'rgba(126,184,247,0.2)' : 'rgba(126,184,247,0.07)';
+  c.strokeStyle = state.showCell ? colors().grid : (state.lightMode ? 'rgba(0,0,0,0.04)' : 'rgba(126,184,247,0.07)');
   c.lineWidth = 0.5;
 
   for (let i = -range; i <= range; i++) {
@@ -1342,7 +1381,7 @@ function drawGrid(c) {
   }
 
   if (state.showCell) {
-    c.strokeStyle = 'rgba(126,184,247,0.85)';
+    c.strokeStyle = colors().cellOutline;
     c.lineWidth = 2.5;
     c.setLineDash([]);
     const o = {x: state.panX, y: state.panY};
@@ -1350,7 +1389,7 @@ function drawGrid(c) {
     const b = {x: state.panX + bx, y: state.panY + by};
     const ab = {x: state.panX + ax + bx, y: state.panY + ay + by};
     // faint fill
-    c.fillStyle = 'rgba(126,184,247,0.04)';
+    c.fillStyle = colors().cellFill;
     c.beginPath();
     c.moveTo(o.x, o.y); c.lineTo(a.x, a.y); c.lineTo(ab.x, ab.y);
     c.lineTo(b.x, b.y); c.closePath();
@@ -1358,7 +1397,7 @@ function drawGrid(c) {
     c.stroke();
     // Corner tick marks
     c.lineWidth = 2;
-    c.strokeStyle = 'rgba(126,184,247,0.95)';
+    c.strokeStyle = colors().cellOutline;
     [[o,ax,ay],[a,-ax,-ay],[b,ax,ay],[ab,-ax,-ay]].forEach(([pt,dax,day])=>{
       const len = 6;
       const nx = -day / Math.hypot(dax,day) * len;
@@ -1370,7 +1409,7 @@ function drawGrid(c) {
   }
 
   if (state.showOrigin) {
-    c.strokeStyle = 'rgba(126,184,247,0.8)';
+    c.strokeStyle = colors().origin;
     c.lineWidth = 1;
     c.beginPath();
     c.arc(state.panX, state.panY, 4, 0, Math.PI*2);
@@ -1389,7 +1428,7 @@ function render() {
   ctx.clearRect(0, 0, W, H);
 
   // Background
-  ctx.fillStyle = '#0e0f14';
+  ctx.fillStyle = colors().bg;
   ctx.fillRect(0, 0, W, H);
 
   drawGrid(ctx);
@@ -1431,7 +1470,7 @@ function updateSymPreview() {
   const sctx = symCtx;
   const W = sc.width, H = sc.height;
   sctx.clearRect(0,0,W,H);
-  sctx.fillStyle = '#161820';
+  sctx.fillStyle = colors().bg;
   sctx.fillRect(0,0,W,H);
 
   // Draw unit cell contents
@@ -1618,6 +1657,12 @@ document.getElementById('motifRot').addEventListener('input', e => {
     state[id] = e.target.checked;
     render();
   });
+});
+
+document.getElementById('lightMode').addEventListener('change', e => {
+  state.lightMode = e.target.checked;
+  document.body.classList.toggle('light', state.lightMode);
+  render();
 });
 
 // ─── MOUSE INTERACTION ───────────────────────────────────────────────────────
