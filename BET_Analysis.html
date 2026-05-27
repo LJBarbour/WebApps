@@ -255,7 +255,7 @@ select:focus{border-color:var(--accent)}
           <span style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#888">Linear region:</span>
           <span id="rouqRangeLabel" style="font-family:var(--mono);font-size:11px;color:var(--ink)">—</span>
           <span id="rouqBadge"></span>
-          <span style="margin-left:auto;font-size:10px;color:#888">Click plot to set range endpoints</span>
+          <span style="margin-left:auto;font-size:10px;color:#888">Drag handles to adjust range (auto off)</span>
         </div>
         <div class="cw" id="cwRouq"><canvas id="chartRouq"></canvas></div>
       </div>
@@ -462,8 +462,6 @@ let rawData = [];       // [{pp0, uptake_mol_g}] — recomputed on each analysis
 let rawFileData = [];   // [{pp0, rawUptake}]    — stored once on file load, never changed
 let betRange = {iMin:0, iMax:0}; // indices into rawData (sorted by pp0)
 let betResult = null;
-let clickCount = 0;
-let clickPP0 = [];
 
 let charts = {rouq:null, bet:null, iso:null};
 let axisMode = 'full'; // 'full' = all data visible; 'zoom' = BET range window only
@@ -1317,6 +1315,7 @@ function drawRouquerolChart(expW,expH){
     title:'Rouquerol Plot',
     expW,expH
   }));
+  if(!expW) drawHandles('chartRouq');
 }
 
 function drawBETChart(expW,expH){
@@ -1346,6 +1345,7 @@ function drawBETChart(expW,expH){
     expW,expH
   }));
   drawBETAnnotation(expW,expH);
+  if(!expW) drawHandles('chartBet');
 }
 
 // =====================================================================
@@ -1544,6 +1544,7 @@ function drawIsoChart(expW,expH){
     expW,expH
   }));
   drawIsoAnnotation(expW, expH);
+  if(!expW) drawHandles('chartIso');
 }
 
 function drawAllCharts(){
@@ -1583,36 +1584,200 @@ document.querySelectorAll('.tab[data-tab]').forEach(btn=>{
 });
 
 // =====================================================================
-// CLICK TO SET RANGE ON ROUQUEROL CHART
+// DRAG HANDLES — shared across all three plots
 // =====================================================================
-document.getElementById('chartRouq').addEventListener('click', e=>{
-  if(!rawData.length||gb('autoRange')) return;
-  const canvas=document.getElementById('chartRouq');
-  const rect=canvas.getBoundingClientRect();
-  const M=getMargins();
-  const W=canvas.offsetWidth, H=canvas.offsetHeight;
-  const pL=M.left, pR=W-M.right;
-  const xFrac=(e.clientX-rect.left-pL)/(pR-pL);
-  const rq=rouquerolTransform(rawData);
-  const r=betRange;
-  const full=(axisMode==='full');
-  // Match the exact same scaleX logic used when drawing the chart
-  const inX=rq.slice(r.iMin,r.iMax+1).map(d=>d.pp0);
-  const outX=[...rq.slice(0,r.iMin).map(d=>d.pp0), ...rq.slice(r.iMax+1).map(d=>d.pp0)];
-  const scaleX = full ? [...inX,...outX] : inX;
-  const scX=makeScale(scaleX,pL,pR);
-  const clickedPP0=scX.lo+xFrac*(scX.hi-scX.lo);
-  clickPP0.push(clickedPP0);
-  if(clickPP0.length>=2){
-    const lo=Math.min(...clickPP0.slice(-2)), hi=Math.max(...clickPP0.slice(-2));
-    document.getElementById('manualMin').value=lo.toFixed(5);
-    document.getElementById('manualMax').value=hi.toFixed(5);
-    clickPP0=[];
-    document.getElementById('autoRange').checked=false;
-    onAutoRangeChange();
-    onManualRange();
+const drag = { active: false, handle: null, canvasId: null };
+const HANDLE_HIT_PX = 14;
+
+// Build the x-axis scale for any of the three charts, matching their draw functions exactly
+function getChartScaleX(canvasId){
+  const canvas = document.getElementById(canvasId);
+  if(!canvas) return null;
+  const M = getMargins();
+  const W = canvas.offsetWidth;
+  const pL = M.left, pR = W - M.right;
+  const r = betRange;
+  const full = (axisMode === 'full');
+
+  if(canvasId === 'chartRouq'){
+    const rq = rouquerolTransform(rawData);
+    const inX = rq.slice(r.iMin,r.iMax+1).map(d=>d.pp0);
+    const outX = [...rq.slice(0,r.iMin).map(d=>d.pp0), ...rq.slice(r.iMax+1).map(d=>d.pp0)];
+    return makeScale(full ? [...inX,...outX] : inX, pL, pR);
+  }
+  if(canvasId === 'chartBet'){
+    const inX = rawData.slice(r.iMin,r.iMax+1).map(d=>d.pp0);
+    const outX = [...rawData.slice(0,r.iMin),...rawData.slice(r.iMax+1)].map(d=>d.pp0);
+    return makeScale(full ? [...inX,...outX] : inX, pL, pR);
+  }
+  if(canvasId === 'chartIso'){
+    const allX = rawData.map(d=>d.pp0);
+    if(!full){
+      const xPad = (rawData[r.iMax].pp0 - rawData[r.iMin].pp0) * 0.15;
+      const zLo = Math.max(0, rawData[r.iMin].pp0 - xPad);
+      const zHi = Math.min(1, rawData[r.iMax].pp0 + xPad);
+      const zX = rawData.filter(d=>d.pp0>=zLo && d.pp0<=zHi).map(d=>d.pp0);
+      return makeScale(zX.length ? zX : allX, pL, pR);
+    }
+    return makeScale(allX, pL, pR);
+  }
+  return null;
+}
+
+// Draw handles on a canvas — called after each chart draw
+function drawHandles(canvasId){
+  if(!rawData.length || gb('autoRange')) return;
+  const canvas = document.getElementById(canvasId);
+  if(!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.offsetWidth, H = canvas.offsetHeight;
+  const M = getMargins();
+  const pL=M.left, pR=W-M.right, pT=M.top, pB=H-M.bottom;
+
+  const scX = getChartScaleX(canvasId);
+  if(!scX) return;
+  const r = betRange;
+  const xMin = scX.toPixel(rawData[r.iMin].pp0);
+  const xMax = scX.toPixel(rawData[r.iMax].pp0);
+
+  // Skip handles that fall outside the plot area (e.g. zoom mode on iso)
+  const midY = (pT + pB) / 2;
+  const tabH = 28, tabW = 10, rc = 3;
+
+  ctx.save();
+  ctx.scale(dpr, dpr);
+
+  function drawOneHandle(x, side){
+    const isDragging = drag.active && drag.handle===side && drag.canvasId===canvasId;
+    const col = isDragging ? 'rgba(180,30,30,0.9)' : 'rgba(180,30,30,0.6)';
+    const fill = isDragging ? 'rgba(180,30,30,0.20)' : 'rgba(180,30,30,0.10)';
+
+    // Only draw if handle is within plot area
+    if(x < pL || x > pR) return;
+
+    // Clipped dashed vertical line
+    ctx.save();
+    ctx.beginPath(); ctx.rect(pL,pT,pR-pL,pB-pT); ctx.clip();
+    ctx.strokeStyle=col; ctx.lineWidth=1.5; ctx.setLineDash([4,3]);
+    ctx.beginPath(); ctx.moveTo(x,pT); ctx.lineTo(x,pB); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    // Rounded grip tab — left of line for min, right of line for max
+    const tx = side==='min' ? x-tabW : x;
+    const ty = midY - tabH/2;
+    ctx.beginPath();
+    ctx.moveTo(tx+rc,ty);
+    ctx.lineTo(tx+tabW-rc,ty); ctx.arcTo(tx+tabW,ty,tx+tabW,ty+rc,rc);
+    ctx.lineTo(tx+tabW,ty+tabH-rc); ctx.arcTo(tx+tabW,ty+tabH,tx+tabW-rc,ty+tabH,rc);
+    ctx.lineTo(tx+rc,ty+tabH); ctx.arcTo(tx,ty+tabH,tx,ty+tabH-rc,rc);
+    ctx.lineTo(tx,ty+rc); ctx.arcTo(tx,ty,tx+rc,ty,rc);
+    ctx.closePath();
+    ctx.fillStyle=fill; ctx.fill();
+    ctx.strokeStyle=col; ctx.lineWidth=1.5; ctx.stroke();
+
+    // Three horizontal grip lines
+    ctx.strokeStyle=col; ctx.lineWidth=1.2;
+    const cx = tx + tabW/2;
+    [-4,0,4].forEach(dy=>{
+      ctx.beginPath(); ctx.moveTo(cx-3,midY+dy); ctx.lineTo(cx+3,midY+dy); ctx.stroke();
+    });
+  }
+
+  drawOneHandle(xMin, 'min');
+  drawOneHandle(xMax, 'max');
+  ctx.restore();
+}
+
+// Attach mouse events to a canvas element
+function attachHandleEvents(canvasId){
+  const canvas = document.getElementById(canvasId);
+  if(!canvas) return;
+
+  function clientXToPP0(clientX){
+    const rect = canvas.getBoundingClientRect();
+    const M = getMargins();
+    const pL = M.left, pR = canvas.offsetWidth - M.right;
+    const frac = (clientX - rect.left - pL) / (pR - pL);
+    const scX = getChartScaleX(canvasId);
+    if(!scX) return null;
+    return Math.max(scX.lo, Math.min(scX.hi, scX.lo + frac*(scX.hi-scX.lo)));
+  }
+
+  function hitTest(clientX){
+    if(!rawData.length || gb('autoRange')) return null;
+    const rect = canvas.getBoundingClientRect();
+    const px = clientX - rect.left;
+    const scX = getChartScaleX(canvasId);
+    if(!scX) return null;
+    const r = betRange;
+    const xMin = scX.toPixel(rawData[r.iMin].pp0);
+    const xMax = scX.toPixel(rawData[r.iMax].pp0);
+    if(Math.abs(px-xMin) <= HANDLE_HIT_PX) return 'min';
+    if(Math.abs(px-xMax) <= HANDLE_HIT_PX) return 'max';
+    return null;
+  }
+
+  canvas.addEventListener('mousemove', e=>{
+    if(!rawData.length || gb('autoRange')){ canvas.style.cursor=''; return; }
+    if(drag.active && drag.canvasId===canvasId){
+      const pp0 = clientXToPP0(e.clientX);
+      if(pp0===null) return;
+      const r = betRange;
+      const curMin = rawData[r.iMin].pp0, curMax = rawData[r.iMax].pp0;
+      if(drag.handle==='min'){
+        document.getElementById('manualMin').value = Math.min(pp0, curMax-0.005).toFixed(5);
+      } else {
+        document.getElementById('manualMax').value = Math.max(pp0, curMin+0.005).toFixed(5);
+      }
+      onManualRange();
+    } else if(!drag.active) {
+      const M = getMargins();
+      const rect = canvas.getBoundingClientRect();
+      const py = e.clientY - rect.top;
+      const H = canvas.offsetHeight;
+      if(py < M.top || py > H-M.bottom){ canvas.style.cursor=''; return; }
+      canvas.style.cursor = hitTest(e.clientX) ? 'ew-resize' : 'default';
+    }
+  });
+
+  canvas.addEventListener('mousedown', e=>{
+    if(!rawData.length) return;
+    const handle = hitTest(e.clientX);
+    if(handle){
+      e.preventDefault();
+      document.getElementById('autoRange').checked = false;
+      onAutoRangeChange();
+      drag.active = true; drag.handle = handle; drag.canvasId = canvasId;
+      canvas.style.cursor = 'ew-resize';
+    }
+  });
+
+  canvas.addEventListener('mouseleave', ()=>{
+    if(!drag.active) canvas.style.cursor = '';
+  });
+}
+
+window.addEventListener('mouseup', ()=>{
+  if(drag.active){
+    drag.active = false; drag.handle = null; drag.canvasId = null;
+    // Snap to nearest data point
+    if(rawData.length){
+      const r = betRange;
+      document.getElementById('manualMin').value = rawData[r.iMin].pp0.toFixed(5);
+      document.getElementById('manualMax').value = rawData[r.iMax].pp0.toFixed(5);
+    }
+    ['chartRouq','chartBet','chartIso'].forEach(id=>{
+      const c = document.getElementById(id); if(c) c.style.cursor='default';
+    });
   }
 });
+
+// Attach to all three canvases
+attachHandleEvents('chartRouq');
+attachHandleEvents('chartBet');
+attachHandleEvents('chartIso');
 
 // =====================================================================
 // MANUAL RANGE
@@ -1621,7 +1786,10 @@ function onAutoRangeChange(){
   const auto=gb('autoRange');
   const wrap=document.getElementById('manualRangeWrap');
   if(wrap) wrap.style.display=auto?'none':'block';
-  if(auto&&rawData.length) runAnalysis();
+  if(rawData.length){
+    if(auto) runAnalysis(); // re-run with Rouquerol auto-selection
+    else drawAllCharts();   // just redraw to show/hide handles without changing the range
+  }
 }
 
 function onManualRange(){
