@@ -304,6 +304,7 @@ select:focus{border-color:var(--accent)}
       </div>
       <div class="cr"><span class="cl">Label size</span><input type="range" id="axSz" min="8" max="72" value="36" oninput="V(this);redraw()"><span class="rv2">14</span></div>
       <div class="cr"><span class="cl">Tick size</span><input type="range" id="tkSz" min="8" max="64" value="30" oninput="V(this);redraw()"><span class="rv2">11</span></div>
+      <div class="cr"><span class="cl">Labels bold</span><input type="checkbox" id="axBold" oninput="redraw()"></div>
       <div class="cr"><span class="cl">Axis color</span><input type="color" id="axCol" value="#000000" oninput="redraw()"></div>
     </div>
   </div>
@@ -330,12 +331,10 @@ select:focus{border-color:var(--accent)}
       <div style="font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#aaa;margin:8px 0 4px">Input series</div>
       <div class="cr"><span class="cl">Color</span><input type="color" id="ptCol" value="#000000" oninput="redraw()"></div>
       <div class="cr"><span class="cl">Size</span><input type="range" id="ptSz" min="2" max="16" value="5" oninput="V(this);redraw()"><span class="rv2">5</span></div>
-      <div class="cr"><span class="cl">Style</span><select id="ptSty" oninput="redraw()"><option>circle</option><option>rect</option><option>triangle</option><option>star</option><option>cross</option></select></div>
       <div class="cr"><span class="cl">Opacity</span><input type="range" id="ptOp" min="0.1" max="1" step=".05" value="1" oninput="V(this,2);redraw()"><span class="rv2">1</span></div>
       <div style="font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#aaa;margin:8px 0 4px">Converted series</div>
       <div class="cr"><span class="cl">Color</span><input type="color" id="ptCol2" value="#b84a2e" oninput="redraw()"></div>
       <div class="cr"><span class="cl">Size</span><input type="range" id="ptSz2" min="2" max="16" value="5" oninput="V(this);redraw()"><span class="rv2">5</span></div>
-      <div class="cr"><span class="cl">Style</span><select id="ptSty2" oninput="redraw()"><option>circle</option><option>rect</option><option>triangle</option><option>star</option><option>cross</option></select></div>
     </div>
   </div>
 
@@ -1187,7 +1186,7 @@ function renderChart(){
   if(!isFinite(yMin)||!isFinite(yMax)||yMin>=yMax) { yMin=0; yMax=1; }
 
   // ---- margins ----
-  const ML = tkSz*5+axSz+12, MR = 30, MT = ttlTxt?ttlSz+24:20, MB = axSz+tkSz+18;
+  const ML = tkSz*4+axSz+16, MR = 30, MT = ttlTxt?ttlSz+24:20, MB = axSz+tkSz+18;
   const PW = W - ML - MR;
   const PH = H - MT - MB;
 
@@ -1241,26 +1240,30 @@ function renderChart(){
   }
 
   // Ticks + labels
+  const tLen  = gn('tickLen')||8;
+  const bold  = gb('axBold') ? 'bold ' : '';
   ctx.font=tkSz+'px '+font; ctx.textAlign='center'; ctx.textBaseline='top';
   xTicks.forEach(t=>{
     const x=px(t);
-    ctx.beginPath(); ctx.moveTo(x,MT+PH); ctx.lineTo(x,MT+PH+6); ctx.stroke();
-    ctx.fillText(fmtTick(t,xStep), x, MT+PH+8);
+    ctx.beginPath(); ctx.moveTo(x,MT+PH); ctx.lineTo(x,MT+PH+tLen); ctx.stroke();
+    ctx.fillText(fmtTick(t,xStep), x, MT+PH+tLen+2);
   });
   ctx.textAlign='right'; ctx.textBaseline='middle';
   yTicks.forEach(t=>{
     const y=py(t);
-    ctx.beginPath(); ctx.moveTo(ML,y); ctx.lineTo(ML-6,y); ctx.stroke();
-    ctx.fillText(fmtTick(t,yStep), ML-9, y);
+    ctx.beginPath(); ctx.moveTo(ML,y); ctx.lineTo(ML-tLen,y); ctx.stroke();
+    ctx.fillText(fmtTick(t,yStep), ML-tLen-3, y);
   });
   ctx.restore();
 
   // Axis labels
   ctx.save();
-  ctx.fillStyle=axCol; ctx.font='bold '+axSz+'px '+font;
+  ctx.fillStyle=axCol; ctx.font=bold+axSz+'px '+font;
   ctx.textAlign='center'; ctx.textBaseline='bottom';
   ctx.fillText(xLblTxt, ML+PW/2, H-2);
-  ctx.translate(axSz, MT+PH/2);
+  // Y label: translate to just left of the tick number area
+  const yLblX = axSz+4;
+  ctx.translate(yLblX, MT+PH/2);
   ctx.rotate(-Math.PI/2);
   ctx.textBaseline='top';
   ctx.fillText(yLblTxt, 0, 0);
@@ -1279,8 +1282,38 @@ function renderChart(){
   ctx.save();
   ctx.beginPath(); ctx.rect(ML,MT,PW,PH); ctx.clip();
 
-  function drawCircle(x,y,r,color,open){
-    ctx.beginPath(); ctx.arc(px(x),py(y),r,0,Math.PI*2);
+  function drawPointAt(cx,cy,r,color,open,style){
+    ctx.beginPath();
+    switch(style){
+      case 'rect':
+        ctx.rect(cx-r, cy-r, r*2, r*2);
+        break;
+      case 'triangle':
+        ctx.moveTo(cx, cy-r);
+        ctx.lineTo(cx+r, cy+r);
+        ctx.lineTo(cx-r, cy+r);
+        ctx.closePath();
+        break;
+      case 'star':{
+        const spikes=5, outer=r, inner=r*0.45;
+        let rot=Math.PI/2*3;
+        const step=Math.PI/spikes;
+        ctx.moveTo(cx, cy-outer);
+        for(let s=0;s<spikes;s++){
+          ctx.lineTo(cx+Math.cos(rot)*outer, cy+Math.sin(rot)*outer); rot+=step;
+          ctx.lineTo(cx+Math.cos(rot)*inner, cy+Math.sin(rot)*inner); rot+=step;
+        }
+        ctx.closePath();
+        break;
+      }
+      case 'cross':
+        ctx.moveTo(cx-r, cy); ctx.lineTo(cx+r, cy);
+        ctx.moveTo(cx, cy-r); ctx.lineTo(cx, cy+r);
+        ctx.strokeStyle=color; ctx.lineWidth=r*0.7; ctx.stroke();
+        return; // cross is stroke-only, no fill
+      default: // circle
+        ctx.arc(cx, cy, r, 0, Math.PI*2);
+    }
     if(open){
       ctx.fillStyle=plotBg; ctx.fill();
       ctx.strokeStyle=color; ctx.lineWidth=2; ctx.stroke();
@@ -1288,6 +1321,7 @@ function renderChart(){
       ctx.fillStyle=color; ctx.fill();
     }
   }
+  function drawPoint(x,y,r,color,open,style){ drawPointAt(px(x),py(y),r,color,open,style); }
 
   function hexAlpha(hex,a){
     const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
@@ -1295,12 +1329,12 @@ function renderChart(){
   }
 
   if(showRaw){
-    rawAds.forEach(pt=>drawCircle(pt.p,pt.q,ptSz,hexAlpha(ptCol,ptOp),false));
-    rawDes.forEach(pt=>drawCircle(pt.p,pt.q,ptSz,hexAlpha(ptCol,ptOp),true));
+    rawAds.forEach(pt=>drawPoint(pt.p,pt.q,ptSz,hexAlpha(ptCol,ptOp),false,'circle'));
+    rawDes.forEach(pt=>drawPoint(pt.p,pt.q,ptSz,hexAlpha(ptCol,ptOp),true,'circle'));
   }
   if(showConv){
-    convAds.forEach(pt=>drawCircle(pt.p,pt.q,ptSz2,ptCol2,false));
-    convDes.forEach(pt=>drawCircle(pt.p,pt.q,ptSz2,ptCol2,true));
+    convAds.forEach(pt=>drawPoint(pt.p,pt.q,ptSz2,ptCol2,false,'circle'));
+    convDes.forEach(pt=>drawPoint(pt.p,pt.q,ptSz2,ptCol2,true,'circle'));
   }
 
   ctx.restore(); // unclip
@@ -1321,13 +1355,7 @@ function renderChart(){
     let lx=ML+8, ly=MT+12;
     entries.forEach(e=>{
       // swatch
-      ctx.beginPath(); ctx.arc(lx+e.sz,ly,e.sz,0,Math.PI*2);
-      if(e.open){
-        ctx.fillStyle=plotBg; ctx.fill();
-        ctx.strokeStyle=e.color; ctx.lineWidth=2; ctx.stroke();
-      } else {
-        ctx.fillStyle=e.color; ctx.fill();
-      }
+      drawPointAt(lx+e.sz, ly, e.sz, e.color, e.open, e.style||'circle');
       ctx.fillStyle=axCol;
       ctx.fillText(e.label, lx+e.sz*2+5, ly);
       lx += e.sz*2+8+ctx.measureText(e.label).width+12;
