@@ -1017,7 +1017,14 @@ function updateResults(){
     const vals=arr.map(r=>r[key]).filter(isFinite);
     if(!vals.length) return '—';
     const lo=Math.min(...vals), hi=Math.max(...vals);
-    return fmtTick(lo, hi-lo)+' – '+fmtTick(hi, hi-lo);
+    // Use 4 significant figures on the actual values, not tick-step rounding
+    function sf(v){ 
+      if(v===0) return '0';
+      const a=Math.abs(v);
+      if(a>=1e5||a<1e-3) return v.toExponential(3);
+      return parseFloat(v.toPrecision(4)).toString();
+    }
+    return sf(lo)+' – '+sf(hi);
   }
 
   // Conversion description
@@ -1334,12 +1341,63 @@ function redraw(){if(rawData.length)renderChart();}
 
 document.getElementById('btnExport').addEventListener('click',()=>{
   if(!convData.length)return;
-  const pOut=gv('pUnitsOut'),qOut=gv('qUnitsOut');
-  const lines=['# Converted sorption data','# Input: '+gv('qUnitsIn')+' → '+qOut,'# Pressure ('+pOut+'), Uptake ('+qOut+')','Pressure,Uptake'];
-  convData.forEach(r=>lines.push(r.p+','+r.q));
+
+  const pOut=gv('pUnitsOut'), qOut=gv('qUnitsOut');
+  const pIn=gv('pUnitsIn'),   qIn=gv('qUnitsIn');
+
+  // Format to 6 significant figures — avoids floating-point noise and Excel text-parse issues
+  function csvFmt(v){
+    if(v===0) return '0';
+    const a=Math.abs(v);
+    if(a>=1e6||a<1e-4) return parseFloat(v.toPrecision(6)).toExponential();
+    return parseFloat(v.toPrecision(6)).toString();
+  }
+
+  const lines=[];
+
+  // ── Metadata header ──────────────────────────────────────────────────────
+  lines.push('# Sorption Unit Converter — converted data');
+  lines.push('# Generated: '+new Date().toISOString().replace('T',' ').slice(0,19));
+
+  // Gas / sorptive
+  const gasKey=gv('gasPreset');
+  if(gasKey) lines.push('Sorptive,'+gasKey);
+
+  // Temperature
+  const tempK=gn('tempK');
+  if(tempK) lines.push('TemperatureK,'+tempK);
+
+  // Host material
+  const formula=gv('hostFormula').trim();
+  if(formula) lines.push('Host_Formula,'+formula);
+  const mwHost=gn('mwHost');
+  if(mwHost) lines.push('Host_MW,'+mwHost);
+  const rhoHost=gn('rhoHost');
+  if(rhoHost) lines.push('Host_Density,'+rhoHost);
+  const massHost=gn('massHost');
+  if(massHost) lines.push('Host_Mass,'+massHost);
+
+  // Conversion provenance
+  lines.push('# Input units: Pressure='+pIn+', Uptake='+qIn);
+  lines.push('# Output units: Pressure='+pOut+', Uptake='+qOut);
+
+  // ── Column header ─────────────────────────────────────────────────────────
+  lines.push('Pressure ('+pOut+'),Uptake ('+qOut+')');
+
+  // ── Data — adsorption, blank line, desorption ─────────────────────────────
+  const ads=convData.filter(r=>r.branch==='ads');
+  const des=convData.filter(r=>r.branch==='des');
+
+  ads.forEach(r=>lines.push(csvFmt(r.p)+','+csvFmt(r.q)));
+
+  if(des.length){
+    lines.push(',');   // blank separator line (CSV-safe)
+    des.forEach(r=>lines.push(csvFmt(r.p)+','+csvFmt(r.q)));
+  }
+
   const blob=new Blob([lines.join('\r\n')],{type:'text/csv'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='sorption_converted.csv';a.click();
-  st('CSV exported.','ok');
+  st('CSV exported: '+ads.length+' adsorption'+(des.length?' + '+des.length+' desorption':'')+' points.','ok');
 });
 
 function savePlot(){
