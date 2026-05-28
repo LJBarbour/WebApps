@@ -1,0 +1,1374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sorption Unit Converter</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:wght@300;600&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --ink:#0f0e0d;--paper:#f6f1ea;--cream:#ede7d8;--pale:#e0d9cc;
+  --rule:#c5bba9;--accent:#b84a2e;
+  --mono:'DM Mono',monospace;--serif:'Fraunces',Georgia,serif;--sans:'DM Sans',sans-serif;
+}
+html,body{height:100%;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:13px}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:var(--pale)}
+::-webkit-scrollbar-thumb{background:var(--rule);border-radius:2px}
+body{display:grid;grid-template-rows:auto 1fr;overflow:hidden}
+header{border-bottom:2px solid var(--ink);padding:12px 22px;display:flex;align-items:baseline;gap:16px;flex-shrink:0}
+header h1{font-family:var(--serif);font-size:23px;font-weight:600;letter-spacing:-.4px}
+header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spacing:.15em;text-transform:uppercase}
+.app{display:grid;grid-template-columns:255px 1fr 268px;overflow:hidden;height:100%}
+.sidebar{border-right:2px solid var(--ink);overflow-y:auto;display:flex;flex-direction:column}
+.sb{padding:12px 14px;border-bottom:1px solid var(--rule)}
+.sb:last-child{border-bottom:none}
+.lbl{font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:8px}
+.dz{border:2px dashed var(--rule);padding:12px 8px;text-align:center;cursor:default;transition:border-color .2s,background .2s;user-select:none}
+.dz.over{border-color:var(--accent);background:var(--cream)}
+.dz-ico{font-size:18px;margin-bottom:4px}
+.dz-txt{font-size:10px;color:#888;line-height:1.5}
+.dz-name{font-size:11px;font-weight:500;color:var(--accent);margin-top:3px;word-break:break-all;min-height:1em}
+#fileBtn{margin-top:7px;width:100%;padding:6px;font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;background:transparent;border:1.5px solid var(--rule);color:#666;cursor:pointer}
+#fileBtn:hover{border-color:var(--accent);color:var(--accent)}
+#fileInput{display:none}
+select{width:100%;background:var(--cream);border:1.5px solid var(--rule);padding:6px 8px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none;cursor:pointer;-webkit-appearance:none;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center}
+select:focus{border-color:var(--accent)}
+.pv{max-height:110px;overflow-y:auto;border:1.5px solid var(--rule);margin-top:6px}
+.pv table{width:100%;border-collapse:collapse;font-size:11px}
+.pv th{background:var(--cream);padding:3px 8px;text-align:right;font-size:9px;text-transform:uppercase;letter-spacing:.08em;position:sticky;top:0;border-bottom:1.5px solid var(--rule)}
+.pv td{padding:3px 8px;text-align:right;border-bottom:1px solid var(--pale);font-family:var(--mono)}
+.btn{display:block;width:100%;padding:8px 12px;font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;border:2px solid var(--ink);background:var(--ink);color:var(--paper);transition:background .15s,border-color .15s}
+.btn:hover:not(:disabled){background:var(--accent);border-color:var(--accent)}
+.btn:disabled{opacity:.3;cursor:not-allowed}
+.btn.out{background:transparent;color:var(--ink)}
+.btn.out:hover:not(:disabled){background:var(--ink);color:var(--paper)}
+/* centre — fixed layout so chart always has space */
+.centre{display:flex;flex-direction:column;overflow:hidden;min-height:0}
+.results{padding:10px 16px;border-bottom:2px solid var(--ink);overflow-y:auto;max-height:180px;flex-shrink:0}
+.chart-wrap{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}
+.chart-tabs{display:flex;border-bottom:1.5px solid var(--rule);flex-shrink:0;background:var(--paper)}
+.chart-tab{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:5px 14px;border:none;background:none;cursor:pointer;color:#888;border-bottom:2px solid transparent;margin-bottom:-1.5px}
+.chart-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.chart-inner{flex:1;min-height:0;position:relative}
+#myChart{position:absolute;top:0;left:0;width:100%;height:100%}
+#status{padding:4px 16px;font-family:var(--mono);font-size:10px;color:#999;border-top:1px solid var(--rule);flex-shrink:0;letter-spacing:.05em}
+#status.ok{color:#2a7a3b}#status.err{color:var(--accent)}
+.r-grid{display:grid;gap:1px;background:var(--rule);border:1.5px solid var(--rule);margin-top:6px}
+.rc{background:var(--paper);padding:9px 12px}
+.rc .rt{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#888;margin-bottom:3px;font-family:Georgia,serif}
+.rc .rv{font-size:13px;font-family:Georgia,serif;color:var(--ink)}
+.rc.hi{background:var(--cream)}
+.ph{color:#bbb;font-size:12px;font-style:italic;padding:4px 0}
+.out-table-wrap{max-height:120px;overflow-y:auto;border:1.5px solid var(--rule);margin-top:6px}
+.out-table{width:100%;border-collapse:collapse;font-size:11px}
+.out-table th{background:var(--cream);padding:3px 8px;text-align:right;font-size:9px;text-transform:uppercase;letter-spacing:.08em;position:sticky;top:0;border-bottom:1.5px solid var(--rule)}
+.out-table th:first-child{text-align:left}
+.out-table td{padding:3px 8px;text-align:right;border-bottom:1px solid var(--pale);font-family:var(--mono);font-size:10px}
+.out-table td:first-child{text-align:left}
+/* right cpanel */
+.cpanel{border-left:2px solid var(--ink);overflow-y:auto;flex-shrink:0}
+.cp-group{border-bottom:1px solid var(--rule)}
+.cp-head{display:flex;justify-content:space-between;align-items:center;padding:9px 13px;cursor:pointer;user-select:none;background:var(--paper);transition:background .15s}
+.cp-head:hover{background:var(--cream)}
+.cp-head .cp-title{font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent)}
+.cp-head .cp-arr{font-size:10px;color:#888;transition:transform .2s}
+.cp-group.open .cp-arr{transform:rotate(180deg)}
+.cp-body{display:none;padding:10px 13px;border-top:1px solid var(--pale)}
+.cp-group.open .cp-body{display:block}
+.cr{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:6px}
+.cr:last-child{margin-bottom:0}
+.cl{font-size:11px;color:#555;flex:1;white-space:nowrap}
+.cr input[type=number]{width:68px;background:var(--cream);border:1.5px solid var(--rule);padding:3px 5px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none}
+.cr input[type=range]{flex:1;min-width:55px;accent-color:var(--accent)}
+.cr input[type=color]{width:32px;height:22px;border:1.5px solid var(--rule);background:none;cursor:pointer;padding:1px}
+.cr input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--accent)}
+.cr select{flex:1;background:var(--cream);border:1.5px solid var(--rule);padding:3px 5px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none;appearance:none}
+.cr input[type=text]{flex:1;background:var(--cream);border:1.5px solid var(--rule);padding:3px 5px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none}
+.rv2{font-family:var(--mono);font-size:11px;min-width:28px;text-align:right}
+.fi-label{font-size:10px;color:#888;margin-top:7px;margin-bottom:2px}
+.mw-info{font-family:var(--mono);font-size:10px;color:var(--accent);margin-top:4px;min-height:1em}
+/* Guide tab content */
+.g-sec{font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin:18px 0 6px;padding-bottom:4px;border-bottom:1px solid var(--rule)}
+.g-code{font-family:var(--mono);font-size:11px;background:var(--cream);padding:1px 5px;border:1px solid var(--pale)}
+.g-table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:8px}
+.g-table th{background:var(--cream);padding:4px 10px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.08em;border-bottom:1.5px solid var(--rule)}
+.g-table td{padding:4px 10px;border-bottom:1px solid var(--pale)}
+.g-table td:first-child{font-family:var(--mono);font-size:11px;white-space:nowrap}
+.unit-warn{background:#fff3cd;border:1.5px solid var(--accent);padding:8px 12px;margin-bottom:8px;font-size:11px;line-height:1.7;font-family:Georgia,serif;color:#5a2000}
+#metaNotes{border-radius:0}
+#metaNotes>div:first-child{border-radius:0}
+</style>
+</head>
+<body>
+<header>
+  <h1>Sorption Unit Converter</h1>
+  <span class="sub">Uptake Capacity &mdash; Interunit Conversion</span>
+</header>
+<div class="app">
+
+<!-- LEFT SIDEBAR -->
+<aside class="sidebar">
+  <div class="sb">
+    <div class="lbl">Data</div>
+    <div class="dz" id="dz">
+      <div class="dz-ico">&#8679;</div>
+      <div class="dz-txt">Drag &amp; drop a CSV file here<br><span style="font-size:9px;color:#aaa">col 1 = pressure &nbsp;|&nbsp; col 2 = uptake</span></div>
+      <div class="dz-name" id="dzName"></div>
+    </div>
+    <button id="fileBtn" onclick="document.getElementById('fileInput').click()">&#128194; Browse for file&hellip;</button>
+    <input type="file" id="fileInput" accept=".csv,.txt,.dat">
+  </div>
+  <div class="sb" id="prevWrap" style="display:none">
+    <div class="lbl">Preview &nbsp;<span id="nPts" style="color:#aaa;text-transform:none;letter-spacing:0;font-size:10px"></span></div>
+    <div class="pv"><table><thead><tr><th>Pressure</th><th>Uptake</th><th style="font-size:9px">Branch</th></tr></thead><tbody id="prevBody"></tbody></table></div>
+  </div>
+  <div class="sb">
+    <div class="lbl">Input Units</div>
+    <div class="fi-label">Pressure</div>
+    <select id="pUnitsIn"><option value="bar">bar</option><option value="mbar">mbar</option><option value="kPa">kPa</option><option value="MPa">MPa</option><option value="atm">atm</option><option value="Pa">Pa</option><option value="mmHg">mmHg (torr)</option><option value="psi">psi</option></select>
+    <div class="fi-label">Uptake</div>
+    <select id="qUnitsIn" onchange="onUnitsChange()">
+      <option value="mmol/g">mmol/g</option><option value="cc(STP)/g">cc(STP)/g</option><option value="mol/kg">mol/kg</option><option value="mol/mol">mol/mol</option><option value="g/g">g/g</option><option value="wt%">wt %</option><option value="mg/g">mg/g</option><option value="ug/g">µg/g</option><option value="mg/mg_host">mg gas / mg host</option><option value="ug/mg_host">µg gas / mg host</option><option value="mg_abs">mg (absolute)</option><option value="ug_abs">µg (absolute)</option><option value="cm3/g">cm³/g (liquid)</option>
+    </select>
+  </div>
+  <div class="sb">
+    <div class="lbl">Output Units</div>
+    <div class="fi-label">Pressure</div>
+    <select id="pUnitsOut"><option value="bar">bar</option><option value="mbar">mbar</option><option value="kPa">kPa</option><option value="MPa">MPa</option><option value="atm">atm</option><option value="Pa">Pa</option><option value="mmHg">mmHg (torr)</option><option value="psi">psi</option></select>
+    <div class="fi-label">Uptake</div>
+    <select id="qUnitsOut" onchange="onUnitsChange()">
+      <option value="mmol/g">mmol/g</option><option value="cc(STP)/g">cc(STP)/g</option><option value="mol/kg">mol/kg</option><option value="mol/mol">mol/mol</option><option value="g/g">g/g</option><option value="wt%">wt %</option><option value="mg/g">mg/g</option><option value="ug/g">µg/g</option><option value="mg/mg_host">mg gas / mg host</option><option value="ug/mg_host">µg gas / mg host</option><option value="mg_abs">mg (absolute)</option><option value="ug_abs">µg (absolute)</option><option value="cm3/g">cm³/g (liquid)</option>
+    </select>
+  </div>
+  <div class="sb" style="display:flex;flex-direction:column;gap:6px">
+    <button class="btn" id="btnConvert" disabled>Convert Units</button>
+    <button class="btn out" id="btnExport" disabled>Export Converted CSV</button>
+  </div>
+</aside>
+
+<!-- CENTRE -->
+<div class="centre">
+  <div class="results">
+    <div class="lbl">Conversion Summary</div>
+    <div id="resContent"><div class="ph">Load a CSV file and click Convert Units.</div></div>
+  </div>
+  <div class="chart-wrap">
+    <div class="chart-tabs">
+      <button class="chart-tab active" id="tabRaw"  onclick="switchTab('raw')">Raw Input</button>
+      <button class="chart-tab"        id="tabConv" onclick="switchTab('conv')">Converted</button>
+      <button class="chart-tab"        id="tabGuide" onclick="switchTab('guide')">Guide</button>
+    </div>
+    <div class="chart-inner">
+      <canvas id="myChart"></canvas>
+      <div id="guideContent" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;overflow-y:auto;padding:24px 32px;background:var(--paper);font-size:13px;line-height:1.75;color:#333;box-sizing:border-box">
+
+        <h2 style="font-family:var(--serif);font-size:22px;font-weight:600;margin-bottom:4px">Sorption Unit Converter</h2>
+        <p style="font-family:var(--mono);font-size:9px;letter-spacing:.15em;text-transform:uppercase;color:var(--accent);margin-bottom:20px">User Guide</p>
+
+        <div class="g-sec">Overview</div>
+        <p>This app loads gas-sorption isotherm data from a CSV file and interconverts the uptake capacity between different unit systems. Both adsorption and desorption branches are supported. The converted data can be exported as a new CSV.</p>
+
+        <div class="g-sec">Loading data</div>
+        <p>Drag and drop a CSV (or delimited text) file onto the drop zone in the left sidebar, or click <b>Browse for file</b>. Column&nbsp;1 should be pressure, column&nbsp;2 uptake, separated by commas, tabs, or semicolons.</p>
+        <p><b>Adsorption / desorption:</b> two blocks of data separated by one or more blank lines (or lines containing only delimiters) are treated as adsorption followed by desorption. Adsorption is plotted with filled circles, desorption with open circles.</p>
+        <p><b>Header row:</b> a non-numeric first row is parsed for units — for example <span class="g-code">Pressure (mbar)</span> sets the pressure unit to mbar, and <span class="g-code">Uptake (mmol/g)</span> sets the uptake unit. If no header is detected, bar and mmol&nbsp;g&#x207b;&#x00b9; are assumed.</p>
+
+        <div class="g-sec">Metadata keys</div>
+        <p>Before the data block you can embed key&#x2013;value rows that the app reads automatically:</p>
+        <table class="g-table">
+          <tr><th>Key</th><th>Effect</th></tr>
+          <tr><td>Sorptive</td><td>Sets the gas (e.g. CO2, methane, N2)</td></tr>
+          <tr><td>TemperatureK</td><td>Temperature in K</td></tr>
+          <tr><td>TemperatureC</td><td>Temperature in &#x00b0;C (converted to K)</td></tr>
+          <tr><td>Host_Formula</td><td>Parses molecular formula and calculates MW</td></tr>
+          <tr><td>Host_MW</td><td>Host molecular weight (g mol&#x207b;&#x00b9;)</td></tr>
+          <tr><td>Host_Density</td><td>Host density (g cm&#x207b;&#x00b3;)</td></tr>
+          <tr><td>Host_Mass</td><td>Host sample mass (mg)</td></tr>
+        </table>
+        <p>If both <span class="g-code">Host_Formula</span> and <span class="g-code">Host_MW</span> are given and disagree by more than 1%, a warning is shown in red.</p>
+
+        <div class="g-sec">Choosing units</div>
+        <p>Set the <b>input units</b> (left sidebar) to match your data file. Set the <b>output units</b> to your target system. Conversion happens automatically when you change the output units, provided all required parameters are available. Otherwise, fill in the missing values and click <b>Convert Units</b>.</p>
+        <p>On file load, the app always converts to mmol&nbsp;g&#x207b;&#x00b9; vs bar as a baseline. You can then select any output units you like.</p>
+
+        <div class="g-sec">Supported uptake units</div>
+        <table class="g-table">
+          <tr><th>Unit</th><th>Requires</th></tr>
+          <tr><td>mmol g&#x207b;&#x00b9;</td><td>&#x2014;</td></tr>
+          <tr><td>cc(STP) g&#x207b;&#x00b9;</td><td>Gas selection recommended; ideal gas (22.414 mL mmol&#x207b;&#x00b9;) used if not set</td></tr>
+          <tr><td>mol kg&#x207b;&#x00b9;</td><td>&#x2014; &nbsp;(identical to mmol g&#x207b;&#x00b9;)</td></tr>
+          <tr><td>mol mol&#x207b;&#x00b9;</td><td>Host MW</td></tr>
+          <tr><td>g g&#x207b;&#x00b9; &nbsp;/&nbsp; wt %</td><td>Gas MW</td></tr>
+          <tr><td>mg g&#x207b;&#x00b9; &nbsp;/&nbsp; &#x00b5;g g&#x207b;&#x00b9;</td><td>Gas MW</td></tr>
+          <tr><td>mg or &#x00b5;g &nbsp;(absolute)</td><td>Gas MW + host sample mass (mg)</td></tr>
+          <tr><td>cm&#x00b3; g&#x207b;&#x00b9; (liquid)</td><td>Gas MW + host density</td></tr>
+        </table>
+
+        <div class="g-sec">cc(STP) and real-gas correction</div>
+        <p>The ideal-gas molar volume at STP (0&nbsp;&#x00b0;C, 1&nbsp;atm) is 22.414&nbsp;mL&nbsp;mmol&#x207b;&#x00b9;. When a gas preset is selected, the van der Waals equation is solved iteratively at STP to give a more accurate molar volume — for example CO&#x2082; gives &#x2248;&nbsp;22.26&nbsp;mL&nbsp;mmol&#x207b;&#x00b9;. The value used is shown in the conversion summary.</p>
+
+        <div class="g-sec">Molecular formula parser</div>
+        <p>Enter standard formulae in the Host Material panel, e.g. <span class="g-code">Zn4O(BDC)3</span> or <span class="g-code">Co2(OH)2(bbta)</span>. Parentheses and fractional stoichiometries are supported. Abbreviations for organic linkers (BDC, dobdc, etc.) are not resolved — enter the MW directly in those cases.</p>
+
+        <div class="g-sec">Plot controls</div>
+        <p>The collapsible panels on the right adjust fonts, colours, axis ranges, and labels independently for the Raw and Converted plots. Axis labels default to detected unit notation (e.g. <i>Uptake / mmol&nbsp;g&#x207b;&#x00b9;</i>) but can be overridden. Click <b>Save Plot Image</b> to export at a specified pixel size.</p>
+
+        <div class="g-sec">Exporting converted data</div>
+        <p>After conversion, click <b>Export Converted CSV</b> in the left sidebar. The file includes a comment header recording the units and conversion applied.</p>
+
+        <div class="g-sec">Supported gases</div>
+        <p>CO&#x2082;, CH&#x2084;, N&#x2082;, O&#x2082;, H&#x2082;, C&#x2082;H&#x2082; (acetylene), C&#x2082;H&#x2084; (ethylene), C&#x2082;H&#x2086; (ethane), C&#x2083;H&#x2086; (propylene), C&#x2083;H&#x2088; (propane), C&#x2084;H&#x2081;&#x2080; (butane), NO, NO&#x2082;, N&#x2082;O, H&#x2082;O, SO&#x2082;, H&#x2082;S, NH&#x2083;, Ar, He, Kr, Xe. For any other gas select Custom and enter the molecular weight manually.</p>
+
+        <p style="margin-top:24px;font-family:var(--mono);font-size:9px;color:#bbb;letter-spacing:.08em">Version 1.0 &nbsp;&mdash;&nbsp; more features coming soon.</p>
+      </div>
+    </div>
+  </div>
+  <div id="status">Ready &mdash; load a CSV file to begin.</div>
+</div>
+
+<!-- RIGHT CONTROLS -->
+<div class="cpanel">
+
+  <div class="cp-group open">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Gas Properties</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Gas preset</span>
+        <select id="gasPreset" style="flex:1" onchange="onGasPreset()">
+          <option value="">Custom</option>
+          <option value="CO2">CO₂</option><option value="CH4">CH₄ (methane)</option>
+          <option value="N2">N₂</option><option value="O2">O₂</option>
+          <option value="H2">H₂</option><option value="C2H2">C₂H₂ (acetylene)</option>
+          <option value="C2H4">C₂H₄ (ethylene)</option><option value="C2H6">C₂H₆ (ethane)</option>
+          <option value="C3H6">C₃H₆ (propylene)</option><option value="C3H8">C₃H₈ (propane)</option>
+          <option value="C4H10">C₄H₁₀ (butane)</option>
+          <option value="NO">NO</option><option value="NO2">NO₂</option><option value="N2O">N₂O</option>
+          <option value="H2O">H₂O</option>
+          <option value="SO2">SO₂</option><option value="H2S">H₂S</option>
+          <option value="NH3">NH₃</option><option value="Ar">Ar</option>
+          <option value="He">He</option><option value="Kr">Kr</option><option value="Xe">Xe</option>
+        </select>
+      </div>
+      <div class="cr"><span class="cl">MW gas (g/mol)</span><input type="number" id="mwGas" placeholder="e.g. 44.01" min="1" step="0.01" oninput="onParamChange()"></div>
+      <div class="cr"><span class="cl">Temperature (K)</span><input type="number" id="tempK" placeholder="e.g. 298" min="1" step="1"></div>
+    </div>
+  </div>
+
+  <div class="cp-group open">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Host Material</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Formula</span><input type="text" id="hostFormula" placeholder="e.g. Zn4O(BDC)3" oninput="onFormulaInput()"></div>
+      <div id="mwFromFormula" class="mw-info"></div>
+      <div class="cr" style="margin-top:6px"><span class="cl">MW host (g/mol)</span><input type="number" id="mwHost" placeholder="e.g. 769.0" min="0.001" step="0.01" oninput="onParamChange()"></div>
+      <div class="cr"><span class="cl">Density (g/cm³)</span><input type="number" id="rhoHost" placeholder="for cm³/g liq." min="0" step="0.001" oninput="onParamChange()"></div>
+      <div class="cr"><span class="cl">Mass of host (mg)</span><input type="number" id="massHost" placeholder="e.g. 5.0" min="0" step="0.001" oninput="onParamChange()"></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Axis Ranges</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#aaa;margin-bottom:4px">Raw plot</div>
+      <div class="cr"><span class="cl">X min</span><input type="number" id="xmin" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">X max</span><input type="number" id="xmax" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Y min</span><input type="number" id="ymin" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Y max</span><input type="number" id="ymax" placeholder="auto" oninput="redraw()"></div>
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#aaa;margin:8px 0 4px">Converted plot</div>
+      <div class="cr"><span class="cl">X min</span><input type="number" id="xminC" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">X max</span><input type="number" id="xmaxC" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Y min</span><input type="number" id="yminC" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Y max</span><input type="number" id="ymaxC" placeholder="auto" oninput="redraw()"></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Axis Labels &amp; Fonts</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#aaa;margin-bottom:4px">Raw plot</div>
+      <div class="cr"><span class="cl">X label</span><input type="text" id="xLbl" value="Pressure" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Y label</span><input type="text" id="yLbl" value="Uptake" oninput="redraw()"></div>
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#aaa;margin:8px 0 4px">Converted plot</div>
+      <div class="cr"><span class="cl">X label</span><input type="text" id="xLblConv" value="" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Y label</span><input type="text" id="yLblConv" value="" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Font</span>
+        <select id="fontFam" oninput="redraw()">
+          <option value="Arial,sans-serif" selected>Arial</option>
+          <option value="'DM Mono',monospace">DM Mono</option>
+          <option value="'Times New Roman',serif">Times New Roman</option>
+          <option value="Georgia,serif">Georgia</option>
+          <option value="'Helvetica Neue',Helvetica,sans-serif">Helvetica</option>
+          <option value="'Courier New',monospace">Courier New</option>
+          <option value="Verdana,sans-serif">Verdana</option>
+        </select>
+      </div>
+      <div class="cr"><span class="cl">Label size</span><input type="range" id="axSz" min="8" max="72" value="36" oninput="V(this);redraw()"><span class="rv2">14</span></div>
+      <div class="cr"><span class="cl">Tick size</span><input type="range" id="tkSz" min="8" max="64" value="30" oninput="V(this);redraw()"><span class="rv2">11</span></div>
+      <div class="cr"><span class="cl">Axis color</span><input type="color" id="axCol" value="#000000" oninput="redraw()"></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Grid &amp; Frame</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Show grid</span><input type="checkbox" id="grid" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Grid color</span><input type="color" id="gridCol" value="#dddddd" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Grid width</span><input type="range" id="gridW" min="0.5" max="3" step=".5" value="1" oninput="V(this);redraw()"><span class="rv2">1</span></div>
+      <div class="cr"><span class="cl">Tick length</span><input type="range" id="tickLen" min="2" max="16" value="8" oninput="V(this);redraw()"><span class="rv2">8</span></div>
+      <div class="cr"><span class="cl">Axis width</span><input type="range" id="frameW" min="0.5" max="5" step=".5" value="3" oninput="V(this);redraw()"><span class="rv2">3</span></div>
+      <div class="cr"><span class="cl">Box border</span><input type="checkbox" id="boxBdr" checked oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Box width</span><input type="range" id="boxW" min="0.5" max="5" step=".5" value="3" oninput="V(this);redraw()"><span class="rv2">3</span></div>
+      <div class="cr"><span class="cl">Box color</span><input type="color" id="boxCol" value="#000000" oninput="redraw()"></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Colors &amp; Points</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Chart bg</span><input type="color" id="chartBg" value="#ffffff" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Plot bg</span><input type="color" id="plotBg" value="#ffffff" oninput="redraw()"></div>
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#aaa;margin:8px 0 4px">Input series</div>
+      <div class="cr"><span class="cl">Color</span><input type="color" id="ptCol" value="#000000" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Size</span><input type="range" id="ptSz" min="2" max="16" value="5" oninput="V(this);redraw()"><span class="rv2">5</span></div>
+      <div class="cr"><span class="cl">Style</span><select id="ptSty" oninput="redraw()"><option>circle</option><option>rect</option><option>triangle</option><option>star</option><option>cross</option></select></div>
+      <div class="cr"><span class="cl">Opacity</span><input type="range" id="ptOp" min="0.1" max="1" step=".05" value="1" oninput="V(this,2);redraw()"><span class="rv2">1</span></div>
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#aaa;margin:8px 0 4px">Converted series</div>
+      <div class="cr"><span class="cl">Color</span><input type="color" id="ptCol2" value="#b84a2e" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Size</span><input type="range" id="ptSz2" min="2" max="16" value="5" oninput="V(this);redraw()"><span class="rv2">5</span></div>
+      <div class="cr"><span class="cl">Style</span><select id="ptSty2" oninput="redraw()"><option>circle</option><option>rect</option><option>triangle</option><option>star</option><option>cross</option></select></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Legend &amp; Title</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Show legend</span><input type="checkbox" id="leg" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Legend size</span><input type="range" id="legSz" min="8" max="36" value="11" oninput="V(this);redraw()"><span class="rv2">11</span></div>
+      <div class="cr"><span class="cl">Chart title</span><input type="text" id="ttl" placeholder="none" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Title size</span><input type="range" id="ttlSz" min="10" max="60" value="15" oninput="V(this);redraw()"><span class="rv2">15</span></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Save Plot</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Width px</span><input type="number" id="expW" value="1200"></div>
+      <div class="cr"><span class="cl">Height px</span><input type="number" id="expH" value="900"></div>
+      <div class="cr"><span class="cl">Format</span><select id="expFmt"><option>PNG</option><option>JPEG</option></select></div>
+      <button class="btn out" style="margin-top:8px;width:100%" onclick="savePlot()">Save Plot Image</button>
+    </div>
+  </div>
+
+
+
+</div>
+</div><!-- app -->
+
+<script>
+function tog(h){h.closest('.cp-group').classList.toggle('open')}
+function V(el,dp){el.nextElementSibling.textContent=parseFloat(el.value).toFixed(dp||0)}
+function gv(id){return document.getElementById(id).value}
+function gb(id){return document.getElementById(id).checked}
+function gn(id){const v=parseFloat(gv(id));return isNaN(v)?undefined:v}
+function ha(hex,a){const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);return`rgba(${r},${g},${b},${a})`}
+function st(msg,cls){const e=document.getElementById('status');e.innerHTML=msg;e.className=cls||''}
+function fmt(v,sig=4){if(v===undefined||v===null||isNaN(v))return'--';const a=Math.abs(v);if(a===0)return'0';if(a>=1e5||a<1e-3)return v.toExponential(sig-1);return parseFloat(v.toPrecision(sig)).toString()}
+
+// Convert unit string from slash notation to superscript notation
+// e.g. "mmol/g" → "mmol g⁻¹",  "cc(STP)/g" → "cc(STP) g⁻¹", "mol/mol" → "mol mol⁻¹"
+// "mg_abs" → "mg",  "ug_abs" → "µg",  "wt%" stays "wt %"
+function fmtUnit(u){
+  if(!u) return u;
+  const sup = {
+    'mmol/g':    'mmol g\u207b\u00b9',
+    'cc(STP)/g': 'cc(STP) g\u207b\u00b9',
+    'mol/kg':    'mol kg\u207b\u00b9',
+    'mol/mol':   'mol mol\u207b\u00b9',
+    'g/g':       'g g\u207b\u00b9',
+    'wt%':       'wt %',
+    'mg/g':      'mg g\u207b\u00b9',
+    'ug/g':      '\u00b5g g\u207b\u00b9',
+    'mg/mg_host':'mg mg\u207b\u00b9',
+    'ug/mg_host':'\u00b5g mg\u207b\u00b9',
+    'mg_abs':    'mg',
+    'ug_abs':    '\u00b5g',
+    'cm3/g':     'cm\u00b3 g\u207b\u00b9',
+    'bar':   'bar',  'mbar':  'mbar',  'kPa': 'kPa',
+    'MPa':   'MPa',  'atm':   'atm',   'Pa':  'Pa',
+    'mmHg':  'mmHg', 'psi':   'psi'
+  };
+  return sup[u] || u;
+}
+
+// Format a tick value so all ticks on an axis share the same number of decimal places.
+// tickStep is the interval between ticks — use it to determine required precision.
+function fmtTick(v, tickStep){
+  if(v===undefined||v===null||isNaN(v)) return '';
+  const a = Math.abs(v);
+  // Use scientific notation for very large or very small values
+  if(a!==0 && (a>=1e5 || a<1e-3)) return v.toExponential(2);
+  // Determine decimal places from step size
+  if(tickStep && tickStep>0){
+    const mag = Math.floor(Math.log10(tickStep));
+    const dp = Math.max(0, -mag);  // e.g. step=0.2 → mag=-1 → dp=1
+    return v.toFixed(dp);
+  }
+  return parseFloat(v.toPrecision(4)).toString();
+}
+
+const GAS_MW={CO2:44.010,CH4:16.043,N2:28.014,O2:31.999,H2:2.016,C2H2:26.038,C2H4:28.053,C2H6:30.069,C3H6:42.080,C3H8:44.096,C4H10:58.122,NO:30.006,NO2:46.005,N2O:44.013,H2O:18.015,SO2:64.064,H2S:34.081,NH3:17.031,Ar:39.948,He:4.003,Kr:83.798,Xe:131.293};
+function onGasPreset(){const g=gv('gasPreset');if(g&&GAS_MW[g])document.getElementById('mwGas').value=GAS_MW[g];onParamChange()}
+
+const AW={H:1.008,He:4.003,Li:6.941,Be:9.012,B:10.811,C:12.011,N:14.007,O:15.999,F:18.998,Ne:20.180,Na:22.990,Mg:24.305,Al:26.982,Si:28.086,P:30.974,S:32.065,Cl:35.453,Ar:39.948,K:39.098,Ca:40.078,Sc:44.956,Ti:47.867,V:50.942,Cr:51.996,Mn:54.938,Fe:55.845,Co:58.933,Ni:58.693,Cu:63.546,Zn:65.38,Ga:69.723,Ge:72.630,As:74.922,Se:78.960,Br:79.904,Kr:83.798,Rb:85.468,Sr:87.620,Y:88.906,Zr:91.224,Nb:92.906,Mo:95.960,Ru:101.07,Rh:102.906,Pd:106.42,Ag:107.868,Cd:112.411,In:114.818,Sn:118.710,Sb:121.760,Te:127.600,I:126.904,Xe:131.293,Cs:132.905,Ba:137.327,La:138.905,Ce:140.116,Pr:140.908,Nd:144.242,Sm:150.360,Eu:151.964,Gd:157.250,Tb:158.925,Dy:162.500,Ho:164.930,Er:167.259,Tm:168.934,Yb:173.054,Lu:174.967,Hf:178.490,Ta:180.948,W:183.840,Re:186.207,Os:190.230,Ir:192.217,Pt:195.084,Au:196.967,Hg:200.590,Tl:204.383,Pb:207.200,Bi:208.980,Th:232.038,U:238.029};
+
+function parseMolecularFormula(formula){
+  let s=formula.replace(/\s/g,''),pos=0;
+  function parseGroup(){
+    let counts={};
+    while(pos<s.length){
+      if(s[pos]===')'||s[pos]===']') break;
+      if(s[pos]==='('||s[pos]==='['){pos++;const sub=parseGroup();pos++;const n=parseNum();for(const[el,c] of Object.entries(sub))counts[el]=(counts[el]||0)+c*n;}
+      else if(s[pos]>='A'&&s[pos]<='Z'){let el=s[pos++];while(pos<s.length&&s[pos]>='a'&&s[pos]<='z')el+=s[pos++];if(!AW[el])throw new Error('Unknown element: '+el);const n=parseNum();counts[el]=(counts[el]||0)+n;}
+      else pos++;
+    }
+    return counts;
+  }
+  function parseNum(){let n='';while(pos<s.length&&(s[pos]>='0'&&s[pos]<='9'||s[pos]==='.')){n+=s[pos++];}return n?parseFloat(n):1;}
+  try{const c=parseGroup();let mw=0;for(const[el,n] of Object.entries(c))mw+=AW[el]*n;return{mw,error:null};}
+  catch(e){return{mw:null,error:e.message};}
+}
+
+function onFormulaInput(){
+  const f=document.getElementById('hostFormula').value.trim();
+  const info=document.getElementById('mwFromFormula');
+  if(!f){info.textContent='';return;}
+  const r=parseMolecularFormula(f);
+  if(r.error){info.textContent='⚠ '+r.error;info.style.color='#888';}
+  else{info.textContent='MW = '+r.mw.toFixed(3)+' g/mol';info.style.color='var(--accent)';document.getElementById('mwHost').value=r.mw.toFixed(3);onParamChange();}
+}
+
+function pToBar(v,u){return u==='bar'?v:u==='mbar'?v/1000:u==='kPa'?v/100:u==='MPa'?v*10:u==='atm'?v*1.01325:u==='Pa'?v/1e5:u==='mmHg'?v*0.00133322:u==='psi'?v*0.0689476:v}
+function pFromBar(v,u){return u==='bar'?v:u==='mbar'?v*1000:u==='kPa'?v*100:u==='MPa'?v/10:u==='atm'?v/1.01325:u==='Pa'?v*1e5:u==='mmHg'?v/0.00133322:u==='psi'?v/0.0689476:v}
+
+// Molar volume at STP (0°C, 1 atm) in mL/mmol — ideal gas
+const VM_STP = 22.414;
+
+// Van der Waals a,b constants for real-gas molar volume correction
+// a in L²·atm/mol², b in L/mol
+const VDW = {
+  CO2:{a:3.640,b:0.04267}, CH4:{a:2.253,b:0.04278}, N2:{a:1.390,b:0.03913},
+  O2:{a:1.360,b:0.03183},  H2:{a:0.2444,b:0.02661}, C2H4:{a:4.552,b:0.05821},
+  C2H6:{a:5.562,b:0.06380},C3H6:{a:8.664,b:0.08245},C3H8:{a:9.385,b:0.09049},
+  H2O:{a:5.536,b:0.03049}, SO2:{a:6.803,b:0.05636}, H2S:{a:4.490,b:0.04287},
+  NH3:{a:4.169,b:0.03707}, Ar:{a:1.355,b:0.03201},  He:{a:0.03457,b:0.02370},
+  Kr:{a:2.349,b:0.03978},  Xe:{a:4.250,b:0.05105},
+  C2H2:{a:4.516,b:0.05220}, C4H10:{a:14.66,b:0.12260},
+  NO:{a:1.358,b:0.02789},   NO2:{a:5.354,b:0.04424},  N2O:{a:3.832,b:0.04415}
+};
+
+// Molar volume at STP for selected gas (mL/mmol).
+// Uses van der Waals if gas is known, else ideal.
+// STP = 273.15 K, 1 atm = 101325 Pa
+function vmSTP(gasKey){
+  if(!gasKey || !VDW[gasKey]) return VM_STP;
+  const{a,b}=VDW[gasKey];
+  // Solve van der Waals: (P + a/V²)(V - b) = RT, P=1 atm, T=273.15 K
+  // R = 0.08206 L·atm/mol·K
+  const P=1.0, T=273.15, R=0.08206;
+  let V=R*T/P; // ideal as starting guess, L/mol
+  for(let i=0;i<50;i++) V=R*T/(P+a/(V*V))+b; // iterative
+  return V; // L/mol = mL/mmol
+}
+
+// Molar volume at experimental T,P for real gas (mL/mmol)
+// T in K, P in bar. Returns null if gas unknown or T/P not set.
+function vmExpt(gasKey,T,P_bar){
+  if(!gasKey||!T||!P_bar) return null;
+  if(!VDW[gasKey]) return null;
+  const{a,b}=VDW[gasKey];
+  const P_atm=P_bar/1.01325;
+  const R=0.08206;
+  let V=R*T/P_atm;
+  for(let i=0;i<50;i++){
+    const Vnew=R*T/(P_atm+a/(V*V))+b;
+    if(Math.abs(Vnew-V)<1e-10) break;
+    V=Vnew;
+  }
+  return V; // L/mol = mL/mmol
+}
+
+// Convert uptake value v in units u → mmol/g
+// p = {mwGas, mwHost, massHost, gasKey, tempK}
+// Returns null if a required parameter is missing
+function qToMmolG(v,u,p){
+  const{mwGas:G, mwHost:H, massHost:M}=p;
+  if(u==='mmol/g')       return v;
+  if(u==='cc(STP)/g'){
+    const vm=vmSTP(p.gasKey);
+    return v/vm;
+  }
+  if(u==='mol/kg')       return v;                        // 1 mol/kg = 1 mmol/g
+  if(u==='mol/mol')      return H ? v*1000/H : null;
+  if(u==='g/g')          return G ? v*1000/G : null;
+  if(u==='wt%')          return G ? v*10/G   : null;
+  if(u==='mg/g')         return G ? v/G      : null;
+  if(u==='ug/g')         return G ? v/G/1000 : null;
+  if(u==='mg/mg_host')   return G ? v*1000/G : null;      // mg/mg = g/g
+  if(u==='ug/mg_host')   return G ? v/G      : null;      // µg/mg = mg/g
+  if(u==='mg_abs')       return (G&&M) ? (v/G)/(M/1000) : null;  // mg gas → mmol gas / g host
+  if(u==='ug_abs')       return (G&&M) ? (v/G/1000)/(M/1000) : null;
+  return null;
+}
+
+// Convert mmol/g → units u
+function qFromMmolG(v,u,p){
+  const{mwGas:G, mwHost:H, rhoHost:R, massHost:M, gasKey, tempK}=p;
+  if(u==='mmol/g')       return v;
+  if(u==='cc(STP)/g'){
+    const vm=vmSTP(gasKey);
+    return v*vm;
+  }
+  if(u==='mol/kg')       return v;
+  if(u==='mol/mol')      return H ? v*H/1000 : null;
+  if(u==='g/g')          return G ? v*G/1000 : null;
+  if(u==='wt%')          return G ? v*G/10   : null;
+  if(u==='mg/g')         return G ? v*G      : null;
+  if(u==='ug/g')         return G ? v*G*1000 : null;
+  if(u==='mg/mg_host')   return G ? v*G/1000 : null;
+  if(u==='ug/mg_host')   return G ? v*G      : null;
+  if(u==='mg_abs')       return (G&&M) ? v*G*(M/1000) : null;   // mmol/g × g/mmol × g_host = mg gas
+  if(u==='ug_abs')       return (G&&M) ? v*G*1000*(M/1000) : null;
+  if(u==='cm3/g')        return (G&&R) ? v*G/1000/R : null;
+  return null;
+}
+
+function needsGas(u)    { return ['g/g','wt%','mg/g','ug/g','mg/mg_host','ug/mg_host','mg_abs','ug_abs','cm3/g'].includes(u); }
+function needsHost(u)   { return u==='mol/mol'; }
+function needsMass(u)   { return ['mg_abs','ug_abs'].includes(u); }
+function needsRho(u)    { return u==='cm3/g'; }
+function needsTemp(u)   { return false; } // placeholder for future real-gas cc(STP) at expt conditions
+
+let rawData=[],convData=[],chart=null,currentTab='raw';
+
+// File loading
+const dz=document.getElementById('dz');
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('over')});
+dz.addEventListener('dragleave',()=>dz.classList.remove('over'));
+dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('over');loadFile(e.dataTransfer.files[0])});
+document.getElementById('fileInput').addEventListener('change',e=>{if(e.target.files[0])loadFile(e.target.files[0])});
+
+function loadFile(f){
+  if(!f)return;
+  const reader=new FileReader();
+  reader.onload=e=>parseCSV(e.target.result,f.name);
+  reader.readAsText(f);
+}
+
+
+// ── Metadata detection helpers ───────────────────────────────────────────────
+
+// Map a raw header string to a known pressure unit value
+function detectPressureUnit(s){
+  s=s.toLowerCase();
+  if(/\bmpa\b/.test(s))  return 'MPa';
+  if(/\bkpa\b/.test(s))  return 'kPa';
+  if(/\bmbar\b/.test(s)) return 'mbar';  // must be before \bbar\b
+  if(/\bbar\b/.test(s))  return 'bar';
+  if(/\batm\b/.test(s))  return 'atm';
+  if(/\btorr\b/.test(s)||/\bmmhg\b/.test(s)) return 'mmHg';
+  if(/\bpsi\b/.test(s))  return 'psi';
+  if(/\bpa\b/.test(s))   return 'Pa';
+  return null;
+}
+
+// Map a raw header string to a known uptake unit value
+function detectUptakeUnit(s){
+  const sl=s.toLowerCase().replace(/\s/g,'');
+  // Check explicit per-host ratios first (before bare microgram/milligram)
+  if(/µg\/mg|ug\/mg/.test(sl))           return 'ug/mg_host';
+  if(/mg\/mg/.test(sl))                  return 'mg/mg_host';
+  // Explicit absolute flags
+  if(/µg_abs|ug_abs|ugabs/.test(sl))     return 'ug_abs';
+  if(/mg_abs|mgabs/.test(sl))            return 'mg_abs';
+  // Per-gram ratios — require explicit /g denominator
+  if(/µg\/g|ug\/g/.test(sl))             return 'ug/g';
+  if(/mg\/g/.test(sl))                   return 'mg/g';
+  // Bare 'microgram'/'µg'/'ug' with no denominator = absolute
+  if(/microgram/.test(sl))               return 'ug_abs';
+  if(/milligram/.test(sl))               return 'mg_abs';
+  // Molar
+  if(/mmol\/g/.test(sl))                 return 'mmol/g';
+  if(/mol\/mol/.test(sl))                return 'mol/mol';
+  if(/mol\/kg/.test(sl))                 return 'mol/kg';
+  // Volumetric
+  if(/cc.*stp|cm3.*stp|ml.*stp/.test(sl)) return 'cc(STP)/g';
+  if(/cm3\/g|cc\/g/.test(sl))            return 'cm3/g';
+  // Mass fraction
+  if(/wt\s*%|wt%/.test(sl))             return 'wt%';
+  if(/g\/g/.test(sl))                    return 'g/g';
+  return null;
+}
+
+// Map a gas name string to a known gasPreset key
+function detectGas(s){
+  const sl=s.toLowerCase().replace(/\s/g,'');
+  const map={
+    'co2':'CO2','carbondioxide':'CO2',
+    'ch4':'CH4','methane':'CH4',
+    'n2':'N2','nitrogen':'N2',
+    'o2':'O2','oxygen':'O2',
+    'h2':'H2','hydrogen':'H2',
+    'c2h4':'C2H4','ethylene':'C2H4',
+    'c2h6':'C2H6','ethane':'C2H6',
+    'c3h6':'C3H6','propylene':'C3H6',
+    'c3h8':'C3H8','propane':'C3H8',
+    'c4h10':'C4H10','butane':'C4H10','n-butane':'C4H10',
+    'c2h2':'C2H2','acetylene':'C2H2','ethyne':'C2H2',
+    'no2':'NO2','nitrogendioxide':'NO2',
+    'n2o':'N2O','nitrousoxide':'N2O',
+    'no':'NO','nitricoxide':'NO',
+    'h2o':'H2O','water':'H2O',
+    'so2':'SO2','h2s':'H2S',
+    'nh3':'NH3','ammonia':'NH3',
+    'ar':'Ar','argon':'Ar',
+    'he':'He','helium':'He',
+    'kr':'Kr','krypton':'Kr',
+    'xe':'Xe','xenon':'Xe'
+  };
+  return map[sl]||null;
+}
+
+// Apply parsed metadata to UI controls; return array of {msg,ok} for the info panel
+function applyMetadata(meta){
+  const notes=[];
+
+  // Sorptive / gas
+  if(meta.sorptive){
+    const key=detectGas(meta.sorptive);
+    if(key){
+      document.getElementById('gasPreset').value=key;
+      onGasPreset();   // fills MW
+      notes.push({ok:true, msg:'Sorptive detected: <b>'+key+'</b> — MW set to '+GAS_MW[key]+' g/mol.'});
+    } else {
+      notes.push({ok:false, msg:'Sorptive "<b>'+meta.sorptive+'</b>" not recognised — set gas manually.'});
+    }
+  }
+
+  // Temperature
+  if(meta.tempK!==undefined){
+    document.getElementById('tempK').value=meta.tempK;
+    notes.push({ok:true, msg:'Temperature: <b>'+meta.tempK+' K</b>.'});
+  }
+  if(meta.tempC!==undefined){
+    const K=meta.tempC+273.15;
+    document.getElementById('tempK').value=K.toFixed(2);
+    notes.push({ok:true, msg:'Temperature: <b>'+meta.tempC+' °C</b> → '+K.toFixed(2)+' K.'});
+  }
+
+  // Host MW (direct)
+  if(meta.hostMW!==undefined){
+    document.getElementById('mwHost').value=meta.hostMW;
+    notes.push({ok:true, msg:'Host MW from file: <b>'+meta.hostMW+' g/mol</b>.'});
+  }
+
+  // Host formula — parse and compare
+  if(meta.hostFormula){
+    document.getElementById('hostFormula').value=meta.hostFormula;
+    const res=parseMolecularFormula(meta.hostFormula);
+    if(res.error){
+      notes.push({ok:false, msg:'Host formula "<b>'+meta.hostFormula+'</b>": could not parse ('+res.error+'). Enter MW manually.'});
+    } else {
+      const calcMW=parseFloat(res.mw.toFixed(3));
+      document.getElementById('mwFromFormula').textContent='MW = '+calcMW+' g/mol';
+      document.getElementById('mwFromFormula').style.color='var(--accent)';
+      if(meta.hostMW!==undefined){
+        // check consistency
+        const diff=Math.abs(calcMW-meta.hostMW);
+        const pct=diff/meta.hostMW*100;
+        if(pct>1.0){
+          notes.push({ok:false, msg:'⚠ Host MW mismatch: formula gives <b>'+calcMW+'</b> g/mol but Host_MW says <b>'+meta.hostMW+'</b> g/mol ('+pct.toFixed(1)+'% difference). Check your file.'});
+        } else {
+          document.getElementById('mwHost').value=calcMW;
+          notes.push({ok:true, msg:'Host formula <b>'+meta.hostFormula+'</b> → MW = '+calcMW+' g/mol (consistent with Host_MW).'});
+        }
+      } else {
+        document.getElementById('mwHost').value=calcMW;
+        notes.push({ok:true, msg:'Host formula <b>'+meta.hostFormula+'</b> → MW = '+calcMW+' g/mol.'});
+      }
+    }
+  }
+
+  // Host density
+  if(meta.hostDensity!==undefined){
+    document.getElementById('rhoHost').value=meta.hostDensity;
+    notes.push({ok:true, msg:'Host density: <b>'+meta.hostDensity+' g/cm³</b>.'});
+  }
+
+  // Host mass
+  if(meta.hostMass!==undefined){
+    document.getElementById('massHost').value=meta.hostMass;
+    notes.push({ok:true, msg:'Host sample mass: <b>'+meta.hostMass+' mg</b>.'});
+  }
+
+  // Pressure units
+  if(meta.pUnit){
+    document.getElementById('pUnitsIn').value=meta.pUnit;
+    if(meta._pDefault)
+      notes.push({ok:true, msg:'No pressure units in header — defaulting to <b>'+fmtUnit(meta.pUnit)+'</b>.'});
+    else
+      notes.push({ok:true, msg:'Pressure units from header: <b>'+fmtUnit(meta.pUnit)+'</b>.'});
+    autoLabels();
+  }
+
+  // Uptake units
+  if(meta.qUnit){
+    document.getElementById('qUnitsIn').value=meta.qUnit;
+    if(meta._qDefault)
+      notes.push({ok:true, msg:'No uptake units in header — defaulting to <b>'+fmtUnit(meta.qUnit)+'</b>.'});
+    else
+      notes.push({ok:true, msg:'Uptake units from header: <b>'+fmtUnit(meta.qUnit)+'</b>.'});
+    autoLabels();
+  }
+
+  return notes;
+}
+
+// Show metadata notes in a dedicated div above resContent
+function showMetaNotes(notes){
+  const prev=document.getElementById('metaNotes');
+  if(prev) prev.remove();
+  if(!notes||!notes.length) return;
+  const div=document.createElement('div');
+  div.id='metaNotes';
+  div.style.cssText='border:1.5px solid var(--rule);margin-bottom:6px;font-size:11px;font-family:Georgia,serif;line-height:1.7';
+  const header=document.createElement('div');
+  header.style.cssText='background:var(--cream);padding:4px 10px;font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)';
+  header.textContent='Detected from file';
+  div.appendChild(header);
+  notes.forEach(n=>{
+    const row=document.createElement('div');
+    row.style.cssText='padding:3px 10px;border-top:1px solid var(--pale);background:'+(n.ok?'#fff':'#fff0f0')+';color:'+(n.ok?'#333':'#8b0000');
+    row.innerHTML=(n.ok?'✓ ':'⚠ ')+n.msg;
+    div.appendChild(row);
+  });
+  const rc=document.getElementById('resContent');
+  rc.parentElement.insertBefore(div,rc);
+}
+
+// ── Main CSV parser ──────────────────────────────────────────────────────────
+function parseCSV(text,name){
+  const allLines=text.split(/\r?\n/);
+  rawData=[];
+  let skipped=0,branch='ads',inGap=false,gapSeen=false;
+  const meta={};   // will be populated from header rows
+  let dataStarted=false;
+
+  for(const line of allLines){
+    const trimmed=line.trim();
+
+    // Blank / separator line
+    if(!trimmed){
+      if(dataStarted) inGap=true;
+      continue;
+    }
+
+    const cols=trimmed.split(/,|\t|;/).map(c=>c.trim());
+    const c0=cols[0]||'', c1=cols[1]||'';
+
+    // ── Metadata key=value rows (before data starts) ──
+    if(!dataStarted){
+      const key=c0.toLowerCase().replace(/\s/g,'');
+      if(key==='host_mw'||key==='hostmw'){
+        const v=parseFloat(c1);
+        if(!isNaN(v)) meta.hostMW=v;
+        continue;
+      }
+      if(key==='host_formula'||key==='hostformula'){
+        if(c1) meta.hostFormula=c1;
+        continue;
+      }
+      if(key==='host_density'||key==='hostdensity'){
+        const v=parseFloat(c1);
+        if(!isNaN(v)) meta.hostDensity=v;
+        continue;
+      }
+      if(key==='host_mass'||key==='hostmass'){
+        const v=parseFloat(c1);
+        if(!isNaN(v)) meta.hostMass=v;
+        continue;
+      }
+      if(key==='sorptive'||key==='gas'||key==='adsorbate'){
+        if(c1) meta.sorptive=c1;
+        continue;
+      }
+      if(key==='temperaturek'||key==='temp_k'||key==='t_k'){
+        const v=parseFloat(c1);
+        if(!isNaN(v)) meta.tempK=v;
+        continue;
+      }
+      if(key==='temperaturec'||key==='temp_c'||key==='t_c'){
+        const v=parseFloat(c1);
+        if(!isNaN(v)) meta.tempC=v;
+        continue;
+      }
+
+      // Try as a column-header row (both cols non-numeric text)
+      const p0=parseFloat(c0), p1=parseFloat(c1);
+      if(isNaN(p0)&&isNaN(p1)&&c0&&c1){
+        // Extract pressure unit from first column
+        const pu=detectPressureUnit(c0);
+        if(pu) meta.pUnit=pu;
+        // Extract uptake unit from second column
+        const qu=detectUptakeUnit(c1);
+        if(qu) meta.qUnit=qu;
+        // Also check if first column is just "pressure" and second is a unit string
+        if(!qu){
+          const qu2=detectUptakeUnit(c1);
+          if(qu2) meta.qUnit=qu2;
+        }
+        // Don't continue — fall through to data-parse attempt which will fail and skip
+      }
+    }
+
+    // ── Data rows ──
+    if(inGap){branch='des';inGap=false;gapSeen=true;}
+    const p=parseFloat(c0), q=parseFloat(c1);
+    if(isNaN(p)||isNaN(q)){
+      if(dataStarted) inGap=true;
+      continue;
+    }
+    dataStarted=true;
+    rawData.push({p,q,branch});
+  }
+
+  if(!rawData.length){st('No numeric data found in file.','err');return;}
+
+  // If no units detected from header, apply defaults and note it
+  if(!meta.pUnit){ meta.pUnit='bar'; meta._pDefault=true; }
+  if(!meta.qUnit){ meta.qUnit='mmol/g'; meta._qDefault=true; }
+
+  // Apply metadata to controls and collect notes
+  const notes=applyMetadata(meta);
+  showMetaNotes(notes);
+
+  document.getElementById('dzName').textContent=name;
+  document.getElementById('prevWrap').style.display='';
+  const nAds=rawData.filter(r=>r.branch==='ads').length;
+  const nDes=rawData.filter(r=>r.branch==='des').length;
+  const ptInfo=gapSeen?' ('+nAds+' ads + '+nDes+' des)':'';
+  document.getElementById('nPts').textContent=rawData.length+' rows'+ptInfo+(skipped?' ('+skipped+' skipped)':'');
+  const tb=document.getElementById('prevBody');tb.innerHTML='';
+  rawData.slice(0,8).forEach(r=>{
+    const tr=document.createElement('tr');
+    const tagCol=r.branch==='des'?'var(--accent)':'#aaa';
+    tr.innerHTML='<td>'+fmt(r.p)+'</td><td>'+fmt(r.q)+'</td><td style="color:'+tagCol+';font-size:9px">'+r.branch+'</td>';
+    tb.appendChild(tr);
+  });
+  if(rawData.length>8){
+    const tr=document.createElement('tr');
+    tr.innerHTML='<td colspan=3 style="color:#aaa;font-style:italic;text-align:center">\u2026'+(rawData.length-8)+' more</td>';
+    tb.appendChild(tr);
+  }
+  document.getElementById('btnConvert').disabled=false;
+  convData=[];
+  st('Loaded '+rawData.length+' points from "'+name+'"'+(gapSeen?' \u2014 ads + des detected.':'.'), 'ok');
+  validateUnits();
+  autoLabels();
+
+  // Set output units to bar / mmol/g as starting point
+  document.getElementById('pUnitsOut').value = 'bar';
+  document.getElementById('qUnitsOut').value = 'mmol/g';
+  autoLabels();  // update labels for output units too
+
+  // Try silent conversion immediately; if it works, show the converted tab
+  const ok = tryConvert(true);
+  if(ok){
+    switchTab('conv');
+    st('Loaded and converted to mmol g⁻¹ vs bar. Select output units to convert further.','ok');
+  } else {
+    renderChart();
+    st('Loaded '+rawData.length+' points. Set parameters and click Convert Units.','ok');
+  }
+}
+
+
+function autoLabels(){
+  document.getElementById('xLbl').value='Pressure / '+fmtUnit(gv('pUnitsIn'));
+  document.getElementById('yLbl').value='Uptake / '+fmtUnit(gv('qUnitsIn'));
+}
+function onParamChange(){
+  validateUnits();
+  if(rawData.length){
+    const ok = tryConvert(true);
+    if(ok) renderChart();
+  }
+}
+function onUnitsChange(){
+  autoLabels();
+  validateUnits();
+  if(rawData.length){
+    const ok = tryConvert(true);  // silent — no error if params missing
+    renderChart();
+    if(ok) switchTab('conv');
+  }
+}
+
+// Show prominent warning in results panel if required parameters are missing
+function validateUnits(){
+  const qIn=gv('qUnitsIn'), qOut=gv('qUnitsOut');
+  const mwGas=gn('mwGas'), mwHost=gn('mwHost'), rhoHost=gn('rhoHost');
+  const massHost=gn('massHost'), gasKey=gv('gasPreset')||'';
+  const msgs=[];
+  if((needsGas(qIn)||needsGas(qOut))&&!mwGas)
+    msgs.push('Gas molecular weight (M<sub>gas</sub>, g/mol) is required for <b>'+[qIn,qOut].filter(u=>needsGas(u)).join(', ')+'</b> — enter it in Gas Properties.');
+  if((needsHost(qIn)||needsHost(qOut))&&!mwHost)
+    msgs.push('<b>mol/mol</b> requires the host formula-unit molecular weight: uptake [mmol/g] × M<sub>host</sub> [g/mol] ÷ 1000 = mol guest / mol host. Enter the host formula or MW in Host Material.');
+  if((needsMass(qIn)||needsMass(qOut))&&!massHost)
+    msgs.push('<b>Absolute mass units (mg/µg)</b> require the mass of the host sample in mg — enter it in Host Material.');
+  if((needsRho(qIn)||needsRho(qOut))&&!rhoHost)
+    msgs.push('Host density is required for <b>cm³/g (liquid)</b> — enter it in Host Material.');
+  // cc(STP)/g note
+  const stpUnits=[qIn,qOut].filter(u=>u==='cc(STP)/g');
+  if(stpUnits.length){
+    if(gasKey&&VDW&&VDW[gasKey]){
+      msgs.push('ℹ <b>cc(STP)/g</b>: using van der Waals molar volume for <b>'+gasKey+'</b> at STP (0°C, 1 atm) = '+vmSTP(gasKey).toFixed(4)+' mL/mmol (cf. ideal 22.414 mL/mmol).');
+    } else {
+      msgs.push('ℹ <b>cc(STP)/g</b>: using ideal-gas molar volume (22.414 mL/mmol). Select the gas in Gas Properties to apply a van der Waals real-gas correction.');
+    }
+  }
+  const rc = document.getElementById('resContent');
+  // remove any previous warning div
+  const prev = document.getElementById('unitWarning');
+  if(prev) prev.remove();
+  if(msgs.length){
+    const div=document.createElement('div');
+    div.id='unitWarning';
+    div.style.cssText='background:#fff3cd;border:1.5px solid #b84a2e;padding:8px 12px;margin-top:8px;font-size:11px;line-height:1.7;font-family:Georgia,serif;color:#5a2000';
+    div.innerHTML='⚠ <b>Cannot convert yet:</b><br>'+msgs.map(m=>'&bull; '+m).join('<br>');
+    rc.parentElement.insertBefore(div, rc);
+  }
+}
+
+// Attempt conversion silently — returns true if successful, false if params missing.
+// When silent=true, missing params do not update the status bar or warning panel.
+function tryConvert(silent){
+  if(!rawData.length) return false;
+  const qIn=gv('qUnitsIn'),qOut=gv('qUnitsOut'),pIn=gv('pUnitsIn'),pOut=gv('pUnitsOut');
+  const mwGas=gn('mwGas'),mwHost=gn('mwHost'),rhoHost=gn('rhoHost');
+  const massHost=gn('massHost'),tempK=gn('tempK'),gasKey=gv('gasPreset')||'';
+  const prm={mwGas,mwHost,rhoHost,massHost,gasKey,tempK};
+  const missing=[];
+  if((needsGas(qIn)||needsGas(qOut))&&!mwGas)     missing.push('gas MW (set in Gas Properties)');
+  if((needsHost(qIn)||needsHost(qOut))&&!mwHost)   missing.push('host MW (set in Host Material)');
+  if((needsMass(qIn)||needsMass(qOut))&&!massHost)  missing.push('mass of host sample in mg (set in Host Material)');
+  if((needsRho(qIn)||needsRho(qOut))&&!rhoHost)    missing.push('host density (set in Host Material)');
+  if(missing.length){
+    if(!silent){
+      st('⚠ Cannot convert — missing: '+missing.join('; ')+'.','err');
+      validateUnits();
+    }
+    return false;
+  }
+  convData=[];let bad=0;
+  for(const pt of rawData){
+    const pB=pToBar(pt.p,pIn),pC=pFromBar(pB,pOut);
+    const qM=qToMmolG(pt.q,qIn,prm);if(qM===null){bad++;continue;}
+    const qC=qFromMmolG(qM,qOut,prm);if(qC===null){bad++;continue;}
+    convData.push({p:pC,q:qC,branch:pt.branch});
+  }
+  if(!silent){
+    if(bad) st('Done — '+bad+' points skipped.','err');
+    else st('Converted '+convData.length+' points: '+qIn+' → '+qOut+'.','ok');
+  }
+  updateResults();
+  return true;
+}
+
+function doConvert(){
+  if(!rawData.length){st('Load a CSV file first.','err');return;}
+  const ok = tryConvert(false);
+  if(ok) renderChart();
+}
+
+document.getElementById('btnConvert').addEventListener('click',doConvert);
+
+function updateResults(){
+  if(!convData.length){
+    document.getElementById('resContent').innerHTML='<div class="ph">No converted data.</div>';
+    document.getElementById('btnExport').disabled=true;
+    return;
+  }
+  document.getElementById('btnExport').disabled=false;
+  const qIn=gv('qUnitsIn'),qOut=gv('qUnitsOut'),pIn=gv('pUnitsIn'),pOut=gv('pUnitsOut');
+  const mwGas=gn('mwGas'),mwHost=gn('mwHost'),gasKey=gv('gasPreset');
+
+  // Data statistics
+  const cAds=convData.filter(r=>r.branch==='ads');
+  const cDes=convData.filter(r=>r.branch==='des');
+  const rAds=rawData.filter(r=>r.branch==='ads');
+  const rDes=rawData.filter(r=>r.branch==='des');
+
+  function rng(arr,key){
+    const vals=arr.map(r=>r[key]).filter(isFinite);
+    if(!vals.length) return '—';
+    const lo=Math.min(...vals), hi=Math.max(...vals);
+    return fmtTick(lo, hi-lo)+' – '+fmtTick(hi, hi-lo);
+  }
+
+  // Conversion description
+  let desc='';
+  const vdwNote = (qIn==='cc(STP)/g'||qOut==='cc(STP)/g') && gasKey && VDW[gasKey]
+    ? ' (van der Waals molar volume for '+gasKey+': '+vmSTP(gasKey).toFixed(4)+' mL mmol⁻¹)'
+    : (qIn==='cc(STP)/g'||qOut==='cc(STP)/g') ? ' (ideal gas: 22.414 mL mmol⁻¹)' : '';
+  if(qIn===qOut && pIn===pOut) desc='Units unchanged.';
+  else if(qIn===qOut) desc='Uptake unchanged; pressure converted '+fmtUnit(pIn)+' → '+fmtUnit(pOut)+'.';
+  else {
+    const steps=[];
+    if(pIn!==pOut) steps.push('Pressure: '+fmtUnit(pIn)+' → '+fmtUnit(pOut));
+    if(qIn==='mmol/g'&&qOut==='cc(STP)/g') steps.push('Uptake × '+vmSTP(gasKey||'').toFixed(4)+' mL mmol⁻¹'+vdwNote);
+    else if(qIn==='cc(STP)/g'&&qOut==='mmol/g') steps.push('Uptake ÷ '+vmSTP(gasKey||'').toFixed(4)+vdwNote);
+    else if(qIn==='mmol/g'&&qOut==='mol/kg') steps.push('Uptake unchanged (1 mmol g⁻¹ ≡ 1 mol kg⁻¹)');
+    else if(qIn==='mmol/g'&&qOut==='mol/mol') steps.push('Uptake × Mₜₕ/1000 = ×'+(mwHost?(mwHost/1000).toPrecision(4):'?')+' (Mₜₕ = '+(mwHost||'?')+' g mol⁻¹)');
+    else if(qIn==='mmol/g'&&qOut==='g/g')    steps.push('Uptake × Mᴳₐₛ/1000 = ×'+(mwGas?(mwGas/1000).toPrecision(4):'?'));
+    else if(qIn==='mmol/g'&&qOut==='wt%')    steps.push('Uptake × Mᴳₐₛ/10 = ×'+(mwGas?(mwGas/10).toPrecision(4):'?'));
+    else if(qIn==='mmol/g'&&qOut==='mg/g')   steps.push('Uptake × Mᴳₐₛ = ×'+(mwGas||'?'));
+    else steps.push('Uptake: '+fmtUnit(qIn)+' → '+fmtUnit(qOut)+' via mmol g⁻¹ intermediate');
+    desc=steps.join('; ')+'.';
+  }
+
+  // Build summary HTML
+  const hasDes=rDes.length>0;
+  let rows='';
+
+  // Row 1: point counts
+  if(hasDes){
+    rows+=`<div class="rc"><div class="rt">Adsorption points</div><div class="rv">${cAds.length}</div></div>`;
+    rows+=`<div class="rc"><div class="rt">Desorption points</div><div class="rv">${cDes.length}</div></div>`;
+  } else {
+    rows+=`<div class="rc"><div class="rt">Data points</div><div class="rv">${convData.length}</div></div>`;
+  }
+
+  // Row 2: pressure range
+  const pRngRaw = rng(rawData,'p'), pRngConv = rng(convData,'p');
+  const pSame = (pIn===pOut);
+  if(pSame){
+    rows+=`<div class="rc"><div class="rt">Pressure range / ${fmtUnit(pOut)}</div><div class="rv">${pRngConv}</div></div>`;
+  } else {
+    rows+=`<div class="rc"><div class="rt">Pressure in / ${fmtUnit(pIn)}</div><div class="rv">${pRngRaw}</div></div>`;
+    rows+=`<div class="rc hi"><div class="rt">Pressure out / ${fmtUnit(pOut)}</div><div class="rv">${pRngConv}</div></div>`;
+  }
+
+  // Row 3: uptake range
+  const qRngRaw = rng(rawData,'q'), qRngConv = rng(convData,'q');
+  if(qIn===qOut){
+    rows+=`<div class="rc"><div class="rt">Uptake range / ${fmtUnit(qOut)}</div><div class="rv">${qRngConv}</div></div>`;
+  } else {
+    rows+=`<div class="rc"><div class="rt">Uptake in / ${fmtUnit(qIn)}</div><div class="rv">${qRngRaw}</div></div>`;
+    rows+=`<div class="rc hi"><div class="rt">Uptake out / ${fmtUnit(qOut)}</div><div class="rv">${qRngConv}</div></div>`;
+  }
+
+  const html=`
+  <div class="r-grid" style="grid-template-columns:1fr 1fr">${rows}</div>
+  <div style="font-size:11px;color:#555;margin-top:8px;line-height:1.7;font-family:Georgia,serif">${desc}</div>`;
+
+  document.getElementById('resContent').innerHTML=html;
+}
+
+
+// ---- Chart ----
+function switchTab(t){
+  currentTab=t;
+  ['Raw','Conv','Guide'].forEach(n=>document.getElementById('tab'+n).classList.remove('active'));
+  document.getElementById('tab'+t.charAt(0).toUpperCase()+t.slice(1)).classList.add('active');
+  // Show/hide canvas vs guide
+  const isGuide = t==='guide';
+  document.getElementById('myChart').style.display    = isGuide ? 'none' : 'block';
+  document.getElementById('guideContent').style.display = isGuide ? 'block' : 'none';
+  document.getElementById('status').style.display = isGuide ? 'none' : '';
+  if(!isGuide) renderChart();
+}
+
+function renderChart(){
+  if(!rawData.length) return;
+
+  const canvas = document.getElementById('myChart');
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.offsetWidth  || canvas.parentElement.offsetWidth  || 600;
+  const H = canvas.offsetHeight || canvas.parentElement.offsetHeight || 400;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  // ---- settings ----
+  const font     = gv('fontFam');
+  const axSz     = gn('axSz')||36;
+  const tkSz     = gn('tkSz')||30;
+  const axCol    = gv('axCol');
+  const plotBg   = gv('plotBg');
+  const chartBg  = gv('chartBg');
+  const ptCol    = gv('ptCol');
+  const ptSz     = gn('ptSz')||5;
+  const ptOp     = gn('ptOp')??1;
+  const ptCol2   = gv('ptCol2');
+  const ptSz2    = gn('ptSz2')||5;
+  // Axis labels: on 'conv' tab use output units; on 'raw' use input units; respect user overrides
+  const pInU  = gv('pUnitsIn'),  pOutU = gv('pUnitsOut');
+  const qInU2 = gv('qUnitsIn'),  qOutU2= gv('qUnitsOut');
+  let xLblTxt, yLblTxt;
+  if(currentTab==='conv'){
+    // Use user override if set, else auto from units
+    const xc = gv('xLblConv'), yc = gv('yLblConv');
+    xLblTxt = xc || 'Pressure / '+fmtUnit(pOutU);
+    yLblTxt = yc || 'Uptake / '+fmtUnit(qOutU2);
+  } else {
+    xLblTxt = gv('xLbl');
+    yLblTxt = gv('yLbl');
+  }
+  const ttlTxt   = gv('ttl');
+  const ttlSz    = (gn('ttlSz')||15);
+  const legSz    = gn('legSz')||11;
+  const showLeg  = gb('leg');
+  const showGrid = gb('grid');
+  const gridCol  = gv('gridCol');
+  const gridW    = gn('gridW')||1;
+  const boxBdr   = gb('boxBdr');
+  const boxCol   = gv('boxCol');
+  const boxW     = gn('boxW')||3;
+  const frameW   = gn('frameW')||3;
+
+  const showRaw  = currentTab==='raw';
+  const showConv = currentTab==='conv' && convData.length>0;
+
+  const rawAds = rawData.filter(r=>r.branch==='ads');
+  const rawDes = rawData.filter(r=>r.branch==='des');
+  const convAds= convData.filter(r=>r.branch==='ads');
+  const convDes= convData.filter(r=>r.branch==='des');
+  const hasDes = rawDes.length>0;
+
+  // ---- collect all visible points to determine data range ----
+  let allPts = [];
+  if(showRaw)  allPts = allPts.concat(rawData);
+  if(showConv) allPts = allPts.concat(convData);
+  if(!allPts.length) allPts = rawData; // fallback so range is never empty
+
+  const pVals = allPts.map(r=>r.p).filter(v=>isFinite(v));
+  const qVals = allPts.map(r=>r.q).filter(v=>isFinite(v));
+  if(!pVals.length||!qVals.length){ ctx.fillStyle='#aaa'; ctx.font='14px sans-serif'; ctx.fillText('No data to plot',W/2,H/2); return; }
+
+  const isConv = currentTab==='conv';
+  let xMin = gn(isConv?'xminC':'xmin'), xMax = gn(isConv?'xmaxC':'xmax');
+  let yMin = gn(isConv?'yminC':'ymin'), yMax = gn(isConv?'ymaxC':'ymax');
+  if(xMin===undefined) xMin = Math.min(...pVals);
+  if(xMax===undefined) xMax = Math.max(...pVals);
+  if(yMin===undefined) yMin = Math.min(...qVals);
+  if(yMax===undefined) yMax = Math.max(...qVals);
+  // pad 5%
+  const xPad=(xMax-xMin)*0.05||Math.abs(xMax)*0.05||0.1;
+  const yPad=(yMax-yMin)*0.05||Math.abs(yMax)*0.05||0.1;
+  if(gn(isConv?'xminC':'xmin')===undefined) xMin-=xPad;
+  if(gn(isConv?'xmaxC':'xmax')===undefined) xMax+=xPad;
+  if(gn(isConv?'yminC':'ymin')===undefined) yMin-=yPad;
+  if(gn(isConv?'ymaxC':'ymax')===undefined) yMax+=yPad;
+  // Final sanity check
+  if(!isFinite(xMin)||!isFinite(xMax)||xMin>=xMax) { xMin=0; xMax=1; }
+  if(!isFinite(yMin)||!isFinite(yMax)||yMin>=yMax) { yMin=0; yMax=1; }
+
+  // ---- margins ----
+  const ML = tkSz*5+axSz+12, MR = 30, MT = ttlTxt?ttlSz+24:20, MB = axSz+tkSz+18;
+  const PW = W - ML - MR;
+  const PH = H - MT - MB;
+
+  function px(x){ return ML + (x-xMin)/(xMax-xMin)*PW; }
+  function py(y){ return MT + PH - (y-yMin)/(yMax-yMin)*PH; }
+
+  // ---- nice ticks ----
+  function niceTicks(lo,hi,n){
+    const rough=(hi-lo)/n;
+    const exp=Math.floor(Math.log10(rough));
+    const frac=rough/Math.pow(10,exp);
+    let nice;
+    if(frac<1.5) nice=1;
+    else if(frac<3) nice=2;
+    else if(frac<7) nice=5;
+    else nice=10;
+    const step=nice*Math.pow(10,exp);
+    const ticks=[];
+    let t=Math.ceil(lo/step)*step;
+    while(t<=hi+1e-10){ticks.push(parseFloat(t.toPrecision(10)));t+=step;}
+    return ticks;
+  }
+  const xTicks=niceTicks(xMin,xMax,6);
+  const yTicks=niceTicks(yMin,yMax,6);
+  const xStep = xTicks.length>1 ? xTicks[1]-xTicks[0] : 0;
+  const yStep = yTicks.length>1 ? yTicks[1]-yTicks[0] : 0;
+
+  // ---- draw ----
+  // Background
+  ctx.fillStyle=chartBg; ctx.fillRect(0,0,W,H);
+  // Plot area
+  ctx.fillStyle=plotBg;  ctx.fillRect(ML,MT,PW,PH);
+
+  // Grid
+  if(showGrid){
+    ctx.save();
+    ctx.strokeStyle=gridCol; ctx.lineWidth=gridW;
+    xTicks.forEach(t=>{const x=px(t);ctx.beginPath();ctx.moveTo(x,MT);ctx.lineTo(x,MT+PH);ctx.stroke();});
+    yTicks.forEach(t=>{const y=py(t);ctx.beginPath();ctx.moveTo(ML,y);ctx.lineTo(ML+PW,y);ctx.stroke();});
+    ctx.restore();
+  }
+
+  // Axes
+  ctx.save();
+  ctx.strokeStyle=axCol; ctx.lineWidth=frameW; ctx.fillStyle=axCol;
+  ctx.beginPath(); ctx.moveTo(ML,MT); ctx.lineTo(ML,MT+PH); ctx.lineTo(ML+PW,MT+PH); ctx.stroke();
+  if(boxBdr){
+    ctx.save(); ctx.strokeStyle=boxCol; ctx.lineWidth=boxW;
+    ctx.strokeRect(ML,MT,PW,PH);
+    ctx.restore();
+  }
+
+  // Ticks + labels
+  ctx.font=tkSz+'px '+font; ctx.textAlign='center'; ctx.textBaseline='top';
+  xTicks.forEach(t=>{
+    const x=px(t);
+    ctx.beginPath(); ctx.moveTo(x,MT+PH); ctx.lineTo(x,MT+PH+6); ctx.stroke();
+    ctx.fillText(fmtTick(t,xStep), x, MT+PH+8);
+  });
+  ctx.textAlign='right'; ctx.textBaseline='middle';
+  yTicks.forEach(t=>{
+    const y=py(t);
+    ctx.beginPath(); ctx.moveTo(ML,y); ctx.lineTo(ML-6,y); ctx.stroke();
+    ctx.fillText(fmtTick(t,yStep), ML-9, y);
+  });
+  ctx.restore();
+
+  // Axis labels
+  ctx.save();
+  ctx.fillStyle=axCol; ctx.font='bold '+axSz+'px '+font;
+  ctx.textAlign='center'; ctx.textBaseline='bottom';
+  ctx.fillText(xLblTxt, ML+PW/2, H-2);
+  ctx.translate(axSz, MT+PH/2);
+  ctx.rotate(-Math.PI/2);
+  ctx.textBaseline='top';
+  ctx.fillText(yLblTxt, 0, 0);
+  ctx.restore();
+
+  // Title
+  if(ttlTxt){
+    ctx.save();
+    ctx.fillStyle=axCol; ctx.font='bold '+ttlSz+'px '+font;
+    ctx.textAlign='center'; ctx.textBaseline='top';
+    ctx.fillText(ttlTxt, ML+PW/2, 4);
+    ctx.restore();
+  }
+
+  // Clip to plot area for points
+  ctx.save();
+  ctx.beginPath(); ctx.rect(ML,MT,PW,PH); ctx.clip();
+
+  function drawCircle(x,y,r,color,open){
+    ctx.beginPath(); ctx.arc(px(x),py(y),r,0,Math.PI*2);
+    if(open){
+      ctx.fillStyle=plotBg; ctx.fill();
+      ctx.strokeStyle=color; ctx.lineWidth=2; ctx.stroke();
+    } else {
+      ctx.fillStyle=color; ctx.fill();
+    }
+  }
+
+  function hexAlpha(hex,a){
+    const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+    return 'rgba('+r+','+g+','+b+','+a+')';
+  }
+
+  if(showRaw){
+    rawAds.forEach(pt=>drawCircle(pt.p,pt.q,ptSz,hexAlpha(ptCol,ptOp),false));
+    rawDes.forEach(pt=>drawCircle(pt.p,pt.q,ptSz,hexAlpha(ptCol,ptOp),true));
+  }
+  if(showConv){
+    convAds.forEach(pt=>drawCircle(pt.p,pt.q,ptSz2,ptCol2,false));
+    convDes.forEach(pt=>drawCircle(pt.p,pt.q,ptSz2,ptCol2,true));
+  }
+
+  ctx.restore(); // unclip
+
+  // Legend
+  if(showLeg){
+    const entries=[];
+    if(showRaw){
+      entries.push({label: hasDes?'Adsorption / '+fmtUnit(qInU2):'Input / '+fmtUnit(qInU2), color:hexAlpha(ptCol,ptOp), open:false, sz:ptSz});
+      if(hasDes) entries.push({label:'Desorption / '+fmtUnit(qInU2), color:hexAlpha(ptCol,ptOp), open:true, sz:ptSz});
+    }
+    if(showConv){
+      entries.push({label: convDes.length?'Adsorption / '+fmtUnit(qOutU2):'Converted / '+fmtUnit(qOutU2), color:ptCol2, open:false, sz:ptSz2});
+      if(convDes.length) entries.push({label:'Desorption / '+fmtUnit(qOutU2), color:ptCol2, open:true, sz:ptSz2});
+    }
+    ctx.save();
+    ctx.font=legSz+'px '+font; ctx.textBaseline='middle';
+    let lx=ML+8, ly=MT+12;
+    entries.forEach(e=>{
+      // swatch
+      ctx.beginPath(); ctx.arc(lx+e.sz,ly,e.sz,0,Math.PI*2);
+      if(e.open){
+        ctx.fillStyle=plotBg; ctx.fill();
+        ctx.strokeStyle=e.color; ctx.lineWidth=2; ctx.stroke();
+      } else {
+        ctx.fillStyle=e.color; ctx.fill();
+      }
+      ctx.fillStyle=axCol;
+      ctx.fillText(e.label, lx+e.sz*2+5, ly);
+      lx += e.sz*2+8+ctx.measureText(e.label).width+12;
+    });
+    ctx.restore();
+  }
+}
+
+
+function redraw(){if(rawData.length)renderChart();}
+
+document.getElementById('btnExport').addEventListener('click',()=>{
+  if(!convData.length)return;
+  const pOut=gv('pUnitsOut'),qOut=gv('qUnitsOut');
+  const lines=['# Converted sorption data','# Input: '+gv('qUnitsIn')+' → '+qOut,'# Pressure ('+pOut+'), Uptake ('+qOut+')','Pressure,Uptake'];
+  convData.forEach(r=>lines.push(r.p+','+r.q));
+  const blob=new Blob([lines.join('\r\n')],{type:'text/csv'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='sorption_converted.csv';a.click();
+  st('CSV exported.','ok');
+});
+
+function savePlot(){
+  const canvas=document.getElementById('myChart');
+  if(!canvas)return;
+  // Render at export size
+  const W=parseInt(document.getElementById('expW').value)||1200;
+  const H=parseInt(document.getElementById('expH').value)||900;
+  const fmt2=(gv('expFmt')||'PNG').toLowerCase();
+  // Temporarily resize canvas, render, save, restore
+  const ow=canvas.width,oh=canvas.height;
+  canvas.width=W; canvas.height=H;
+  renderChart();
+  const a=document.createElement('a');
+  a.href=canvas.toDataURL('image/'+fmt2,0.96);
+  a.download='sorption_plot.'+fmt2; a.click();
+  canvas.width=ow; canvas.height=oh;
+  renderChart();
+  st('Plot saved.','ok');
+}
+
+// Initialise slider display values to match their current value attributes
+(function initSliders(){
+  ['axSz','tkSz','ttlSz','legSz','ptSz','ptSz2','ptOp','gridW','tickLen','frameW','boxW',
+   'minTickLen','majTickW'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(!el) return;
+    const span=el.nextElementSibling;
+    if(span) span.textContent=parseFloat(el.value).toFixed(el.step&&el.step<1?2:0);
+  });
+})();
+
+window.addEventListener('resize',()=>{renderChart();});
+
+</script>
+</body>
+</html>
