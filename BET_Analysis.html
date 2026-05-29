@@ -158,6 +158,22 @@ select:focus{border-color:var(--accent)}
     <div class="assume-banner" id="assumeBanner"></div>
   </div>
 
+  <!-- Host metadata — populated from file, editable -->
+  <div class="sb" id="hostMetaWrap" style="display:none">
+    <div class="lbl">Host (Sorbent) Metadata</div>
+    <div class="pg" id="hostMetaGrid">
+      <label>Formula<span>e.g. ZIF-8, SiO₂</span></label>
+      <input type="text"   id="hostFormula"  placeholder="—" style="font-size:10px">
+      <label>M<sub>w</sub> (g/mol)<span>molecular weight</span></label>
+      <input type="number" id="hostMW"       placeholder="—" step="0.01" min="0" onchange="checkHostConsistency()">
+      <label>ρ (g/cc)<span>bulk density</span></label>
+      <input type="number" id="hostDensity"  placeholder="—" step="0.001" min="0">
+      <label>Mass (mg)<span>sample mass</span></label>
+      <input type="number" id="hostMassMg"   placeholder="—" step="0.01"  min="0" onchange="onHostMassChange()">
+    </div>
+    <div id="hostConsistencyMsg" style="display:none;margin-top:5px;font-size:10px;color:var(--accent);padding:4px 7px;background:#fff0f0;border-left:3px solid var(--accent)"></div>
+  </div>
+
   <div class="sb">
     <div class="lbl">Sorptive</div>
     <select id="sorptiveSel" onchange="onSorptiveChange()">
@@ -198,6 +214,13 @@ select:focus{border-color:var(--accent)}
       <option value="mmol">mmol — absolute</option>
       <option value="mgg">mg/g — per gram</option>
       <option value="mg">mg — absolute</option>
+      <option value="molkg">mol/kg — per kg</option>
+      <option value="molmol">mol/mol — per mol host</option>
+      <option value="gg">g/g — mass ratio</option>
+      <option value="wt">wt% — weight percent</option>
+      <option value="mgg_ug">µg/g — per gram</option>
+      <option value="mg_ug">µg — absolute</option>
+      <option value="ugmg">µg/mg — per mg host</option>
     </select>
   </div>
 
@@ -415,17 +438,60 @@ select:focus{border-color:var(--accent)}
         <tr><td style="padding:3px 8px">Kr at 77 K</td><td style="padding:3px 8px;text-align:center">20.2</td><td style="padding:3px 8px;text-align:center">0.267</td></tr>
         <tr style="background:var(--cream)"><td style="padding:3px 8px">H₂O at 298 K</td><td style="padding:3px 8px;text-align:center">12.5</td><td style="padding:3px 8px;text-align:center">3.169</td></tr>
       </table>
-      <p style="margin-top:12px"><strong>CSV Format</strong></p>
-      <p style="margin:6px 0 8px">The CSV must have two numeric columns: p/p₀ (0–1) and uptake. Column headers and blank lines are ignored. If the first column exceeds 1, values are assumed to be absolute pressures and are divided by p₀.</p>
-      <p style="margin:6px 0 4px">You can optionally embed metadata in the header lines (before the data) so the app sets mass, sorptive, and units automatically. Any line that cannot be parsed as two numbers is treated as a header. Recognised formats:</p>
-      <pre style="background:var(--cream);padding:8px 10px;font-size:10px;line-height:1.8;margin:6px 0 10px;overflow-x:auto">mass = 0.2345
-sorptive = N2_77
-uptake_unit = mmol/g
-relative_pressure, uptake_mmol_g
+      <p style="margin-top:14px"><strong>CSV Format</strong></p>
+      <p style="margin:6px 0 8px">The file must have two columns: pressure (or p/p₀) and uptake. Comma, tab, or semicolon delimiters are all accepted. Any line that cannot be parsed as two numbers is treated as a metadata or header line and is never included in the data.</p>
+
+      <p style="margin:10px 0 4px"><em>Metadata keyword lines</em> — placed before the data, in any order:</p>
+      <table style="width:100%;border-collapse:collapse;font-size:11px;margin:4px 0 10px">
+        <tr style="background:var(--cream)"><th style="text-align:left;padding:4px 8px">Keyword</th><th style="text-align:left;padding:4px 8px">Value</th><th style="text-align:left;padding:4px 8px">Notes</th></tr>
+        <tr><td style="padding:3px 8px;font-family:monospace">Host_Mass</td><td style="padding:3px 8px">number [unit]</td><td style="padding:3px 8px">Sample mass. Unit suffix: ug, mg, g, kg. Default unit if omitted: <strong>mg</strong>.<br>e.g. <code>Host_Mass, 52.4</code> → 52.4 mg; <code>Host_Mass, 0.0524 g</code> → 0.0524 g</td></tr>
+        <tr style="background:var(--cream)"><td style="padding:3px 8px;font-family:monospace">Sorptive</td><td style="padding:3px 8px">gas name or code</td><td style="padding:3px 8px">e.g. N2, N2_77, N2_87, Ar, Ar_77, Ar_87, CO2, CO2_273, CO2_298, Kr, H2O, water, nitrogen, argon, krypton</td></tr>
+        <tr><td style="padding:3px 8px;font-family:monospace">TemperatureK</td><td style="padding:3px 8px">number</td><td style="padding:3px 8px">Experiment temperature in Kelvin</td></tr>
+        <tr style="background:var(--cream)"><td style="padding:3px 8px;font-family:monospace">TemperatureC</td><td style="padding:3px 8px">number</td><td style="padding:3px 8px">Experiment temperature in °C (converted to K automatically)</td></tr>
+        <tr><td style="padding:3px 8px;font-family:monospace">mass</td><td style="padding:3px 8px">number (g)</td><td style="padding:3px 8px">Alternative to Host_Mass; value assumed to be in grams</td></tr>
+        <tr style="background:var(--cream)"><td style="padding:3px 8px;font-family:monospace">uptake_unit</td><td style="padding:3px 8px">unit string</td><td style="padding:3px 8px">Explicit uptake unit override (see table below)</td></tr>
+        <tr><td style="padding:3px 8px;font-family:monospace">Host_Formula</td><td style="padding:3px 8px">formula</td><td style="padding:3px 8px">Host molecular formula — stored but not used in BET</td></tr>
+        <tr style="background:var(--cream)"><td style="padding:3px 8px;font-family:monospace">Host_MW</td><td style="padding:3px 8px">number (g/mol)</td><td style="padding:3px 8px">Host molecular weight — stored but not used in BET</td></tr>
+        <tr><td style="padding:3px 8px;font-family:monospace">Host_Density</td><td style="padding:3px 8px">number (g/cc)</td><td style="padding:3px 8px">Host bulk density — stored but not used in BET</td></tr>
+      </table>
+
+      <p style="margin:10px 0 4px"><em>Column header line</em> — the last non-numeric line before the data. Units are extracted from bracket content or the last token in each header string:</p>
+      <pre style="background:var(--cream);padding:8px 10px;font-size:10px;line-height:1.8;margin:4px 0 8px;overflow-x:auto">Pressure (mbar), Uptake (mmol/g)    ← extracts mbar and mmol/g
+p/p0, n [cm3(STP)/g]                ← extracts relative pressure and cm³(STP)/g
+Relative Pressure, Quantity adsorbed (mmol)</pre>
+
+      <p style="margin:10px 0 4px"><em>Recognised pressure units</em> (first column):</p>
+      <p style="font-size:11px;color:#555;margin:0 0 8px;line-height:1.8">p/p₀ or relative (default) &nbsp;·&nbsp; Pa &nbsp;·&nbsp; kPa &nbsp;·&nbsp; MPa &nbsp;·&nbsp; bar &nbsp;·&nbsp; mbar &nbsp;·&nbsp; atm &nbsp;·&nbsp; mmHg / Torr &nbsp;·&nbsp; psi<br>
+      Absolute pressures are converted to p/p₀ using the sorptive's saturation pressure p₀.</p>
+
+      <p style="margin:10px 0 4px"><em>Recognised uptake units</em> (second column):</p>
+      <table style="width:100%;border-collapse:collapse;font-size:11px;margin:4px 0 10px">
+        <tr style="background:var(--cream)"><th style="text-align:left;padding:4px 8px">Unit string(s)</th><th style="text-align:left;padding:4px 8px">Internal key</th><th style="text-align:left;padding:4px 8px">Meaning</th></tr>
+        <tr><td style="padding:3px 8px;font-family:monospace">cm3(STP)/g, cc(STP)/g, cm³/g</td><td style="padding:3px 8px">cm3g</td><td style="padding:3px 8px">cm³ at STP per gram sorbent</td></tr>
+        <tr style="background:var(--cream)"><td style="padding:3px 8px;font-family:monospace">cm3(STP), cc(STP), cm³</td><td style="padding:3px 8px">cm3</td><td style="padding:3px 8px">cm³ at STP absolute</td></tr>
+        <tr><td style="padding:3px 8px;font-family:monospace">mmol/g</td><td style="padding:3px 8px">mmolg</td><td style="padding:3px 8px">mmol per gram sorbent</td></tr>
+        <tr style="background:var(--cream)"><td style="padding:3px 8px;font-family:monospace">mmol</td><td style="padding:3px 8px">mmol</td><td style="padding:3px 8px">mmol absolute <strong>(default if not detected)</strong></td></tr>
+        <tr><td style="padding:3px 8px;font-family:monospace">mol/kg</td><td style="padding:3px 8px">molkg</td><td style="padding:3px 8px">mol per kg sorbent (= mmol/g)</td></tr>
+        <tr style="background:var(--cream)"><td style="padding:3px 8px;font-family:monospace">mol/mol</td><td style="padding:3px 8px">molmol</td><td style="padding:3px 8px">mol sorptive per mol host</td></tr>
+        <tr><td style="padding:3px 8px;font-family:monospace">g/g</td><td style="padding:3px 8px">gg</td><td style="padding:3px 8px">gram sorptive per gram host</td></tr>
+        <tr style="background:var(--cream)"><td style="padding:3px 8px;font-family:monospace">wt%</td><td style="padding:3px 8px">wt</td><td style="padding:3px 8px">weight percent</td></tr>
+        <tr><td style="padding:3px 8px;font-family:monospace">mg/g</td><td style="padding:3px 8px">mgg</td><td style="padding:3px 8px">mg sorptive per gram host</td></tr>
+        <tr style="background:var(--cream)"><td style="padding:3px 8px;font-family:monospace">mg</td><td style="padding:3px 8px">mg</td><td style="padding:3px 8px">mg sorptive absolute</td></tr>
+        <tr><td style="padding:3px 8px;font-family:monospace">µg/g, ug/g, microgram/g</td><td style="padding:3px 8px">mgg_ug</td><td style="padding:3px 8px">µg per gram host</td></tr>
+        <tr style="background:var(--cream)"><td style="padding:3px 8px;font-family:monospace">µg/mg, ug/mg</td><td style="padding:3px 8px">ugmg</td><td style="padding:3px 8px">µg per mg host</td></tr>
+        <tr><td style="padding:3px 8px;font-family:monospace">µg, ug, microgram</td><td style="padding:3px 8px">mg_ug</td><td style="padding:3px 8px">µg absolute</td></tr>
+      </table>
+
+      <p style="margin:10px 0 4px"><em>Complete example with metadata header:</em></p>
+      <pre style="background:var(--cream);padding:8px 10px;font-size:10px;line-height:1.8;margin:4px 0 8px;overflow-x:auto">Host_Mass, 52.4 mg
+Sorptive, N2
+TemperatureK, 77
+relative_pressure, uptake (mmol/g)
 0.01000, 0.04521
-0.02000, 0.05103
+0.02000, 0.07103
+0.05000, 0.12840
 ...</pre>
-      <p style="margin:4px 0 8px;font-size:11px;color:#666">Key–value pairs use <code>=</code> or <code>:</code> as separator. Keys are case-insensitive. Recognised sorptive names: <em>N2, N2_77, N2_87, Ar, Ar_77, Ar_87, CO2, CO2_273, CO2_298, Kr, H2O, water</em>. Recognised unit strings: <em>cm3/g, cm3, mmol/g, mmol, mg/g, mg</em>. Any fields not found in the file are shown as "assumed" in the banner and default to N₂ at 77 K, mass = 0.1 g, units = mmol (absolute).</p>
+      <p style="font-size:11px;color:#666;margin:0">Any parameters not detected in the file are shown with a ⚠ "assumed" badge in the detected-parameters panel and fall back to defaults (N₂ at 77 K, mass = 0.1 g, units = mmol).</p>
     </div>
     <div class="overlay-foot"><button class="btn out" style="width:auto;padding:6px 18px" onclick="document.getElementById('helpOverlay').style.display='none'">Close</button></div>
   </div>
@@ -506,23 +572,35 @@ onSorptiveChange();
 // =====================================================================
 // UNIT CONVERSION → mol/g
 // =====================================================================
+// Pressure units → kPa conversion factor
+const PRESSURE_TO_KPA = {
+  kpa:1, pa:0.001, mpa:1000, bar:100, mbar:0.1,
+  atm:101.325, mmhg:0.133322, torr:0.133322, psi:6.89476,
+};
+
+function pressureToKPa(val, unit){
+  const f = PRESSURE_TO_KPA[unit.toLowerCase()] || 1;
+  return val * f;
+}
+
 function toMolG(val, unit, mass_g){
-  // returns mol/g of gas
-  const MW_gas=null; // for mg unit: assume sorptive, but we'll use molar volume approach
+  const s = getSorptive();
+  const MW = molarMass(s.mol);
   switch(unit){
-    case 'cm3g':  return val/VM;                    // cm³(STP)/g → mol/g
-    case 'cm3':   return val/(VM*mass_g);            // cm³(STP) → mol/g
-    case 'mmolg': return val/1000;                   // mmol/g → mol/g
-    case 'mmol':  return val/(1000*mass_g);          // mmol → mol/g
-    case 'mgg': {                                    // mg/g → mol/g  (MW of sorptive)
-      const s=getSorptive(); const MW=molarMass(s.mol);
-      return val/(MW*1000);
-    }
-    case 'mg': {
-      const s=getSorptive(); const MW=molarMass(s.mol);
-      return val/(MW*1000*mass_g);
-    }
-    default: return val/VM;
+    case 'cm3g':    return val / VM;                       // cm³(STP)/g → mol/g
+    case 'cm3':     return val / (VM * mass_g);            // cm³(STP) → mol/g
+    case 'mmolg':   return val / 1000;                     // mmol/g → mol/g
+    case 'mmol':    return val / (1000 * mass_g);          // mmol → mol/g
+    case 'mgg':     return val / (MW * 1000);              // mg/g → mol/g
+    case 'mg':      return val / (MW * 1000 * mass_g);     // mg → mol/g
+    case 'molkg':   return val / 1000;                     // mol/kg = mmol/g
+    case 'molmol':  return val / MW;                       // mol sorptive / mol host — needs host MW
+    case 'gg':      return val / MW;                       // g/g → mol/g
+    case 'wt':      return (val/100) / MW;                 // wt% → mol/g (approx, small loading)
+    case 'mgg_ug':  return val / (MW * 1e6);               // µg/g → mol/g
+    case 'mg_ug':   return val / (MW * 1e6 * mass_g);      // µg → mol/g (absolute µg)
+    case 'ugmg':    return val / (MW * 1e3);               // µg/mg = mg/g → mol/g (same as mgg scaled)
+    default:        return val / VM;
   }
 }
 
@@ -543,166 +621,395 @@ function molarMass(mol){
 // Any line that can't be parsed as two numbers is treated as a header/comment.
 // The first line with two parseable numbers starts the data block.
 
+// =====================================================================
+// CSV PARSING — comprehensive metadata extraction
+// =====================================================================
+
 const SORPTIVE_ALIASES = {
-  // map lowercase strings → SORPTIVES key
-  'n2':       'N2_77', 'n2_77':'N2_77', 'nitrogen':'N2_77', 'nitrogen_77':'N2_77',
-  'n2_87':    'N2_87', 'nitrogen_87':'N2_87',
-  'ar':       'Ar_87', 'ar_87':'Ar_87', 'argon':'Ar_87', 'argon_87':'Ar_87',
-  'ar_77':    'Ar_77', 'argon_77':'Ar_77',
-  'co2':      'CO2_273', 'co2_273':'CO2_273', 'carbondioxide_273':'CO2_273',
-  'co2_298':  'CO2_298', 'carbondioxide_298':'CO2_298',
-  'kr':       'Kr_77',   'kr_77':'Kr_77', 'krypton':'Kr_77',
-  'h2o':      'H2O_298', 'h2o_298':'H2O_298', 'water':'H2O_298',
+  'n2':'N2_77','n2_77':'N2_77','nitrogen':'N2_77','nitrogen77':'N2_77',
+  'n2_87':'N2_87','nitrogen87':'N2_87',
+  'ar':'Ar_87','ar_87':'Ar_87','argon':'Ar_87','argon87':'Ar_87',
+  'ar_77':'Ar_77','argon77':'Ar_77',
+  'co2':'CO2_273','co2_273':'CO2_273','carbondioxide':'CO2_273','carbondioxide273':'CO2_273',
+  'co2_298':'CO2_298','carbondioxide298':'CO2_298',
+  'kr':'Kr_77','kr_77':'Kr_77','krypton':'Kr_77',
+  'h2o':'H2O_298','h2o_298':'H2O_298','water':'H2O_298',
 };
 
-const UNIT_ALIASES = {
-  'cm3/g':'cm3g','cm3_stp/g':'cm3g','cm3(stp)/g':'cm3g','cm³/g':'cm3g','cm3/g(stp)':'cm3g',
-  'cm3':'cm3','cm³':'cm3','cm3_stp':'cm3','cm3(stp)':'cm3',
-  'mmol/g':'mmolg','mmolg':'mmolg','mmol_g':'mmolg',
+// Pressure unit token → internal key
+const PRESSURE_UNIT_MAP = {
+  'p/p0':'pp0','p/p₀':'pp0','relative':'pp0','relativepressure':'pp0',
+  'bar':'bar','mbar':'mbar','kpa':'kpa','mpa':'mpa',
+  'pa':'pa','atm':'atm','mmhg':'mmhg','torr':'torr','psi':'psi',
+};
+
+// Uptake unit token → internal key
+const UPTAKE_UNIT_MAP = {
+  'cm3/g':'cm3g','cm³/g':'cm3g','cc/g':'cm3g','cm3(stp)/g':'cm3g','cc(stp)/g':'cm3g',
+  'cm3(stp/g)':'cm3g','cc(stp/g)':'cm3g','cm3stp/g':'cm3g',
+  'cm3':'cm3','cm³':'cm3','cc':'cm3','cm3(stp)':'cm3','cc(stp)':'cm3',
+  'mmol/g':'mmolg','mmolg':'mmolg',
   'mmol':'mmol',
-  'mg/g':'mgg','mgg':'mgg',
+  'mol/kg':'molkg','mol/kg':'molkg',
+  'mol/mol':'molmol',
+  'g/g':'gg',
+  'wt%':'wt','wt':'wt',
+  'mg/g':'mgg',
   'mg':'mg',
+  'µg/g':'mgg_ug','ug/g':'mgg_ug','microg/g':'mgg_ug','microgram/g':'mgg_ug',
+  'µg':'mg_ug','ug':'mg_ug','microg':'mg_ug','microgram':'mg_ug',
+  'µg/mg':'ugmg','ug/mg':'ugmg',
 };
 
-function parseCSVSmart(text){
-  const lines = text.split(/\r?\n/).map(l=>l.trim()).filter(l=>l);
-  const meta = { mass:null, sorptiveKey:null, unitKey:null,
-                 massSrc:'default', sorptiveSrc:'default', unitSrc:'default' };
-  const dataRows = [];
+const UNIT_LABELS = {
+  cm3g:'cm³(STP)/g', cm3:'cm³(STP)', mmolg:'mmol/g', mmol:'mmol',
+  molkg:'mol/kg', molmol:'mol/mol', gg:'g/g', wt:'wt%',
+  mgg:'mg/g', mg:'mg', mgg_ug:'µg/g', mg_ug:'µg', ugmg:'µg/mg'
+};
 
-  for(const line of lines){
-    // Try to extract two numbers → data row
-    const cols = line.split(/[,\t;]+/).map(c=>c.trim());
-    const a = parseFloat(cols[0]), b = parseFloat(cols[1]);
-    if(cols.length>=2 && !isNaN(a) && !isNaN(b)){
-      dataRows.push([a,b]);
-      continue;
-    }
-
-    // Non-numeric line — try to extract metadata
-    // Pattern: key=value, key:value, or freeform
-    const kv = line.match(/^([^=:,\t]+)[=:]\s*(.+)$/);
-    if(kv){
-      const key = kv[1].trim().toLowerCase().replace(/[\s_-]/g,'');
-      const val = kv[2].trim();
-      // Mass
-      if(/^mass|sample.*mass|weight|sample.*weight/.test(key)){
-        const m = parseFloat(val);
-        if(!isNaN(m) && m>0){ meta.mass=m; meta.massSrc='file'; }
-      }
-      // Sorptive
-      if(/^sorptive|adsorbate|probe|gas/.test(key)){
-        const sk = resolveSorptiveKey(val);
-        if(sk){ meta.sorptiveKey=sk; meta.sorptiveSrc='file'; }
-      }
-      // Unit
-      if(/^unit|uptake.*unit|unit.*uptake|col.*2|second.*col|q.*unit/.test(key)){
-        const uk = resolveUnitKey(val);
-        if(uk){ meta.unitKey=uk; meta.unitSrc='file'; }
-      }
-    } else {
-      // Freeform: check each token for recognisable values
-      // Mass: a lone number followed by g, mg, gram
-      const massMatch = line.match(/(\d+\.?\d*(?:[eE][+-]?\d+)?)\s*(?:g\b|gram)/i);
-      if(massMatch && !meta.massSrc.includes('file')){
-        const m = parseFloat(massMatch[1]);
-        // Exclude "mg" matches — those are milligrams, not grams
-        if(!isNaN(m) && m>0 && !/mg/i.test(line.slice(massMatch.index, massMatch.index+massMatch[0].length+1))){
-          meta.mass=m; meta.massSrc='file';
-        }
-      }
-      // Sorptive keyword anywhere on line
-      if(!meta.sorptiveSrc.includes('file')){
-        const sk = resolveSorptiveKey(line);
-        if(sk){ meta.sorptiveKey=sk; meta.sorptiveSrc='file'; }
-      }
-      // Unit keyword anywhere — look for unit-like tokens
-      if(!meta.unitSrc.includes('file')){
-        // try each comma/tab/space separated token
-        for(const tok of line.split(/[,\t\s]+/)){
-          const uk = resolveUnitKey(tok);
-          if(uk){ meta.unitKey=uk; meta.unitSrc='file'; break; }
-        }
-      }
-    }
+// Parse a mass string that may include a unit suffix; returns value in grams.
+// If no unit is given, assumes mg (as per convention for Host_Mass).
+function parseMassToG(str){
+  if(!str) return null;
+  const m = String(str).trim().match(/^([\d.eE+\-]+)\s*(ug|µg|mg|g|kg)?$/i);
+  if(!m) return null;
+  const v = parseFloat(m[1]);
+  if(isNaN(v) || v<=0) return null;
+  const unit = (m[2]||'mg').toLowerCase().replace('µ','u');
+  switch(unit){
+    case 'ug': return v * 1e-6;
+    case 'mg': return v * 1e-3;
+    case 'g':  return v;
+    case 'kg': return v * 1e3;
+    default:   return v * 1e-3; // fallback: mg
   }
+}
+const ELEMENT_MW = {H:1.008,C:12.011,N:14.007,O:15.999,S:32.06,Cl:35.45,
+                    Si:28.085,Al:26.982,Fe:55.845,Zn:65.38,Co:58.933,
+                    Ni:58.693,Cu:63.546,Mn:54.938,Mg:24.305,Ca:40.078,
+                    Na:22.990,K:39.098,Ti:47.867,Zr:91.224};
 
-  // Apply defaults for anything not found
-  if(!meta.mass)        { meta.mass=0.1;      meta.massSrc='default'; }
-  if(!meta.sorptiveKey) { meta.sorptiveKey='N2_77'; meta.sorptiveSrc='default'; }
-  if(!meta.unitKey)     { meta.unitKey='mmol'; meta.unitSrc='default'; }
+function formulaToMW(formula){
+  // Very simple: parse sequences like C2H6, ZnN2C8H12 etc.
+  // Returns null if formula looks non-parseable
+  if(!formula || /[^A-Za-z0-9]/.test(formula)) return null;
+  let mw=0, i=0;
+  while(i<formula.length){
+    if(!/[A-Z]/.test(formula[i])) return null; // unexpected
+    let elem=formula[i++];
+    while(i<formula.length && /[a-z]/.test(formula[i])) elem+=formula[i++];
+    let numStr='';
+    while(i<formula.length && /[0-9]/.test(formula[i])) numStr+=formula[i++];
+    const count = numStr ? parseInt(numStr) : 1;
+    if(!(elem in ELEMENT_MW)) return null; // unknown element
+    mw += ELEMENT_MW[elem]*count;
+  }
+  return mw>0 ? mw : null;
+}
 
-  return { meta, dataRows };
+function resolvePressureUnit(str){
+  const s = str.toLowerCase().replace(/[\s_\-\.]/g,'');
+  if(PRESSURE_UNIT_MAP[s]) return PRESSURE_UNIT_MAP[s];
+  if(/p\/?p0|p\/?p₀|relativep/.test(s)) return 'pp0';
+  if(/mbar|millibar/.test(s)) return 'mbar';
+  if(/mpa|megapas/.test(s)) return 'mpa';
+  if(/kpa|kilopas/.test(s)) return 'kpa';
+  if(/^pa$|pascal/.test(s)) return 'pa';
+  if(/mmhg|torr/.test(s)) return 'mmhg';
+  if(/^bar$/.test(s)) return 'bar';
+  if(/atm|atmosphere/.test(s)) return 'atm';
+  if(/psi/.test(s)) return 'psi';
+  return null;
+}
+
+function resolveUptakeUnit(str){
+  if(!str) return null;
+  // Normalise: strip spaces, lowercase, replace µ with u
+  const s = str.toLowerCase().replace(/\s/g,'').replace(/µ/g,'u').replace(/³/g,'3');
+  // Direct map lookup
+  if(UPTAKE_UNIT_MAP[s]) return UPTAKE_UNIT_MAP[s];
+  // Careful ordering: try longer patterns first to avoid mmol matching before mmol/g
+  if(/mmol\s*\/\s*g|mmol_g|mmolg/.test(s)) return 'mmolg';
+  if(/^mmol$/.test(s)) return 'mmol';
+  if(/cm3?\s*\(?stp\)?\s*\/\s*g|cc\s*\(?stp\)?\s*\/\s*g/.test(s)) return 'cm3g';
+  if(/cm3?\s*\(?stp|cc\s*\(?stp/.test(s)) return 'cm3';
+  if(/^cc\/g$|^cm3\/g$/.test(s)) return 'cm3g';
+  if(/^cc$|^cm3$/.test(s)) return 'cm3';
+  if(/mol\s*\/\s*kg|mol_kg/.test(s)) return 'molkg';
+  if(/mol\s*\/\s*mol|mol_mol/.test(s)) return 'molmol';
+  if(/g\s*\/\s*g|g_g/.test(s)) return 'gg';
+  if(/wt\s*%|wt%/.test(s)) return 'wt';
+  if(/mg\s*\/\s*g|mg_g/.test(s)) return 'mgg';
+  if(/ug\s*\/\s*mg|ug_mg|microg_mg/.test(s)) return 'ugmg';
+  if(/ug\s*\/\s*g|ug_g|microg_g|microgram_g/.test(s)) return 'mgg_ug';
+  if(/^mg$/.test(s)) return 'mg';
+  if(/^ug$|^microg$|^microgram$/.test(s)) return 'mg_ug';
+  return null;
+}
+
+// Extract unit token from a column header string like "Uptake (mmol/g)" or "Pressure [kPa]"
+function extractUnitFromHeader(hdr){
+  if(!hdr) return null;
+  // Look for content inside brackets first
+  const bracketed = hdr.match(/[\(\[](.*?)[\)\]]/);
+  if(bracketed) return bracketed[1].trim();
+  // Otherwise try the last whitespace-delimited token
+  const toks = hdr.trim().split(/\s+/);
+  return toks[toks.length-1];
 }
 
 function resolveSorptiveKey(str){
   const s = str.toLowerCase().replace(/[\s_\-()]/g,'');
-  // Direct key match
   if(SORPTIVES[str]) return str;
   if(SORPTIVE_ALIASES[s]) return SORPTIVE_ALIASES[s];
-  // Partial substring matches
-  if(/nitrogen|n2/.test(s)){
-    if(/87/.test(s)) return 'N2_87';
-    return 'N2_77';
-  }
-  if(/argon|ar(?!bon)/.test(s)){
-    if(/77/.test(s)) return 'Ar_77';
-    return 'Ar_87';
-  }
-  if(/co2|carbondiox|carbon.diox/.test(s)){
-    if(/298/.test(s)) return 'CO2_298';
-    return 'CO2_273';
-  }
+  if(/nitrogen|^n2/.test(s)){ return /87/.test(s)?'N2_87':'N2_77'; }
+  if(/argon|^ar(?!bon)/.test(s)){ return /77/.test(s)?'Ar_77':'Ar_87'; }
+  if(/co2|carbondiox|carbon.?diox/.test(s)){ return /298/.test(s)?'CO2_298':'CO2_273'; }
   if(/krypton|^kr/.test(s)) return 'Kr_77';
   if(/water|h2o/.test(s)) return 'H2O_298';
   return null;
 }
 
-function resolveUnitKey(str){
-  const s = str.toLowerCase().replace(/\s/g,'');
-  if(UNIT_ALIASES[s]) return UNIT_ALIASES[s];
-  // Fuzzy
-  if(/cm.?3.*(stp)?.*(\/g|per.?g)/i.test(s)||/cm3g/.test(s)) return 'cm3g';
-  if(/cm.?3(?!\/)/.test(s)&&!/g/.test(s)) return 'cm3';
-  if(/mmol\s*\/\s*g|mmolg|mmol_g/.test(s)) return 'mmolg';
-  if(/^mmol$/.test(s)) return 'mmol';
-  if(/mg\s*\/\s*g|mgg/.test(s)) return 'mgg';
-  if(/^mg$/.test(s)) return 'mg';
-  return null;
+function resolveUnitKey(str){ return resolveUptakeUnit(str); } // legacy alias
+
+// ---- Temperature helpers ----
+function tempToK(val, unit){
+  if(!unit||unit==='k') return val;
+  if(unit==='c') return val+273.15;
+  return val;
 }
 
-const UNIT_LABELS = {
-  cm3g:'cm³/g (STP)', cm3:'cm³ (STP)', mmolg:'mmol/g', mmol:'mmol', mgg:'mg/g', mg:'mg'
-};
+// ---- Main parser ----
+function parseCSVSmart(text){
+  const lines = text.split(/\r?\n/).map(l=>l.trim()).filter(l=>l);
+
+  const meta = {
+    // core (used by BET)
+    mass:null, massSrc:'default',
+    sorptiveKey:null, sorptiveSrc:'default',
+    unitKey:null, unitSrc:'default',
+    pressureUnit:null, pressureUnitSrc:'default',
+    // host metadata
+    hostFormula:null, hostMW:null, hostDensity:null, hostMassG:null,
+    hostTemp:null, hostTempUnit:null,
+    // column headers (raw strings)
+    col1Hdr:null, col2Hdr:null,
+    // warnings
+    warnings:[],
+  };
+  const dataRows = [];
+  let foundData = false;
+
+  for(let li=0; li<lines.length; li++){
+    const line = lines[li];
+    const cols = line.split(/[,\t;]+/).map(c=>c.trim());
+
+    // Check for key=value or "Key, Value" structured metadata lines
+    // Structured: exactly two cols, first is a known keyword, second is a value
+    const key0 = cols[0].trim();
+    const val0 = cols.length>=2 ? cols[1].trim() : '';
+
+    const keyNorm = key0.toLowerCase().replace(/[\s_\-]/g,'');
+
+    // ---- Structured keyword metadata (two-column key/value) ----
+    if(/^hostmw$/.test(keyNorm)){
+      const v=parseFloat(val0); if(v>0) meta.hostMW=v; continue;
+    }
+    if(/^hostformula$/.test(keyNorm)){
+      meta.hostFormula=val0; continue;
+    }
+    if(/^hostdensity$/.test(keyNorm)){
+      const v=parseFloat(val0); if(v>0) meta.hostDensity=v; continue;
+    }
+    if(/^hostmass$/.test(keyNorm)){
+      // val0 may include a unit suffix (ug, mg, g, kg); default unit is mg
+      const g = parseMassToG(val0);
+      if(g!==null) meta.hostMassG=g; continue;
+    }
+    if(/^sorptive|^adsorbate|^probe|^gas/.test(keyNorm)){
+      const sk=resolveSorptiveKey(val0||key0);
+      if(sk){ meta.sorptiveKey=sk; meta.sorptiveSrc='file'; } continue;
+    }
+    if(/^temperaturek$/.test(keyNorm)){
+      const v=parseFloat(val0); if(!isNaN(v)){ meta.hostTemp=v; meta.hostTempUnit='k'; } continue;
+    }
+    if(/^temperaturec$/.test(keyNorm)){
+      const v=parseFloat(val0); if(!isNaN(v)){ meta.hostTemp=v+273.15; meta.hostTempUnit='c'; } continue;
+    }
+    if(/^mass|^samplemass|^sampleweight/.test(keyNorm)){
+      const v=parseFloat(val0); if(v>0){ meta.mass=v; meta.massSrc='file'; } continue;
+    }
+    if(/^uptakeunit|^unit/.test(keyNorm)){
+      const uk=resolveUptakeUnit(val0);
+      if(uk){ meta.unitKey=uk; meta.unitSrc='file'; } continue;
+    }
+
+    // ---- Try parsing as two numbers → data row ----
+    const a=parseFloat(cols[0]), b=parseFloat(cols[1]);
+    if(cols.length>=2 && !isNaN(a) && !isNaN(b)){
+      dataRows.push([a,b]);
+      foundData=true;
+      continue;
+    }
+
+    // ---- Column header line (two non-numeric strings) ----
+    // Must look like headers: both cols non-empty, not yet in data
+    if(!foundData && cols.length>=2 && isNaN(parseFloat(cols[0])) && isNaN(parseFloat(cols[1]))){
+      meta.col1Hdr = cols[0];
+      meta.col2Hdr = cols[1];
+
+      // Extract pressure unit from col1 header
+      if(!meta.pressureUnit){
+        const tok = extractUnitFromHeader(cols[0]);
+        const pu = resolvePressureUnit(tok||cols[0]);
+        if(pu){ meta.pressureUnit=pu; meta.pressureUnitSrc='header'; }
+      }
+      // Extract uptake unit from col2 header
+      if(!meta.unitKey){
+        const tok = extractUnitFromHeader(cols[1]);
+        const uk = resolveUptakeUnit(tok||cols[1]);
+        if(uk){ meta.unitKey=uk; meta.unitSrc='header'; }
+      }
+      // Extract sorptive from either header if not yet found
+      if(!meta.sorptiveKey){
+        const sk = resolveSorptiveKey(cols[0]+' '+cols[1]);
+        if(sk){ meta.sorptiveKey=sk; meta.sorptiveSrc='header'; }
+      }
+      continue;
+    }
+
+    // ---- Freeform non-numeric line ----
+    if(!foundData){
+      // Mass: number followed by g (but not mg)
+      const massM = line.match(/(\d+\.?\d*(?:[eE][+-]?\d+)?)\s*(g)\b/i);
+      if(massM && !/mg/i.test(line.slice(Math.max(0,massM.index-1), massM.index+massM[0].length+1))){
+        const v=parseFloat(massM[1]); if(v>0&&!meta.massSrc.includes('file')){ meta.mass=v; meta.massSrc='freeform'; }
+      }
+      if(!meta.sorptiveKey){
+        const sk=resolveSorptiveKey(line);
+        if(sk){ meta.sorptiveKey=sk; meta.sorptiveSrc='freeform'; }
+      }
+      if(!meta.unitKey){
+        for(const tok of line.split(/[,\t\s\(\)\[\]]+/)){
+          const uk=resolveUptakeUnit(tok);
+          if(uk){ meta.unitKey=uk; meta.unitSrc='freeform'; break; }
+        }
+      }
+    }
+  }
+
+  // ---- Cross-check host MW vs formula ----
+  if(meta.hostFormula && meta.hostMW){
+    const calcMW = formulaToMW(meta.hostFormula);
+    if(calcMW!==null && Math.abs(calcMW-meta.hostMW)/meta.hostMW > 0.02){
+      meta.warnings.push(`Host MW from formula (${calcMW.toFixed(2)} g/mol) does not match given MW (${meta.hostMW} g/mol).`);
+    }
+  }
+
+  // ---- hostMassG → override sampleMass if not already set from a mass= line ----
+  if(meta.hostMassG && !meta.massSrc.includes('file')){
+    meta.mass = meta.hostMassG;
+    meta.massSrc = 'file';
+  }
+
+  // ---- Apply defaults ----
+  if(!meta.mass)         { meta.mass=0.1;       meta.massSrc='default'; }
+  if(!meta.sorptiveKey)  { meta.sorptiveKey='N2_77'; meta.sorptiveSrc='default'; }
+  if(!meta.unitKey)      { meta.unitKey='mmol';  meta.unitSrc='default'; }
+  if(!meta.pressureUnit) { meta.pressureUnit='pp0'; meta.pressureUnitSrc='default'; }
+
+  return { meta, dataRows };
+}
+
+// ---- Banner ----
+function srcBadge(src){
+  if(src==='default') return '<span style="color:var(--accent);font-size:9px">⚠ assumed</span>';
+  return '<span style="color:var(--green);font-size:9px">✓ from file</span>';
+}
 
 function showAssumptionsBanner(meta){
   const wrap = document.getElementById('assumeBannerWrap');
   const banner = document.getElementById('assumeBanner');
-  const srcLabel = src => src==='file'
-    ? '<span style="color:var(--green);font-size:9px">✓ from file</span>'
-    : '<span style="color:var(--accent);font-size:9px">⚠ assumed</span>';
 
   const sorptiveLabel = SORPTIVES[meta.sorptiveKey]?.label || meta.sorptiveKey;
   const unitLabel = UNIT_LABELS[meta.unitKey] || meta.unitKey;
+  const pressLabel = meta.pressureUnit==='pp0' ? 'Relative (p/p₀)' : meta.pressureUnit.toUpperCase();
 
-  banner.innerHTML = `
-    <div class="ab-title">Calculation assumptions</div>
-    <div class="ab-row">
-      <span class="ab-key">Sample mass</span>
-      <span class="ab-val">${meta.mass} g &nbsp;${srcLabel(meta.massSrc)}</span>
-    </div>
-    <div class="ab-row">
-      <span class="ab-key">Sorptive</span>
-      <span class="ab-val">${sorptiveLabel} &nbsp;${srcLabel(meta.sorptiveSrc)}</span>
-    </div>
-    <div class="ab-row">
-      <span class="ab-key">Uptake units</span>
-      <span class="ab-val">${unitLabel} &nbsp;${srcLabel(meta.unitSrc)}</span>
-    </div>
-    <div style="margin-top:6px;font-size:10px;color:#888;line-height:1.5">
-      Change any values in the panels below, then click <strong>Run BET Analysis</strong>.
-    </div>`;
+  let html = `<div class="ab-title">Detected parameters</div>`;
+
+  // Core rows
+  html += `
+    <div class="ab-row"><span class="ab-key">Sample mass</span>
+      <span class="ab-val">${meta.mass} g &nbsp;${srcBadge(meta.massSrc)}</span></div>
+    <div class="ab-row"><span class="ab-key">Sorptive</span>
+      <span class="ab-val">${sorptiveLabel} &nbsp;${srcBadge(meta.sorptiveSrc)}</span></div>
+    <div class="ab-row"><span class="ab-key">Uptake units</span>
+      <span class="ab-val">${unitLabel} &nbsp;${srcBadge(meta.unitSrc)}</span></div>
+    <div class="ab-row"><span class="ab-key">Pressure units</span>
+      <span class="ab-val">${pressLabel} &nbsp;${srcBadge(meta.pressureUnitSrc)}</span></div>`;
+
+  // Host metadata rows (only shown if detected)
+  const hostRows = [
+    ['Formula', meta.hostFormula],
+    ['Mᴄ (g/mol)', meta.hostMW],
+    ['Density (g/cc)', meta.hostDensity],
+    ['Host mass', meta.hostMassG!=null ? `${(meta.hostMassG*1000).toFixed(4)} mg` : null],
+    ['Temperature', meta.hostTemp ? `${meta.hostTemp.toFixed(1)} K` : null],
+  ];
+  const anyHost = hostRows.some(([,v])=>v!=null);
+  if(anyHost){
+    html += `<div style="font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#888;margin:6px 0 3px">Host metadata</div>`;
+    hostRows.forEach(([label,val])=>{
+      if(val==null) return;
+      html += `<div class="ab-row"><span class="ab-key">${label}</span>
+        <span class="ab-val" style="color:var(--green)">${val}</span></div>`;
+    });
+  }
+
+  // Column headers (for reference)
+  if(meta.col1Hdr||meta.col2Hdr){
+    html += `<div style="margin-top:5px;font-size:9px;color:#aaa">
+      Headers: "${meta.col1Hdr||'—'}" / "${meta.col2Hdr||'—'}"</div>`;
+  }
+
+  // Warnings
+  meta.warnings.forEach(w=>{
+    html += `<div style="margin-top:5px;font-size:10px;color:var(--accent);padding:3px 6px;background:#fff0f0;border-left:2px solid var(--accent)">⚠ ${w}</div>`;
+  });
+
+  html += `<div style="margin-top:6px;font-size:10px;color:#888;line-height:1.5">
+    Check values below, then click <strong>Run BET Analysis</strong>.</div>`;
+
+  banner.innerHTML = html;
   wrap.style.display='';
+}
+
+function setIfPresent(id, val){
+  if(val!=null){ const el=document.getElementById(id); if(el) el.value=val; }
+}
+
+function checkHostConsistency(){
+  const formula = document.getElementById('hostFormula').value.trim();
+  const mw = parseFloat(document.getElementById('hostMW').value);
+  const msgEl = document.getElementById('hostConsistencyMsg');
+  if(!msgEl) return;
+  if(formula && !isNaN(mw) && mw>0){
+    const calcMW = formulaToMW(formula);
+    if(calcMW!==null && Math.abs(calcMW-mw)/mw > 0.02){
+      msgEl.textContent = `⚠ MW from formula "${formula}" ≈ ${calcMW.toFixed(2)} g/mol, but entered MW = ${mw.toFixed(2)} g/mol. Please check.`;
+      msgEl.style.display='block';
+      return;
+    }
+  }
+  msgEl.style.display='none';
+}
+
+function onHostMassChange(){
+  // If host mass (mg) is set, update the sample mass (g) field
+  const mg = parseFloat(document.getElementById('hostMassMg').value);
+  if(!isNaN(mg) && mg>0){
+    document.getElementById('sampleMass').value = (mg/1000).toFixed(6);
+  }
 }
 
 function loadFile(file){
@@ -712,7 +1019,7 @@ function loadFile(file){
 
     if(dataRows.length<3){st('Error: need at least 3 data points.','err');return;}
 
-    // Apply detected/default metadata to sidebar controls
+    // Apply core metadata to sidebar controls
     document.getElementById('sampleMass').value = meta.mass;
     document.getElementById('uptakeUnit').value  = meta.unitKey;
     if(meta.sorptiveKey && document.querySelector(`#sorptiveSel option[value="${meta.sorptiveKey}"]`)){
@@ -720,27 +1027,42 @@ function loadFile(file){
       onSorptiveChange();
     }
 
-    // Detect if first column looks like absolute pressure (>1) and normalise
+    // Host_Mass → populate the main sample mass field (only relevant metadata for BET)
+    if(meta.hostMassG!=null && meta.massSrc==='default'){
+      document.getElementById('sampleMass').value = meta.hostMassG.toFixed(6);
+      meta.mass = meta.hostMassG;
+      meta.massSrc = 'file';
+    }
+    // Host metadata panel is not shown for BET — formula/MW/density not needed here
+
+    // Pressure conversion: normalise first column to p/p₀
     const s = getSorptive();
     const maxCol0 = Math.max(...dataRows.map(([p])=>p));
-    const needsNorm = maxCol0>1.5;
+    const pu = meta.pressureUnit;
 
-    // Store raw file values — pp0 (normalised if needed) and the original uptake number
+    let normFn;
+    if(pu==='pp0' || maxCol0<=1.5){
+      normFn = p => p; // already relative
+    } else {
+      // Convert absolute pressure to p/p₀ using sorptive's p0
+      const p0kPa = s.p0;
+      const toKPa = PRESSURE_TO_KPA[pu] || 1;
+      normFn = p => (p * toKPa) / p0kPa;
+    }
+
     rawFileData = dataRows
-      .map(([p,q])=>({pp0: needsNorm ? p/s.p0 : p, rawUptake:q}))
+      .map(([p,q])=>({pp0: normFn(p), rawUptake:q}))
       .filter(d=>d.pp0>0&&d.pp0<1)
       .sort((a,b)=>a.pp0-b.pp0);
 
     if(rawFileData.length<3){st('Error: fewer than 3 valid points in 0<p/p₀<1.','err');return;}
-    if(needsNorm) st('Note: pressure values >1 normalised by p₀ = '+s.p0+' kPa');
 
-    // Show the assumptions banner
+    // Show assumptions banner
     showAssumptionsBanner(meta);
 
     document.getElementById('btnAnalyse').disabled=false;
     document.getElementById('dzName').textContent=file.name;
-    st('Loaded '+rawFileData.length+' points — check assumptions below, then click Run BET Analysis.');
-    // Auto-run so charts are visible immediately
+    st('Loaded '+rawFileData.length+' points — check detected parameters, then click Run BET Analysis.');
     runAnalysis();
   };
   reader.readAsText(file);
