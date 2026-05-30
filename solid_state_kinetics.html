@@ -79,9 +79,9 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
 /* ── CENTRE ── */
 .centre{display:flex;flex-direction:column;overflow:hidden;min-height:0;min-width:0}
 .tab-bar{border-bottom:2px solid var(--ink);display:flex;flex-shrink:0;background:var(--paper)}
-.tab{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:10px 16px;border-bottom:3px solid transparent;cursor:pointer;color:#888;transition:all .15s;margin-bottom:-2px}
-.tab:hover{color:var(--ink)}
-.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab{padding:7px 16px;font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;cursor:pointer;border:none;background:none;color:#888;border-right:1px solid var(--rule);margin-bottom:-2px}
+.tab:hover{background:var(--cream);color:var(--ink)}
+.tab.active{background:var(--cream);color:var(--accent);border-bottom:2px solid var(--accent)}
 
 /* raw canvas area */
 .raw-area{flex:1;min-height:0;position:relative;padding:10px 14px}
@@ -162,7 +162,7 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
     <div class="range-row" style="margin-top:0">
       <div class="range-field">
         <label>Time unit</label>
-        <input type="text" id="timeUnit" placeholder="e.g. s, min, h" style="background:var(--cream);border:1.5px solid var(--rule);padding:4px 7px;font-family:var(--mono);font-size:11px;color:var(--ink);width:100%;outline:none" oninput="updateResBox()">
+        <input type="text" id="timeUnit" placeholder="e.g. s, min, h" style="background:var(--cream);border:1.5px solid var(--rule);padding:4px 7px;font-family:var(--mono);font-size:11px;color:var(--ink);width:100%;outline:none" oninput="updateResBox();if(currentTab==='fit')drawFit();">
       </div>
     </div>
   </div>
@@ -186,15 +186,16 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
 <!-- ══ CENTRE ══ -->
 <div class="centre">
   <div class="tab-bar">
-    <div class="tab active" id="tab-raw"  onclick="switchTab('raw')">Raw Data</div>
-    <div class="tab"        id="tab-alpha" onclick="switchTab('alpha')">α(t) Curve</div>
-    <div class="tab"        id="tab-fit"  onclick="switchTab('fit')">Model Fit</div>
+    <button class="tab active" id="tab-raw"   onclick="switchTab('raw')">Raw Data</button>
+    <button class="tab"        id="tab-alpha" onclick="switchTab('alpha')">&#945;(t) Curve</button>
+    <button class="tab"        id="tab-fit"   onclick="switchTab('fit')">Model Fit</button>
+    <button class="tab"        id="tab-guide" onclick="switchTab('guide')">Guide</button>
   </div>
 
   <!-- Raw data canvas panel -->
   <div class="raw-area" id="panel-raw">
     <div class="raw-canvas-wrap" id="rawWrap">
-      <div class="canvas-lbl" id="rawLbl">mass vs time — load a CSV to begin</div>
+      <div class="canvas-lbl" id="rawLbl">signal vs time — load a CSV to begin</div>
       <canvas id="rawCanvas"></canvas>
       <div class="canvas-hint">click to set reaction bounds</div>
     </div>
@@ -216,6 +217,72 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
       <div class="zoom-reset" onclick="resetZoom()">&#8635; Reset</div>
       <canvas id="fitCanvas"></canvas>
       <div class="canvas-hint">left-drag: zoom &nbsp;·&nbsp; right-drag: pan</div>
+    </div>
+  </div>
+
+  <!-- Guide panel -->
+  <div class="raw-area" id="panel-guide" style="display:none;overflow-y:auto">
+    <div style="max-width:680px;margin:0 auto;padding:8px 4px;font-family:var(--sans);font-size:13px;line-height:1.7;color:var(--ink)">
+
+      <div style="font-family:var(--serif);font-size:22px;font-weight:600;margin-bottom:18px;padding-bottom:10px;border-bottom:2px solid var(--ink)">How to Use This App</div>
+
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:6px">Overview</div>
+      <p style="margin-bottom:14px">This app fits solid-state reaction kinetic models of the form <strong>f(α) = kt + b</strong> to thermogravimetric or similar time-series data. Load your data, select the reaction range, inspect the α(t) curve, then test kinetic models on the linear transformed plot.</p>
+
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:6px">Step 1 — Load Data</div>
+      <p style="margin-bottom:14px">Drag a CSV file onto the drop zone or click <em>Browse for file</em>. The file must have two numeric columns: <strong>time</strong> (column 1) and <strong>mass</strong> or signal (column 2). A header row is skipped automatically. Enter the time unit (e.g. s, min, h) in the Units field so that the rate constant k is reported with correct units.</p>
+
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:6px">Step 2 — Set Reaction Bounds</div>
+      <p style="margin-bottom:8px">On the <strong>Raw Data</strong> tab, click on the plot to set two boundaries:</p>
+      <ul style="margin:0 0 14px 20px">
+        <li><strong>t₀</strong> (green dashed line) — where the reaction begins. Click at the start of the uptake/release event.</li>
+        <li><strong>t∞</strong> (red dashed line) — where equilibrium is reached, i.e. where the curve flattens. Click at the end of the event.</li>
+      </ul>
+      <p style="margin-bottom:14px">You can also type values directly into the t₀ / t∞ fields and click <em>Apply</em>. Values are snapped to the nearest data point. Use <em>Reset Selection</em> to start over.</p>
+
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:6px">Step 3 — Inspect α(t)</div>
+      <p style="margin-bottom:14px">Switch to the <strong>α(t) Curve</strong> tab. The selected segment is rescaled so that α runs from 0 (at t₀) to 1 (at t∞), and time is shifted to start at zero. The curve shape gives a qualitative indication of the likely kinetic mechanism before any fitting is attempted.</p>
+
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:6px">Step 4 — Fit a Kinetic Model</div>
+      <p style="margin-bottom:8px">Choose a model from one of the four groups in the left panel. The app automatically switches to the <strong>Model Fit</strong> tab, where f(α) is plotted against time. A good model produces a straight line. The regression parameters are shown in the left panel:</p>
+      <ul style="margin:0 0 14px 20px">
+        <li><strong>k</strong> — rate constant (slope), with units [time]⁻¹ and estimated standard deviation</li>
+        <li><strong>b</strong> — intercept, with ESD (ideally close to zero)</li>
+        <li><strong>R²</strong> — coefficient of determination (closer to 1 is better)</li>
+        <li><strong>n</strong> — number of data points used in the current fit window</li>
+      </ul>
+      <p style="margin-bottom:14px">The equation of the selected model is displayed in the canvas below the model selector.</p>
+
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:6px">Step 5 — Zoom &amp; Refine</div>
+      <p style="margin-bottom:14px">On the Model Fit tab, <strong>left-drag</strong> to draw a zoom rectangle — the plot rescales to that region and the regression is immediately recomputed from only the visible points. <strong>Right-drag</strong> to pan. Click <strong>⟲ Reset</strong> to return to the full range. This lets you identify the range over which the data are most linear and obtain the best-fit k for that regime.</p>
+
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:6px">Step 6 — Export</div>
+      <p style="margin-bottom:8px">Two export options are available:</p>
+      <ul style="margin:0 0 14px 20px">
+        <li><strong>Export Results CSV</strong> — saves a spreadsheet with the regression parameters and the full α, f(α), and residual data for the selected range.</li>
+        <li><strong>Save Plot Image</strong> — renders the current Model Fit plot at the specified resolution (default 1200×900 px) as a PNG or JPEG suitable for publication. All style settings (fonts, colors, labels, line widths) are respected.</li>
+      </ul>
+
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:6px">Kinetic Models</div>
+      <p style="margin-bottom:8px">The following model families are available:</p>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">
+        <thead><tr style="border-bottom:2px solid var(--ink)">
+          <th style="text-align:left;padding:4px 8px;font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase">Group</th>
+          <th style="text-align:left;padding:4px 8px;font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase">Models</th>
+          <th style="text-align:left;padding:4px 8px;font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase">Mechanism</th>
+        </tr></thead>
+        <tbody>
+          <tr style="border-bottom:1px solid var(--pale)"><td style="padding:5px 8px;font-weight:500">Nucleation</td><td style="padding:5px 8px;font-family:var(--mono);font-size:11px">P2, P3, P4, A2, A3, A4</td><td style="padding:5px 8px;color:#555">Nucleation and growth (Power Law and Avrami-Erofeev)</td></tr>
+          <tr style="border-bottom:1px solid var(--pale)"><td style="padding:5px 8px;font-weight:500">Geometrical Contraction</td><td style="padding:5px 8px;font-family:var(--mono);font-size:11px">R2, R3</td><td style="padding:5px 8px;color:#555">Shrinking core (contracting area or volume)</td></tr>
+          <tr style="border-bottom:1px solid var(--pale)"><td style="padding:5px 8px;font-weight:500">Diffusion</td><td style="padding:5px 8px;font-family:var(--mono);font-size:11px">D1, D2, D3, D4</td><td style="padding:5px 8px;color:#555">1D, 2D (Valensi), 3D (Jander), Ginstling-Brounstein</td></tr>
+          <tr><td style="padding:5px 8px;font-weight:500">Reaction Order</td><td style="padding:5px 8px;font-family:var(--mono);font-size:11px">F1, F2, F3</td><td style="padding:5px 8px;color:#555">First, second, and third order</td></tr>
+        </tbody>
+      </table>
+
+      <div style="background:var(--cream);border:1.5px solid var(--rule);padding:10px 14px;font-size:12px;color:#555;margin-bottom:8px">
+        <strong style="color:var(--ink)">Tip:</strong> A model fits well if its f(α) vs time plot is linear over a wide range of α. Compare R² values, but also look for systematic curvature — a high R² over a narrow zoom window may still indicate a poor model. The intercept b should be small relative to the signal; a large b may indicate an induction period or a poor choice of t₀.
+      </div>
+
     </div>
   </div>
 
@@ -319,6 +386,33 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
   </div>
 
   <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Fit Legend</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Show legend</span><input type="checkbox" id="legShow" checked oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Position</span>
+        <select id="legPos" oninput="redraw()">
+          <option value="tl">Top left</option>
+          <option value="tr">Top right</option>
+          <option value="bl">Bottom left</option>
+          <option value="br">Bottom right</option>
+        </select>
+      </div>
+      <div class="cr"><span class="cl">Font</span>
+        <select id="legFont" oninput="redraw()">
+          <option value="'Palatino Linotype',Palatino,Georgia,serif" selected>Palatino</option>
+          <option value="Georgia,serif">Georgia</option>
+          <option value="'Times New Roman',serif">Times New Roman</option>
+          <option value="Arial,sans-serif">Arial</option>
+          <option value="'Helvetica Neue',Helvetica,sans-serif">Helvetica</option>
+          <option value="'Century Schoolbook',serif">Century Schoolbook</option>
+          <option value="'DM Mono',monospace">DM Mono</option>
+        </select>
+      </div>
+      <div class="cr"><span class="cl">Size</span><input type="range" id="legSz" min="8" max="40" value="18" oninput="V(this);redraw()"><span class="rv2">18</span></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
     <div class="cp-head" onclick="tog(this)"><span class="cp-title">Save Plot</span><span class="cp-arr">&#9660;</span></div>
     <div class="cp-body">
       <div class="cr"><span class="cl">Width px</span><input type="number" id="expW" value="1200"></div>
@@ -374,6 +468,7 @@ let zs={xMin:null,xMax:null,yMin:null,yMax:null};
 const zsMap={raw:{xMin:null,xMax:null,yMin:null,yMax:null}, alpha:{xMin:null,xMax:null,yMin:null,yMax:null}, fit:{xMin:null,xMax:null,yMin:null,yMax:null}};
 zs=zsMap.raw;
 const dragMap={}, isDragMap={}, rubberMap={};
+let wasPanDrag=false;
 
 // ════════════════════════════════════════════════════════════════
 //  FILE LOADING
@@ -491,56 +586,56 @@ function TW(ctx,txt,sz,ital){
 }
 function HL(ctx,x1,x2,y,lw){ctx.save();ctx.strokeStyle='#0f0e0d';ctx.lineWidth=lw||1;ctx.beginPath();ctx.moveTo(x1,y);ctx.lineTo(x2,y);ctx.stroke();ctx.restore()}
 
-// Equation renderers — draws "F(α) = <expr>" centred
+// Equation renderers — draws "f(α) = <expr>" centred
 const EQ = {
   P2(ctx,w,h){ const cy=h/2,sz=17,sm=12; let x=6;
-    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = ',x,cy+5,sz,false);
+    x+=T(ctx,'f(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = ',x,cy+5,sz,false);
     x+=T(ctx,'α',x,cy+5,sz,true); T(ctx,'1/2',x,cy-1,sm,false);
   },
   P3(ctx,w,h){ const cy=h/2,sz=17,sm=12; let x=6;
-    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = ',x,cy+5,sz,false);
+    x+=T(ctx,'f(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = ',x,cy+5,sz,false);
     x+=T(ctx,'α',x,cy+5,sz,true); T(ctx,'1/3',x,cy-1,sm,false);
   },
   P4(ctx,w,h){ const cy=h/2,sz=17,sm=12; let x=6;
-    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = ',x,cy+5,sz,false);
+    x+=T(ctx,'f(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = ',x,cy+5,sz,false);
     x+=T(ctx,'α',x,cy+5,sz,true); T(ctx,'1/4',x,cy-1,sm,false);
   },
   A2(ctx,w,h){ const cy=h/2,sz=17,sm=11; let x=6;
-    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = [−ln(1−',x,cy+5,sz,false);
+    x+=T(ctx,'f(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = [−ln(1−',x,cy+5,sz,false);
     x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,')]',x,cy+5,sz,false); T(ctx,'1/2',x,cy-1,sm,false);
   },
   A3(ctx,w,h){ const cy=h/2,sz=17,sm=11; let x=6;
-    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = [−ln(1−',x,cy+5,sz,false);
+    x+=T(ctx,'f(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = [−ln(1−',x,cy+5,sz,false);
     x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,')]',x,cy+5,sz,false); T(ctx,'1/3',x,cy-1,sm,false);
   },
   A4(ctx,w,h){ const cy=h/2,sz=17,sm=11; let x=6;
-    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = [−ln(1−',x,cy+5,sz,false);
+    x+=T(ctx,'f(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = [−ln(1−',x,cy+5,sz,false);
     x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,')]',x,cy+5,sz,false); T(ctx,'1/4',x,cy-1,sm,false);
   },
   R2(ctx,w,h){ const cy=h/2,sz=17,sm=11; let x=6;
-    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = 1−(1−',x,cy+5,sz,false);
+    x+=T(ctx,'f(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = 1−(1−',x,cy+5,sz,false);
     x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,')',x,cy+5,sz,false); T(ctx,'1/2',x,cy-1,sm,false);
   },
   R3(ctx,w,h){ const cy=h/2,sz=17,sm=11; let x=6;
-    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = 1−(1−',x,cy+5,sz,false);
+    x+=T(ctx,'f(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = 1−(1−',x,cy+5,sz,false);
     x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,')',x,cy+5,sz,false); T(ctx,'1/3',x,cy-1,sm,false);
   },
   D1(ctx,w,h){ const cy=h/2,sz=17,sm=11; let x=6;
-    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = ',x,cy+5,sz,false);
+    x+=T(ctx,'f(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = ',x,cy+5,sz,false);
     x+=T(ctx,'α',x,cy+5,sz,true); T(ctx,'2',x,cy-1,sm,false);
   },
   D2(ctx,w,h){ const cy=h/2,sz=16,sm=11; let x=4;
-    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = (1−',x,cy+5,sz,false);
+    x+=T(ctx,'f(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = (1−',x,cy+5,sz,false);
     x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') ln(1−',x,cy+5,sz,false);
     x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') + ',x,cy+5,sz,false); T(ctx,'α',x,cy+5,sz,true);
   },
   D3(ctx,w,h){ const cy=h/2,sz=16,sm=11; let x=4;
-    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = [1−(1−',x,cy+5,sz,false);
+    x+=T(ctx,'f(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = [1−(1−',x,cy+5,sz,false);
     x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,')',x,cy+5,sz,false); T(ctx,'1/3',x,cy-1,sm,false);
     x+=TW(ctx,'1/3',sm,false)+1; x+=T(ctx,']',x,cy+5,sz,false); T(ctx,'2',x,cy-1,sm,false);
   },
   D4(ctx,w,h){ const cy=h/2,sz=15,sm=11; let x=4;
-    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true);
+    x+=T(ctx,'f(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true);
     x+=T(ctx,') = 1−',x,cy+5,sz,false);
     // fraction 2α/3
     const nW=TW(ctx,'2α',sz,true), dW=TW(ctx,'3',sz,false);
@@ -552,11 +647,11 @@ const EQ = {
     x+=T(ctx,')',x,cy+5,sz,false); T(ctx,'2/3',x,cy-1,sm,false);
   },
   F1(ctx,w,h){ const cy=h/2,sz=17,sm=11; let x=6;
-    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = −ln(1−',x,cy+5,sz,false);
+    x+=T(ctx,'f(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = −ln(1−',x,cy+5,sz,false);
     x+=T(ctx,'α',x,cy+5,sz,true); T(ctx,')',x,cy+5,sz,false);
   },
   F2(ctx,w,h){ const cy=h/2,sz=17,sm=12; let x=6;
-    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = ',x,cy+5,sz,false);
+    x+=T(ctx,'f(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = ',x,cy+5,sz,false);
     const nW=TW(ctx,'1',sz,false), dW=TW(ctx,'1−α',sz,true)+2;
     const fw=Math.max(nW,dW)+6;
     T(ctx,'1',x+(fw-nW)/2,cy-2,sz,false);
@@ -565,7 +660,7 @@ const EQ = {
     T(ctx,'− 1',x,cy+5,sz,false);
   },
   F3(ctx,w,h){ const cy=h/2,sz=16,sm=11; let x=4;
-    x+=T(ctx,'F(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = ',x,cy+5,sz,false);
+    x+=T(ctx,'f(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = ',x,cy+5,sz,false);
     const nW=TW(ctx,'1',sz,false);
     const dW=TW(ctx,'2(1−α)',sz,true)+TW(ctx,'2',sm,false)+4;
     const fw=Math.max(nW,dW)+6;
@@ -653,7 +748,7 @@ function updateResBox(){
     <div style="margin-top:2px"><span class="rl">b </span><span class="rv">${fmtEsd(fitReg.b,fitReg.se_b)}</span></div>
     <div style="margin-top:4px"><span class="rl">R²     </span><span class="rr">${fitReg.r2.toFixed(6)}</span></div>
     <div style="margin-top:2px;font-size:10px;color:#aaa;font-family:var(--mono)">n = ${fitReg.n} points</div>
-    <div style="margin-top:4px;font-size:10px;color:#aaa;font-family:var(--mono)">F(α) = ${fitReg.k.toExponential(3)}·t ${sign} ${Math.abs(fitReg.b).toExponential(3)}</div>
+    <div style="margin-top:4px;font-size:10px;color:#aaa;font-family:var(--mono)">f(α) = ${fitReg.k.toExponential(3)}·t ${sign} ${Math.abs(fitReg.b).toExponential(3)}</div>
   </div>`;
   document.getElementById('btnExport').disabled=false;
 }
@@ -725,34 +820,77 @@ function fmtN(v){return(Math.abs(v)>=1e4||(Math.abs(v)<0.01&&v!==0))?v.toExponen
 function toC(x,y,dims,xr,yr){return{cx:dims.l+(x-xr.min)/(xr.max-xr.min)*dims.pw, cy:dims.b-(y-yr.min)/(yr.max-yr.min)*dims.ph}}
 function toD(cx,cy,dims,xr,yr){return{x:xr.min+(cx-dims.l)/dims.pw*(xr.max-xr.min), y:yr.min+(dims.b-cy)/dims.ph*(yr.max-yr.min)}}
 
-// Draw axes, grid, box border, ticks, labels for any canvas chart
+// Unified axes drawing — used by raw, alpha, and fit canvases
+// Uses right-panel style controls so all three charts look identical
 function drawAxes(ctx,dims,xr,yr,xLabel,yLabel){
   const{l,r,t,b,pw,ph,dpr}=dims;
+  const axC   = gv('axCol')||'#000000';
+  const font  = gv('fontFam')||'Arial,sans-serif';
+  const axSz  = (parseFloat(gv('axSz'))||36) * dpr;
+  const tkSz  = (parseFloat(gv('tkSz'))||30) * dpr;
+  const gridOn= gb('grid');
+  const gridC = gv('gridCol')||'#dddddd';
+  const gridW = (parseFloat(gv('gridW'))||1) * dpr;
+  const frameW= (parseFloat(gv('frameW'))||3) * dpr;
+  const TL    = (parseFloat(gv('tickLen'))||8) * dpr;
+  const tickDir = gv('tickDir')||'out';
+  const majTW = (parseFloat(gv('majTickW'))||3) * dpr;
+  const boxBdr= gb('boxBdr');
+  const boxW  = (parseFloat(gv('boxW'))||3) * dpr;
+  const boxC  = gv('boxCol')||'#000000';
+
+  const xDp = tickDecimals(xr.ticks);
+  const yDp = tickDecimals(yr.ticks);
+
   ctx.save();
-  // light grid
-  ctx.strokeStyle='rgba(0,0,0,0.08)'; ctx.lineWidth=0.7*dpr; ctx.setLineDash([3*dpr,5*dpr]);
-  xr.ticks.forEach(v=>{const cx=l+(v-xr.min)/(xr.max-xr.min)*pw;if(cx<l-1||cx>r+1)return;
-    ctx.beginPath();ctx.moveTo(cx,t);ctx.lineTo(cx,b);ctx.stroke()});
-  yr.ticks.forEach(v=>{const cy=b-(v-yr.min)/(yr.max-yr.min)*ph;if(cy<t-1||cy>b+1)return;
-    ctx.beginPath();ctx.moveTo(l,cy);ctx.lineTo(r,cy);ctx.stroke()});
-  ctx.setLineDash([]);
-  // full box border
-  ctx.strokeStyle='#333'; ctx.lineWidth=1.5*dpr;
-  ctx.strokeRect(l,t,pw,ph);
-  // ticks (outward)
-  const TL=5*dpr;
-  ctx.fillStyle='#444'; ctx.font=`${10*dpr}px 'DM Mono',monospace`; ctx.textAlign='center';
-  xr.ticks.forEach(v=>{const cx=l+(v-xr.min)/(xr.max-xr.min)*pw;if(cx<l-0.5||cx>r+0.5)return;
-    ctx.beginPath();ctx.moveTo(cx,b);ctx.lineTo(cx,b+TL);ctx.stroke();
-    ctx.fillText(fmtN(v),cx,b+TL+11*dpr)});
+
+  // Grid
+  if(gridOn){
+    ctx.strokeStyle=gridC; ctx.lineWidth=gridW; ctx.setLineDash([3*dpr,5*dpr]);
+    xr.ticks.forEach(v=>{
+      const cx=l+(v-xr.min)/(xr.max-xr.min)*pw; if(cx<l||cx>r) return;
+      ctx.beginPath();ctx.moveTo(cx,t);ctx.lineTo(cx,b);ctx.stroke();
+    });
+    yr.ticks.forEach(v=>{
+      const cy=b-(v-yr.min)/(yr.max-yr.min)*ph; if(cy<t||cy>b) return;
+      ctx.beginPath();ctx.moveTo(l,cy);ctx.lineTo(r,cy);ctx.stroke();
+    });
+    ctx.setLineDash([]);
+  }
+
+  // Frame
+  ctx.strokeStyle=axC; ctx.lineWidth=frameW; ctx.strokeRect(l,t,pw,ph);
+  if(boxBdr){ ctx.strokeStyle=boxC; ctx.lineWidth=boxW; ctx.strokeRect(l,t,pw,ph); }
+
+  // Ticks + tick labels
+  ctx.strokeStyle=axC; ctx.lineWidth=majTW;
+  ctx.fillStyle=axC; ctx.textAlign='center'; ctx.font=`${tkSz}px ${font}`;
+  xr.ticks.forEach(v=>{
+    const cx=l+(v-xr.min)/(xr.max-xr.min)*pw; if(cx<l-1||cx>r+1) return;
+    if(tickDir==='out'||tickDir==='both'){ctx.beginPath();ctx.moveTo(cx,b);ctx.lineTo(cx,b+TL);ctx.stroke();}
+    if(tickDir==='in' ||tickDir==='both'){ctx.beginPath();ctx.moveTo(cx,b);ctx.lineTo(cx,b-TL);ctx.stroke();}
+    ctx.fillText(fmtTick(v,xDp), cx, b+TL+tkSz*1.1);
+  });
   ctx.textAlign='right';
-  yr.ticks.forEach(v=>{const cy=b-(v-yr.min)/(yr.max-yr.min)*ph;if(cy<t-0.5||cy>b+0.5)return;
-    ctx.beginPath();ctx.moveTo(l,cy);ctx.lineTo(l-TL,cy);ctx.stroke();
-    ctx.fillText(fmtN(v),l-TL-4*dpr,cy+3.5*dpr)});
-  // axis labels
-  ctx.fillStyle='#222'; ctx.textAlign='center'; ctx.font=`${11*dpr}px 'DM Sans',sans-serif`;
-  ctx.fillText(xLabel,(l+r)/2,b+TL+26*dpr);
-  ctx.save();ctx.translate(14*dpr,(t+b)/2);ctx.rotate(-Math.PI/2);ctx.fillText(yLabel,0,0);ctx.restore();
+  yr.ticks.forEach(v=>{
+    const cy=b-(v-yr.min)/(yr.max-yr.min)*ph; if(cy<t-1||cy>b+1) return;
+    if(tickDir==='out'||tickDir==='both'){ctx.beginPath();ctx.moveTo(l,cy);ctx.lineTo(l-TL,cy);ctx.stroke();}
+    if(tickDir==='in' ||tickDir==='both'){ctx.beginPath();ctx.moveTo(l,cy);ctx.lineTo(l+TL,cy);ctx.stroke();}
+    ctx.fillText(fmtTick(v,yDp), l-TL-4*dpr, cy+tkSz*0.35);
+  });
+
+  // Axis labels
+  ctx.fillStyle=axC; ctx.font=`${axSz}px ${font}`; ctx.textAlign='center';
+  ctx.fillText(xLabel, (l+r)/2, b+TL+tkSz*1.1+axSz*1.3);
+  // Y label: positioned snug against tick labels
+  ctx.font=`${tkSz}px ${font}`;
+  const maxTickW=Math.max(...yr.ticks.map(v=>ctx.measureText(fmtTick(v,yDp)).width));
+  ctx.font=`${axSz}px ${font}`;
+  const yLblX = l - TL - 4*dpr - maxTickW - axSz*0.8;
+  ctx.save(); ctx.translate(yLblX,(t+b)/2); ctx.rotate(-Math.PI/2);
+  ctx.fillText(yLabel, 0, 0);
+  ctx.restore();
+
   ctx.restore();
 }
 
@@ -831,7 +969,7 @@ function onDown(e,id){
   const c=canvasEl(id); if(!c) return;
   const rect=c.getBoundingClientRect(), dpr=window.devicePixelRatio;
   const cx=(e.clientX-rect.left)*dpr, cy=(e.clientY-rect.top)*dpr;
-  const dims=getPlotDims(c);
+  const dims=getPlotDims(c, true);
   // must be inside plot area
   if(cx<dims.l||cx>dims.r||cy<dims.t||cy>dims.b) return;
   e.preventDefault();
@@ -840,11 +978,12 @@ function onDown(e,id){
     dragMap[id]={mode:'zoom', csx:cx, csy:cy, sx:e.clientX, sy:e.clientY};
     rubberMap[id]=null; isDragMap[id]=false;
   } else if(e.button===2){
-    // right button — start pan; snapshot current ranges
+    if(id!=='fit') return;
     const{xr,yr}=getRanges(id);
     dragMap[id]={mode:'pan', sx:e.clientX, sy:e.clientY,
       xMin:xr.min, xMax:xr.max, yMin:yr.min, yMax:yr.max};
     isDragMap[id]=false;
+    // do NOT preventDefault here — we allow context menu unless mouse actually moves
   }
 }
 
@@ -862,7 +1001,7 @@ function onMove(e,id){
   if(!isDragMap[id]) return;
 
   document.getElementById('tooltip').style.display='none';
-  const dims=getPlotDims(c);
+  const dims=getPlotDims(c, true);
 
   if(dragMap[id].mode==='zoom'){
     // Update rubber-band rectangle (clamped to plot area)
@@ -889,10 +1028,23 @@ function onMove(e,id){
 }
 
 function onUp(e,id){
+  if(dragMap[id] && dragMap[id].mode==='pan' && !isDragMap[id]){
+    // Right-click with no movement — copy canvas to clipboard
+    const c=canvasEl(id); if(!c) { cleanup(); return; }
+    c.toBlob(blob=>{
+      if(!blob) return;
+      try {
+        navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);
+        st('Canvas copied to clipboard.','ok');
+      } catch(err){ st('Copy to clipboard not supported in this browser.','err'); }
+    });
+    rubberMap[id]=null; dragMap[id]=null; isDragMap[id]=false;
+    return;
+  }
   if(isDragMap[id] && dragMap[id]){
     if(dragMap[id].mode==='zoom' && rubberMap[id]){
       const c=canvasEl(id);
-      const dims=getPlotDims(c);
+      const dims=getPlotDims(c, true);
       const{xr,yr}=getRanges(id);
       const rb=rubberMap[id];
       const x1c=Math.min(rb.x1,rb.x2), x2c=Math.max(rb.x1,rb.x2);
@@ -904,7 +1056,10 @@ function onUp(e,id){
       }
     }
     // after zoom or pan on fit: recompute regression from visible window
-    if(id==='fit'){ recomputeFitFromView(); }
+    if(id==='fit'){
+      if(dragMap[id].mode==='pan' && isDragMap[id]) wasPanDrag=true;
+      recomputeFitFromView();
+    }
   }
   rubberMap[id]=null; dragMap[id]=null; isDragMap[id]=false;
   if(id==='raw') drawRaw();
@@ -927,7 +1082,7 @@ function onRawClick(e){
   const c=document.getElementById('rawCanvas');
   const rect=c.getBoundingClientRect(), dpr=window.devicePixelRatio;
   const cx=(e.clientX-rect.left)*dpr, cy=(e.clientY-rect.top)*dpr;
-  const dims=getPlotDims(c);
+  const dims=getPlotDims(c, true);
   if(cx<dims.l||cx>dims.r||cy<dims.t||cy>dims.b) return;
   const{xr,yr}=getRanges('raw');
   const{x}=toD(cx,cy,dims,xr,yr);
@@ -951,7 +1106,7 @@ function onRawClick(e){
 function showTip(e,c,rect,dpr){
   if(rawData.length===0) return;
   const cx=(e.clientX-rect.left)*dpr, cy=(e.clientY-rect.top)*dpr;
-  const dims=getPlotDims(c);
+  const dims=getPlotDims(c, true);
   const tip=document.getElementById('tooltip');
   if(cx<dims.l||cx>dims.r||cy<dims.t||cy>dims.b){tip.style.display='none';return}
   const{xr,yr}=getRanges('raw');
@@ -986,16 +1141,18 @@ function renderAlpha(){ const c=document.getElementById('alphaCanvas'); if(!c) r
 function drawRaw(){
   const c=document.getElementById('rawCanvas'); if(!c||!c.width) return;
   const ctx=c.getContext('2d');
-  const dims=getPlotDims(c);
+  const dims=getPlotDims(c, true);
   const{w,h,l,r,t,b,pw,ph,dpr}=dims;
+  if(pw<=0||ph<=0) return;
   ctx.clearRect(0,0,w,h);
-  ctx.fillStyle='#f6f1ea'; ctx.fillRect(0,0,w,h);
+  ctx.fillStyle=gv('chartBg')||'#ffffff'; ctx.fillRect(0,0,w,h);
   if(rawData.length===0){
-    document.getElementById('rawLbl').textContent='mass vs time — load a CSV to begin';
+    document.getElementById('rawLbl').textContent='signal vs time — load a CSV to begin';
     return;
   }
   const{xr,yr}=getRanges('raw');
-  ctx.fillStyle='#ffffff'; ctx.fillRect(l,t,pw,ph);
+  const tkSz=(parseFloat(gv('tkSz'))||30)*dpr;
+  ctx.fillStyle=gv('plotBg')||'#ffffff'; ctx.fillRect(l,t,pw,ph);
   ctx.save(); ctx.beginPath(); ctx.rect(l,t,pw,ph); ctx.clip();
 
   // reaction range band
@@ -1014,16 +1171,16 @@ function drawRaw(){
     const xc=toC(t0,0,dims,xr,yr).cx;
     ctx.save(); ctx.strokeStyle='#2a7a3b'; ctx.lineWidth=1.5*dpr; ctx.setLineDash([4*dpr,3*dpr]);
     ctx.beginPath();ctx.moveTo(xc,t);ctx.lineTo(xc,b);ctx.stroke(); ctx.restore();
-    ctx.fillStyle='#2a7a3b'; ctx.font=`bold ${9*dpr}px 'DM Mono',monospace`; ctx.textAlign='left';
-    ctx.fillText('t₀',xc+4*dpr,t+12*dpr);
+    ctx.fillStyle='#2a7a3b'; ctx.font=`bold ${tkSz}px 'DM Mono',monospace`; ctx.textAlign='left';
+    ctx.fillText('t₀',xc+4*dpr,t+tkSz*1.2);
   }
   // t1 marker
   if(t1!==null){
     const xc=toC(t1,0,dims,xr,yr).cx;
     ctx.save(); ctx.strokeStyle='#b84a2e'; ctx.lineWidth=1.5*dpr; ctx.setLineDash([4*dpr,3*dpr]);
     ctx.beginPath();ctx.moveTo(xc,t);ctx.lineTo(xc,b);ctx.stroke(); ctx.restore();
-    ctx.fillStyle='#b84a2e'; ctx.font=`bold ${9*dpr}px 'DM Mono',monospace`; ctx.textAlign='right';
-    ctx.fillText('t∞',xc-4*dpr,t+12*dpr);
+    ctx.fillStyle='#b84a2e'; ctx.font=`bold ${tkSz}px 'DM Mono',monospace`; ctx.textAlign='right';
+    ctx.fillText('t∞',xc-4*dpr,t+tkSz*1.2);
   }
   // rubber-band zoom rect (left-drag)
   if(rubberMap['raw']){
@@ -1034,27 +1191,28 @@ function drawRaw(){
     ctx.strokeRect(rx,ry,rw,rh); ctx.restore();
   }
   ctx.restore();
-  drawAxes(ctx,dims,xr,yr,'Time','Mass');
-  const lbl=t0===null?'mass vs time — click to set t₀ (reaction start)':
-            t1===null?'mass vs time — click to set t∞ (equilibrium end)':
-            'mass vs time — bounds set';
+  drawAxes(ctx,dims,xr,yr,'Time','Signal');
+  const lbl=t0===null?'signal vs time — click to set t₀ (reaction start)':
+            t1===null?'signal vs time — click to set t∞ (equilibrium end)':
+            'signal vs time — bounds set';
   document.getElementById('rawLbl').textContent=lbl;
 }
 
 function drawAlpha(){
   const c=document.getElementById('alphaCanvas'); if(!c||!c.width) return;
   const ctx=c.getContext('2d');
-  const dims=getPlotDims(c);
+  const dims=getPlotDims(c, true);
   const{w,h,l,r,t,b,pw,ph,dpr}=dims;
+  if(pw<=0||ph<=0) return;
   ctx.clearRect(0,0,w,h);
-  ctx.fillStyle='#f6f1ea'; ctx.fillRect(0,0,w,h);
+  ctx.fillStyle=gv('chartBg')||'#ffffff'; ctx.fillRect(0,0,w,h);
   if(alphaData.length<2){
     ctx.fillStyle='#aaa'; ctx.font=`${11*dpr}px 'DM Sans',sans-serif`; ctx.textAlign='center';
     ctx.fillText('Set reaction bounds on Raw Data tab to see α(t)',w/2,h/2);
     return;
   }
   const{xr,yr}=getRanges('alpha');
-  ctx.fillStyle='#ffffff'; ctx.fillRect(l,t,pw,ph);
+  ctx.fillStyle=gv('plotBg')||'#ffffff'; ctx.fillRect(l,t,pw,ph);
   ctx.save(); ctx.beginPath(); ctx.rect(l,t,pw,ph); ctx.clip();
   ctx.beginPath(); ctx.strokeStyle='#0f0e0d'; ctx.lineWidth=1.5*dpr;
   let first=true;
@@ -1108,7 +1266,8 @@ function resetSel(){
 
 function setupFitCanvas(){
   const c=document.getElementById('fitCanvas'); if(!c) return;
-  c.addEventListener('contextmenu', e=>e.preventDefault());
+  // contextmenu fires after mouseup; suppress it if a pan drag just occurred
+  c.addEventListener('contextmenu', e=>{ if(wasPanDrag) { e.preventDefault(); wasPanDrag=false; } });
   c.addEventListener('mousedown',  e=>onDown(e,'fit'));
   c.addEventListener('mousemove',  e=>onMove(e,'fit'));
   c.addEventListener('mouseup',    e=>onUp(e,'fit'));
@@ -1173,6 +1332,9 @@ function drawFit(){
     ctx.save(); ctx.strokeStyle='#b84a2e'; ctx.lineWidth=1.5*dpr; ctx.setLineDash([4*dpr,3*dpr]);
     ctx.strokeRect(rx2,ry2,rw,rh); ctx.restore();
   }
+  // Legend
+  if(gb('legShow')) drawLegend(ctx, dims, xr, yr);
+
   ctx.restore();
 
   // Y-axis label uses model equation string
@@ -1184,98 +1346,157 @@ function drawFit(){
 }
 
 // drawAxesFit: uses right-panel style controls; slider values are px sizes at 1x dpr
-function drawAxesFit(ctx,dims,xr,yr,xLabel,yLabel){
-  const{l,r,t,b,pw,ph,dpr}=dims;
+// ════════════════════════════════════════════════════════════════
+//  FIT LEGEND
+// ════════════════════════════════════════════════════════════════
+function drawLegend(ctx, dims, xr, yr){
+  if(!fitReg||!selectedModel||!alphaData.length) return;
+  const{l,r,t,b,dpr}=dims;
+  const font  = gv('legFont')||"'Palatino Linotype',Palatino,Georgia,serif";
+  const sz    = (parseFloat(gv('legSz'))||18) * dpr;
+  const pos   = gv('legPos')||'tl';
+  const tu    = (document.getElementById('timeUnit').value||'').trim();
+  const tuStr = tu ? ` ${tu}` : '';
+  const tuInv = tu ? ` ${tu}⁻¹` : '';
   const axC   = gv('axCol')||'#000000';
-  const font  = gv('fontFam')||'Arial,sans-serif';
-  const axSz  = (parseFloat(gv('axSz'))||36) * dpr;
-  const tkSz  = (parseFloat(gv('tkSz'))||30) * dpr;
-  const gridOn= gb('grid');
-  const gridC = gv('gridCol')||'#dddddd';
-  const gridW = (parseFloat(gv('gridW'))||1) * dpr;
-  const frameW= (parseFloat(gv('frameW'))||3) * dpr;
-  const TL    = (parseFloat(gv('tickLen'))||8) * dpr;
-  const tickDir = gv('tickDir')||'out';
-  const majTW = (parseFloat(gv('majTickW'))||3) * dpr;
-  const boxBdr= gb('boxBdr');
-  const boxW  = (parseFloat(gv('boxW'))||3) * dpr;
-  const boxC  = gv('boxCol')||'#000000';
+
+  // Helper: draw a run of mixed normal/italic/superscript segments on one baseline
+  // segments: [{text, italic, sup, bold}]
+  // returns total advance width
+  function drawMixed(ctx, segs, x, y, sz){
+    let cx=x;
+    segs.forEach(s=>{
+      const fsz = s.sup ? sz*0.65 : sz;
+      const dy  = s.sup ? -sz*0.45 : 0;
+      ctx.font = `${s.bold?'bold ':''}${s.italic?'italic ':''}${fsz}px ${font}`;
+      ctx.fillText(s.text, cx, y+dy);
+      cx += ctx.measureText(s.text).width;
+    });
+    return cx - x;
+  }
+  function measureMixed(ctx, segs, sz){
+    let w=0;
+    segs.forEach(s=>{
+      const fsz=s.sup?sz*0.65:sz;
+      ctx.font=`${s.bold?'bold ':''}${s.italic?'italic ':''}${fsz}px ${font}`;
+      w+=ctx.measureText(s.text).width;
+    });
+    return w;
+  }
+
+  // Format value ± esd in scientific notation sharing the same exponent
+  function sciParts(val, esd){
+    const exp = Math.floor(Math.log10(Math.abs(val)||1));
+    const sc  = Math.pow(10,exp);
+    const v   = (val/sc).toFixed(3);
+    const e   = (esd/sc).toFixed(3);
+    return {v, e, exp};
+  }
+
+  const kP  = sciParts(fitReg.k,  fitReg.se_k);
+  const bP  = sciParts(fitReg.b,  fitReg.se_b);
+
+  // α range: use alpha values of the points currently in the fit window
+  const{xr:fitXr}=getRanges('fit');
+  const visibleAlpha=alphaData.filter(p=>p.t>=fitXr.min&&p.t<=fitXr.max);
+  const aMin=visibleAlpha.length ? Math.min(...visibleAlpha.map(p=>p.alpha)) : 0;
+  const aMax=visibleAlpha.length ? Math.max(...visibleAlpha.map(p=>p.alpha)) : 1;
+  const aDp=2; // always 2 decimal places for α values
+
+  const xDp = tickDecimals(xr.ticks);
+
+  // Build line data (each line is an array of segments)
+  const lines = [
+    // Model name — bold, not italic
+    [{text: selectedModel.name, bold:true, italic:false}],
+    // k = (v ± e) × 10^exp tu⁻¹
+    [
+      {text:'k', italic:true}, {text:' = ('+kP.v+' ± '+kP.e+') × 10'},
+      {text:''+kP.exp, sup:true}, {text:tuInv}
+    ],
+    // b = (v ± e) × 10^exp
+    [
+      {text:'b', italic:true}, {text:' = ('+bP.v+' ± '+bP.e+') × 10'},
+      {text:''+bP.exp, sup:true}
+    ],
+    // R² = value
+    [
+      {text:'R', italic:true}, {text:'²', sup:true},
+      {text:' = '+fitReg.r2.toFixed(5)}
+    ],
+    // α range
+    [
+      {text:'α', italic:true},
+      {text:' range: '+aMin.toFixed(aDp)+' – '+aMax.toFixed(aDp)}
+    ],
+  ];
+
+  // Measure all lines to find box width
+  const lineH = sz * 1.55;
+  const pad   = sz * 0.7;
+  let maxW = 0;
+  lines.forEach(segs => {
+    const w = measureMixed(ctx, segs, sz);
+    if(w > maxW) maxW = w;
+  });
+  const boxW = maxW + pad*2;
+  const boxH = lines.length * lineH + pad*1.2;
+  const margin = sz * 0.8;
+
+  // Position
+  let bx, by;
+  if(pos==='tl'){ bx=l+margin;       by=t+margin; }
+  else if(pos==='tr'){ bx=r-boxW-margin; by=t+margin; }
+  else if(pos==='bl'){ bx=l+margin;       by=b-boxH-margin; }
+  else              { bx=r-boxW-margin; by=b-boxH-margin; }
+
+  // Box — white fill, border same as axis colour
+  ctx.save();
+  ctx.fillStyle='rgba(255,255,255,0.92)';
+  ctx.strokeStyle=axC; ctx.lineWidth=1.5*dpr;
+  const rx=sz*0.3;
+  ctx.beginPath();
+  ctx.moveTo(bx+rx,by); ctx.lineTo(bx+boxW-rx,by);
+  ctx.arcTo(bx+boxW,by,bx+boxW,by+rx,rx);
+  ctx.lineTo(bx+boxW,by+boxH-rx);
+  ctx.arcTo(bx+boxW,by+boxH,bx+boxW-rx,by+boxH,rx);
+  ctx.lineTo(bx+rx,by+boxH);
+  ctx.arcTo(bx,by+boxH,bx,by+boxH-rx,rx);
+  ctx.lineTo(bx,by+rx);
+  ctx.arcTo(bx,by,bx+rx,by,rx);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+
+  // Draw text lines
+  ctx.fillStyle=axC;
+  lines.forEach((segs,i)=>{
+    const y = by + pad*0.8 + sz + i*lineH;
+    drawMixed(ctx, segs, bx+pad, y, sz);
+  });
+
+  ctx.restore();
+}
+
+function drawAxesFit(ctx,dims,xr,yr,xLabel,yLabel){
+  // Use right-panel label overrides for the fit chart
   const xLblTxt = gv('xLbl')||xLabel;
   const yLblTxt = gv('yLbl')||yLabel;
-  const ttl   = gv('ttl');
-  const ttlSz = (parseFloat(gv('ttlSz'))||30) * dpr;
-
-  // Consistent decimal places per axis
-  const xDp = tickDecimals(xr.ticks);
-  const yDp = tickDecimals(yr.ticks);
-
-  ctx.save();
-
-  // Grid
-  if(gridOn){
-    ctx.strokeStyle=gridC; ctx.lineWidth=gridW; ctx.setLineDash([3*dpr,5*dpr]);
-    xr.ticks.forEach(v=>{
-      const cx=l+(v-xr.min)/(xr.max-xr.min)*pw;
-      if(cx<l||cx>r) return;
-      ctx.beginPath();ctx.moveTo(cx,t);ctx.lineTo(cx,b);ctx.stroke();
-    });
-    yr.ticks.forEach(v=>{
-      const cy=b-(v-yr.min)/(yr.max-yr.min)*ph;
-      if(cy<t||cy>b) return;
-      ctx.beginPath();ctx.moveTo(l,cy);ctx.lineTo(r,cy);ctx.stroke();
-    });
-    ctx.setLineDash([]);
-  }
-
-  // Frame / box border
-  ctx.strokeStyle=axC; ctx.lineWidth=frameW;
-  ctx.strokeRect(l,t,pw,ph);
-  if(boxBdr){ ctx.strokeStyle=boxC; ctx.lineWidth=boxW; ctx.strokeRect(l,t,pw,ph); }
-
-  // Ticks and tick labels
-  ctx.strokeStyle=axC; ctx.lineWidth=majTW;
-  ctx.fillStyle=axC; ctx.textAlign='center'; ctx.font=`${tkSz}px ${font}`;
-  xr.ticks.forEach(v=>{
-    const cx=l+(v-xr.min)/(xr.max-xr.min)*pw;
-    if(cx<l-1||cx>r+1) return;
-    if(tickDir==='out'||tickDir==='both'){ctx.beginPath();ctx.moveTo(cx,b);ctx.lineTo(cx,b+TL);ctx.stroke();}
-    if(tickDir==='in' ||tickDir==='both'){ctx.beginPath();ctx.moveTo(cx,b);ctx.lineTo(cx,b-TL);ctx.stroke();}
-    ctx.fillText(fmtTick(v,xDp), cx, b+TL+tkSz*1.1);
-  });
-  ctx.textAlign='right';
-  yr.ticks.forEach(v=>{
-    const cy=b-(v-yr.min)/(yr.max-yr.min)*ph;
-    if(cy<t-1||cy>b+1) return;
-    if(tickDir==='out'||tickDir==='both'){ctx.beginPath();ctx.moveTo(l,cy);ctx.lineTo(l-TL,cy);ctx.stroke();}
-    if(tickDir==='in' ||tickDir==='both'){ctx.beginPath();ctx.moveTo(l,cy);ctx.lineTo(l+TL,cy);ctx.stroke();}
-    ctx.fillText(fmtTick(v,yDp), l-TL-4*dpr, cy+tkSz*0.35);
-  });
-
-  // Axis labels
-  ctx.fillStyle=axC; ctx.font=`${axSz}px ${font}`; ctx.textAlign='center';
-  ctx.fillText(xLblTxt, (l+r)/2, b+TL+tkSz*1.1+axSz*1.3);
-  // Y label: snug against tick labels — measure widest tick label
-  ctx.font=`${tkSz}px ${font}`;
-  const maxTickW = Math.max(...yr.ticks.map(v=>ctx.measureText(fmtTick(v,yDp)).width));
-  ctx.font=`${axSz}px ${font}`;
-  const yLblX = l - TL - 4*dpr - maxTickW - axSz*0.8;
-  ctx.save(); ctx.translate(yLblX,(t+b)/2); ctx.rotate(-Math.PI/2);
-  ctx.fillText(yLblTxt, 0, 0);
-  ctx.restore();
-
-  // Title (only if non-empty)
-  if(ttl && ttl.trim()){
+  drawAxes(ctx,dims,xr,yr,xLblTxt,yLblTxt);
+  // Title (only for fit chart)
+  const ttl=gv('ttl'), ttlSz=(parseFloat(gv('ttlSz'))||30)*dims.dpr;
+  const axC=gv('axCol')||'#000000', font=gv('fontFam')||'Arial,sans-serif';
+  if(ttl&&ttl.trim()){
+    const{l,r,t}=dims;
+    ctx.save();
     ctx.fillStyle=axC; ctx.font=`${ttlSz}px ${font}`; ctx.textAlign='center';
-    ctx.fillText(ttl.trim(), (l+r)/2, t - ttlSz*0.4);
+    ctx.fillText(ttl.trim(),(l+r)/2,t-ttlSz*0.4);
+    ctx.restore();
   }
-
-  ctx.restore();
 }
 
 // Recompute fit from visible fit window (x range) and redraw
 function recomputeFitFromView(){
   if(!selectedModel||!fitPts.length) return;
-  // all fit points within current x view
   const{xr}=getRanges('fit');
   const visible=fitPts.filter(p=>p.t>=xr.min&&p.t<=xr.max);
   if(visible.length<2) return;
@@ -1283,6 +1504,7 @@ function recomputeFitFromView(){
   if(!reg) return;
   fitReg=reg;
   updateResBox();
+  drawFit();
 }
 
 function gv(id){const el=document.getElementById(id);return el?el.value:'';}
@@ -1364,6 +1586,9 @@ function savePlot(){
 
   ctx.restore(); // end clip
 
+  // Legend — reuse drawLegend with the offscreen dims
+  if(gb('legShow')) drawLegend(ctx, dims, xr, yr);
+
   // Axes and labels
   const axC=gv('axCol')||'#000000', font=gv('fontFam')||'Arial,sans-serif';
   const axSz=(parseFloat(gv('axSz'))||36)*scale;
@@ -1424,15 +1649,16 @@ function savePlot(){
 // ════════════════════════════════════════════════════════════════
 function switchTab(tab){
   currentTab=tab;
-  ['raw','alpha','fit'].forEach(id=>{
+  ['raw','alpha','fit','guide'].forEach(id=>{
     const tb=document.getElementById('tab-'+id);
     const pn=document.getElementById('panel-'+id);
     if(tb) tb.classList.toggle('active',id===tab);
     if(pn) pn.style.display=id===tab?'':'none';
   });
-  if(tab==='raw')  { renderRaw(); }
-  else if(tab==='alpha'){ setTimeout(()=>{ renderAlpha(); setupAlphaCanvas(); },30); }
-  else if(tab==='fit')  { setTimeout(()=>{ renderFit();   setupFitCanvas();   },30); }
+  if(tab==='raw')        { renderRaw(); }
+  else if(tab==='alpha') { setTimeout(()=>{ renderAlpha(); setupAlphaCanvas(); },30); }
+  else if(tab==='fit')   { setTimeout(()=>{ renderFit();   setupFitCanvas();   },30); }
+  // guide: static HTML, nothing to render
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1440,14 +1666,26 @@ function switchTab(tab){
 // ════════════════════════════════════════════════════════════════
 function exportCSV(){
   if(!fitReg||!selectedModel) return;
-  const lines=['Solid State Kinetics Results','',
+  // Round to 8 significant figures — avoids over-long strings that spreadsheets read as text
+  const r8=v=>parseFloat(v.toPrecision(8));
+  const tu=(document.getElementById('timeUnit').value||'').trim();
+  const lines=[
+    'Solid State Kinetics Results',
+    '',
     'Model,'+selectedModel.name,
-    'k,'+fitReg.k,'b,'+fitReg.b,'R2,'+fitReg.r2,'',
-    't-t0,alpha,F(alpha),residual'];
+    'k ('+( tu ? tu+'⁻¹' : 'time⁻¹' )+'),'+r8(fitReg.k),
+    'k ESD,'+r8(fitReg.se_k),
+    'b,'+r8(fitReg.b),
+    'b ESD,'+r8(fitReg.se_b),
+    'R2,'+r8(fitReg.r2),
+    'n points,'+fitReg.n,
+    '',
+    't-t0,alpha,f(alpha),f(alpha)_fitted,residual'
+  ];
   alphaData.forEach(p=>{
     const fy=selectedModel.f(p.alpha);
     const fitted=fitReg.k*p.t+fitReg.b;
-    lines.push(`${p.t},${p.alpha},${fy},${fy-fitted}`);
+    lines.push([r8(p.t),r8(p.alpha),r8(fy),r8(fitted),r8(fy-fitted)].join(','));
   });
   const blob=new Blob([lines.join('\r\n')],{type:'text/csv'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='kinetics_results.csv';a.click();
