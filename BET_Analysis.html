@@ -106,14 +106,6 @@ select:focus{border-color:var(--accent)}
 .badge{display:inline-block;padding:1px 6px;font-family:var(--mono);font-size:9px;border:1px solid var(--rule);background:var(--paper)}
 .badge.good{border-color:var(--green);color:var(--green);background:#f0faf2}
 .badge.warn{border-color:var(--accent);color:var(--accent)}
-/* overlay */
-.overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;display:flex;align-items:center;justify-content:center}
-.overlay-box{background:var(--paper);border:2px solid var(--ink);width:min(520px,90vw);max-height:80vh;display:flex;flex-direction:column}
-.overlay-hd{padding:14px 18px;border-bottom:2px solid var(--ink);display:flex;justify-content:space-between;align-items:baseline}
-.overlay-hd h2{font-family:var(--serif);font-size:18px;font-weight:600}
-.overlay-hd button{background:none;border:none;font-size:18px;cursor:pointer;color:#888}
-.overlay-body{overflow-y:auto;padding:14px 18px;flex:1;font-size:12px;line-height:1.7;color:#444}
-.overlay-foot{padding:10px 18px;border-top:1px solid var(--rule);display:flex;gap:8px;justify-content:flex-end}
 @keyframes spin{to{transform:rotate(360deg)}}
 .sp{display:inline-block;width:9px;height:9px;border:2px solid var(--rule);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:5px}
 /* rouquerol selection note */
@@ -227,7 +219,6 @@ select:focus{border-color:var(--accent)}
   <div class="sb" style="display:flex;flex-direction:column;gap:6px">
     <button class="btn" id="btnAnalyse" disabled>Run BET Analysis</button>
     <button class="btn out" id="btnExport" disabled>Export Results CSV</button>
-    <button class="btn out" id="btnHelp">&#9432; BET Theory &amp; Guide</button>
   </div>
 </aside>
 
@@ -242,6 +233,7 @@ select:focus{border-color:var(--accent)}
     <button class="tab active" data-tab="iso">Full Isotherm</button>
     <button class="tab" data-tab="bet">BET Linear Plot</button>
     <button class="tab" data-tab="rouq">Rouquerol Plot</button>
+    <button class="tab" data-tab="guide">Guide</button>
     <div style="margin-left:auto;display:flex;align-items:center;gap:0;border-left:1px solid var(--rule)">
       <button class="tab axis-btn active" id="axisBtnFull" onclick="setAxisMode('full')" title="Show full p/p₀ axis (0 to 1)" style="border-right:none">&#8596; Full</button>
       <button class="tab axis-btn" id="axisBtnZoom" onclick="setAxisMode('zoom')" title="Zoom to relevant region">&#8982; Zoom</button>
@@ -283,10 +275,128 @@ select:focus{border-color:var(--accent)}
         <div class="cw" id="cwRouq"><canvas id="chartRouq"></canvas></div>
       </div>
     </div>
-  </div>
+
+    <!-- Guide tab -->
+    <div class="tab-panel" id="tab-guide" style="overflow-y:auto">      <div style="max-width:700px;margin:0 auto;padding:18px 20px;font-family:var(--sans);font-size:13px;line-height:1.7;color:var(--ink)">
+
+        <div style="font-family:var(--serif);font-size:22px;font-weight:600;margin-bottom:18px;padding-bottom:10px;border-bottom:2px solid var(--ink)">BET Theory &amp; Guide</div>
+
+        <div style="font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:6px">The BET Equation</div>
+        <p style="margin-bottom:8px">The linearised BET equation is:</p>
+        <p style="font-family:monospace;background:var(--cream);padding:7px 10px;margin-bottom:10px;font-size:12px"><em>p</em>/p₀ / [<em>n</em>(1 − <em>p</em>/p₀)] = 1/(<em>n</em>ₘ<em>C</em>) + (<em>C</em>−1)/(<em>n</em>ₘ<em>C</em>) · <em>p</em>/p₀</p>
+        <p style="margin-bottom:8px">A plot of the left side (<em>y</em>) vs <em>p</em>/p₀ (<em>x</em>) gives a straight line with slope <em>s</em> = (<em>C</em>−1)/(<em>n</em>ₘ<em>C</em>) and intercept <em>i</em> = 1/(<em>n</em>ₘ<em>C</em>), so:</p>
+        <ul style="margin:0 0 14px 20px;line-height:1.9">
+          <li><em>n</em>ₘ = 1/(<em>s</em> + <em>i</em>) — monolayer capacity</li>
+          <li><em>C</em> = <em>s</em>/<em>i</em> + 1 — BET C-constant</li>
+        </ul>
+
+        <div style="font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:6px">Rouquerol Consistency Criteria</div>
+        <p style="margin-bottom:8px">The valid BET range must satisfy all three criteria:</p>
+        <ol style="margin:0 0 14px 20px;line-height:1.9">
+          <li><em>n</em>(1 − <em>p</em>/p₀) must increase monotonically with <em>p</em>/p₀</li>
+          <li>The <em>C</em>-constant must be positive</li>
+          <li>The calculated <em>n</em>ₘ must fall within the selected <em>p</em>/p₀ range</li>
+        </ol>
+        <p style="margin-bottom:14px">The auto-selection finds the longest contiguous window of ≥3 points satisfying criterion 1 and verifies criteria 2 &amp; 3. The Rouquerol plot shows <em>n</em>(1−<em>p</em>/p₀) vs <em>p</em>/p₀ — the selected region is shaded; you can drag its boundary handles to adjust the range manually.</p>
+
+        <div style="font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:6px">Surface Area Calculation</div>
+        <p style="margin-bottom:8px"><em>S</em><sub>BET</sub> = <em>n</em>ₘ · <em>N</em><sub>A</sub> · σ / <em>m</em><sub>sample</sub></p>
+        <p style="margin-bottom:14px">where <em>n</em>ₘ is the monolayer capacity (mol/g), <em>N</em><sub>A</sub> is Avogadro's number, σ is the molecular cross-sectional area, and <em>m</em><sub>sample</sub> is the sample mass.</p>
+
+        <div style="font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:6px">Molecule Cross-sectional Areas (σ)</div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px">
+          <thead><tr style="border-bottom:2px solid var(--ink)">
+            <th style="text-align:left;padding:5px 8px">Sorptive</th>
+            <th style="padding:5px 8px;text-align:center">σ (Å²)</th>
+            <th style="padding:5px 8px;text-align:center">p₀ (kPa)</th>
+            <th style="padding:5px 8px;text-align:center">T (K)</th>
+          </tr></thead>
+          <tbody>
+            <tr style="border-bottom:1px solid var(--pale)"><td style="padding:4px 8px">N₂ at 77 K</td><td style="padding:4px 8px;text-align:center">16.2</td><td style="padding:4px 8px;text-align:center">101.325</td><td style="padding:4px 8px;text-align:center">77</td></tr>
+            <tr style="border-bottom:1px solid var(--pale);background:var(--cream)"><td style="padding:4px 8px">N₂ at 87 K</td><td style="padding:4px 8px;text-align:center">16.2</td><td style="padding:4px 8px;text-align:center">101.325</td><td style="padding:4px 8px;text-align:center">87</td></tr>
+            <tr style="border-bottom:1px solid var(--pale)"><td style="padding:4px 8px">Ar at 77 K</td><td style="padding:4px 8px;text-align:center">14.2</td><td style="padding:4px 8px;text-align:center">101.325</td><td style="padding:4px 8px;text-align:center">77</td></tr>
+            <tr style="border-bottom:1px solid var(--pale);background:var(--cream)"><td style="padding:4px 8px">Ar at 87 K</td><td style="padding:4px 8px;text-align:center">14.2</td><td style="padding:4px 8px;text-align:center">101.325</td><td style="padding:4px 8px;text-align:center">87</td></tr>
+            <tr style="border-bottom:1px solid var(--pale)"><td style="padding:4px 8px">CO₂ at 273 K</td><td style="padding:4px 8px;text-align:center">21.4</td><td style="padding:4px 8px;text-align:center">3485.3</td><td style="padding:4px 8px;text-align:center">273</td></tr>
+            <tr style="border-bottom:1px solid var(--pale);background:var(--cream)"><td style="padding:4px 8px">CO₂ at 298 K</td><td style="padding:4px 8px;text-align:center">21.4</td><td style="padding:4px 8px;text-align:center">6412.8</td><td style="padding:4px 8px;text-align:center">298</td></tr>
+            <tr style="border-bottom:1px solid var(--pale)"><td style="padding:4px 8px">Kr at 77 K</td><td style="padding:4px 8px;text-align:center">20.2</td><td style="padding:4px 8px;text-align:center">0.267</td><td style="padding:4px 8px;text-align:center">77</td></tr>
+            <tr><td style="padding:4px 8px;background:var(--cream)">H₂O at 298 K</td><td style="padding:4px 8px;text-align:center;background:var(--cream)">12.5</td><td style="padding:4px 8px;text-align:center;background:var(--cream)">3.169</td><td style="padding:4px 8px;text-align:center;background:var(--cream)">298</td></tr>
+          </tbody>
+        </table>
+
+        <div style="font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:6px">CSV Format</div>
+        <p style="margin-bottom:8px">The file must have two columns: pressure (or <em>p</em>/p₀) and uptake. Comma, tab, or semicolon delimiters are all accepted. Any line that cannot be parsed as two numbers is treated as a metadata or header line.</p>
+
+        <p style="margin:10px 0 4px"><em>Metadata keyword lines</em> — placed before the data, in any order:</p>
+        <table style="width:100%;border-collapse:collapse;font-size:11px;margin:4px 0 12px">
+          <thead><tr style="border-bottom:2px solid var(--ink)">
+            <th style="text-align:left;padding:4px 8px;font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase">Keyword</th>
+            <th style="text-align:left;padding:4px 8px;font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase">Value</th>
+            <th style="text-align:left;padding:4px 8px;font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase">Notes</th>
+          </tr></thead>
+          <tbody>
+            <tr style="border-bottom:1px solid var(--pale)"><td style="padding:4px 8px;font-family:monospace">Host_Mass</td><td style="padding:4px 8px">number [unit]</td><td style="padding:4px 8px">Sample mass. Unit suffix: ug, mg, g, kg. <strong>Default: mg.</strong><br><code>Host_Mass, 52.4</code> → 52.4 mg &nbsp;·&nbsp; <code>Host_Mass, 0.0524 g</code> → 0.0524 g</td></tr>
+            <tr style="border-bottom:1px solid var(--pale);background:var(--cream)"><td style="padding:4px 8px;font-family:monospace">Sorptive</td><td style="padding:4px 8px">gas name</td><td style="padding:4px 8px">N2, N2_77, N2_87, Ar, Ar_77, Ar_87, CO2, CO2_273, CO2_298, Kr, H2O, water, nitrogen, argon, krypton (case-insensitive)</td></tr>
+            <tr style="border-bottom:1px solid var(--pale)"><td style="padding:4px 8px;font-family:monospace">TemperatureK</td><td style="padding:4px 8px">number</td><td style="padding:4px 8px">Experiment temperature in Kelvin</td></tr>
+            <tr style="border-bottom:1px solid var(--pale);background:var(--cream)"><td style="padding:4px 8px;font-family:monospace">TemperatureC</td><td style="padding:4px 8px">number</td><td style="padding:4px 8px">Temperature in °C — converted to K automatically</td></tr>
+            <tr style="border-bottom:1px solid var(--pale)"><td style="padding:4px 8px;font-family:monospace">mass</td><td style="padding:4px 8px">number (g)</td><td style="padding:4px 8px">Alternative to Host_Mass; value in grams</td></tr>
+            <tr style="border-bottom:1px solid var(--pale);background:var(--cream)"><td style="padding:4px 8px;font-family:monospace">uptake_unit</td><td style="padding:4px 8px">unit string</td><td style="padding:4px 8px">Explicit uptake unit override (see table below)</td></tr>
+            <tr style="border-bottom:1px solid var(--pale)"><td style="padding:4px 8px;font-family:monospace">Host_Formula</td><td style="padding:4px 8px">formula</td><td style="padding:4px 8px">Host molecular formula — stored but not used in BET</td></tr>
+            <tr style="border-bottom:1px solid var(--pale);background:var(--cream)"><td style="padding:4px 8px;font-family:monospace">Host_MW</td><td style="padding:4px 8px">g/mol</td><td style="padding:4px 8px">Host molecular weight — stored but not used in BET</td></tr>
+            <tr><td style="padding:4px 8px;font-family:monospace">Host_Density</td><td style="padding:4px 8px">g/cc</td><td style="padding:4px 8px">Host bulk density — stored but not used in BET</td></tr>
+          </tbody>
+        </table>
+
+        <p style="margin:10px 0 4px"><em>Column header line</em> — last non-numeric line before data. Units extracted from bracket/square-bracket content or last token:</p>
+        <pre style="background:var(--cream);padding:8px 10px;font-size:10px;line-height:1.8;margin:4px 0 12px;overflow-x:auto">Pressure (mbar), Uptake (mmol/g)
+p/p0, n [cm3(STP)/g]
+Relative Pressure, Quantity adsorbed (mmol)</pre>
+
+        <p style="margin:10px 0 4px"><em>Recognised pressure units</em> (first column):</p>
+        <p style="font-size:12px;color:#555;margin:0 0 12px;line-height:1.9"><em>p</em>/p₀ or relative (default) &nbsp;·&nbsp; Pa &nbsp;·&nbsp; kPa &nbsp;·&nbsp; MPa &nbsp;·&nbsp; bar &nbsp;·&nbsp; mbar &nbsp;·&nbsp; atm &nbsp;·&nbsp; mmHg / Torr &nbsp;·&nbsp; psi<br>Absolute pressures are divided by the sorptive's p₀ to give <em>p</em>/p₀.</p>
+
+        <p style="margin:10px 0 4px"><em>Recognised uptake units</em> (second column):</p>
+        <table style="width:100%;border-collapse:collapse;font-size:11px;margin:4px 0 12px">
+          <thead><tr style="border-bottom:2px solid var(--ink)">
+            <th style="text-align:left;padding:4px 8px;font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase">Unit string(s)</th>
+            <th style="text-align:left;padding:4px 8px;font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase">Meaning</th>
+          </tr></thead>
+          <tbody>
+            <tr style="border-bottom:1px solid var(--pale)"><td style="padding:4px 8px;font-family:monospace">cm3(STP)/g, cc(STP)/g, cm³/g</td><td style="padding:4px 8px">cm³ at STP per gram sorbent</td></tr>
+            <tr style="border-bottom:1px solid var(--pale);background:var(--cream)"><td style="padding:4px 8px;font-family:monospace">cm3(STP), cc(STP), cm³</td><td style="padding:4px 8px">cm³ at STP absolute</td></tr>
+            <tr style="border-bottom:1px solid var(--pale)"><td style="padding:4px 8px;font-family:monospace">mmol/g</td><td style="padding:4px 8px">mmol per gram sorbent</td></tr>
+            <tr style="border-bottom:1px solid var(--pale);background:var(--cream)"><td style="padding:4px 8px;font-family:monospace">mmol <strong>(default)</strong></td><td style="padding:4px 8px">mmol absolute</td></tr>
+            <tr style="border-bottom:1px solid var(--pale)"><td style="padding:4px 8px;font-family:monospace">mol/kg</td><td style="padding:4px 8px">mol per kg sorbent (= mmol/g)</td></tr>
+            <tr style="border-bottom:1px solid var(--pale);background:var(--cream)"><td style="padding:4px 8px;font-family:monospace">mol/mol</td><td style="padding:4px 8px">mol sorptive per mol host</td></tr>
+            <tr style="border-bottom:1px solid var(--pale)"><td style="padding:4px 8px;font-family:monospace">g/g</td><td style="padding:4px 8px">gram sorptive per gram host</td></tr>
+            <tr style="border-bottom:1px solid var(--pale);background:var(--cream)"><td style="padding:4px 8px;font-family:monospace">wt%</td><td style="padding:4px 8px">weight percent</td></tr>
+            <tr style="border-bottom:1px solid var(--pale)"><td style="padding:4px 8px;font-family:monospace">mg/g</td><td style="padding:4px 8px">mg sorptive per gram host</td></tr>
+            <tr style="border-bottom:1px solid var(--pale);background:var(--cream)"><td style="padding:4px 8px;font-family:monospace">mg</td><td style="padding:4px 8px">mg sorptive absolute</td></tr>
+            <tr style="border-bottom:1px solid var(--pale)"><td style="padding:4px 8px;font-family:monospace">µg/g, ug/g, microgram/g</td><td style="padding:4px 8px">µg per gram host</td></tr>
+            <tr style="border-bottom:1px solid var(--pale);background:var(--cream)"><td style="padding:4px 8px;font-family:monospace">µg/mg, ug/mg</td><td style="padding:4px 8px">µg per mg host</td></tr>
+            <tr><td style="padding:4px 8px;font-family:monospace">µg, ug, microgram</td><td style="padding:4px 8px">µg absolute</td></tr>
+          </tbody>
+        </table>
+
+        <p style="margin:10px 0 4px"><em>Complete example with metadata header:</em></p>
+        <pre style="background:var(--cream);padding:8px 10px;font-size:10px;line-height:1.8;margin:4px 0 8px;overflow-x:auto">Host_Mass, 52.4 mg
+Sorptive, N2
+TemperatureK, 77
+relative_pressure, uptake (mmol/g)
+0.01000, 0.04521
+0.02000, 0.07103
+0.05000, 0.12840
+...</pre>
+
+        <div style="background:var(--cream);border:1.5px solid var(--rule);padding:10px 14px;font-size:12px;color:#555;margin-top:8px">
+          <strong style="color:var(--ink)">Tip:</strong> Any parameters not detected from the file are shown with a ⚠ "assumed" badge in the detected-parameters panel and fall back to defaults: N₂ at 77 K, mass = 0.1 g, uptake units = mmol (absolute).
+        </div>
+
+      </div>
+    </div>
+  </div><!-- tab-panels -->
 
   <div id="status">Ready &mdash; load a CSV file to begin.</div>
-</div>
+</div><!-- centre -->
 
 <!-- RIGHT CONTROLS -->
 <div class="cpanel" id="cpanel">
@@ -361,10 +471,10 @@ select:focus{border-color:var(--accent)}
   </div>
 
   <div class="cp-group">
-    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Annotations</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Result Legend</span><span class="cp-arr">&#9660;</span></div>
     <div class="cp-body">
       <div class="cr"><span class="cl" style="font-size:10px;color:#aaa;font-style:italic">BET linear plot</span></div>
-      <div class="cr"><span class="cl">Show box</span><input type="checkbox" id="annBetShow" checked onchange="redrawAll()"></div>
+      <div class="cr"><span class="cl">Show legend</span><input type="checkbox" id="annBetShow" checked onchange="redrawAll()"></div>
       <div class="cr"><span class="cl">Position</span>
         <select id="annBetPos" onchange="redrawAll()">
           <option value="tl" selected>Top left</option>
@@ -374,7 +484,7 @@ select:focus{border-color:var(--accent)}
         </select>
       </div>
       <div class="cr" style="margin-top:6px"><span class="cl" style="font-size:10px;color:#aaa;font-style:italic">Isotherm plot</span></div>
-      <div class="cr"><span class="cl">Show box</span><input type="checkbox" id="annIsoShow" checked onchange="redrawAll()"></div>
+      <div class="cr"><span class="cl">Show legend</span><input type="checkbox" id="annIsoShow" checked onchange="redrawAll()"></div>
       <div class="cr"><span class="cl">Position</span>
         <select id="annIsoPos" onchange="redrawAll()">
           <option value="tl">Top left</option>
@@ -383,7 +493,18 @@ select:focus{border-color:var(--accent)}
           <option value="br" selected>Bottom right</option>
         </select>
       </div>
-      <div class="cr" style="margin-top:6px"><span class="cl">Annotation font size</span><input type="range" id="annSz" min="8" max="24" value="13" oninput="V(this);redrawAll()"><span class="rv2">13</span></div>
+      <div class="cr" style="margin-top:8px"><span class="cl">Font</span>
+        <select id="annFont" onchange="redrawAll()">
+          <option value="'Palatino Linotype',Palatino,Georgia,serif" selected>Palatino</option>
+          <option value="Georgia,serif">Georgia</option>
+          <option value="'Times New Roman',serif">Times New Roman</option>
+          <option value="Arial,sans-serif">Arial</option>
+          <option value="'Helvetica Neue',Helvetica,sans-serif">Helvetica</option>
+          <option value="'Century Schoolbook',serif">Century Schoolbook</option>
+          <option value="'DM Mono',monospace">DM Mono</option>
+        </select>
+      </div>
+      <div class="cr"><span class="cl">Size</span><input type="range" id="annSz" min="8" max="40" value="18" oninput="V(this);redrawAll()"><span class="rv2">18</span></div>
     </div>
   </div>
 
@@ -402,100 +523,6 @@ select:focus{border-color:var(--accent)}
 </div><!-- cpanel -->
 </div><!-- app -->
 
-<!-- HELP OVERLAY -->
-<div class="overlay" id="helpOverlay" style="display:none">
-  <div class="overlay-box">
-    <div class="overlay-hd"><h2>BET Theory &amp; Guide</h2><button onclick="document.getElementById('helpOverlay').style.display='none'">&times;</button></div>
-    <div class="overlay-body">
-      <p><strong>The BET Equation</strong></p>
-      <p style="margin:6px 0 12px">The linearised BET equation is:</p>
-      <p style="font-family:monospace;background:var(--cream);padding:7px 10px;margin-bottom:12px">p/p₀ / [n(1 − p/p₀)] = 1/(nₘC) + (C−1)/(nₘC) · p/p₀</p>
-      <p>A plot of the left side (y) vs p/p₀ (x) gives a straight line with slope <em>s = (C−1)/(nₘC)</em> and intercept <em>i = 1/(nₘC)</em>, so:</p>
-      <ul style="margin:7px 0 12px 18px;line-height:1.9">
-        <li>nₘ = 1/(s + i) — monolayer capacity</li>
-        <li>C = s/i + 1 — BET C-constant</li>
-      </ul>
-      <p><strong>Rouquerol Consistency Criteria</strong></p>
-      <p style="margin:6px 0 12px">The valid BET range must satisfy:</p>
-      <ol style="margin:7px 0 12px 18px;line-height:1.9">
-        <li>n(1 − p/p₀) must increase monotonically with p/p₀</li>
-        <li>The C-constant must be positive</li>
-        <li>The calculated nₘ must fall within the selected p/p₀ range</li>
-      </ol>
-      <p>The auto-selection finds the longest contiguous window of ≥3 points that satisfies criterion 1, and checks criteria 2 &amp; 3.</p>
-      <p style="margin-top:12px"><strong>Surface Area Calculation</strong></p>
-      <p style="margin:6px 0 12px">S<sub>BET</sub> = nₘ · Nₐ · σ / M<sub>sample</sub></p>
-      <p>where nₘ is in mol, Nₐ is Avogadro's number, σ is the molecular cross-sectional area, and M<sub>sample</sub> is sample mass.</p>
-      <p style="margin-top:12px"><strong>Molecule Cross-sectional Areas (σ)</strong></p>
-      <table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:6px">
-        <tr style="background:var(--cream)"><th style="text-align:left;padding:4px 8px">Sorptive</th><th style="padding:4px 8px">σ (ų)</th><th style="padding:4px 8px">p₀ (kPa)</th></tr>
-        <tr><td style="padding:3px 8px">N₂ at 77 K</td><td style="padding:3px 8px;text-align:center">16.2</td><td style="padding:3px 8px;text-align:center">101.325</td></tr>
-        <tr style="background:var(--cream)"><td style="padding:3px 8px">N₂ at 87 K</td><td style="padding:3px 8px;text-align:center">16.2</td><td style="padding:3px 8px;text-align:center">101.325</td></tr>
-        <tr><td style="padding:3px 8px">Ar at 77 K</td><td style="padding:3px 8px;text-align:center">14.2</td><td style="padding:3px 8px;text-align:center">101.325</td></tr>
-        <tr style="background:var(--cream)"><td style="padding:3px 8px">Ar at 87 K</td><td style="padding:3px 8px;text-align:center">14.2</td><td style="padding:3px 8px;text-align:center">101.325</td></tr>
-        <tr><td style="padding:3px 8px">CO₂ at 273 K</td><td style="padding:3px 8px;text-align:center">21.4</td><td style="padding:3px 8px;text-align:center">3485.3</td></tr>
-        <tr style="background:var(--cream)"><td style="padding:3px 8px">CO₂ at 298 K</td><td style="padding:3px 8px;text-align:center">21.4</td><td style="padding:3px 8px;text-align:center">6412.8</td></tr>
-        <tr><td style="padding:3px 8px">Kr at 77 K</td><td style="padding:3px 8px;text-align:center">20.2</td><td style="padding:3px 8px;text-align:center">0.267</td></tr>
-        <tr style="background:var(--cream)"><td style="padding:3px 8px">H₂O at 298 K</td><td style="padding:3px 8px;text-align:center">12.5</td><td style="padding:3px 8px;text-align:center">3.169</td></tr>
-      </table>
-      <p style="margin-top:14px"><strong>CSV Format</strong></p>
-      <p style="margin:6px 0 8px">The file must have two columns: pressure (or p/p₀) and uptake. Comma, tab, or semicolon delimiters are all accepted. Any line that cannot be parsed as two numbers is treated as a metadata or header line and is never included in the data.</p>
-
-      <p style="margin:10px 0 4px"><em>Metadata keyword lines</em> — placed before the data, in any order:</p>
-      <table style="width:100%;border-collapse:collapse;font-size:11px;margin:4px 0 10px">
-        <tr style="background:var(--cream)"><th style="text-align:left;padding:4px 8px">Keyword</th><th style="text-align:left;padding:4px 8px">Value</th><th style="text-align:left;padding:4px 8px">Notes</th></tr>
-        <tr><td style="padding:3px 8px;font-family:monospace">Host_Mass</td><td style="padding:3px 8px">number [unit]</td><td style="padding:3px 8px">Sample mass. Unit suffix: ug, mg, g, kg. Default unit if omitted: <strong>mg</strong>.<br>e.g. <code>Host_Mass, 52.4</code> → 52.4 mg; <code>Host_Mass, 0.0524 g</code> → 0.0524 g</td></tr>
-        <tr style="background:var(--cream)"><td style="padding:3px 8px;font-family:monospace">Sorptive</td><td style="padding:3px 8px">gas name or code</td><td style="padding:3px 8px">e.g. N2, N2_77, N2_87, Ar, Ar_77, Ar_87, CO2, CO2_273, CO2_298, Kr, H2O, water, nitrogen, argon, krypton</td></tr>
-        <tr><td style="padding:3px 8px;font-family:monospace">TemperatureK</td><td style="padding:3px 8px">number</td><td style="padding:3px 8px">Experiment temperature in Kelvin</td></tr>
-        <tr style="background:var(--cream)"><td style="padding:3px 8px;font-family:monospace">TemperatureC</td><td style="padding:3px 8px">number</td><td style="padding:3px 8px">Experiment temperature in °C (converted to K automatically)</td></tr>
-        <tr><td style="padding:3px 8px;font-family:monospace">mass</td><td style="padding:3px 8px">number (g)</td><td style="padding:3px 8px">Alternative to Host_Mass; value assumed to be in grams</td></tr>
-        <tr style="background:var(--cream)"><td style="padding:3px 8px;font-family:monospace">uptake_unit</td><td style="padding:3px 8px">unit string</td><td style="padding:3px 8px">Explicit uptake unit override (see table below)</td></tr>
-        <tr><td style="padding:3px 8px;font-family:monospace">Host_Formula</td><td style="padding:3px 8px">formula</td><td style="padding:3px 8px">Host molecular formula — stored but not used in BET</td></tr>
-        <tr style="background:var(--cream)"><td style="padding:3px 8px;font-family:monospace">Host_MW</td><td style="padding:3px 8px">number (g/mol)</td><td style="padding:3px 8px">Host molecular weight — stored but not used in BET</td></tr>
-        <tr><td style="padding:3px 8px;font-family:monospace">Host_Density</td><td style="padding:3px 8px">number (g/cc)</td><td style="padding:3px 8px">Host bulk density — stored but not used in BET</td></tr>
-      </table>
-
-      <p style="margin:10px 0 4px"><em>Column header line</em> — the last non-numeric line before the data. Units are extracted from bracket content or the last token in each header string:</p>
-      <pre style="background:var(--cream);padding:8px 10px;font-size:10px;line-height:1.8;margin:4px 0 8px;overflow-x:auto">Pressure (mbar), Uptake (mmol/g)    ← extracts mbar and mmol/g
-p/p0, n [cm3(STP)/g]                ← extracts relative pressure and cm³(STP)/g
-Relative Pressure, Quantity adsorbed (mmol)</pre>
-
-      <p style="margin:10px 0 4px"><em>Recognised pressure units</em> (first column):</p>
-      <p style="font-size:11px;color:#555;margin:0 0 8px;line-height:1.8">p/p₀ or relative (default) &nbsp;·&nbsp; Pa &nbsp;·&nbsp; kPa &nbsp;·&nbsp; MPa &nbsp;·&nbsp; bar &nbsp;·&nbsp; mbar &nbsp;·&nbsp; atm &nbsp;·&nbsp; mmHg / Torr &nbsp;·&nbsp; psi<br>
-      Absolute pressures are converted to p/p₀ using the sorptive's saturation pressure p₀.</p>
-
-      <p style="margin:10px 0 4px"><em>Recognised uptake units</em> (second column):</p>
-      <table style="width:100%;border-collapse:collapse;font-size:11px;margin:4px 0 10px">
-        <tr style="background:var(--cream)"><th style="text-align:left;padding:4px 8px">Unit string(s)</th><th style="text-align:left;padding:4px 8px">Internal key</th><th style="text-align:left;padding:4px 8px">Meaning</th></tr>
-        <tr><td style="padding:3px 8px;font-family:monospace">cm3(STP)/g, cc(STP)/g, cm³/g</td><td style="padding:3px 8px">cm3g</td><td style="padding:3px 8px">cm³ at STP per gram sorbent</td></tr>
-        <tr style="background:var(--cream)"><td style="padding:3px 8px;font-family:monospace">cm3(STP), cc(STP), cm³</td><td style="padding:3px 8px">cm3</td><td style="padding:3px 8px">cm³ at STP absolute</td></tr>
-        <tr><td style="padding:3px 8px;font-family:monospace">mmol/g</td><td style="padding:3px 8px">mmolg</td><td style="padding:3px 8px">mmol per gram sorbent</td></tr>
-        <tr style="background:var(--cream)"><td style="padding:3px 8px;font-family:monospace">mmol</td><td style="padding:3px 8px">mmol</td><td style="padding:3px 8px">mmol absolute <strong>(default if not detected)</strong></td></tr>
-        <tr><td style="padding:3px 8px;font-family:monospace">mol/kg</td><td style="padding:3px 8px">molkg</td><td style="padding:3px 8px">mol per kg sorbent (= mmol/g)</td></tr>
-        <tr style="background:var(--cream)"><td style="padding:3px 8px;font-family:monospace">mol/mol</td><td style="padding:3px 8px">molmol</td><td style="padding:3px 8px">mol sorptive per mol host</td></tr>
-        <tr><td style="padding:3px 8px;font-family:monospace">g/g</td><td style="padding:3px 8px">gg</td><td style="padding:3px 8px">gram sorptive per gram host</td></tr>
-        <tr style="background:var(--cream)"><td style="padding:3px 8px;font-family:monospace">wt%</td><td style="padding:3px 8px">wt</td><td style="padding:3px 8px">weight percent</td></tr>
-        <tr><td style="padding:3px 8px;font-family:monospace">mg/g</td><td style="padding:3px 8px">mgg</td><td style="padding:3px 8px">mg sorptive per gram host</td></tr>
-        <tr style="background:var(--cream)"><td style="padding:3px 8px;font-family:monospace">mg</td><td style="padding:3px 8px">mg</td><td style="padding:3px 8px">mg sorptive absolute</td></tr>
-        <tr><td style="padding:3px 8px;font-family:monospace">µg/g, ug/g, microgram/g</td><td style="padding:3px 8px">mgg_ug</td><td style="padding:3px 8px">µg per gram host</td></tr>
-        <tr style="background:var(--cream)"><td style="padding:3px 8px;font-family:monospace">µg/mg, ug/mg</td><td style="padding:3px 8px">ugmg</td><td style="padding:3px 8px">µg per mg host</td></tr>
-        <tr><td style="padding:3px 8px;font-family:monospace">µg, ug, microgram</td><td style="padding:3px 8px">mg_ug</td><td style="padding:3px 8px">µg absolute</td></tr>
-      </table>
-
-      <p style="margin:10px 0 4px"><em>Complete example with metadata header:</em></p>
-      <pre style="background:var(--cream);padding:8px 10px;font-size:10px;line-height:1.8;margin:4px 0 8px;overflow-x:auto">Host_Mass, 52.4 mg
-Sorptive, N2
-TemperatureK, 77
-relative_pressure, uptake (mmol/g)
-0.01000, 0.04521
-0.02000, 0.07103
-0.05000, 0.12840
-...</pre>
-      <p style="font-size:11px;color:#666;margin:0">Any parameters not detected in the file are shown with a ⚠ "assumed" badge in the detected-parameters panel and fall back to defaults (N₂ at 77 K, mass = 0.1 g, units = mmol).</p>
-    </div>
-    <div class="overlay-foot"><button class="btn out" style="width:auto;padding:6px 18px" onclick="document.getElementById('helpOverlay').style.display='none'">Close</button></div>
-  </div>
-</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>
@@ -1671,152 +1698,131 @@ function drawBETChart(expW,expH){
 }
 
 // =====================================================================
-// SHARED ANNOTATION BOX RENDERER
+// RESULT LEGEND — matches kinetics app Fit Legend style
 // =====================================================================
-// rows: [{label, value, unit}]  — label is plain text, value/unit rendered in mono
-// posCode: 'tl' | 'tr' | 'bl' | 'br'
-function drawAnnotationBox(ctx, dpr, W, H, M, posCode, rows, baseSz, font){
-  if(!rows||!rows.length) return;
+// Each legend line is an array of segments: {text, italic, bold, sup}
+// Rendered with mixed italic/upright/superscript, white bg, rounded box.
 
-  const sz   = baseSz || 13;           // font size for values
-  const lsz  = sz * 0.82;             // label font size (slightly smaller)
-  const lineH = sz + 5;               // line height
-  const padX = 12, padY = 10;
-  const divH  = 5;                    // divider gap between rows
+function _measureMixed(ctx, segs, sz, font){
+  let w=0;
+  segs.forEach(s=>{
+    const fsz = s.sup ? sz*0.65 : sz;
+    ctx.font = `${s.bold?'bold ':''}${s.italic?'italic ':''}${fsz}px ${font}`;
+    w += ctx.measureText(s.text).width;
+  });
+  return w;
+}
+
+function _drawMixed(ctx, segs, x, y, sz, font){
+  let cx=x;
+  segs.forEach(s=>{
+    const fsz = s.sup ? sz*0.65 : sz;
+    const dy  = s.sup ? -sz*0.45 : 0;
+    ctx.font = `${s.bold?'bold ':''}${s.italic?'italic ':''}${fsz}px ${font}`;
+    ctx.fillText(s.text, cx, y+dy);
+    cx += ctx.measureText(s.text).width;
+  });
+}
+
+function _roundedBox(ctx, x, y, w, h, r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.arcTo(x+w,y,x+w,y+r,r);
+  ctx.lineTo(x+w,y+h-r); ctx.arcTo(x+w,y+h,x+w-r,y+h,r);
+  ctx.lineTo(x+r,y+h); ctx.arcTo(x,y+h,x,y+h-r,r);
+  ctx.lineTo(x,y+r); ctx.arcTo(x,y,x+r,y,r);
+  ctx.closePath();
+}
+
+// lines: array of segment arrays
+// posCode: 'tl'|'tr'|'bl'|'br'
+function drawLegendBox(canvas, lines, posCode, sz, font, dpr){
+  if(!canvas||!lines||!lines.length) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.offsetWidth||600, H = canvas.offsetHeight||400;
+  const M = getMargins();
   const pL=M.left, pR=W-M.right, pT=M.top, pB=H-M.bottom;
-  const inset = 14;                   // distance from plot-area edge
 
-  // ---- measure box width ----
-  const maxLblW = Math.max(...rows.map(r=>{
-    const isVar = !['Sorptive','Range','Note'].includes(r.label);
-    ctx.font = `${isVar?'italic ':''} ${lsz}px ${font}`;
-    return ctx.measureText(r.label).width;
-  }));
-  ctx.font = `${sz}px ${font}`;
-  const maxValW = Math.max(...rows.map(r=>ctx.measureText(r.value+(r.unit?' '+r.unit:'')).width));
-  const bw = padX*2 + maxLblW + 16 + maxValW;
-  const bh = padY*2 + rows.length * lineH + (rows.length-1)*1;
+  const lineH = sz * 1.55;
+  const pad   = sz * 0.7;
+  const margin = sz * 0.8;
 
-  // ---- position ----
+  // Measure to find box width
+  let maxW = 0;
+  lines.forEach(segs => {
+    const w = _measureMixed(ctx, segs, sz, font);
+    if(w>maxW) maxW=w;
+  });
+  const boxW = maxW + pad*2;
+  const boxH = lines.length * lineH + pad*1.2;
+
+  // Position
   let bx, by;
-  switch(posCode){
-    case 'tl': bx=pL+inset;      by=pT+inset;      break;
-    case 'tr': bx=pR-bw-inset;   by=pT+inset;      break;
-    case 'bl': bx=pL+inset;      by=pB-bh-inset;   break;
-    case 'br': default:
-               bx=pR-bw-inset;   by=pB-bh-inset;   break;
-  }
+  if(posCode==='tl')     { bx=pL+margin; by=pT+margin; }
+  else if(posCode==='tr'){ bx=pR-boxW-margin; by=pT+margin; }
+  else if(posCode==='bl'){ bx=pL+margin; by=pB-boxH-margin; }
+  else                   { bx=pR-boxW-margin; by=pB-boxH-margin; }
 
   ctx.save();
   ctx.scale(dpr, dpr);
 
-  // ---- box background + border ----
-  // Subtle drop shadow
-  ctx.shadowColor='rgba(0,0,0,0.10)';
-  ctx.shadowBlur=8; ctx.shadowOffsetX=2; ctx.shadowOffsetY=2;
-  ctx.fillStyle='rgba(250,247,242,0.96)';
-  roundRect(ctx, bx, by, bw, bh, 3);
+  // Box — white fill, axis-colour border, rounded
+  const axC = '#0f0e0d';
+  const rx = sz * 0.3;
+  _roundedBox(ctx, bx, by, boxW, boxH, rx);
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
   ctx.fill();
-  ctx.shadowColor='transparent'; ctx.shadowBlur=0; ctx.shadowOffsetX=0; ctx.shadowOffsetY=0;
-  ctx.strokeStyle='rgba(197,187,169,0.9)'; ctx.lineWidth=1;
-  roundRect(ctx, bx, by, bw, bh, 3);
+  ctx.strokeStyle = axC; ctx.lineWidth = 1.5*dpr;
+  _roundedBox(ctx, bx, by, boxW, boxH, rx);
   ctx.stroke();
 
-  // ---- rows ----
-  rows.forEach((row, i)=>{
-    const y = by + padY + i * lineH + sz * 0.82; // baseline
-
-    // Label (smaller, italic for variable names) — all black
-    const isVar = !['Sorptive','Range','Note'].includes(row.label);
-    ctx.font = `${isVar?'italic ':''} ${lsz}px ${font}`;
-    ctx.fillStyle = '#0f0e0d';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'alphabetic';
-    ctx.fillText(row.label, bx + padX, y);
-
-    // Value + unit — all black
-    ctx.font = `${sz}px ${font}`;
-    ctx.fillStyle = '#0f0e0d';
-    ctx.textAlign = 'right';
-    const valStr = row.value;
-    const unitStr = row.unit ? ' ' + row.unit : '';
-    const valX = bx + bw - padX;
-    if(unitStr){
-      ctx.fillText(valStr + unitStr, valX, y);
-    } else {
-      ctx.fillText(valStr, valX, y);
-    }
-
-    // Thin separator line between rows (except after last)
-    if(i < rows.length-1){
-      ctx.strokeStyle='rgba(197,187,169,0.4)'; ctx.lineWidth=0.5;
-      ctx.beginPath();
-      ctx.moveTo(bx+padX, by + padY + (i+1)*lineH - 1);
-      ctx.lineTo(bx+bw-padX, by + padY + (i+1)*lineH - 1);
-      ctx.stroke();
-    }
+  // Text lines
+  ctx.fillStyle = axC;
+  ctx.textBaseline = 'alphabetic';
+  ctx.textAlign = 'left';
+  lines.forEach((segs, i)=>{
+    const y = by + pad*0.8 + sz + i*lineH;
+    _drawMixed(ctx, segs, bx+pad, y, sz, font);
   });
 
   ctx.restore();
 }
 
-// Utility: rounded rectangle path
-function roundRect(ctx, x, y, w, h, r){
-  ctx.beginPath();
-  ctx.moveTo(x+r, y);
-  ctx.lineTo(x+w-r, y); ctx.arcTo(x+w, y, x+w, y+r, r);
-  ctx.lineTo(x+w, y+h-r); ctx.arcTo(x+w, y+h, x+w-r, y+h, r);
-  ctx.lineTo(x+r, y+h); ctx.arcTo(x, y+h, x, y+h-r, r);
-  ctx.lineTo(x, y+r); ctx.arcTo(x, y, x+r, y, r);
-  ctx.closePath();
-}
-
 function drawBETAnnotation(expW, expH){
-  if(!betResult) return;
-  if(!gb('annBetShow')) return;
-  const canvas=document.getElementById('chartBet');
+  if(!betResult||!gb('annBetShow')) return;
+  const canvas = document.getElementById('chartBet');
   if(!canvas) return;
-  const ctx=canvas.getContext('2d');
-  const W=expW||canvas.offsetWidth||600;
-  const H=expH||canvas.offsetHeight||400;
-  const dpr=expW?1:window.devicePixelRatio||1;
-  const M=getMargins();
-  const f=betResult.fit, s=betResult.s;
-  const font=gv('fontFam');
-  const sz=gn('annSz')||13;
-  const pos=gv('annBetPos')||'tl';
+  const f = betResult.fit, s = betResult.s;
+  const font = gv('annFont') || "'Palatino Linotype',Palatino,Georgia,serif";
+  const sz   = (gn('annSz')||18) * (expW ? 1 : window.devicePixelRatio||1);
+  const pos  = gv('annBetPos')||'tl';
+  const dpr  = expW ? 1 : window.devicePixelRatio||1;
 
-  const rows=[
-    {label:'S\u2082 BET',  value:fmt(betResult.sbet,5), unit:'m\u00b2 g\u207b\u00b9'},
-    {label:'C',            value:fmt(f.C,5),            unit:''},
-    {label:'n\u2098',      value:fmt(f.nm*1000,4),      unit:'mmol g\u207b\u00b9'},
-    {label:'R\u00b2',      value:f.r2.toFixed(5),        unit:''},
-    {label:'Sorptive',     value:s.label,                unit:''},
+  const lines = [
+    [{text:'S', italic:true},{text:'₂',sup:true},{text:' BET = '+fmt(betResult.sbet,5)+' m² g⁻¹'}],
+    [{text:'C'  ,italic:true},{text:' = '+fmt(f.C,5)}],
+    [{text:'n'  ,italic:true},{text:'ₘ',sup:false},{text:' = '+fmt(f.nm*1000,4)+' mmol g⁻¹'}],
+    [{text:'R'  ,italic:true},{text:'²',sup:true },{text:' = '+f.r2.toFixed(5)}],
+    [{text:'Sorptive: '+s.label}],
   ];
-  drawAnnotationBox(ctx, dpr, W, H, M, pos, rows, sz, font);
+  drawLegendBox(canvas, lines, pos, sz, font, dpr);
 }
 
 function drawIsoAnnotation(expW, expH){
-  if(!betResult) return;
-  if(!gb('annIsoShow')) return;
-  const canvas=document.getElementById('chartIso');
+  if(!betResult||!gb('annIsoShow')) return;
+  const canvas = document.getElementById('chartIso');
   if(!canvas) return;
-  const ctx=canvas.getContext('2d');
-  const W=expW||canvas.offsetWidth||600;
-  const H=expH||canvas.offsetHeight||400;
-  const dpr=expW?1:window.devicePixelRatio||1;
-  const M=getMargins();
-  const f=betResult.fit, s=betResult.s;
-  const font=gv('fontFam');
-  const sz=gn('annSz')||13;
-  const pos=gv('annIsoPos')||'br';
+  const f = betResult.fit, s = betResult.s;
+  const font = gv('annFont') || "'Palatino Linotype',Palatino,Georgia,serif";
+  const sz   = (gn('annSz')||18) * (expW ? 1 : window.devicePixelRatio||1);
+  const pos  = gv('annIsoPos')||'br';
+  const dpr  = expW ? 1 : window.devicePixelRatio||1;
 
-  const rows=[
-    {label:'S\u2082 BET',  value:fmt(betResult.sbet,5), unit:'m\u00b2/g'},
-    {label:'n\u2098',      value:fmt(f.nm*1000,4),      unit:'mmol/g'},
-    {label:'C',            value:fmt(f.C,4),            unit:''},
+  const lines = [
+    [{text:'S', italic:true},{text:'₂',sup:true},{text:' BET = '+fmt(betResult.sbet,5)+' m² g⁻¹'}],
+    [{text:'n'  ,italic:true},{text:'ₘ',sup:false},{text:' = '+fmt(f.nm*1000,4)+' mmol g⁻¹'}],
+    [{text:'C'  ,italic:true},{text:' = '+fmt(f.C,4)}],
   ];
-  drawAnnotationBox(ctx, dpr, W, H, M, pos, rows, sz, font);
+  drawLegendBox(canvas, lines, pos, sz, font, dpr);
 }
 
 function drawIsoChart(expW,expH){
@@ -2137,10 +2143,6 @@ document.getElementById('fileInput').addEventListener('change',e=>{
 // BUTTONS
 // =====================================================================
 document.getElementById('btnAnalyse').addEventListener('click', runAnalysis);
-
-document.getElementById('btnHelp').addEventListener('click',()=>{
-  document.getElementById('helpOverlay').style.display='flex';
-});
 
 document.getElementById('btnExport').addEventListener('click',()=>{
   if(!betResult) return;
