@@ -1318,7 +1318,7 @@ function resetSel(){
   setStepA(1);
   document.getElementById('resBox').innerHTML='<div class="res-ph">Select a model to see results</div>';
   document.getElementById('btnExport').disabled=true;
-  drawRaw(); drawAlpha(); drawFit();
+  switchTab('raw');
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1327,8 +1327,22 @@ function resetSel(){
 function suggestModel(){
   if(alphaData.length<10) return;
   const out=document.getElementById('suggestOut');
-  out.style.display=''; out.innerHTML='<em>Analysing…</em>';
+  out.style.display='';
 
+  // Estimate computation cost: O(n²) per model, 18 models
+  const n=alphaData.length;
+  const heavy = n > 500;
+  const msg = heavy
+    ? `<span style="color:var(--accent)">&#9680;</span> Analysing ${n} points across all models — this may take a few seconds, please wait…`
+    : '<em>Analysing…</em>';
+  out.innerHTML=msg;
+
+  // Yield to the browser so the message renders before the heavy work starts
+  setTimeout(()=>_suggestModelCompute(), 30);
+}
+
+function _suggestModelCompute(){
+  const out=document.getElementById('suggestOut');
   const ad=alphaData;
   const n=ad.length;
 
@@ -1371,30 +1385,47 @@ function suggestModel(){
   }
 
   // ── 6. Longest-linear-segment scoring ────────────────────────
-  const WIN_MIN=Math.max(6,Math.floor(n*0.12));
-  const R2_THRESH=0.997;
+  // Subsample to at most 120 points for speed — shape is preserved
+  const MAX_PTS = 120;
+  function subsample(pts){
+    if(pts.length<=MAX_PTS) return pts;
+    const step=pts.length/MAX_PTS;
+    return Array.from({length:MAX_PTS},(_,i)=>pts[Math.round(i*step)]);
+  }
 
-  function longestLinearWindow(pts){
-    let best=0;
-    for(let s=0;s<pts.length-WIN_MIN;s++){
-      let sx=0,sy=0,sx2=0,sxy=0,cnt=0;
-      for(let e=s;e<pts.length;e++){
+  const WIN_MIN = 6;
+  const R2_THRESH = 0.997;
+
+  function longestLinearWindow(ptsRaw){
+    const pts = subsample(ptsRaw);
+    const m = pts.length;
+    let best = 0;
+    // Welford-style incremental regression + incremental ssres
+    // We maintain all sums as we extend e, then subtract as we advance s
+    for(let s=0; s<m-WIN_MIN; s++){
+      // skip start if remaining range can't beat best
+      if(m-s <= best) break;
+      let sx=0,sy=0,sx2=0,sxy=0,sy2=0,cnt=0;
+      for(let e=s; e<m; e++){
         const x=pts[e].t, y=pts[e].y;
-        sx+=x; sy+=y; sx2+=x*x; sxy+=x*y; cnt++;
-        if(cnt<WIN_MIN) continue;
-        const den=cnt*sx2-sx*sx; if(Math.abs(den)<1e-15) continue;
-        const k2=(cnt*sxy-sx*sy)/den, b2=(sy-k2*sx)/cnt;
-        const mean=sy/cnt;
-        let ssres=0, sstot=0;
-        for(let j=s;j<=e;j++){
-          ssres+=(pts[j].y-(k2*pts[j].t+b2))**2;
-          sstot+=(pts[j].y-mean)**2;
-        }
+        sx+=x; sy+=y; sx2+=x*x; sxy+=x*y; sy2+=y*y; cnt++;
+        if(cnt < WIN_MIN) continue;
+        const den=cnt*sx2-sx*sx;
+        if(Math.abs(den)<1e-15) continue;
+        const k2=(cnt*sxy-sx*sy)/den;
+        const b2=(sy-k2*sx)/cnt;
+        // ssres = sy2 - k2*sxy - b2*sy + b2*(sy-k2*sx) ... simplify:
+        // = sy2 - 2*k2*sxy - 2*b2*sy + k2²*sx2 + 2*k2*b2*sx + cnt*b2²
+        // Simpler: ssres = sy2 - k2*sxy - b2*sy (standard OLS identity)
+        const ssres = sy2 - k2*sxy - b2*sy;
+        const sstot = sy2 - sy*sy/cnt;
         if(sstot<1e-15) continue;
-        if(1-ssres/sstot>=R2_THRESH) best=Math.max(best,cnt);
+        const r2 = 1 - ssres/sstot;
+        if(r2 >= R2_THRESH) best = Math.max(best, cnt);
+        else if(cnt > WIN_MIN*3) break; // non-linear and window already large — stop extending
       }
     }
-    return best;
+    return best / MAX_PTS; // return as fraction directly
   }
 
   const allModels=Object.values(MODELS).flat();
@@ -1404,9 +1435,8 @@ function suggestModel(){
     if(pts.length<WIN_MIN) continue;
     const reg=linReg(pts.map(p=>p.t),pts.map(p=>p.y));
     if(!reg) continue;
-    const linWin=longestLinearWindow(pts);
-    const linFrac=linWin/pts.length;
-    scores.push({m, r2:reg.r2, linFrac, linWin});
+    const linFrac=longestLinearWindow(pts);  // already a fraction
+    scores.push({m, r2:reg.r2, linFrac});
   }
   scores.sort((a,b)=>b.linFrac-a.linFrac||b.r2-a.r2);
 
