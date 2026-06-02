@@ -493,21 +493,32 @@ function loadFile(f){
 function parseCSV(txt){
   const lines=txt.trim().split(/\r?\n/); const data=[]; let skip=0;
   for(const ln of lines){
-    const p=ln.split(/[,;\t]+/);
-    const t=parseFloat(p[0]),m=parseFloat(p[1]);
+    const p=ln.trim().split(/[,;\t ]+/);
+    const t=parseFloat(p[0].trim()),m=parseFloat(p[1].trim());
     if(isNaN(t)||isNaN(m)){skip++;continue;}
     data.push({t,m});
   }
   if(data.length<2){st('Could not parse CSV — expected two numeric columns.','err');return}
   data.sort((a,b)=>a.t-b.t);
   rawData=data; t0=null;t1=null;alphaData=[];fitPts=[];fitReg=null;clickPhase=1;
+  selectedModel=null;
   zsMap.raw={xMin:null,xMax:null,yMin:null,yMax:null};
   zsMap.alpha={xMin:null,xMax:null,yMin:null,yMax:null};
   zsMap.fit={xMin:null,xMax:null,yMin:null,yMax:null};
   zs=zsMap.raw;
+  // Reset model dropdowns
+  document.querySelectorAll('[id^="grp-"]').forEach(s=>{ s.value=''; });
+  // Clear equation canvas
+  const eqC=document.getElementById('eqCanvas');
+  if(eqC){ const ec=eqC.getContext('2d'); ec.clearRect(0,0,eqC.width,eqC.height);
+    ec.fillStyle='#ede7d8'; ec.fillRect(0,0,eqC.width,eqC.height); }
+  // Clear results box
+  document.getElementById('resBox').innerHTML='<div class="res-ph">Select a model to see results</div>';
+  document.getElementById('btnExport').disabled=true;
   setStepA(1);
   st(`${data.length} points loaded${skip?` (${skip} skipped)`:''}  —  click Raw Data chart to set reaction bounds.`,'ok');
-  renderRaw();
+  // Switch to raw data tab so user sees the data immediately
+  switchTab('raw');
 }
 
 // ════════════════════════════════════════════════════════════════
