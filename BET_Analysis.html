@@ -32,9 +32,6 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
 .dz-ico{font-size:18px;margin-bottom:4px}
 .dz-txt{font-size:10px;color:#888;line-height:1.5}
 .dz-name{font-size:11px;font-weight:500;color:var(--accent);margin-top:3px;word-break:break-all;min-height:1em}
-#fileBtn{margin-top:7px;width:100%;padding:6px;font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;background:transparent;border:1.5px solid var(--rule);color:#666;cursor:pointer}
-#fileBtn:hover{border-color:var(--accent);color:var(--accent)}
-#fileInput{display:none}
 select{width:100%;background:var(--cream);border:1.5px solid var(--rule);padding:6px 8px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none;cursor:pointer;-webkit-appearance:none;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center}
 select:focus{border-color:var(--accent)}
 /* param rows */
@@ -131,18 +128,11 @@ select:focus{border-color:var(--accent)}
 <aside class="sidebar">
   <div class="sb">
     <div class="lbl">Data</div>
-    <div class="dz" id="dz">
+    <div class="dz" id="dz" style="cursor:pointer" title="Click to browse or drag and drop a file">
       <div class="dz-ico">&#8679;</div>
-      <div class="dz-txt">Drag &amp; drop a CSV file<br><span style="font-size:9px;color:#aaa">col 1: p/p₀ &nbsp;|&nbsp; col 2: uptake<br>optional header — see ⓘ guide</span></div>
+      <div class="dz-txt">Click or drag &amp; drop a CSV file<br><span style="font-size:9px;color:#aaa">col 1: p/p₀ &nbsp;|&nbsp; col 2: uptake<br>optional header — see ⓘ guide</span></div>
       <div class="dz-name" id="dzName"></div>
     </div>
-    <button id="fileBtn" onclick="document.getElementById('fileInput').click()">&#128194; Browse for file&hellip;</button>
-    <input type="file" id="fileInput" accept=".csv,.txt,.dat">
-  </div>
-
-  <div class="sb" id="prevWrap" style="display:none">
-    <div class="lbl">Preview &nbsp;<span id="nPts" style="color:#aaa;text-transform:none;letter-spacing:0;font-size:10px"></span></div>
-    <div class="pv"><table><thead><tr><th>p/p₀</th><th>Uptake</th></tr></thead><tbody id="prevBody"></tbody></table></div>
   </div>
 
   <!-- Assumptions / detected parameters banner -->
@@ -224,15 +214,11 @@ select:focus{border-color:var(--accent)}
 
 <!-- CENTRE -->
 <div class="centre">
-  <div class="results">
-    <div class="lbl">Results</div>
-    <div id="resContent"><div class="ph">Load a CSV file and click Run BET Analysis.</div></div>
-  </div>
-
   <div class="tab-bar">
     <button class="tab active" data-tab="iso">Full Isotherm</button>
     <button class="tab" data-tab="bet">BET Linear Plot</button>
     <button class="tab" data-tab="rouq">Rouquerol Plot</button>
+    <button class="tab" data-tab="summary">Summary</button>
     <button class="tab" data-tab="guide">Guide</button>
     <div style="margin-left:auto;display:flex;align-items:center;gap:0;border-left:1px solid var(--rule)">
       <button class="tab axis-btn active" id="axisBtnFull" onclick="setAxisMode('full')" title="Show full p/p₀ axis (0 to 1)" style="border-right:none">&#8596; Full</button>
@@ -273,6 +259,14 @@ select:focus{border-color:var(--accent)}
           <span style="margin-left:auto;font-size:10px;color:#888">Drag handles to adjust range (auto off)</span>
         </div>
         <div class="cw" id="cwRouq"><canvas id="chartRouq"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Summary tab -->
+    <div class="tab-panel" id="tab-summary" style="overflow-y:auto">
+      <div style="padding:18px 20px">
+        <div class="lbl" style="margin-bottom:8px">Results</div>
+        <div id="resContent"><div class="ph">Load a CSV file and click Run BET Analysis.</div></div>
       </div>
     </div>
 
@@ -534,15 +528,15 @@ relative_pressure, uptake (mmol/g)
 // label: display name
 // =====================================================================
 const SORPTIVES = {
-  N2_77:  { label:'N₂ (77 K)',    sigma:16.2,  p0:101.325,  T:77,   mol:'Nitrogen',  note:'Standard reference. σ = 16.2 Å² (IUPAC recommended).' },
-  N2_87:  { label:'N₂ (87 K)',    sigma:16.2,  p0:101.325,  T:87,   mol:'Nitrogen',  note:'Liquid Ar temperature. σ = 16.2 Å².' },
-  Ar_77:  { label:'Ar (77 K)',    sigma:14.2,  p0:101.325,  T:77,   mol:'Argon',     note:'σ = 14.2 Å² (at liquid N₂ temperature, sub-cooled liquid).' },
-  Ar_87:  { label:'Ar (87 K)',    sigma:14.2,  p0:101.325,  T:87,   mol:'Argon',     note:'Recommended by IUPAC 2015. σ = 14.2 Å².' },
-  CO2_273:{ label:'CO₂ (273 K)',  sigma:21.4,  p0:3485.3,   T:273,  mol:'Carbon dioxide', note:'Used for micropore analysis. σ = 21.4 Å².' },
-  CO2_298:{ label:'CO₂ (298 K)',  sigma:21.4,  p0:6412.8,   T:298,  mol:'Carbon dioxide', note:'σ = 21.4 Å²; p₀ = 6412.8 kPa.' },
-  Kr_77:  { label:'Kr (77 K)',    sigma:20.2,  p0:0.267,    T:77,   mol:'Krypton',   note:'For low surface area materials. σ = 20.2 Å².' },
-  H2O_298:{ label:'H₂O (298 K)', sigma:12.5,  p0:3.169,    T:298,  mol:'Water',     note:'σ = 12.5 Å² (Hagymassy, 1969).' },
-  custom: { label:'Custom',       sigma:16.2,  p0:101.325,  T:77,   mol:'Custom',    note:'Enter σ, p₀, and T below.' }
+  N2_77:  { label:'N₂ (77 K)',    csv:'N2 (77 K)',    sigma:16.2,  p0:101.325,  T:77,   mol:'Nitrogen',  note:'Standard reference. σ = 16.2 Å² (IUPAC recommended).' },
+  N2_87:  { label:'N₂ (87 K)',    csv:'N2 (87 K)',    sigma:16.2,  p0:101.325,  T:87,   mol:'Nitrogen',  note:'Liquid Ar temperature. σ = 16.2 Å².' },
+  Ar_77:  { label:'Ar (77 K)',    csv:'Ar (77 K)',    sigma:14.2,  p0:101.325,  T:77,   mol:'Argon',     note:'σ = 14.2 Å² (at liquid N₂ temperature, sub-cooled liquid).' },
+  Ar_87:  { label:'Ar (87 K)',    csv:'Ar (87 K)',    sigma:14.2,  p0:101.325,  T:87,   mol:'Argon',     note:'Recommended by IUPAC 2015. σ = 14.2 Å².' },
+  CO2_273:{ label:'CO₂ (273 K)',  csv:'CO2 (273 K)',  sigma:21.4,  p0:3485.3,   T:273,  mol:'Carbon dioxide', note:'Used for micropore analysis. σ = 21.4 Å².' },
+  CO2_298:{ label:'CO₂ (298 K)',  csv:'CO2 (298 K)',  sigma:21.4,  p0:6412.8,   T:298,  mol:'Carbon dioxide', note:'σ = 21.4 Å²; p₀ = 6412.8 kPa.' },
+  Kr_77:  { label:'Kr (77 K)',    csv:'Kr (77 K)',    sigma:20.2,  p0:0.267,    T:77,   mol:'Krypton',   note:'For low surface area materials. σ = 20.2 Å².' },
+  H2O_298:{ label:'H₂O (298 K)', csv:'H2O (298 K)',  sigma:12.5,  p0:3.169,    T:298,  mol:'Water',     note:'σ = 12.5 Å² (Hagymassy, 1969).' },
+  custom: { label:'Custom',       csv:'Custom',       sigma:16.2,  p0:101.325,  T:77,   mol:'Custom',    note:'Enter σ, p₀, and T below.' }
 };
 
 const NA = 6.02214076e23; // Avogadro
@@ -1173,17 +1167,6 @@ function runAnalysis(){
   // Recompute rawData from the stored file values using current mass/unit/sorptive
   rawData = rawFileData.map(d=>({pp0: d.pp0, uptake_mol_g: toMolG(d.rawUptake, unit, mass)}));
 
-  // Refresh preview table to reflect new conversion
-  document.getElementById('prevWrap').style.display='';
-  document.getElementById('nPts').textContent=rawData.length+' pts';
-  const tbody=document.getElementById('prevBody');
-  tbody.innerHTML='';
-  rawData.slice(0,8).forEach(d=>{
-    const tr=document.createElement('tr');
-    tr.innerHTML=`<td>${d.pp0.toFixed(5)}</td><td>${fmt(d.uptake_mol_g*1000,4)} mmol/g</td>`;
-    tbody.appendChild(tr);
-  });
-
   // Determine range
   let range;
   if(gb('autoRange')){
@@ -1236,52 +1219,49 @@ function runAnalysis(){
 
   drawAllCharts();
   document.getElementById('btnExport').disabled=false;
+  // Switch to BET linear plot tab after analysis
+  document.querySelectorAll('.tab[data-tab]').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  document.querySelector('.tab[data-tab="bet"]').classList.add('active');
+  document.getElementById('tab-bet').classList.add('active');
   st('Analysis complete — S_BET = '+fmt(sbet,4)+' m²/g · C = '+fmt(fit.C,4),'ok');
 }
 
 function renderResults(){
   const r=betResult;
-  if(!r){document.getElementById('resContent').innerHTML='<div class="ph">Run analysis first.</div>';return;}
+  const el=document.getElementById('resContent');
+  if(!r){el.innerHTML='<div class="ph">Run analysis first.</div>';return;}
   const f=r.fit;
-  const sbet_m2g=r.sbet;
-  const sbet_m2=(sbet_m2g*r.mass).toFixed(4);
-  const vm_cm3g=(f.nm*VM).toFixed(4);
   const Cfmt=isFinite(f.C)?fmt(f.C,5):'--';
-  document.getElementById('resContent').innerHTML=`
-  <div class="r-grid" style="grid-template-columns:repeat(4,1fr)">
-    <div class="rc hi">
-      <div class="rt">S<sub>BET</sub></div>
-      <div class="rv">${fmt(sbet_m2g,5)}<span class="rs">m²/g</span></div>
-    </div>
-    <div class="rc">
-      <div class="rt">Total S<sub>BET</sub></div>
-      <div class="rv">${fmt(r.sbet*r.mass,5)}<span class="rs">m²</span></div>
-    </div>
-    <div class="rc hi">
-      <div class="rt">C constant</div>
-      <div class="rv">${Cfmt}</div>
-    </div>
-    <div class="rc">
-      <div class="rt">n<sub>m</sub></div>
-      <div class="rv">${fmt(f.nm*1000,4)}<span class="rs">mmol/g</span></div>
-    </div>
-    <div class="rc">
-      <div class="rt">V<sub>m</sub> (STP)</div>
-      <div class="rv">${vm_cm3g}<span class="rs">cm³/g</span></div>
-    </div>
-    <div class="rc">
-      <div class="rt">BET R²</div>
-      <div class="rv">${f.r2.toFixed(6)}</div>
-    </div>
-    <div class="rc">
-      <div class="rt">Range p/p₀</div>
-      <div class="rv">${rawData[r.range.iMin].pp0.toFixed(4)}–${rawData[r.range.iMax].pp0.toFixed(4)}</div>
-    </div>
-    <div class="rc">
-      <div class="rt">Sorptive / σ</div>
-      <div class="rv">${r.s.label} / ${r.s.sigma} Å²</div>
-    </div>
-  </div>`;
+
+  const fitDiv=document.createElement('div');
+  fitDiv.style.cssText='border:1.5px solid var(--rule);font-size:11px;font-family:Georgia,serif;line-height:1.7;margin-bottom:12px';
+
+  const hdr=document.createElement('div');
+  hdr.style.cssText='background:var(--cream);padding:4px 10px;font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)';
+  hdr.textContent='BET Analysis Results \u2014 '+r.s.label;
+  fitDiv.appendChild(hdr);
+
+  function noteRow(html,hi){
+    const row=document.createElement('div');
+    row.style.cssText='padding:3px 10px;border-top:1px solid var(--pale);background:'+(hi?'var(--cream)':'#fff')+';color:#333';
+    row.innerHTML=html;
+    fitDiv.appendChild(row);
+  }
+
+  noteRow('\u2713 <i>S</i><sub>BET</sub> = <b>'+fmt(r.sbet,5)+'</b> m\u00b2/g', false);
+  noteRow('\u2713 Total <i>S</i><sub>BET</sub> = <b>'+fmt(r.sbet*r.mass,5)+'</b> m\u00b2', false);
+  noteRow('\u2713 <i>C</i> constant = <b>'+Cfmt+'</b>', false);
+  noteRow('\u2713 <i>n</i><sub>m</sub> = <b>'+fmt(f.nm*1000,4)+'</b> mmol/g', false);
+  noteRow('\u2713 <i>V</i><sub>m</sub> (STP) = <b>'+(f.nm*VM).toFixed(4)+'</b> cm\u00b3/g', false);
+  noteRow('\u2713 R\u00b2 = <b>'+f.r2.toFixed(6)+'</b>', false);
+  noteRow('\u2713 Range <i>p</i>/p\u2080 = <b>'+rawData[r.range.iMin].pp0.toFixed(4)+'\u2013'+rawData[r.range.iMax].pp0.toFixed(4)+'</b>', false);
+  noteRow('\u2713 Rouquerol criteria: <b>'+(r.allChecks?'all satisfied \u2713':'see plot \u26a0')+'</b>', false);
+  noteRow('\u2713 Sorptive: <b>'+r.s.label+'</b> &nbsp;\u00b7&nbsp; \u03c3 = <b>'+r.s.sigma+'</b> \u00c5\u00b2 &nbsp;\u00b7&nbsp; <i>p</i>\u2080 = <b>'+r.s.p0+'</b> kPa', false);
+  noteRow('\u2713 Sample mass = <b>'+r.mass.toFixed(6)+'</b> g', false);
+
+  el.innerHTML='';
+  el.appendChild(fitDiv);
 }
 
 // =====================================================================
@@ -2128,15 +2108,18 @@ function onManualRange(){
 // FILE DRAG & DROP
 // =====================================================================
 const dz=document.getElementById('dz');
+dz.addEventListener('click',()=>{
+  const fi=document.createElement('input');
+  fi.type='file';fi.accept='.csv,.txt,.dat';fi.style.display='none';
+  fi.onchange=e=>{if(e.target.files[0])loadFile(e.target.files[0]);document.body.removeChild(fi);};
+  document.body.appendChild(fi);fi.click();
+});
 dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('over')});
 dz.addEventListener('dragleave',()=>dz.classList.remove('over'));
 dz.addEventListener('drop',e=>{
   e.preventDefault();dz.classList.remove('over');
   const f=e.dataTransfer.files[0];
   if(f) loadFile(f);
-});
-document.getElementById('fileInput').addEventListener('change',e=>{
-  if(e.target.files[0]) loadFile(e.target.files[0]);
 });
 
 // =====================================================================
@@ -2150,7 +2133,7 @@ document.getElementById('btnExport').addEventListener('click',()=>{
   const lines=[
     'BET Surface Area Analysis Results','',
     'Sample mass (g),'+r.mass,
-    'Sorptive,'+s.label,
+    'Sorptive,'+s.csv,
     'Molecular cross-section (Å²),'+s.sigma,
     'p0 (kPa),'+s.p0,
     'Temperature (K),'+s.T,
@@ -2174,9 +2157,21 @@ document.getElementById('btnExport').addEventListener('click',()=>{
   });
   lines.push('','Full Isotherm Data','p/p0,uptake_mol_g');
   rawData.forEach(d=>lines.push(`${d.pp0.toFixed(6)},${d.uptake_mol_g.toFixed(8)}`));
-  const blob=new Blob([lines.join('\r\n')],{type:'text/csv'});
-  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='BET_results.csv';a.click();
-  st('CSV exported.','ok');
+  const csvText=lines.join('\r\n');
+  const blob=new Blob([csvText],{type:'text/csv'});
+  const slug=r.s.csv.replace(/[^A-Za-z0-9]+/g,'_').replace(/_+$/,'');
+  const defaultName='BET_'+slug+'.csv';
+  if(window.showSaveFilePicker){
+    window.showSaveFilePicker({
+      suggestedName: defaultName,
+      types:[{description:'CSV file',accept:{'text/csv':['.csv']}}]
+    }).then(fh=>fh.createWritable()).then(w=>w.write(csvText).then(()=>w.close())).then(()=>{
+      st('Saved — '+defaultName,'ok');
+    }).catch(e=>{if(e.name!=='AbortError') st('Save failed: '+e.message,'err');});
+  } else {
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=defaultName;a.click();
+    st('CSV downloaded — '+defaultName+'. (Use Chrome/Edge for a save dialog.)','ok');
+  }
 });
 
 // =====================================================================
@@ -2187,24 +2182,36 @@ function savePlot(which){
   const expW=parseInt(gv('expW'))||1400;
   const expH=parseInt(gv('expH'))||1000;
   const fmt2=gv('expFmt').toLowerCase();
-  // Temporarily render to a hidden canvas
   const canvasId={'rouq':'chartRouq','bet':'chartBet','iso':'chartIso'}[which];
   if(which==='rouq') drawRouquerolChart(expW,expH);
   if(which==='bet') drawBETChart(expW,expH);
   if(which==='iso') drawIsoChart(expW,expH);
   const canvas=document.getElementById(canvasId);
   const mime=fmt2==='jpeg'?'image/jpeg':'image/png';
-  const a=document.createElement('a');
-  a.href=canvas.toDataURL(mime,0.96);
-  a.download='BET_'+which+'.'+fmt2;
-  a.click();
+  const dataUrl=canvas.toDataURL(mime,0.96);
   // Restore normal resolution
   setTimeout(()=>{
     if(which==='rouq') drawRouquerolChart();
     if(which==='bet') drawBETChart();
     if(which==='iso') drawIsoChart();
   },100);
-  st('Plot saved.','ok');
+  const slug=betResult?betResult.s.csv.replace(/[^A-Za-z0-9]+/g,'_').replace(/_+$/,''):'plot';
+  const defaultName='BET_'+which+'_'+slug+'.'+fmt2;
+  const byteStr=atob(dataUrl.split(',')[1]);
+  const ab=new Uint8Array(byteStr.length);
+  for(let i=0;i<byteStr.length;i++) ab[i]=byteStr.charCodeAt(i);
+  const imgBlob=new Blob([ab],{type:mime});
+  if(window.showSaveFilePicker){
+    window.showSaveFilePicker({
+      suggestedName: defaultName,
+      types:[{description:fmt2.toUpperCase()+' image',accept:{[mime]:['.'+fmt2]}}]
+    }).then(fh=>fh.createWritable()).then(w=>w.write(imgBlob).then(()=>w.close())).then(()=>{
+      st('Plot saved — '+defaultName,'ok');
+    }).catch(e=>{if(e.name!=='AbortError') st('Save failed: '+e.message,'err');});
+  } else {
+    const a=document.createElement('a');a.href=dataUrl;a.download=defaultName;a.click();
+    st('Plot downloaded — '+defaultName+'. (Use Chrome/Edge for a save dialog.)','ok');
+  }
 }
 
 // =====================================================================

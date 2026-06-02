@@ -1,0 +1,2187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IAST Calculator</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:wght@300;600&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --ink:#0f0e0d;--paper:#f6f1ea;--cream:#ede7d8;--pale:#e0d9cc;
+  --rule:#c5bba9;--accent:#b84a2e;
+  --mono:'DM Mono',monospace;--serif:'Fraunces',Georgia,serif;--sans:'DM Sans',sans-serif;
+}
+html,body{height:100%;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:13px}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:var(--pale)}
+::-webkit-scrollbar-thumb{background:var(--rule);border-radius:2px}
+body{display:grid;grid-template-rows:auto 1fr;overflow:hidden}
+header{border-bottom:2px solid var(--ink);padding:12px 22px;display:flex;align-items:baseline;gap:16px;flex-shrink:0}
+header h1{font-family:var(--serif);font-size:23px;font-weight:600;letter-spacing:-.4px}
+header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spacing:.15em;text-transform:uppercase}
+.app{display:grid;grid-template-columns:270px 1fr 260px;overflow:hidden;height:100%}
+/* LEFT */
+.sidebar{border-right:2px solid var(--ink);overflow-y:auto;display:flex;flex-direction:column}
+.sb{padding:11px 14px;border-bottom:1px solid var(--rule)}
+.sb:last-child{border-bottom:none}
+.lbl{font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:8px}
+.lbl-inline{font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent)}
+.fi-label{font-family:var(--mono);font-size:9px;letter-spacing:.12em;color:#888;margin-bottom:3px;margin-top:6px;white-space:nowrap}
+
+/* Component cards */
+.comp-card{border:1.5px solid var(--rule);margin-bottom:8px;background:var(--paper);position:relative}
+.comp-card:last-child{margin-bottom:0}
+.comp-header{display:flex;align-items:center;justify-content:space-between;padding:6px 9px;background:var(--cream);border-bottom:1px solid var(--rule);cursor:pointer;user-select:none}
+.comp-header:hover{background:var(--pale)}
+.comp-name{font-family:var(--mono);font-size:10px;font-weight:500;color:var(--ink)}
+.comp-del{background:none;border:none;cursor:pointer;font-size:11px;color:#aaa;padding:0 2px;line-height:1}
+.comp-del:hover{color:var(--accent)}
+.comp-arr{font-size:10px;color:#888;transition:transform .2s;margin-left:4px;flex-shrink:0}
+.comp-card.collapsed .comp-arr{transform:rotate(-90deg)}
+.comp-card.collapsed .comp-body{display:none}
+.comp-body{padding:8px 9px}
+.dz-small{border:1.5px dashed var(--rule);padding:8px 6px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;user-select:none;background:var(--paper)}
+.dz-small:hover,.dz-small.over{border-color:var(--accent);background:var(--cream)}
+.dz-small-txt{font-size:9px;color:#aaa;line-height:1.5;pointer-events:none}
+.dz-small-name{font-size:10px;font-weight:500;color:var(--accent);margin-top:3px;word-break:break-all;min-height:1em;font-family:var(--mono);pointer-events:none}
+.comp-info{font-family:var(--mono);font-size:9px;color:#777;margin-top:5px;line-height:1.7}
+.comp-info span{color:var(--ink)}
+.comp-warn{font-family:var(--mono);font-size:9px;color:var(--accent);margin-top:3px}
+
+input[type=text],input[type=number]{background:var(--cream);border:1.5px solid var(--rule);padding:4px 6px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none;width:100%}
+input[type=text]:focus,input[type=number]:focus{border-color:var(--accent)}
+select{width:100%;background:var(--cream);border:1.5px solid var(--rule);padding:6px 8px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none;cursor:pointer;-webkit-appearance:none;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center}
+select:focus{border-color:var(--accent)}
+
+.btn{display:block;width:100%;padding:8px 12px;font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;border:2px solid var(--ink);background:var(--ink);color:var(--paper);transition:background .15s,border-color .15s}
+.btn:hover:not(:disabled){background:var(--accent);border-color:var(--accent)}
+.btn:disabled{opacity:.3;cursor:not-allowed}
+.btn.out{background:transparent;color:var(--ink)}
+.btn.out:hover:not(:disabled){background:var(--ink);color:var(--paper)}
+.btn-sm{display:inline-block;padding:4px 8px;font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;border:1.5px solid var(--rule);background:transparent;color:#666;transition:all .15s}
+.btn-sm:hover{border-color:var(--accent);color:var(--accent)}
+.btn-add{display:block;width:100%;padding:6px;font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;background:transparent;border:1.5px dashed var(--rule);color:#888;cursor:pointer;transition:all .15s;margin-top:4px}
+.btn-add:hover{border-color:var(--accent);color:var(--accent)}
+
+/* y-fraction row */
+.yrow{display:flex;align-items:center;gap:5px;margin-bottom:4px}
+.yrow-lbl{font-family:var(--mono);font-size:10px;flex:1}
+.yrow-inp{width:70px !important;text-align:right}
+.yrow-unit{font-family:var(--mono);font-size:9px;color:#aaa;min-width:14px}
+
+/* CENTRE */
+.centre{display:flex;flex-direction:column;overflow:hidden;min-height:0}
+.results{padding:10px 16px;border-bottom:2px solid var(--ink);overflow-y:auto;max-height:190px;flex-shrink:0}
+.r-grid{display:grid;gap:1px;background:var(--rule);border:1.5px solid var(--rule);margin-top:6px}
+.rc{background:var(--paper);padding:10px 13px}
+.rc .rt{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#888;margin-bottom:4px;font-family:Georgia,serif;font-weight:400}
+.rc .rv{font-size:14px;font-weight:400;line-height:1.6;font-family:Georgia,serif;color:var(--ink)}
+.rc .rs{font-size:12px;color:var(--ink);font-family:Georgia,serif;font-weight:400;white-space:nowrap;margin-left:0.3em}
+.rc.hi{background:var(--cream)}
+.ph{color:#bbb;font-size:12px;font-style:italic;padding:4px 0}
+.chart-wrap{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}
+.chart-tabs{border-bottom:2px solid var(--ink);display:flex;flex-shrink:0;background:var(--paper)}
+.chart-tab{padding:7px 16px;font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;cursor:pointer;border:none;background:none;color:#888;border-right:1px solid var(--rule)}
+.chart-tab:hover{background:var(--cream);color:var(--ink)}
+.chart-tab.active{background:var(--cream);color:var(--accent);border-bottom:2px solid var(--accent);margin-bottom:-2px}
+.chart-inner{flex:1;min-height:0;position:relative}
+canvas.plot{position:absolute;top:0;left:0;width:100%;height:100%}
+#status{padding:4px 16px;font-family:var(--mono);font-size:10px;color:#999;border-top:1px solid var(--rule);flex-shrink:0;letter-spacing:.05em}
+#status.ok{color:#2a7a3b}#status.err{color:var(--accent)}
+
+/* Results table */
+.out-table-wrap{border:1.5px solid var(--rule);margin-top:6px}
+.out-table{width:100%;border-collapse:collapse;font-size:10px}
+.out-table th{background:var(--cream);padding:3px 7px;text-align:right;font-size:9px;text-transform:uppercase;letter-spacing:.06em;position:sticky;top:0;border-bottom:1.5px solid var(--rule);font-family:var(--mono)}
+.out-table th:first-child{text-align:left}
+.out-table td{padding:2px 7px;text-align:right;border-bottom:1px solid var(--pale);font-family:var(--mono)}
+.out-table td:first-child{text-align:left}
+
+/* RIGHT */
+.cpanel{border-left:2px solid var(--ink);overflow-y:auto;flex-shrink:0}
+.cp-group{border-bottom:1px solid var(--rule)}
+.cp-head{display:flex;justify-content:space-between;align-items:center;padding:9px 13px;cursor:pointer;user-select:none;background:var(--paper);transition:background .15s}
+.cp-head:hover{background:var(--cream)}
+.cp-head .cp-title{font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent)}
+.cp-head .cp-arr{font-size:10px;color:#888;transition:transform .2s}
+.cp-group.open .cp-arr{transform:rotate(180deg)}
+.cp-body{display:none;padding:10px 13px;border-top:1px solid var(--pale)}
+.cp-group.open .cp-body{display:block}
+.cr{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:6px}
+.cr:last-child{margin-bottom:0}
+.cl{font-size:11px;color:#555;flex:1;white-space:nowrap}
+.cr input[type=number]{width:68px;background:var(--cream);border:1.5px solid var(--rule);padding:3px 5px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none}
+.cr input[type=range]{flex:1;min-width:55px;accent-color:var(--accent)}
+.cr input[type=color]{width:32px;height:22px;border:1.5px solid var(--rule);background:none;cursor:pointer;padding:1px}
+.cr input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--accent)}
+.cr select{flex:1;background:var(--cream);border:1.5px solid var(--rule);padding:3px 5px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none;appearance:none}
+.cr input[type=text]{flex:1;background:var(--cream);border:1.5px solid var(--rule);padding:3px 5px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none}
+.rv2{font-family:var(--mono);font-size:11px;min-width:28px;text-align:right}
+
+/* Guide */
+.g-sec{font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin:18px 0 6px;padding-bottom:4px;border-bottom:1px solid var(--rule)}
+.g-code{font-family:var(--mono);font-size:11px;background:var(--cream);padding:1px 5px;border:1px solid var(--pale)}
+.g-table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:8px}
+.g-table th{background:var(--cream);padding:4px 10px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.08em;border-bottom:1.5px solid var(--rule)}
+.g-table td{padding:4px 10px;border-bottom:1px solid var(--pale)}
+.g-table td:first-child{font-family:var(--mono);font-size:11px;white-space:nowrap}
+
+/* color swatch per component */
+.swatch{width:10px;height:10px;display:inline-block;border:1px solid #aaa;margin-right:4px;vertical-align:middle;flex-shrink:0}
+
+
+/* Multi-panel dashboard */
+.dashboard{flex:1;min-height:0;overflow:auto;padding:6px;background:var(--paper);display:grid;gap:6px}
+.dash-cell{position:relative;background:#fff;border:1.5px solid var(--rule);min-height:200px}
+.dash-cell canvas{position:absolute;top:0;left:0;width:100%;height:100%}
+.dash-cell .dash-title{position:absolute;top:4px;left:8px;font-family:var(--mono);font-size:8px;letter-spacing:.1em;text-transform:uppercase;color:#bbb;pointer-events:none;z-index:1}
+/* pure-component tab */
+#isoWrap{flex:1;min-height:0;position:relative}
+#cvIso{position:absolute;top:0;left:0;width:100%;height:100%}
+
+/* sweep row */
+.sweep-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px}
+.sweep-row input{width:100% !important}
+.sweep-lbl{font-size:9px;color:#999;font-family:var(--mono);text-align:center;margin-bottom:1px}
+</style>
+</head>
+<body>
+<header>
+  <h1>IAST Calculator</h1>
+  <span class="sub">Ideal Adsorbed Solution Theory &mdash; Multicomponent Sorption</span>
+</header>
+<div class="app">
+
+<!-- ═══════════════════════  LEFT SIDEBAR  ══════════════════════ -->
+<aside class="sidebar">
+
+  <!-- Components -->
+  <div class="sb">
+    <div class="lbl">Components</div>
+    <div id="compList"></div>
+    <button class="btn-add" id="btnAddComp">+ Add Component</button>
+  </div>
+
+  <!-- Mixture Conditions -->
+  <div class="sb">
+    <div class="lbl">Mixture Conditions</div>
+
+    <div class="fi-label">Pressure units</div>
+    <select id="pUnits">
+      <option value="bar">bar</option>
+      <option value="mbar">mbar</option>
+      <option value="Pa">Pa</option>
+      <option value="kPa">kPa</option>
+      <option value="MPa">MPa</option>
+      <option value="atm">atm</option>
+      <option value="mmHg">mmHg (torr)</option>
+      <option value="psi">psi</option>
+    </select>
+
+    <div class="fi-label">Calculation mode</div>
+    <select id="calcMode" onchange="onModeChange()">
+      <option value="sweep_p">Sweep total pressure (fixed composition)</option>
+      <option value="sweep_y">Sweep bulk mole fraction (fixed pressure)</option>
+    </select>
+
+    <!-- Sweep P controls -->
+    <div id="ctrlSweepP">
+      <div class="fi-label">Pressure range &amp; steps</div>
+      <div class="sweep-row">
+        <div><div class="sweep-lbl">P min</div><input type="number" id="pMin" value="0.01" min="0" step="any"></div>
+        <div><div class="sweep-lbl">P max</div><input type="number" id="pMax" value="10" min="0" step="any"></div>
+        <div><div class="sweep-lbl">Steps</div><input type="number" id="pSteps" value="100" min="5" max="500" step="1"></div>
+      </div>
+      <input type="hidden" id="pScale" value="linear">
+      <div class="fi-label" style="margin-top:8px">Bulk mole fractions y<sub>i</sub></div>
+      <div id="yFracs"></div>
+    </div>
+
+    <!-- Sweep Y controls -->
+    <div id="ctrlSweepY" style="display:none">
+      <div class="fi-label">Fixed total pressure</div>
+      <input type="number" id="pFixed" value="1" min="0" step="any">
+      <div class="fi-label">Steps (0→1 for component 1)</div>
+      <input type="number" id="ySteps" value="50" min="5" max="200" step="1">
+      <div class="fi-label" style="font-size:9px;color:#aaa;margin-top:4px">For binary: y₁ sweeps 0.01→0.99, y₂=1−y₁<br>For N components: y₁ sweeps, others share remainder equally</div>
+    </div>
+
+  </div>
+
+  <!-- Output -->
+  <div class="sb">
+    <div class="lbl">Output</div>
+    <div class="fi-label">Selectivity pair</div>
+    <select id="selPair" onchange="renderDashboard()"></select>
+    <div style="font-family:var(--mono);font-size:9px;color:#aaa;margin-top:4px">Uptake: mmol g⁻¹ (fixed)</div>
+    <input type="hidden" id="qUnitsOut" value="mmol/g">
+  </div>
+
+  <!-- Action buttons -->
+  <div class="sb" style="display:flex;flex-direction:column;gap:6px">
+    <button class="btn" id="btnRun" disabled>Run IAST</button>
+    <button class="btn out" id="btnExport" disabled>Export Results CSV</button>
+  </div>
+
+</aside>
+
+<!-- ═══════════════════════  CENTRE  ══════════════════════════ -->
+<div class="centre">
+
+  <div class="chart-wrap">
+    <div class="chart-tabs" id="chartTabs">
+      <button class="chart-tab active" id="tabIso"   onclick="switchTab('iso')">Pure-Component Isotherms</button>
+      <button class="chart-tab"        id="tabPlot"  onclick="switchTab('plot')">Results Plots</button>
+      <button class="chart-tab"        id="tabData"  onclick="switchTab('data')">Results Table</button>
+      <button class="chart-tab"        id="tabGuide" onclick="switchTab('guide')">Guide</button>
+    </div>
+
+    <!-- PLOT TAB -->
+    <div id="plotTab" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden">
+      <div class="dashboard" id="dashboard"></div>
+    </div>
+
+    <!-- ISO TAB -->
+    <div id="isoTab" style="display:flex;flex:1;min-height:0;position:relative">
+      <canvas id="cvIso" style="position:absolute;top:0;left:0;width:100%;height:100%"></canvas>
+    </div>
+
+    <!-- DATA TAB -->
+    <div id="dataContent" style="display:none;flex:1;min-height:0;overflow-y:auto;padding:12px 16px;background:var(--paper)">
+      <div id="dataTable"><div class="ph">Run IAST to see results table.</div></div>
+    </div>
+
+    <!-- GUIDE TAB -->
+    <div id="guideContent" style="display:none;overflow-y:auto;padding:24px 32px;background:var(--paper);font-size:13px;line-height:1.75;color:#333;flex:1;min-height:0">
+      <h2 style="font-family:var(--serif);font-size:22px;font-weight:600;margin-bottom:4px">IAST Calculator</h2>
+      <p style="font-family:var(--mono);font-size:9px;letter-spacing:.15em;text-transform:uppercase;color:var(--accent);margin-bottom:20px">User Guide</p>
+      <div class="g-sec">Overview</div>
+      <p>This app predicts multicomponent adsorption equilibria using Ideal Adsorbed Solution Theory (IAST). Single-component isotherm data exported from the Sorption Isotherm Fitting app are loaded for each component; IAST then computes the mixture loadings and selectivities at any specified bulk-phase composition and pressure.</p>
+      <div class="g-sec">Loading components</div>
+      <p>Click <b>Add Component</b> to create a component slot. For each component, click the drop zone to browse for a CSV file exported from the isotherm fitting app. The app reads the model name and fitted parameters automatically. If no <span class="g-code">Sorptive</span> row is found in the CSV, enter the gas name manually in the text field that appears.</p>
+      <div class="g-sec">CSV format (from fitting app)</div>
+      <table class="g-table">
+        <tr><th>Row</th><th>Content</th></tr>
+        <tr><td>Model,…</td><td>Model name — parsed automatically</td></tr>
+        <tr><td>Parameter,Value,Std Error</td><td>Fitted parameter block</td></tr>
+        <tr><td>Sorptive,CO2</td><td>Optional gas name (can be entered manually)</td></tr>
+        <tr><td>Pressure_Units,bar</td><td>Pressure unit — parsed automatically</td></tr>
+        <tr><td>Uptake_Units,mmol/g</td><td>Uptake unit — stored for reference</td></tr>
+        <tr><td>TemperatureK,298.15</td><td>Temperature in Kelvin — displayed on card</td></tr>
+        <tr><td>Sorptive_MW,44.01</td><td>Gas molecular weight (g mol⁻¹) — displayed on card</td></tr>
+        <tr><td>Host_Formula,…</td><td>Host chemical formula — displayed on card</td></tr>
+        <tr><td>Host_MW,…</td><td>Host molecular weight (g mol⁻¹)</td></tr>
+        <tr><td>Host_Mass,…</td><td>Host sample mass (mg)</td></tr>
+        <tr><td>Pressure,Uptake,Fitted,Residual</td><td>Data table — Pressure &amp; Fitted columns used</td></tr>
+      </table>
+      <div class="g-sec">Shared metadata vocabulary</div>
+      <p>This app is part of a suite of sorption tools for (1) unit conversion, (2) isotherm fitting, (3) IAST calculations, and (4) sorption enthalpy calculations. Metadata keywords are passed through from the input file to the output CSV, ensuring data continuity through the pipeline.</p>
+      <table class="g-table">
+        <tr><th>Keyword</th><th>Value</th><th>Written by</th></tr>
+        <tr><td>Sorptive</td><td>Gas name or synonym</td><td>Unit converter, Isotherm fitter</td></tr>
+        <tr><td>Sorptive_MW</td><td>Gas molecular weight (g mol⁻¹)</td><td>Isotherm fitter</td></tr>
+        <tr><td>Pressure_Units</td><td>mbar, bar, Pa, kPa, MPa, atm, mmHg, psi, p/p0</td><td>Unit converter, Isotherm fitter</td></tr>
+        <tr><td>Uptake_Units</td><td>mmol/g, mol/kg, cc(STP)/g, wt%, …</td><td>Unit converter, Isotherm fitter</td></tr>
+        <tr><td>TemperatureK</td><td>Temperature in Kelvin</td><td>Unit converter, Isotherm fitter; required by Sorption Enthalpy Calculator</td></tr>
+        <tr><td>Host_Formula</td><td>Chemical formula of host material</td><td>Unit converter, Isotherm fitter</td></tr>
+        <tr><td>Host_MW</td><td>Host molecular weight (g mol⁻¹)</td><td>Unit converter, Isotherm fitter</td></tr>
+        <tr><td>Host_Mass</td><td>Host sample mass (mg)</td><td>Unit converter, Isotherm fitter</td></tr>
+        <tr><td>PSat</td><td>Saturation vapour pressure (bar)</td><td>Unit converter</td></tr>
+      </table>
+      <p>Keywords are case-insensitive and whitespace/underscore-tolerant. The IAST Calculator reads all of the above keywords and displays Sorptive_MW, TemperatureK, and Host_Formula in the component cards when present.</p>
+      <div class="g-sec">Supported isotherm models</div>
+      <table class="g-table">
+        <tr><th>Model</th><th>Spreading pressure integral</th></tr>
+        <tr><td>Henry</td><td>Analytical</td></tr>
+        <tr><td>Langmuir</td><td>Analytical</td></tr>
+        <tr><td>Freundlich</td><td>Analytical</td></tr>
+        <tr><td>Langmuir-Freundlich (Sips)</td><td>Analytical</td></tr>
+        <tr><td>Dual-Site Langmuir</td><td>Analytical</td></tr>
+        <tr><td>Dual-Site Langmuir-Freundlich</td><td>Analytical</td></tr>
+        <tr><td>Toth</td><td>Numerical</td></tr>
+        <tr><td>BET</td><td>Numerical</td></tr>
+        <tr><td>All others</td><td>Numerical (Gaussian quadrature)</td></tr>
+      </table>
+      <div class="g-sec">Calculation modes</div>
+      <p><b>Sweep total pressure:</b> Fix the bulk mole fractions y<sub>i</sub> and compute IAST results across a pressure range. Good for adsorption isotherms and selectivity vs pressure plots.</p>
+      <p><b>Sweep bulk mole fraction:</b> Fix total pressure and sweep y₁ from ~0 to ~1. Good for adsorption isotherms and selectivity as a function of bulk-phase composition.</p>
+      <div class="g-sec">Output types</div>
+      <p>Plots are shown automatically based on the calculation mode. <b>Sweep total pressure</b> shows three plots: component loadings (including total) vs pressure, adsorbed-phase mole fractions vs pressure, and selectivity vs pressure. <b>Sweep bulk mole fraction</b> shows two plots: component loadings vs y₁ and selectivity vs y₁.</p>
+      <div class="g-sec">IAST theory</div>
+      <p>IAST (Myers &amp; Prausnitz, 1965) extends Raoult's law to adsorption. At equilibrium, the spreading pressure of each component in the mixture equals a common spreading pressure Π. The spreading pressure is defined as Π = (RT/A)∫₀<sup>P°ᵢ</sup> qᵢ(P)/P dP where A is the specific surface area. IAST solves for the hypothetical single-component pressures P°ᵢ such that all Πᵢ are equal, then computes the adsorbed-phase loading from the mole fractions xᵢ = yᵢP/P°ᵢ (normalised) and total loading 1/q_total = Σxᵢ/qᵢ(P°ᵢ).</p>
+      <div class="g-sec">Selectivity</div>
+      <p>Adsorption selectivity of component i over j is defined as S<sub>ij</sub> = (x<sub>i</sub>/x<sub>j</sub>) / (y<sub>i</sub>/y<sub>j</sub>), where x and y are adsorbed- and gas-phase mole fractions respectively.</p>
+      <p style="margin-top:24px;font-family:var(--mono);font-size:9px;color:#bbb;letter-spacing:.08em">Version 2.0</p>
+    </div>
+
+  </div><!-- chart-wrap -->
+  <div id="status">Ready — add components and load isotherm CSV files.</div>
+</div><!-- centre -->
+
+<!-- ═══════════════════════  RIGHT PANEL  ════════════════════ -->
+<div class="cpanel">
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Axes</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">X label</span><input type="text" id="xLbl" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Y label</span><input type="text" id="yLbl" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">X min</span><input type="number" id="xMin" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">X max</span><input type="number" id="xMax" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Y min</span><input type="number" id="yMin" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Y max</span><input type="number" id="yMax" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">X log scale</span><input type="checkbox" id="xLog" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Y log scale</span><input type="checkbox" id="yLog" oninput="redraw()"></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Typography</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Font</span>
+        <select id="font" onchange="redraw()">
+          <option value="Georgia,serif">Georgia</option>
+          <option value="'Times New Roman',serif">Times New Roman</option>
+          <option value="'Helvetica Neue',Helvetica,sans-serif">Helvetica</option>
+          <option value="'Courier New',monospace">Courier New</option>
+          <option value="Verdana,sans-serif">Verdana</option>
+          <option value="'DM Sans',sans-serif">DM Sans</option>
+        </select>
+      </div>
+      <div class="cr"><span class="cl">Label size</span><input type="range" id="axSz" min="8" max="72" value="36" oninput="V(this);redraw()"><span class="rv2">14</span></div>
+      <div class="cr"><span class="cl">Tick size</span><input type="range" id="tkSz" min="8" max="64" value="28" oninput="V(this);redraw()"><span class="rv2">11</span></div>
+      <div class="cr"><span class="cl">Labels bold</span><input type="checkbox" id="axBold" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Axis color</span><input type="color" id="axCol" value="#000000" oninput="redraw()"></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Grid &amp; Frame</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Show grid</span><input type="checkbox" id="grid" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Grid color</span><input type="color" id="gridCol" value="#dddddd" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Grid width</span><input type="range" id="gridW" min="0.5" max="3" step=".5" value="1" oninput="V(this);redraw()"><span class="rv2">1</span></div>
+      <div class="cr"><span class="cl">Tick length</span><input type="range" id="tickLen" min="2" max="16" value="8" oninput="V(this);redraw()"><span class="rv2">8</span></div>
+      <div class="cr"><span class="cl">Axis width</span><input type="range" id="frameW" min="0.5" max="5" step=".5" value="3" oninput="V(this);redraw()"><span class="rv2">3</span></div>
+      <div class="cr"><span class="cl">Box border</span><input type="checkbox" id="boxBdr" checked oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Box width</span><input type="range" id="boxW" min="0.5" max="5" step=".5" value="3" oninput="V(this);redraw()"><span class="rv2">3</span></div>
+      <div class="cr"><span class="cl">Box color</span><input type="color" id="boxCol" value="#000000" oninput="redraw()"></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Colors &amp; Lines</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Chart bg</span><input type="color" id="chartBg" value="#ffffff" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Plot bg</span><input type="color" id="plotBg" value="#ffffff" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Line width</span><input type="range" id="lnW" min="0.5" max="6" step="0.5" value="2" oninput="V(this);redraw()"><span class="rv2">2</span></div>
+      <div id="colorRows"></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Legend &amp; Title</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Show legend</span><input type="checkbox" id="leg" checked oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Legend size</span><input type="range" id="legSz" min="8" max="36" value="11" oninput="V(this);redraw()"><span class="rv2">11</span></div>
+      <div class="cr"><span class="cl">Chart title</span><input type="text" id="ttl" placeholder="none" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Title size</span><input type="range" id="ttlSz" min="10" max="60" value="15" oninput="V(this);redraw()"><span class="rv2">15</span></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Save Plot</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Width px</span><input type="number" id="expW" value="1200"></div>
+      <div class="cr"><span class="cl">Height px</span><input type="number" id="expH" value="900"></div>
+      <div class="cr"><span class="cl">Format</span><select id="expFmt"><option>PNG</option><option>JPEG</option></select></div>
+      <button class="btn out" style="margin-top:8px;width:100%" onclick="savePlot()">Save Plot Image</button>
+      <div style="margin-top:6px;font-family:var(--mono);font-size:9px;color:#aaa">Saves whichever tab is currently shown (Plot or Isotherms)</div>
+    </div>
+  </div>
+
+</div><!-- cpanel -->
+</div><!-- app -->
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  UTILITY
+// ═══════════════════════════════════════════════════════════════
+function tog(h){h.closest('.cp-group').classList.toggle('open')}
+function V(el,dp){el.nextElementSibling.textContent=parseFloat(el.value).toFixed(dp||0)}
+function gv(id){return document.getElementById(id).value}
+function gb(id){return document.getElementById(id).checked}
+function gn(id){const v=parseFloat(gv(id));return isNaN(v)?null:v}
+function st(msg,cls){const e=document.getElementById('status');e.innerHTML=msg;e.className=cls||''}
+function fmt(v,sig=4){
+  if(v===undefined||v===null||isNaN(v))return'--';
+  const a=Math.abs(v);if(a===0)return'0';
+  if(a>=1e5||a<1e-4)return parseFloat(v.toPrecision(sig)).toExponential(sig-1);
+  return parseFloat(v.toPrecision(sig)).toString();
+}
+function fmt6(v){
+  // Results table: 6 significant figures with trailing zeros for consistency
+  if(v===undefined||v===null||isNaN(v)||!isFinite(v))return'—';
+  if(v===0)return'0.000000';
+  const a=Math.abs(v);
+  if(a>=1e6||a<1e-4) return v.toPrecision(6);
+  const mag=Math.floor(Math.log10(a));
+  const dp=Math.max(0, 5-mag);
+  return v.toFixed(dp);
+}
+function fmtTick(v){
+  // Single-value compact format (used for inputs, not tick sets)
+  if(v===undefined||v===null||isNaN(v)||!isFinite(v))return'';
+  if(v===0)return'0';
+  const a=Math.abs(v);
+  if(a>=1e5||a<1e-3) return parseFloat(v.toPrecision(4)).toExponential();
+  return parseFloat(v.toPrecision(5)).toString();
+}
+
+function fmtTickSet(ticks){
+  // Format an entire axis tick array consistently:
+  // all values share the same number of decimal places,
+  // determined by the step size between ticks.
+  // This ensures e.g. 0.2,0.4,0.6,0.8,1.0 not 0.2,0.4,0.6,0.8,1
+  if(!ticks||ticks.length===0) return ()=>'';
+  const a0=Math.abs(ticks[0]||0), aLast=Math.abs(ticks[ticks.length-1]||0);
+  const maxAbs=Math.max(a0,aLast,...ticks.map(v=>Math.abs(v)));
+  // Use scientific if any value is very large or very small
+  if(maxAbs>=1e5||(maxAbs>0&&maxAbs<1e-3)){
+    return v=>{
+      if(!isFinite(v))return'';
+      return parseFloat(v.toPrecision(3)).toExponential();
+    };
+  }
+  // Determine step size
+  let step=0;
+  if(ticks.length>1){
+    // Use median gap to be robust against uneven ticks
+    const gaps=[];
+    for(let i=1;i<ticks.length;i++) gaps.push(Math.abs(ticks[i]-ticks[i-1]));
+    gaps.sort((a,b)=>a-b);
+    step=gaps[Math.floor(gaps.length/2)];
+  }
+  // Decimal places: enough to represent the step
+  let dp=0;
+  if(step>0&&step<1){
+    dp=Math.max(0,Math.ceil(-Math.log10(step)+0.5));
+    dp=Math.min(dp,10); // sanity cap
+  }
+  // Also ensure enough dp for the largest value's representation
+  // e.g. if step=1 but values are 0.2,0.4,..., we need dp=1
+  if(dp===0){
+    // check if values have fractional parts
+    const hasFrac=ticks.some(v=>Math.abs(v-Math.round(v))>1e-9);
+    if(hasFrac) dp=1;
+  }
+  return v=>{
+    if(!isFinite(v))return'';
+    if(v===0) return dp>0?'0.'+'0'.repeat(dp):'0';
+    return v.toFixed(dp);
+  };
+}
+
+// Default colour palette
+const PALETTE = ['#b84a2e','#2a5caa','#2a7a3b','#8a4fa0','#c07820','#1a9090','#d04080','#606060','#7a5030','#303070'];
+
+// ═══════════════════════════════════════════════════════════════
+//  GAS LIST
+// ═══════════════════════════════════════════════════════════════
+const GAS_LIST = [
+  'Ar','C2H2','C2H4','C2H6','C3H6','C3H8','C4H10','C6H6',
+  'CH4','Cl2','CO','CO2','COS','CS2','H2','H2O','H2S',
+  'HCl','HF','He','Kr','N2','N2O','NH3','NO','NO2',
+  'O2','PH3','SF6','SO2','Xe',
+  'i-C4H10','n-C4H10','n-C5H12','n-C6H14',
+  'C2H5OH','CH3OH','CH3CN',
+  'Custom'
+];
+
+// ═══════════════════════════════════════════════════════════════
+//  COMPONENT STATE
+// ═══════════════════════════════════════════════════════════════
+let components = [];  // [{id, name, model, params, rawP, rawQ, color}]
+let compCount = 0;
+let iastResults = null;  // computed results
+let activeTab = 'iso';
+
+// ═══════════════════════════════════════════════════════════════
+//  ISOTHERM MODELS  q(P, params)
+// ═══════════════════════════════════════════════════════════════
+
+// Normalise model name to a canonical key
+function canonicalModel(raw){
+  if(!raw) return 'unknown';
+  const s = raw.trim().toLowerCase().replace(/[-\s_]+/g,'');
+  if(s==='henry'||s==='henryslaw') return 'henry';
+  if(s==='langmuir') return 'langmuir';
+  if(s==='freundlich') return 'freundlich';
+  if(s==='langmuirfreundlich'||s==='sips'||s==='lf') return 'lf';
+  if(s==='dualsitelangmuir'||s==='dsl'||s==='doublesite langmuir'||s==='dualsite') return 'dsl';
+  if(s==='dualsitelangmuirfreundlich'||s==='dslf'||s==='dualsite langmuirfreundlich'||s==='doublesitelangmuirfreundlich') return 'dslf';
+  if(s==='toth') return 'toth';
+  if(s==='bet'||s==='brunauremmettteller') return 'bet';
+  if(s==='unilan') return 'unilan';
+  if(s==='klotz') return 'klotz';
+  if(s==='quadratic') return 'quadratic';
+  if(s==='temkin') return 'temkin';
+  if(s==='virial') return 'virial';
+  if(s==='mdr'||s==='dubininradushkevich') return 'dr';
+  if(s==='dubininastakhov'||s==='da') return 'da';
+  if(s==='interpolation'||s==='spline'||s==='numerical') return 'numerical';
+  return 'unknown';
+}
+
+// Return a copy of params rescaled so the model works in bar, given original pUnit
+function rescaleParamsToBar(model, params, pUnit){
+  if(pUnit==='bar') return params;
+  const p = Object.assign({}, params);
+  // scale factor: 1 [pUnit] = s bar, so P_bar = P_orig * s
+  // To convert: if model expects P in pUnit, and we feed P_bar,
+  // we substitute P_orig = P_bar / s, i.e. replace a with a/s^m (for LF-type)
+  const s = pToBar(1, pUnit); // 1 unit → bar
+  switch(model){
+    case 'henry':
+      // q = K*P; K has units [q]/[P]. Rescale K: K_bar = K_orig / s
+      p.K = params.K / s;
+      break;
+    case 'langmuir':
+      // q = nm*a*P/(1+a*P); a has units 1/[P]. Rescale: a_bar = a_orig / s
+      p.a = params.a / s;
+      break;
+    case 'freundlich':
+      // q = K*P^n; K has units [q]/[P]^n. K_bar = K_orig / s^n
+      p.K = params.K / Math.pow(s, params.n);
+      break;
+    case 'lf':
+      // q = nm*a*P^m/(1+a*P^m); a has units 1/[P]^m. a_bar = a_orig / s^m
+      p.a = params.a / Math.pow(s, params.m);
+      break;
+    case 'dsl':
+      p.a1 = params.a1 / s;
+      p.a2 = params.a2 / s;
+      break;
+    case 'dslf':
+      p.a1 = params.a1 / Math.pow(s, params.m1);
+      p.a2 = params.a2 / Math.pow(s, params.m2);
+      break;
+    case 'toth':
+      p.a = params.a / s;
+      break;
+    case 'numerical':
+      // rawP already normalised to bar in loadFile/onCompPUnit
+      break;
+    default:
+      break;
+  }
+  return p;
+}
+
+// Same rescaling for uptake: all analytical models return values in original
+// qUnit. We need them in mmol/g. Scale by qToMmolG(1, qUnit).
+function rescaleParamsQToMmolG(model, params, qUnit){
+  if(qUnit==='mmol/g'||qUnit==='mol/kg') return params;
+  const p = Object.assign({}, params);
+  const s = qToMmolG(1, qUnit); // 1 qUnit → mmol/g
+  switch(model){
+    case 'henry':   p.K  = params.K  * s; break;
+    case 'langmuir':p.nm = params.nm * s; break;
+    case 'freundlich': p.K = params.K * s; break;
+    case 'lf':      p.nm = params.nm * s; break;
+    case 'dsl':     p.nm1= params.nm1* s; p.nm2= params.nm2* s; break;
+    case 'dslf':    p.nm1= params.nm1* s; p.nm2= params.nm2* s; break;
+    case 'toth':    p.nm = params.nm * s; break;
+    case 'numerical':
+      if(p.rawQ) p.rawQ = params.rawQ.map(q=>q*s);
+      break;
+    default: break;
+  }
+  return p;
+}
+
+function qModel(P, model, p){
+  if(P<=0) return 0;
+  switch(model){
+    case 'henry':  return p.K*P;
+    case 'langmuir': return p.nm*p.a*P/(1+p.a*P);
+    case 'freundlich': return p.K*Math.pow(P,p.n);
+    case 'lf':  {const x=p.a*Math.pow(P,p.m); return p.nm*x/(1+x);}
+    case 'dsl':  return p.nm1*p.a1*P/(1+p.a1*P) + p.nm2*p.a2*P/(1+p.a2*P);
+    case 'dslf': {const x1=p.a1*Math.pow(P,p.m1),x2=p.a2*Math.pow(P,p.m2); return p.nm1*x1/(1+x1)+p.nm2*x2/(1+x2);}
+    case 'toth': return p.nm*p.a*P/Math.pow(1+Math.pow(p.a*P,p.t),1/p.t);
+    case 'bet':  return p.nm*p.C*P/((1-P/p.Ps)*(1+(p.C-1)*P/p.Ps));
+    case 'quadratic': return (p.Ka+2*p.Kaa*P)*P/(1+p.Ka*P+p.Kaa*P*P);
+    case 'temkin': {
+      // q = nm*(1 - exp(-a*P)) iterative; simple Temkin: q=nm*ln(a*P)/a_t
+      // Use generic: q = q_sat*(RT/Δε)*ln(a*P)
+      return p.qm*(Math.log(1+p.a*P));
+    }
+    case 'unilan': {
+      const s=p.s, c=p.c, nm=p.nm;
+      if(Math.abs(s)<1e-10) return nm*c*P/(1+c*P);
+      return (nm/(2*s))*Math.log((1+c*Math.exp(s)*P)/(1+c*Math.exp(-s)*P));
+    }
+    case 'dr': {
+      const eps=8.314*p.T*Math.log(p.Ps/P);
+      return p.nm*Math.exp(-Math.pow(eps/p.E,2));
+    }
+    case 'da': {
+      const eps=8.314*p.T*Math.log(p.Ps/P);
+      return p.nm*Math.exp(-Math.pow(eps/p.E,p.n));
+    }
+    case 'numerical': {
+      // Interpolate from raw arrays stored in params
+      return interpLinear(p.rawP, p.rawQ, P);
+    }
+    default: return 0;
+  }
+}
+
+function interpLinear(xs, ys, x){
+  if(!xs||xs.length<2) return 0;
+  if(x<=xs[0]) return ys[0];
+  if(x>=xs[xs.length-1]) return ys[ys.length-1];
+  let lo=0, hi=xs.length-1;
+  while(hi-lo>1){const mid=(lo+hi)>>1; if(xs[mid]<=x) lo=mid; else hi=mid;}
+  const t=(x-xs[lo])/(xs[hi]-xs[lo]);
+  return ys[lo]+t*(ys[hi]-ys[lo]);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  SPREADING PRESSURE  Ψ(P) = ∫₀ᴾ q(t)/t dt
+// ═══════════════════════════════════════════════════════════════
+
+function spreadingPressure(P, model, params){
+  if(P<=0) return 0;
+  switch(model){
+    case 'henry':
+      return params.K*P;
+    case 'langmuir':
+      return params.nm*Math.log(1+params.a*P);
+    case 'freundlich':
+      return params.K*Math.pow(P,params.n)/params.n;
+    case 'lf':{
+      const x=Math.pow(params.a*P,params.m);
+      return params.nm/params.m*Math.log(1+x);
+    }
+    case 'dsl':
+      return params.nm1*Math.log(1+params.a1*P) + params.nm2*Math.log(1+params.a2*P);
+    case 'dslf':{
+      const x1=Math.pow(params.a1*P,params.m1), x2=Math.pow(params.a2*P,params.m2);
+      return params.nm1/params.m1*Math.log(1+x1) + params.nm2/params.m2*Math.log(1+x2);
+    }
+    default:
+      // Numerical Gaussian quadrature (20-point GL on [0,P], after variable transform)
+      return spreadingPressureNumerical(P, model, params);
+  }
+}
+
+// 20-point Gauss-Legendre nodes and weights on [-1,1]
+const GL20_NODES = [-0.9931286,-0.9639719,-0.9122344,-0.8391170,-0.7463061,-0.6360537,-0.5108670,-0.3737061,-0.2277859,-0.0765265,0.0765265,0.2277859,0.3737061,0.5108670,0.6360537,0.7463061,0.8391170,0.9122344,0.9639719,0.9931286];
+const GL20_WGTS = [0.0176140,0.0406014,0.0626720,0.0832767,0.1019301,0.1181945,0.1316886,0.1420961,0.1491730,0.1527534,0.1527534,0.1491730,0.1420961,0.1316886,0.1181945,0.1019301,0.0832767,0.0626720,0.0406014,0.0176140];
+
+function spreadingPressureNumerical(P, model, params){
+  // Integrate q(t)/t from eps to P, use log-transform t=exp(u) for stability near 0
+  const eps = 1e-12;
+  const a = Math.log(eps), b = Math.log(P);
+  if(b<=a) return 0;
+  let sum=0;
+  const mid=(a+b)/2, half=(b-a)/2;
+  for(let i=0;i<20;i++){
+    const u = mid + half*GL20_NODES[i];
+    const t = Math.exp(u);
+    // integrand in log space: q(t)/t * dt/du = q(t)/t * t = q(t)
+    sum += GL20_WGTS[i]*qModel(t,model,params);
+  }
+  return sum*half;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  IAST SOLVER  (Newton/bisection hybrid)
+// ═══════════════════════════════════════════════════════════════
+
+// Given bulk mole fractions y[i] and total pressure P_total,
+// find P0[i] (hypothetical single-component pressures) such that
+// all spreading pressures Ψ_i(P0[i]) are equal.
+// Returns {x, q, qtot, psi, converged}
+
+function solveIAST(components, y, Ptot, tol=1e-10){
+  const N   = components.length;
+  const eps = 1e-15;
+
+  // Bisect to find P such that spreadingPressure(P, comp) = targetPsi.
+  // Ψ is strictly monotone increasing, so bisection always converges.
+  function findP0(targetPsi, comp){
+    if(targetPsi <= 0) return eps;
+    // Expand upper bound until Ψ(hi) >= target
+    let hi = Math.max(Ptot * 10, 1.0);
+    for(let k=0; k<60; k++){
+      if(spreadingPressure(hi, comp.model, comp.params) >= targetPsi) break;
+      hi *= 4;
+      if(hi > 1e12) break;
+    }
+    let lo = eps, hi2 = hi;
+    for(let k=0; k<120; k++){
+      const mid = (lo + hi2) / 2;
+      if(spreadingPressure(mid, comp.model, comp.params) < targetPsi) lo = mid;
+      else hi2 = mid;
+      if((hi2 - lo) < tol * (lo + hi2 + eps)) break;
+    }
+    return (lo + hi2) / 2;
+  }
+
+  // For a given p0 = P0[0], compute the sum Σ x_i = Σ y_i*Ptot/P0_i.
+  // This is monotone decreasing in p0, so we can bisect on it too.
+  function sumXatP0(p0){
+    const psi0 = spreadingPressure(p0, components[0].model, components[0].params);
+    const P0   = [p0];
+    for(let i=1; i<N; i++) P0.push(findP0(psi0, components[i]));
+    let s = 0;
+    for(let i=0; i<N; i++) s += y[i] * Ptot / Math.max(P0[i], eps);
+    return {s, P0};
+  }
+
+  // Bisect on p0 to find Σ x_i = 1.
+  // At p0→0:   Ψ0→0, all P0_i→0, Σ x_i → ∞  (f > 0)
+  // At p0→∞:   Ψ0→∞, all P0_i→∞, Σ x_i → 0  (f < 0)
+  let lo_p0 = eps;
+  let hi_p0 = Math.max(Ptot * 10, 1.0);
+  for(let k=0; k<60; k++){
+    if(sumXatP0(hi_p0).s < 1.0) break;
+    hi_p0 *= 4;
+    if(hi_p0 > 1e12) break;
+  }
+
+  for(let k=0; k<120; k++){
+    const mid = (lo_p0 + hi_p0) / 2;
+    if(sumXatP0(mid).s > 1.0) lo_p0 = mid;
+    else                       hi_p0 = mid;
+    if((hi_p0 - lo_p0) < tol * (lo_p0 + hi_p0 + eps)) break;
+  }
+
+  const {P0} = sumXatP0((lo_p0 + hi_p0) / 2);
+
+  // Compute adsorbed fractions and loadings
+  const xRaw = y.map((yi,i) => yi * Ptot / Math.max(P0[i], eps));
+  const xSum = xRaw.reduce((s,v) => s+v, 0);
+  const x    = xRaw.map(v => v / Math.max(xSum, eps));
+  const qS   = P0.map((pi,i) => Math.max(qModel(pi, components[i].model, components[i].params), eps));
+  const invQ = x.reduce((s,xi,i) => s + xi/qS[i], 0);
+  const qtot = 1 / Math.max(invQ, eps);
+  const qi   = x.map(xi => xi * qtot);
+
+  const converged = isFinite(qtot) && qtot > 0 && x.every(v => isFinite(v) && v >= 0);
+  return {x, qi, qtot, P0, converged};
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+//  UNIT DETECTION HELPERS  (from Sorption Unit Converter)
+// ═══════════════════════════════════════════════════════════════
+
+const PRESSURE_UNITS = ['bar','mbar'];
+
+// Pressure unit display labels
+function fmtPUnit(u){
+  const m={'bar':'bar','mbar':'mbar','kPa':'kPa','MPa':'MPa','atm':'atm',
+           'Pa':'Pa','mmHg':'mmHg','psi':'psi','p/p0':'p/p₀'};
+  return m[u]||u;
+}
+// Uptake unit display labels
+function fmtQUnit(u){
+  const m={'mmol/g':'mmol g⁻¹','mol/kg':'mol kg⁻¹','cc(STP)/g':'cc(STP) g⁻¹',
+           'cm3/g':'cm³ g⁻¹','g/g':'g g⁻¹','wt%':'wt %','mg/g':'mg g⁻¹',
+           'ug/g':'µg g⁻¹','mg/mg_host':'mg mg⁻¹','ug/mg_host':'µg mg⁻¹',
+           'mg_abs':'mg','ug_abs':'µg','mol/mol':'mol mol⁻¹'};
+  return m[u]||u;
+}
+
+// Pressure unit conversion: to/from bar
+function pToBar(v,u){
+  switch(u){
+    case 'mbar': return v/1000;
+    case 'Pa':   return v/1e5;
+    case 'kPa':  return v/100;
+    case 'MPa':  return v*10;
+    case 'atm':  return v*1.01325;
+    case 'mmHg': return v*0.00133322;
+    case 'psi':  return v*0.0689476;
+    default:     return v;   // bar
+  }
+}
+function pFromBar(v,u){
+  switch(u){
+    case 'mbar': return v*1000;
+    case 'Pa':   return v*1e5;
+    case 'kPa':  return v*100;
+    case 'MPa':  return v/10;
+    case 'atm':  return v/1.01325;
+    case 'mmHg': return v/0.00133322;
+    case 'psi':  return v/0.0689476;
+    default:     return v;   // bar
+  }
+}
+// Uptake is always mmol/g — these are no-ops kept for API compatibility
+function qToMmolG(v,u){return v;}
+function qFromMmolG(v,u){return v;}
+
+// Detect pressure unit from a header string (e.g. "Pressure (mbar)")
+function detectPressureUnit(s){
+  s=s.toLowerCase();
+  if(/\bmpa\b/.test(s))  return 'MPa';
+  if(/\bkpa\b/.test(s))  return 'kPa';
+  if(/\bmbar\b/.test(s)) return 'mbar'; // before \bbar\b
+  if(/\bbar\b/.test(s))  return 'bar';
+  if(/\batm\b/.test(s))  return 'atm';
+  if(/\btorr\b/.test(s)||/\bmmhg\b/.test(s)) return 'mmHg';
+  if(/\bpsi\b/.test(s))  return 'psi';
+  if(/\bpa\b/.test(s))   return 'Pa';
+  return null;
+}
+
+// detectUptakeUnit removed — uptake is always mmol/g
+
+// Match a metadata keyword for Pressure_Units
+function detectPressureUnitKeyword(s){
+  const sl=s.toLowerCase().replace(/[_\s-]/g,'');
+  const direct={'bar':'bar','mbar':'mbar','kpa':'kPa','mpa':'MPa',
+                'atm':'atm','pa':'Pa','mmhg':'mmHg','torr':'mmHg','psi':'psi',
+                'p/p0':'p/p0','pp0':'p/p0','relative':'p/p0'};
+  if(direct[sl]) return direct[sl];
+  return detectPressureUnit(s);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CSV PARSER
+// ═══════════════════════════════════════════════════════════════
+
+function parseIsothermCSV(text){
+  const lines = text.split(/\r?\n/);
+  const result = {
+    model:null, params:{}, sorptive:null,
+    sorptiveMW:null, tempK:null,
+    hostFormula:null, hostMW:null, hostMass:null,
+    rawP:[], rawQ:[],
+    pUnit:null, pUnitSource:null,  // 'keyword'|'header'|'default'
+    qUnit:'mmol/g', qUnitSource:'fixed',  // always mmol/g
+    error:null
+  };
+
+  let paramMode=false, dataMode=false;
+
+  for(let li=0;li<lines.length;li++){
+    const raw=lines[li].trim();
+    if(!raw) continue;
+
+    const cols = raw.split(',').map(s=>s.trim());
+    const c0=cols[0]||'', c1=cols[1]||'';
+
+    // ── Isotherm-fitting-app structural keywords ──
+    if(c0==='Model'){result.model=c1; paramMode=false; dataMode=false; continue;}
+    if(c0==='Sorptive'){result.sorptive=c1; continue;}
+    if(c0==='Parameter'&&c1==='Value'){paramMode=true; dataMode=false; continue;}
+    if(c0==='Correlation Matrix'){paramMode=false; dataMode=false; continue;}
+
+    // ── Unit & metadata keywords (case-insensitive, underscore/space tolerant) ──
+    const key=c0.toLowerCase().replace(/[_\s]/g,'');
+    if(!dataMode){
+      if(key==='pressure_units'||key==='pressureunits'||key==='punits'){
+        const u=detectPressureUnitKeyword(c1);
+        if(u){result.pUnit=u; result.pUnitSource='keyword';}
+        continue;
+      }
+      if(key==='sorptivemw'||key==='mwgas'||key==='gasmw'||key==='mw'){
+        const v=parseFloat(c1);
+        if(isFinite(v)&&v>0) result.sorptiveMW=v;
+        continue;
+      }
+      if(key==='temperaturek'){
+        const v=parseFloat(c1);
+        if(isFinite(v)&&v>0) result.tempK=v;
+        continue;
+      }
+      if(key==='temperaturec'){
+        const v=parseFloat(c1);
+        if(isFinite(v)) result.tempK=v+273.15;
+        continue;
+      }
+      if(key==='hostformula'){
+        if(c1) result.hostFormula=c1;
+        continue;
+      }
+      if(key==='hostmw'||key==='mwhost'){
+        const v=parseFloat(c1);
+        if(isFinite(v)&&v>0) result.hostMW=v;
+        continue;
+      }
+      if(key==='hostmass'||key==='masssample'||key==='samplemass'){
+        const v=parseFloat(c1);
+        if(isFinite(v)&&v>0) result.hostMass=v;
+        continue;
+      }
+    }
+
+    // ── Data table header: "Pressure,Uptake,Fitted,Residual" ──
+    if(c0==='Pressure'&&c1==='Uptake'){
+      paramMode=false; dataMode=true;
+      // Try to extract units from column headers if not already found
+      if(!result.pUnit){
+        const pu=detectPressureUnit(c0);
+        if(pu){result.pUnit=pu; result.pUnitSource='header';}
+      }
+      continue;
+    }
+
+    // ── Column header with embedded units e.g. "Pressure (mbar), Uptake (cc(STP)/g)" ──
+    if(!dataMode && !paramMode){
+      const p0=parseFloat(c0);
+      if(isNaN(p0) && c0 && c1){
+        if(!result.pUnit){
+          const pu=detectPressureUnit(c0);
+          if(pu){result.pUnit=pu; result.pUnitSource='header';}
+        }
+      }
+    }
+
+    if(paramMode){
+      if(c0&&c1&&!isNaN(parseFloat(c1))){
+        const pname=c0.trim();
+        if(pname!=='R2'&&pname!=='SSR') result.params[pname]=parseFloat(c1);
+      }
+    }
+    if(dataMode){
+      const P=parseFloat(c0), Qmeas=parseFloat(c1);
+      if(isFinite(P)&&P>0){
+        if(isFinite(Qmeas)&&Qmeas>=0){result.rawP.push(P);result.rawQ.push(Qmeas);}
+      }
+    }
+  }
+
+  if(!result.model) result.error='Model name not found in CSV';
+  // Apply defaults if nothing detected
+  if(!result.pUnit){result.pUnit='bar'; result.pUnitSource='default';}
+  return result;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  COMPONENT UI
+// ═══════════════════════════════════════════════════════════════
+
+function addComponent(){
+  const id = ++compCount;
+  const color = PALETTE[(components.length)%PALETTE.length];
+  const comp = {id, name:'', model:null, params:{}, rawP:[], rawQ:[], color, loaded:false};
+  components.push(comp);
+  renderCompList();
+  updateColorRows();
+  updateYFracs();
+  updateSelPair();
+  updateRunBtn();
+}
+
+function invalidateIAST(){
+  // Wipe IAST results and reset result panels when inputs change
+  iastResults = null;
+  document.getElementById('btnExport').disabled = true;
+  renderDataTable();   // shows placeholder
+  renderDashboard();   // shows "Run IAST to populate"
+  st('Inputs changed — please re-run IAST.','');
+}
+
+function removeComponent(id){
+  components = components.filter(c=>c.id!==id);
+  renderCompList();
+  updateColorRows();
+  updateYFracs();
+  updateSelPair();
+  updateRunBtn();
+  renderIsoChart();    // update pure-component plot immediately
+  invalidateIAST();
+}
+
+function renderCompList(){
+  const el=document.getElementById('compList');
+  el.innerHTML='';
+  components.forEach((comp,idx)=>{
+    const div=document.createElement('div');
+    div.className='comp-card'+(comp.collapsed?' collapsed':'');
+    div.id='card-'+comp.id;
+
+    const gasOpts = GAS_LIST.map(g=>`<option value="${g}"${comp.name===g?' selected':''}>${g}</option>`).join('');
+    const showNameField = !comp.sorptive_in_file;
+
+    // Build the drop zone element directly (NOT via innerHTML) so events attach cleanly
+    const dz=document.createElement('div');
+    dz.className='dz-small';
+    dz.id='dz-'+comp.id;
+    const dzTxt=document.createElement('div');
+    dzTxt.className='dz-txt';
+    dzTxt.style.pointerEvents='none';
+    dzTxt.textContent=comp.loaded?'':comp.filename?'':'Click or drop CSV here';
+    const dzName=document.createElement('div');
+    dzName.className='dz-small-name';
+    dzName.id='dzn-'+comp.id;
+    dzName.style.pointerEvents='none';
+    dzName.textContent=comp.filename||'';
+    dz.appendChild(dzTxt);
+    dz.appendChild(dzName);
+
+    // Click to browse
+    dz.addEventListener('click',()=>browseFile(comp.id));
+
+    // Drag and drop
+    dz.addEventListener('dragover', e=>{e.preventDefault();dz.classList.add('over');});
+    dz.addEventListener('dragleave',e=>{if(!dz.contains(e.relatedTarget))dz.classList.remove('over');});
+    dz.addEventListener('drop',e=>{
+      e.preventDefault();
+      dz.classList.remove('over');
+      const f=e.dataTransfer.files[0];
+      if(f) loadFile(comp.id,f);
+    });
+
+    div.innerHTML=`
+      <div class="comp-header" id="hdr-${comp.id}">
+        <span class="comp-name"><span class="swatch" style="background:${comp.color};display:inline-block;width:9px;height:9px;border:1px solid #888;margin-right:4px"></span>Component ${idx+1}${comp.name?' — '+comp.name:''}</span>
+        <span style="display:flex;align-items:center;gap:4px">
+          <span class="comp-arr">&#9660;</span>
+          <button class="comp-del" onclick="event.stopPropagation();removeComponent(${comp.id})" title="Remove">✕</button>
+        </span>
+      </div>
+      <div class="comp-body" id="compbody-${comp.id}">
+        ${!comp.loaded?'':
+          `<div class="comp-info">
+            <span style="color:#aaa">Model:</span> <span>${comp.model_raw||'—'}</span><br>
+            ${Object.entries(comp.params).filter(([k])=>!['rawP','rawQ'].includes(k)).slice(0,6).map(([k,v])=>`<span style="color:#aaa">${k}:</span> <span>${fmt(v,5)}</span>`).join(' &nbsp;')}
+            ${comp.sorptiveMW!=null?`<br><span style="color:#aaa">MW:</span> <span>${comp.sorptiveMW} g mol⁻¹</span>`:''}
+            ${comp.tempK!=null?`<br><span style="color:#aaa">T:</span> <span>${comp.tempK} K</span>`:''}
+            ${comp.hostFormula?`<br><span style="color:#aaa">Host:</span> <span>${comp.hostFormula}</span>`:''}
+          </div>
+          <div style="margin-top:6px;border-top:1px solid var(--pale);padding-top:6px">
+            <div class="yrow">
+              <span class="yrow-lbl" style="font-family:var(--mono);font-size:9px;color:#888">Pressure unit</span>
+              <select onchange="onCompPUnit(${comp.id},this.value)" style="width:70px;background:var(--cream);border:1.5px solid var(--rule);padding:2px 4px;font-family:var(--mono);font-size:10px;color:var(--ink);outline:none;appearance:none">
+                <option value="bar"${comp.pUnit==='bar'?' selected':''}>bar</option>
+                <option value="mbar"${comp.pUnit==='mbar'?' selected':''}>mbar</option>
+                <option value="Pa"${comp.pUnit==='Pa'?' selected':''}>Pa</option>
+                <option value="kPa"${comp.pUnit==='kPa'?' selected':''}>kPa</option>
+                <option value="MPa"${comp.pUnit==='MPa'?' selected':''}>MPa</option>
+                <option value="atm"${comp.pUnit==='atm'?' selected':''}>atm</option>
+                <option value="mmHg"${comp.pUnit==='mmHg'?' selected':''}>mmHg</option>
+                <option value="psi"${comp.pUnit==='psi'?' selected':''}>psi</option>
+              </select>
+              <span style="font-size:8px;color:${comp.pUnitSource==='default'?'var(--accent)':'#aaa'}" title="${comp.pUnitSource==='default'?'Assumed bar — change if needed':'Detected: '+comp.pUnitSource}">${comp.pUnitSource==='default'?'⚠':'✓'}</span>
+            </div>
+            <div style="font-family:var(--mono);font-size:8px;color:#aaa;margin-top:3px">Uptake: mmol g⁻¹ (fixed)</div>
+          </div>`
+        }
+        <div class="fi-label">Sorptive gas${comp.sorptive_in_file?' <span style="color:#aaa;font-size:8px;font-style:italic">(from file)</span>':''}</div>
+        <select onchange="onGasChange(${comp.id},this.value)" style="margin-bottom:0">
+          <option value="">— select —</option>${gasOpts}
+        </select>
+        ${comp.name==='Custom'?`<div class="fi-label">Custom name</div><input type="text" placeholder="e.g. C2H2" value="${comp.customName||''}" onchange="onCustomName(${comp.id},this.value)">`:'' }
+        ${comp.warn?`<div class="comp-warn">⚠ ${comp.warn}</div>`:''}
+      </div>`;
+
+    // Insert the pre-built dz element into the comp-body
+    const compBody=div.querySelector('#compbody-'+comp.id);
+    if(compBody) compBody.insertBefore(dz, compBody.firstChild);
+
+    // Wire header click to collapse/expand
+    const hdr=div.querySelector('#hdr-'+comp.id);
+    if(hdr) hdr.addEventListener('click',()=>{
+      comp.collapsed=!comp.collapsed;
+      div.classList.toggle('collapsed',comp.collapsed);
+    });
+
+    el.appendChild(div);
+  });
+}
+
+function browseFile(id){
+  const fi=document.createElement('input');
+  fi.type='file';fi.accept='.csv,.txt';
+  fi.style.display='none';
+  fi.onchange=e=>{
+    if(e.target.files[0]) loadFile(id,e.target.files[0]);
+    document.body.removeChild(fi);
+  };
+  document.body.appendChild(fi);
+  fi.click();
+}
+
+function loadFile(id, file){
+  const comp=components.find(c=>c.id===id);
+  if(!comp) return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const parsed=parseIsothermCSV(e.target.result);
+    if(parsed.error){st('Error in '+file.name+': '+parsed.error,'err');return;}
+    comp.model_raw = parsed.model;
+    comp.model = canonicalModel(parsed.model);
+    comp.params = parsed.params;
+    comp.rawP = parsed.rawP;
+    comp.rawQ = parsed.rawQ;
+    comp.filename = file.name;
+    comp.loaded = true;
+    comp.warn = '';
+    if(comp.model==='unknown') comp.warn='Model "'+parsed.model+'" not recognised — numerical integration used';
+
+    // Extended metadata from shared vocabulary
+    comp.sorptiveMW  = parsed.sorptiveMW  || null;
+    comp.tempK       = parsed.tempK       || null;
+    comp.hostFormula = parsed.hostFormula || null;
+    comp.hostMW      = parsed.hostMW      || null;
+    comp.hostMass    = parsed.hostMass    || null;
+
+    if(parsed.sorptive){
+      comp.name=parsed.sorptive;
+      comp.sorptive_in_file=true;
+    } else {
+      comp.sorptive_in_file=false;
+    }
+
+    // Store detected units on the component
+    comp.pUnit = parsed.pUnit;
+    comp.qUnit = parsed.qUnit;
+    comp.pUnitSource = parsed.pUnitSource;
+    comp.qUnitSource = parsed.qUnitSource;
+
+    // Normalise rawP → bar, rawQ → mmol/g for internal IAST calculations
+    comp.rawP_bar  = comp.rawP.map(p => pToBar(p,  comp.pUnit));
+    comp.rawQ_mmolg = comp.rawQ.map(q => qToMmolG(q, comp.qUnit));
+
+    // For numerical model: store raw arrays in params
+    if(comp.model==='unknown'||comp.model==='numerical'){
+      comp.model='numerical';
+      comp.params.rawP=comp.rawP;
+      comp.params.rawQ=comp.rawQ;
+    }
+
+    comp.collapsed = true;  // collapse after loading to save space
+    renderCompList();
+    updateColorRows();
+    updateYFracs();
+    updateSelPair();
+    updateRunBtn();
+    renderIsoChart();
+    invalidateIAST();
+    const uMsg=' | P: '+fmtPUnit(comp.pUnit)+' ('+comp.pUnitSource+'), Q: '+fmtQUnit(comp.qUnit)+' ('+comp.qUnitSource+')';
+    st('Loaded '+file.name+(parsed.sorptive?' ('+parsed.sorptive+')':'')+uMsg,'ok');
+  };
+  reader.readAsText(file);
+}
+
+function onCompPUnit(id,val){
+  const comp=components.find(c=>c.id===id);
+  if(comp){
+    comp.pUnit=val; comp.pUnitSource='manual';
+    if(comp.rawP.length) comp.rawP_bar=comp.rawP.map(p=>pToBar(p,val));
+    if(comp.model==='numerical'&&comp.params) comp.params.rawP=comp.rawP_bar;
+    renderCompList(); renderIsoChart(); invalidateIAST();
+  }
+}
+
+
+function onGasChange(id,val){
+  const comp=components.find(c=>c.id===id);
+  if(!comp) return;
+  comp.name=val;
+  if(val!=='' && comp.sorptive_in_file) comp.sorptive_in_file=false;
+  renderCompList();
+  updateColorRows();
+  updateYFracs();
+  updateSelPair();
+  updateRunBtn();
+  // Sorptive name only affects labels — relabel existing results without wiping them
+  if(iastResults) iastResults.names=components.map(c=>c.name);
+  renderDataTable();
+  renderIsoChart();   // update iso tab immediately
+  renderDashboard();  // update pure_iso panel in dashboard
+}
+function onCustomName(id,val){
+  const comp=components.find(c=>c.id===id);
+  if(!comp) return;
+  comp.name=val;
+  updateYFracs();
+  updateSelPair();
+  updateRunBtn();
+  if(iastResults) iastResults.names=components.map(c=>c.name);
+  renderDataTable();
+  renderIsoChart();
+  renderDashboard();
+}
+
+function updateRunBtn(){
+  const ok=components.length>=2 && components.every(c=>c.loaded&&c.name);
+  document.getElementById('btnRun').disabled=!ok;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Y-FRACTIONS UI
+// ═══════════════════════════════════════════════════════════════
+
+function updateYFracs(){
+  const mode=gv('calcMode');
+  const containers = ['yFracs'];
+  containers.forEach(cid=>{
+    if(mode==='sweep_y') return;
+    const el=document.getElementById(cid);
+    if(!el) return;
+    el.innerHTML='';
+    const N=components.length;
+    if(N===0){el.innerHTML='<div style="font-family:var(--mono);font-size:9px;color:#aaa">Add components first</div>';return;}
+    const even=parseFloat((1/N).toFixed(4));
+    components.forEach((comp,i)=>{
+      const row=document.createElement('div');
+      row.className='yrow';
+      const name=comp.name||('Component '+(i+1));
+      const defVal=i<N-1?even:null;
+      const curVal=comp['yVal']||even;
+      row.innerHTML=`<span class="yrow-lbl">${name}</span><input class="yrow-inp" type="number" min="0" max="1" step="0.01" value="${fmtTick(curVal)}" oninput="onYChange(${comp.id},this.value)" style="width:70px;background:var(--cream);border:1.5px solid var(--rule);padding:3px 5px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none"><span class="yrow-unit"></span>`;
+      el.appendChild(row);
+    });
+  });
+}
+
+function onYChange(id,val){
+  const comp=components.find(c=>c.id===id);
+  if(comp) comp.yVal=parseFloat(val)||0;
+}
+
+function getYFracs(){
+  const N=components.length;
+  let y=components.map(c=>isFinite(c.yVal)?c.yVal:1/N);
+  const s=y.reduce((a,b)=>a+b,0);
+  if(s<=0) return y.map(()=>1/N);
+  return y.map(v=>v/s);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MODE & OUTPUT TYPE CHANGES
+// ═══════════════════════════════════════════════════════════════
+
+function onModeChange(){
+  const m=gv('calcMode');
+  document.getElementById('ctrlSweepP').style.display=m==='sweep_p'?'':'none';
+  document.getElementById('ctrlSweepY').style.display=m==='sweep_y'?'':'none';
+}
+
+function onOutTypeChange(){} // legacy stub
+
+function updateSelPair(){
+  const el=document.getElementById('selPair');
+  el.innerHTML='';
+  const N=components.length;
+  for(let i=0;i<N;i++){
+    for(let j=0;j<N;j++){
+      if(i===j) continue;
+      const ni=components[i].name||'C'+(i+1);
+      const nj=components[j].name||'C'+(j+1);
+      const opt=document.createElement('option');
+      opt.value=i+','+j;
+      opt.textContent=ni+' / '+nj;
+      el.appendChild(opt);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  COLOUR ROWS IN RIGHT PANEL
+// ═══════════════════════════════════════════════════════════════
+
+function updateColorRows(){
+  const el=document.getElementById('colorRows');
+  el.innerHTML='';
+  components.forEach((comp,i)=>{
+    const name=comp.name||('C'+(i+1));
+    const row=document.createElement('div');
+    row.className='cr';
+    row.innerHTML=`<span class="cl">${name}</span><input type="color" value="${comp.color}" oninput="onColorChange(${comp.id},this.value)">`;
+    el.appendChild(row);
+  });
+}
+
+function onColorChange(id,val){
+  const comp=components.find(c=>c.id===id);
+  if(comp){comp.color=val; redraw();}
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  RUN IAST
+// ═══════════════════════════════════════════════════════════════
+
+function convertQ(q){return q;}  // always mmol/g
+
+function qLabel(){return 'mmol g⁻¹';}
+
+function buildPressureArray(){
+  const mode=gv('calcMode');
+  const pMin=gn('pMin')||0.01, pMax=gn('pMax')||10, steps=parseInt(gv('pSteps'))||100;
+  const scale=gv('pScale')||'linear';
+  const arr=[];
+  if(scale==='log'){
+    const lMin=Math.log10(Math.max(pMin,1e-10)), lMax=Math.log10(pMax);
+    for(let i=0;i<steps;i++) arr.push(Math.pow(10,lMin+(lMax-lMin)*i/(steps-1)));
+  } else {
+    for(let i=0;i<steps;i++) arr.push(pMin+(pMax-pMin)*i/(steps-1));
+  }
+  return arr;
+}
+
+document.getElementById('btnRun').addEventListener('click', runIAST);
+
+function runIAST(){
+  if(components.length<2){st('Need at least 2 components','err');return;}
+  if(!components.every(c=>c.loaded)){st('Not all components have CSV files loaded','err');return;}
+
+  st('Computing IAST…','');
+  iastResults=null;
+  document.getElementById('btnExport').disabled=true;
+
+  const mode=gv('calcMode');
+  const N=components.length;
+
+  setTimeout(()=>{
+    try{
+      let rows=[];
+
+      // Build normalised component objects (params in bar / mmol/g)
+      const normComps = components.map(c=>{
+        let p = rescaleParamsToBar(c.model, c.params, c.pUnit||'bar');
+        p = rescaleParamsQToMmolG(c.model, p, c.qUnit||'mmol/g');
+        // Store the max measured pressure (in bar) so the solver doesn't extrapolate wildly
+        const pMaxBar = c.rawP.length ? pToBar(Math.max(...c.rawP), c.pUnit||'bar') : Infinity;
+        return {model:c.model, params:p, pMaxBar};
+      });
+
+      // User pressure inputs are in pUnits; convert to bar for the solver
+      const userPUnit = gv('pUnits');
+
+      if(mode==='sweep_p'){
+        const pressures=buildPressureArray().map(p=>pToBar(p,userPUnit));
+        const y=getYFracs();
+        rows=pressures.map(P=>{
+          const r=solveIAST(normComps,y,P);
+          // Store P back in user units for display
+          return {P:pFromBar(P,userPUnit), x:r.x, qi:r.qi, qtot:r.qtot, y, converged:r.converged};
+        });
+      }
+      else if(mode==='sweep_y'){
+        const P=pToBar(gn('pFixed')||1, userPUnit);
+        const steps=parseInt(gv('ySteps'))||50;
+        for(let s=0;s<=steps;s++){
+          const y1=0.01+0.98*s/steps;
+          let y;
+          if(N===2) y=[y1,1-y1];
+          else {const rem=(1-y1)/(N-1); y=[y1,...Array(N-1).fill(rem)];}
+          const r=solveIAST(normComps,y,P);
+          rows.push({P:pFromBar(P,userPUnit), y, x:r.x, qi:r.qi, qtot:r.qtot, converged:r.converged});
+        }
+      }
+
+
+      iastResults={rows, mode, N, names:components.map(c=>c.name)};
+      renderDataTable();
+      switchTab('plot');   // switch to Results Plots automatically
+      document.getElementById('btnExport').disabled=false;
+      st('IAST complete — '+rows.length+' point'+(rows.length>1?'s':''),'ok');
+    } catch(e){
+      st('Error: '+e.message,'err');
+      console.error(e);
+    }
+  },10);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  SUMMARY PANEL
+// ═══════════════════════════════════════════════════════════════
+
+function renderSummary(){
+  if(!iastResults){document.getElementById('resContent').innerHTML='<div class="ph">Run IAST to see results.</div>';return;}
+  const {rows,names,N}=iastResults;
+  const last=rows[rows.length-1];
+  const first=rows[0];
+  const qU=qLabel();
+
+  let html='<div class="r-grid" style="grid-template-columns:repeat('+Math.min(N+2,5)+',1fr)">';
+
+  // At last point
+  names.forEach((nm,i)=>{
+    html+=`<div class="rc hi"><div class="rt">q(${nm})</div><div class="rv">${fmt(convertQ(last.qi[i]))}<span class="rs">${qU}</span></div></div>`;
+  });
+  html+=`<div class="rc"><div class="rt">q total</div><div class="rv">${fmt(convertQ(last.qtot))}<span class="rs">${qU}</span></div></div>`;
+  if(N===2 && last.y[0]>0 && last.y[1]>0){
+    const sel=(last.x[0]/last.x[1])/(last.y[0]/last.y[1]);
+    html+=`<div class="rc"><div class="rt">S(1/2) at last pt</div><div class="rv">${fmt(sel)}</div></div>`;
+  }
+  html+='</div>';
+
+  const pU=gv('pUnits');
+  if(rows.length>1){
+    html+=`<div style="font-family:var(--mono);font-size:9px;color:#aaa;margin-top:5px">Last point: P = ${fmt(last.P)} ${pU} &nbsp;|&nbsp; ${rows.length} points computed</div>`;
+  } else {
+    html+=`<div style="font-family:var(--mono);font-size:9px;color:#aaa;margin-top:5px">P = ${fmt(last.P)} ${pU}</div>`;
+  }
+
+  document.getElementById('resContent').innerHTML=html;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DATA TABLE
+// ═══════════════════════════════════════════════════════════════
+
+function renderDataTable(){
+  if(!iastResults){document.getElementById('dataTable').innerHTML='<div class="ph">Run IAST to see results.</div>';return;}
+  const {rows,names,N,mode}=iastResults;
+  const pU=gv('pUnits'), qU=qLabel();
+  const xvar=mode==='sweep_y'?'y₁':'P / '+pU;
+
+  let hdrs=[xvar];
+  names.forEach(n=>hdrs.push('q('+n+') / '+qU));
+  hdrs.push('q_total / '+qU);
+  names.forEach(n=>hdrs.push('x('+n+')'));
+  if(N===2) hdrs.push('S(1/2)');
+
+  let html=`<div class="out-table-wrap"><table class="out-table"><thead><tr>${hdrs.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>`;
+
+  rows.forEach(r=>{
+    const xv=mode==='sweep_y'?fmt6(r.y[0]):fmt6(r.P);
+    let cells=[xv];
+    r.qi.forEach(q=>cells.push(fmt6(convertQ(q))));
+    cells.push(fmt6(convertQ(r.qtot)));
+    r.x.forEach(x=>cells.push(fmt6(x)));
+    if(N===2){
+      const sel=(r.y[1]>0&&r.y[0]>0)?(r.x[0]/r.x[1])/(r.y[0]/r.y[1]):NaN;
+      cells.push(fmt6(sel));
+    }
+    html+=`<tr>${cells.map(c=>`<td>${c}</td>`).join('')}</tr>`;
+  });
+
+  html+='</tbody></table></div>';
+  document.getElementById('dataTable').innerHTML=html;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  TAB SWITCHING
+// ═══════════════════════════════════════════════════════════════
+
+function switchTab(t){
+  activeTab=t;
+  ['plot','iso','data','guide'].forEach(id=>{
+    const btn=document.getElementById('tab'+id.charAt(0).toUpperCase()+id.slice(1));
+    if(btn) btn.classList.toggle('active',id===t);
+  });
+  document.getElementById('plotTab').style.display      = t==='plot'  ? 'flex':'none';
+  document.getElementById('isoTab').style.display       = t==='iso'   ? 'flex':'none';
+  document.getElementById('dataContent').style.display  = t==='data'  ? 'flex':'none';
+  document.getElementById('guideContent').style.display = t==='guide' ? 'block':'none';
+  if(t==='plot') renderDashboard();
+  if(t==='iso')  renderIsoChart();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CANVAS CHART ENGINE  (shared between both canvases)
+// ═══════════════════════════════════════════════════════════════
+
+function getChartStyle(){
+  return {
+    font:   gv('font'),
+    axSz:   parseInt(document.getElementById('axSz').value)/2.2,
+    tkSz:   parseInt(document.getElementById('tkSz').value)/2.2,
+    axBold: gb('axBold'),
+    axCol:  gv('axCol'),
+    grid:   gb('grid'),
+    gridCol:gv('gridCol'),
+    gridW:  parseFloat(document.getElementById('gridW').value),
+    tickLen:parseInt(document.getElementById('tickLen').value),
+    frameW: parseFloat(document.getElementById('frameW').value),
+    boxBdr: gb('boxBdr'),
+    boxW:   parseFloat(document.getElementById('boxW').value),
+    boxCol: gv('boxCol'),
+    chartBg:gv('chartBg'),
+    plotBg: gv('plotBg'),
+    lnW:    parseFloat(document.getElementById('lnW').value),
+    leg:    gb('leg'),
+    legSz:  parseInt(document.getElementById('legSz').value),
+    ttl:    gv('ttl'),
+    ttlSz:  parseInt(document.getElementById('ttlSz').value),
+    xLbl:   gv('xLbl'),
+    yLbl:   gv('yLbl'),
+    xMinO:  gn('xMin'), xMaxO:gn('xMax'), yMinO:gn('yMin'), yMaxO:gn('yMax'),
+    xLog:   gb('xLog'), yLog:gb('yLog'),
+  };
+}
+
+function drawChart(cvs, series, style, opts){
+  // series: [{label, color, data:[{x,y}], dash}]
+  // opts: {xLabel, yLabel, title}
+  const W=cvs.width, H=cvs.height;
+  const ctx=cvs.getContext('2d');
+  const panelTitle=opts.title||style.ttl||'';
+  const ML=72, MR=20, MT=panelTitle?42:24, MB=48;
+  const PW=W-ML-MR, PH=H-MT-MB;
+
+  ctx.fillStyle=style.chartBg; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle=style.plotBg; ctx.fillRect(ML,MT,PW,PH);
+
+  // Compute data ranges
+  let xAll=[], yAll=[];
+  series.forEach(s=>s.data.forEach(d=>{xAll.push(d.x);yAll.push(d.y);}));
+  if(xAll.length===0) return;
+  let xMin=style.xMinO!==null?style.xMinO:Math.min(...xAll);
+  let xMax=style.xMaxO!==null?style.xMaxO:Math.max(...xAll);
+  let yMin=style.yMinO!==null?style.yMinO:Math.min(...yAll);
+  let yMax=style.yMaxO!==null?style.yMaxO:Math.max(...yAll);
+  if(xMin===xMax){xMin-=0.5;xMax+=0.5;}
+  if(yMin===yMax){yMin-=0.5;yMax+=0.5;}
+  yMin=Math.max(0,yMin-0.02*(yMax-yMin));
+  yMax=yMax+0.05*(yMax-yMin);
+
+  const toCanX=x=>{
+    if(style.xLog) return ML+Math.log10(Math.max(x,1e-30)/Math.max(xMin,1e-30))/Math.log10(Math.max(xMax,1e-30)/Math.max(xMin,1e-30))*PW;
+    return ML+(x-xMin)/(xMax-xMin)*PW;
+  };
+  const toCanY=y=>{
+    if(style.yLog) return MT+PH-Math.log10(Math.max(y,1e-30)/Math.max(yMin,1e-30))/Math.log10(Math.max(yMax,1e-30)/Math.max(yMin,1e-30))*PH;
+    return MT+PH-(y-yMin)/(yMax-yMin)*PH;
+  };
+
+  // Grid
+  if(style.grid){
+    ctx.save(); ctx.strokeStyle=style.gridCol; ctx.lineWidth=style.gridW;
+    const nTicks=6;
+    for(let i=0;i<=nTicks;i++){
+      const frac=i/nTicks;
+      if(!style.xLog){const cx=ML+frac*PW; ctx.beginPath();ctx.moveTo(cx,MT);ctx.lineTo(cx,MT+PH);ctx.stroke();}
+      if(!style.yLog){const cy=MT+frac*PH; ctx.beginPath();ctx.moveTo(ML,cy);ctx.lineTo(ML+PW,cy);ctx.stroke();}
+    }
+    ctx.restore();
+  }
+
+  // Clip & draw series
+  ctx.save();
+  ctx.beginPath();ctx.rect(ML,MT,PW,PH);ctx.clip();
+  series.forEach(s=>{
+    if(!s.data.length) return;
+    ctx.beginPath();ctx.strokeStyle=s.color;ctx.lineWidth=style.lnW;
+    if(s.dash) ctx.setLineDash(s.dash); else ctx.setLineDash([]);
+    let first=true;
+    s.data.forEach(d=>{
+      if(!isFinite(d.x)||!isFinite(d.y)){first=true;return;}
+      const cx=toCanX(d.x), cy=toCanY(d.y);
+      if(first){ctx.moveTo(cx,cy);first=false;}else ctx.lineTo(cx,cy);
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
+  });
+  ctx.restore();
+
+  // Frame & ticks
+  ctx.save();
+  ctx.strokeStyle=style.axCol; ctx.lineWidth=style.frameW;
+  ctx.strokeRect(ML,MT,PW,PH);
+
+  // Box border (top/right)
+  if(style.boxBdr){
+    ctx.strokeStyle=style.boxCol; ctx.lineWidth=style.boxW;
+    ctx.beginPath();ctx.moveTo(ML,MT);ctx.lineTo(ML+PW,MT);ctx.lineTo(ML+PW,MT+PH);ctx.stroke();
+  }
+
+  // Ticks & tick labels
+  ctx.fillStyle=style.axCol;
+  ctx.font=(style.tkSz)+'px '+style.font;
+  ctx.textBaseline='top'; ctx.textAlign='center';
+  function niceTicks(mn,mx,n){
+    const raw=(mx-mn)/n;
+    const mag=Math.pow(10,Math.floor(Math.log10(raw)));
+    const nice=[1,2,2.5,5,10].find(f=>f*mag>=raw)||10;
+    const step=nice*mag;
+    const t=[];
+    for(let v=Math.ceil(mn/step)*step;v<=mx+1e-10;v+=step) t.push(parseFloat(v.toPrecision(10)));
+    return t;
+  }
+  const xTicks=style.xLog?logTicks(xMin,xMax):niceTicks(xMin,xMax,7);
+  const yTicks=style.yLog?logTicks(yMin,yMax):niceTicks(yMin,yMax,6);
+  function logTicks(mn,mx){
+    const t=[];
+    const l0=Math.floor(Math.log10(Math.max(mn,1e-30))),l1=Math.ceil(Math.log10(mx));
+    for(let e=l0;e<=l1;e++) t.push(Math.pow(10,e));
+    return t.filter(v=>v>=mn&&v<=mx);
+  }
+
+  ctx.lineWidth=style.frameW*0.6;
+  const fmtX=fmtTickSet(xTicks), fmtY=fmtTickSet(yTicks);
+  xTicks.forEach(v=>{
+    if(v<xMin||v>xMax) return;
+    const cx=toCanX(v);
+    ctx.beginPath();ctx.moveTo(cx,MT+PH);ctx.lineTo(cx,MT+PH+style.tickLen);ctx.stroke();
+    ctx.fillText(style.xLog?'10^'+Math.round(Math.log10(v)):fmtX(v),cx,MT+PH+style.tickLen+2);
+  });
+  ctx.textAlign='right'; ctx.textBaseline='middle';
+  yTicks.forEach(v=>{
+    if(v<yMin||v>yMax) return;
+    const cy=toCanY(v);
+    ctx.beginPath();ctx.moveTo(ML,cy);ctx.lineTo(ML-style.tickLen,cy);ctx.stroke();
+    ctx.fillText(fmtY(v),ML-style.tickLen-2,cy);
+  });
+
+  // Axis labels
+  const lblFont=(style.axBold?'bold ':'')+style.axSz+'px '+style.font;
+  ctx.font=lblFont; ctx.fillStyle=style.axCol;
+  const xLbl=opts.xLabel||''; const yLbl=opts.yLabel||'';
+  ctx.textAlign='center'; ctx.textBaseline='bottom';
+  ctx.fillText(xLbl, ML+PW/2, H-4);
+  ctx.save(); ctx.translate(14, MT+PH/2); ctx.rotate(-Math.PI/2);
+  ctx.textBaseline='top';
+  ctx.fillText(yLbl, 0, 0);
+  ctx.restore();
+
+  // Panel title (drawn above the plot area, smaller than the full chart title)
+  if(panelTitle){
+    ctx.font='bold '+(Math.max(9,style.tkSz))+'px '+style.font;
+    ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillStyle=style.axCol;
+    ctx.fillText(panelTitle, ML+PW/2, MT/2);
+  }
+
+  // Legend — horizontal layout inside plot area top
+  if(style.leg && series.length){
+    ctx.save();
+    ctx.beginPath();ctx.rect(ML,MT,PW,PH);ctx.clip();
+    const legFont=Math.max(8,style.legSz-1)+'px '+style.font;
+    ctx.font=legFont; ctx.textBaseline='middle'; ctx.textAlign='left';
+    const lineLen=18, gap=6, pad=6;
+    let lx=ML+pad, ly=MT+pad+style.legSz/2;
+    series.forEach((s,i)=>{
+      if(!s.label) return;
+      const tw=ctx.measureText(s.label).width;
+      // wrap to next line if needed
+      if(lx+lineLen+gap+tw > ML+PW-pad && i>0){lx=ML+pad; ly+=style.legSz+3;}
+      ctx.strokeStyle=s.color; ctx.lineWidth=Math.max(1.5,style.lnW);
+      if(s.dash) ctx.setLineDash(s.dash); else ctx.setLineDash([]);
+      ctx.beginPath();ctx.moveTo(lx,ly);ctx.lineTo(lx+lineLen,ly);ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle=style.axCol;
+      ctx.fillText(s.label, lx+lineLen+3, ly);
+      lx+=lineLen+gap+tw+10;
+    });
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DASHBOARD — multi-panel IAST results
+// ═══════════════════════════════════════════════════════════════
+
+// Panel definitions: id, title, needs sweep_p, needs sweep_y
+const PANELS = [
+  {id:'pure_iso',    title:'Fitted pure-component isotherms',              sweepP:true,  sweepY:true},
+  {id:'loading_p',   title:'Loadings vs pressure',                     sweepP:true,  sweepY:false},
+  {id:'xfrac_p',     title:'Adsorbed-phase mole fractions vs pressure',sweepP:true,  sweepY:false},
+  {id:'sel_p',       title:'Selectivity vs pressure',                  sweepP:true,  sweepY:false},
+  {id:'loading_y',   title:'Component & total loadings vs y₁',    sweepP:false, sweepY:true},
+  {id:'sel_y',       title:'Selectivity vs y₁',                   sweepP:false, sweepY:true},
+  {id:'yx_diagram',  title:'y–x diagram (adsorbed vs bulk)',       sweepP:false, sweepY:true},
+];
+
+function getActivePanels(){
+  // Panels shown are determined automatically by calculation mode
+  const mode = iastResults ? iastResults.mode : gv('calcMode');
+  if(mode==='sweep_p') return PANELS.filter(p=>p.sweepP);
+  if(mode==='sweep_y') return PANELS.filter(p=>p.sweepY);
+  return [];
+}
+
+function renderDashboard(){
+  const db=document.getElementById('dashboard');
+  if(!db) return;
+
+  const active=getActivePanels();
+  const n=active.length;
+  if(n===0){db.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;font-family:var(--mono);font-size:11px;color:#bbb">Select at least one plot above</div>';return;}
+
+  // Always 2-column grid
+  const cols=2, rows_=Math.ceil(n/2);
+  db.style.gridTemplateColumns='repeat(2,1fr)';
+  db.style.gridTemplateRows=`repeat(${rows_},1fr)`;
+
+  // Rebuild cells only if panel set changed
+  const key=active.map(p=>p.id).join(',');
+  if(db.dataset.key!==key){
+    db.dataset.key=key;
+    db.innerHTML='';
+    active.forEach(p=>{
+      const cell=document.createElement('div');
+      cell.className='dash-cell';
+      cell.id='cell_'+p.id;
+      const cvs=document.createElement('canvas');
+      cvs.id='cv_'+p.id;
+      cell.appendChild(cvs);
+      db.appendChild(cell);
+    });
+  }
+
+  if(!iastResults){
+    const s=getChartStyle();
+    active.forEach(p=>{
+      const cvs=document.getElementById('cv_'+p.id);
+      if(!cvs||!cvs.offsetWidth) return;
+      if(p.id==='pure_iso'){renderIsoIntoCanvas(cvs); return;}
+      cvs.width=cvs.offsetWidth; cvs.height=cvs.offsetHeight;
+      const ctx=cvs.getContext('2d');
+      ctx.fillStyle=s.chartBg; ctx.fillRect(0,0,cvs.width,cvs.height);
+      ctx.fillStyle='#ccc'; ctx.font='11px '+s.font;
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('Run IAST to populate',cvs.width/2,cvs.height/2);
+    });
+    return;
+  }
+
+  const {rows:dataRows,names,N,mode}=iastResults;
+  const style=getChartStyle();
+  const pU=gv('pUnits'), qU=qLabel();
+  const pairStr=gv('selPair')||'0,1';
+  const [pi,pj]=pairStr.split(',').map(Number);
+  const ci=components[Math.min(pi,N-1)]||components[0];
+  const cj=components[Math.min(pj,N-1)]||components[1]||components[0];
+
+  const xP=r=>r.P;
+  const xY=r=>r.y[0];
+  const xLblP='Pressure / '+pU;
+  const xLblY='y₁ (bulk mole fraction)';
+
+  active.forEach(p=>{
+    const cvs=document.getElementById('cv_'+p.id);
+    if(!cvs||!cvs.offsetWidth) return;
+    cvs.width=cvs.offsetWidth; cvs.height=cvs.offsetHeight;
+
+    // Check if data is available for this panel
+    const needsY=p.sweepY&&!p.sweepP;
+    const needsP=p.sweepP&&!p.sweepY;
+    const hasP=mode==='sweep_p'||mode==='single';
+    const hasY=mode==='sweep_y';
+    if(needsY&&!hasY){
+      drawNoData(cvs,style,'Use "Sweep bulk mole fraction" mode');return;}
+    if(needsP&&!hasP){
+      drawNoData(cvs,style,'Use "Sweep total pressure" mode');return;}
+
+    const xGetter=needsY?xY:xP;
+    const xLbl=style.xLbl||(needsY?xLblY:xLblP);
+    const series=[];
+
+    if(p.id==='pure_iso'){
+      renderIsoIntoCanvas(cvs);
+      return;
+    }
+    else if(p.id==='loading_p'){
+      names.forEach((nm,i)=>series.push({
+        label:'q('+nm+')', color:components[i].color,
+        data:dataRows.map(r=>({x:xGetter(r),y:convertQ(r.qi[i])}))
+      }));
+      // Total loading in black
+      series.push({label:'q total', color:'#000000',
+        data:dataRows.map(r=>({x:xGetter(r),y:convertQ(r.qtot)}))});
+      drawChart(cvs,series,style,{xLabel:xLbl,yLabel:style.yLbl||'Uptake / '+qU,
+        title:'Loadings vs pressure'});
+    }
+    else if(p.id==='xfrac_p'){
+      names.forEach((nm,i)=>series.push({
+        label:'x('+nm+')', color:components[i].color,
+        data:dataRows.map(r=>({x:xGetter(r),y:r.x[i]}))
+      }));
+      drawChart(cvs,series,style,{xLabel:xLbl,yLabel:style.yLbl||'Adsorbed mole fraction',
+        title:'Adsorbed-phase mole fractions vs pressure'});
+    }
+    else if(p.id==='sel_p'){
+      series.push({label:'S('+ci.name+'/'+cj.name+')',color:ci.color,
+        data:dataRows.map(r=>{
+          const yi=r.y[pi]||0, yj=r.y[pj]||0;
+          if(yi<=0||yj<=0) return {x:xGetter(r),y:NaN};
+          return {x:xGetter(r),y:(r.x[pi]/r.x[pj])/(yi/yj)};
+        })});
+      drawChart(cvs,series,style,{xLabel:xLbl,yLabel:style.yLbl||'Selectivity',
+        title:'Selectivity vs pressure'});
+    }
+    else if(p.id==='loading_y'){
+      names.forEach((nm,i)=>series.push({
+        label:'q('+nm+')', color:components[i].color,
+        data:dataRows.map(r=>({x:xY(r),y:convertQ(r.qi[i])}))
+      }));
+      series.push({label:'q total', color:'#000000',
+        data:dataRows.map(r=>({x:xY(r),y:convertQ(r.qtot)}))});
+      drawChart(cvs,series,style,{xLabel:xLblY,yLabel:style.yLbl||'Uptake / '+qU,
+        title:'Component loadings vs y₁'});
+    }
+    else if(p.id==='sel_y'){
+      series.push({label:'S('+ci.name+'/'+cj.name+')',color:ci.color,
+        data:dataRows.map(r=>{
+          const yi=r.y[pi]||0, yj=r.y[pj]||0;
+          if(yi<=0||yj<=0) return {x:xY(r),y:NaN};
+          return {x:xY(r),y:(r.x[pi]/r.x[pj])/(yi/yj)};
+        })});
+      drawChart(cvs,series,style,{xLabel:xLblY,yLabel:style.yLbl||'Selectivity',
+        title:'Selectivity vs y₁'});
+    }
+    else if(p.id==='yx_diagram'){
+      // y-x diagram: adsorbed mole fraction x₁ vs bulk mole fraction y₁
+      // Also draw the diagonal (x=y) as a reference line in grey
+      series.push({label:'x = y (reference)', color:'#cccccc', dash:[4,4],
+        data:[{x:0,y:0},{x:1,y:1}]});
+      names.forEach((nm,i)=>{
+        series.push({label:'x('+nm+')', color:components[i].color,
+          data:dataRows.map(r=>({x:xY(r),y:r.x[i]}))});
+      });
+      drawChart(cvs,series,style,{xLabel:xLblY,
+        yLabel:style.yLbl||'Adsorbed mole fraction x',
+        title:'y–x diagram'});
+    }
+  });
+}
+
+function drawNoData(cvs,style,msg){
+  cvs.width=cvs.offsetWidth; cvs.height=cvs.offsetHeight;
+  const ctx=cvs.getContext('2d');
+  ctx.fillStyle=style.chartBg; ctx.fillRect(0,0,cvs.width,cvs.height);
+  ctx.fillStyle='#ccc'; ctx.font='11px '+style.font;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(msg||'No data',cvs.width/2,cvs.height/2);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  SINGLE-COMPONENT ISOTHERM CHART
+// ═══════════════════════════════════════════════════════════════
+
+// Render pure-component isotherms into any canvas (used by dashboard + iso tab)
+function renderIsoIntoCanvas(cvs){
+  if(!cvs) return;
+  // Auto-size only for live DOM canvases (offsetWidth > 0); off-screen canvases
+  // used by savePlot already have their dimensions set — don't overwrite them.
+  if(cvs.offsetWidth) { cvs.width=cvs.offsetWidth; cvs.height=cvs.offsetHeight; }
+  if(!cvs.width||!cvs.height) return;
+
+  const loaded=components.filter(c=>c.loaded);
+  const style=getChartStyle();
+
+  if(!loaded.length){
+    const ctx=cvs.getContext('2d');
+    ctx.fillStyle=style.chartBg; ctx.fillRect(0,0,cvs.width,cvs.height);
+    ctx.fillStyle='#bbb'; ctx.font='11px '+style.font;
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('Load component isotherms to preview',cvs.width/2,cvs.height/2);
+    return;
+  }
+
+  const series=[];
+  loaded.forEach(c=>{
+    if(!c.rawP.length) return;
+    const cPU=c.pUnit||'bar';
+    const pts=c.rawP.map((p,i)=>({x:pToBar(p,cPU), y:c.rawQ[i]}));
+    series.push({label:c.name||'?', color:c.color, data:pts, scatter:true});
+    const paramsBar=rescaleParamsToBar(c.model,c.params,cPU);
+    const pMinBar=Math.min(...pts.map(pt=>pt.x));
+    const pMaxBar=Math.max(...pts.map(pt=>pt.x));
+    const logMin=Math.log10(Math.max(pMinBar*0.1,1e-10));
+    const logMax=Math.log10(pMaxBar*1.01);
+    const curvePts=[];
+    for(let i=0;i<=400;i++){
+      const P=Math.pow(10,logMin+(logMax-logMin)*i/400);
+      const q=qModel(P,c.model,paramsBar);
+      if(isFinite(q)&&q>=0) curvePts.push({x:P,y:q});
+    }
+    series.push({label:null,color:c.color,data:curvePts,dash:null});
+  });
+
+  const panelTitle='Fitted pure-component isotherms';
+  drawChartWithScatter(cvs,series,style,{
+    xLabel:style.xLbl||'Pressure / bar',
+    yLabel:style.yLbl||'Uptake / mmol g⁻¹',
+    title:panelTitle
+  });
+}
+
+function renderIsoChart(){
+  renderIsoIntoCanvas(document.getElementById('cvIso'));
+}
+
+// Extended draw that supports scatter points
+function drawChartWithScatter(cvs, series, style, opts){
+  const W=cvs.width, H=cvs.height;
+  const ctx=cvs.getContext('2d');
+  const panelTitle=opts.title||style.ttl||'';
+  const ML=72,MR=20,MT=panelTitle?42:24,MB=48;
+  const PW=W-ML-MR, PH=H-MT-MB;
+
+  ctx.fillStyle=style.chartBg;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle=style.plotBg;ctx.fillRect(ML,MT,PW,PH);
+
+  let xAll=[],yAll=[];
+  series.forEach(s=>s.data.forEach(d=>{xAll.push(d.x);yAll.push(d.y);}));
+  if(!xAll.length) return;
+  let xMin=style.xMinO!==null?style.xMinO:Math.min(...xAll);
+  let xMax=style.xMaxO!==null?style.xMaxO:Math.max(...xAll);
+  let yMin=style.yMinO!==null?style.yMinO:0;
+  let yMax=style.yMaxO!==null?style.yMaxO:Math.max(...yAll);
+  // Padding so points aren't flush against axes
+  const xPad=(xMax-xMin)*0.04||xMax*0.04||0.1;
+  xMin=Math.max(0, xMin-xPad);
+  xMax=xMax+xPad;
+  if(xMin===xMax){xMin=0;xMax=xMax*1.1||1;}
+  if(yMin===yMax){yMin=0;yMax=yMax*1.1||1;}
+  yMax=yMax*1.05;
+
+  const toX=x=>ML+(x-xMin)/(xMax-xMin)*PW;
+  const toY=y=>MT+PH-(y-yMin)/(yMax-yMin)*PH;
+
+  if(style.grid){
+    ctx.save();ctx.strokeStyle=style.gridCol;ctx.lineWidth=style.gridW;
+    [0,.2,.4,.6,.8,1].forEach(f=>{
+      ctx.beginPath();ctx.moveTo(ML+f*PW,MT);ctx.lineTo(ML+f*PW,MT+PH);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(ML,MT+f*PH);ctx.lineTo(ML+PW,MT+f*PH);ctx.stroke();
+    });
+    ctx.restore();
+  }
+
+  ctx.save();ctx.beginPath();ctx.rect(ML,MT,PW,PH);ctx.clip();
+  series.forEach(s=>{
+    if(s.scatter){
+      ctx.fillStyle=s.color;
+      s.data.forEach(d=>{
+        if(!isFinite(d.x)||!isFinite(d.y)) return;
+        const cx=toX(d.x),cy=toY(d.y);
+        ctx.beginPath();ctx.arc(cx,cy,3.5,0,2*Math.PI);ctx.fill();
+      });
+    } else {
+      ctx.beginPath();ctx.strokeStyle=s.color;ctx.lineWidth=style.lnW;
+      if(s.dash)ctx.setLineDash(s.dash);else ctx.setLineDash([]);
+      let first=true;
+      s.data.forEach(d=>{
+        if(!isFinite(d.x)||!isFinite(d.y)){first=true;return;}
+        const cx=toX(d.x),cy=toY(d.y);
+        if(first){ctx.moveTo(cx,cy);first=false;}else ctx.lineTo(cx,cy);
+      });
+      ctx.stroke();ctx.setLineDash([]);
+    }
+  });
+  ctx.restore();
+
+  ctx.save();
+  ctx.strokeStyle=style.axCol;ctx.lineWidth=style.frameW;
+  ctx.strokeRect(ML,MT,PW,PH);
+  if(style.boxBdr){ctx.strokeStyle=style.boxCol;ctx.lineWidth=style.boxW;ctx.beginPath();ctx.moveTo(ML,MT);ctx.lineTo(ML+PW,MT);ctx.lineTo(ML+PW,MT+PH);ctx.stroke();}
+
+  // Ticks
+  ctx.font=style.tkSz+'px '+style.font;ctx.fillStyle=style.axCol;
+  function nt(mn,mx,n){const raw=(mx-mn)/n;const mag=Math.pow(10,Math.floor(Math.log10(raw)));const nice=[1,2,2.5,5,10].find(f=>f*mag>=raw)||10;const step=nice*mag;const t=[];for(let v=Math.ceil(mn/step)*step;v<=mx+1e-10;v+=step)t.push(parseFloat(v.toPrecision(10)));return t;}
+  const xT=nt(xMin,xMax,7), yT=nt(yMin,yMax,6);
+  ctx.lineWidth=style.frameW*0.6;
+  ctx.textAlign='center';ctx.textBaseline='top';
+  const fmtXs=fmtTickSet(xT), fmtYs=fmtTickSet(yT);
+  xT.forEach(v=>{if(v<xMin||v>xMax)return;const cx=toX(v);ctx.beginPath();ctx.moveTo(cx,MT+PH);ctx.lineTo(cx,MT+PH+style.tickLen);ctx.stroke();ctx.fillText(fmtXs(v),cx,MT+PH+style.tickLen+2);});
+  ctx.textAlign='right';ctx.textBaseline='middle';
+  yT.forEach(v=>{if(v<yMin||v>yMax)return;const cy=toY(v);ctx.beginPath();ctx.moveTo(ML,cy);ctx.lineTo(ML-style.tickLen,cy);ctx.stroke();ctx.fillText(fmtYs(v),ML-style.tickLen-2,cy);});
+
+  const lb=(style.axBold?'bold ':'')+style.axSz+'px '+style.font;
+  ctx.font=lb;ctx.fillStyle=style.axCol;
+  ctx.textAlign='center';ctx.textBaseline='bottom';
+  ctx.fillText(opts.xLabel||'',ML+PW/2,H-4);
+  ctx.save();ctx.translate(14,MT+PH/2);ctx.rotate(-Math.PI/2);ctx.textBaseline='top';ctx.fillText(opts.yLabel||'',0,0);ctx.restore();
+  if(style.ttl){ctx.font=style.ttlSz+'px '+style.font;ctx.textAlign='center';ctx.textBaseline='top';ctx.fillStyle=style.axCol;ctx.fillText(style.ttl,ML+PW/2,8);}
+  if(panelTitle){ctx.font='bold '+(Math.max(9,style.tkSz))+'px '+style.font;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle=style.axCol;ctx.fillText(panelTitle,ML+PW/2,MT/2);}
+
+  // Legend — only named series
+  if(style.leg){
+    const named=series.filter(s=>s.label&&s.scatter);
+    ctx.font=style.legSz+'px '+style.font;ctx.textBaseline='middle';ctx.textAlign='left';
+    const lh=style.legSz+4, lx=ML+10, sy=MT+10;
+    named.forEach((s,i)=>{
+      const ly=sy+i*lh;
+      ctx.fillStyle=s.color;ctx.beginPath();ctx.arc(lx+6,ly,4,0,2*Math.PI);ctx.fill();
+      ctx.fillStyle=style.axCol;ctx.fillText(s.label,lx+14,ly);
+    });
+  }
+  ctx.restore();
+}
+
+function redraw(){
+  if(activeTab==='plot') renderDashboard();
+  if(activeTab==='iso') renderIsoChart();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  EXPORT
+// ═══════════════════════════════════════════════════════════════
+
+document.getElementById('btnExport').addEventListener('click',()=>{
+  if(!iastResults) return;
+  const {rows,names,N,mode}=iastResults;
+  const pU=gv('pUnits'),qU=qLabel();
+  const lines=[];
+  lines.push('# IAST Calculator — Results');
+  lines.push('# Generated: '+new Date().toISOString().replace('T',' ').slice(0,19));
+  lines.push('# Components: '+names.join(', '));
+  components.forEach((c,i)=>{
+    lines.push('# Component '+(i+1)+': '+c.name+' | Model: '+(c.model_raw||'—'));
+    Object.entries(c.params).filter(([k])=>!['rawP','rawQ'].includes(k)).forEach(([k,v])=>lines.push('#   '+k+': '+v));
+  });
+  lines.push('#');
+  const xhdr=mode==='sweep_y'?'y1 (bulk)':'Pressure ('+pU+')';
+  let hdrs=[xhdr];
+  names.forEach(n=>hdrs.push('q_'+n+' ('+qU+')'));
+  hdrs.push('q_total ('+qU+')');
+  names.forEach(n=>hdrs.push('x_'+n));
+  if(N===2) hdrs.push('Selectivity_1/2');
+  lines.push(hdrs.join(','));
+  rows.forEach(r=>{
+    const xv=mode==='sweep_y'?fmt6(r.y[0]):fmt6(r.P);
+    let cells=[xv];
+    r.qi.forEach(q=>cells.push(fmt6(convertQ(q))));
+    cells.push(fmt6(convertQ(r.qtot)));
+    r.x.forEach(x=>cells.push(fmt6(x)));
+    if(N===2){const sel=(r.y[1]>0&&r.y[0]>0)?(r.x[0]/r.x[1])/(r.y[0]/r.y[1]):NaN;cells.push(fmt6(sel));}
+    lines.push(cells.join(','));
+  });
+  const csvText=lines.join('\r\n');
+  const blob=new Blob([csvText],{type:'text/csv'});
+  const defaultName='iast_'+names.join('_')+'.csv';
+  if(window.showSaveFilePicker){
+    window.showSaveFilePicker({
+      suggestedName: defaultName,
+      types:[{description:'CSV file',accept:{'text/csv':['.csv']}}]
+    }).then(fh=>fh.createWritable()).then(w=>w.write(csvText).then(()=>w.close())).then(()=>{
+      st('Saved — '+defaultName,'ok');
+    }).catch(e=>{if(e.name!=='AbortError') st('Save failed: '+e.message,'err');});
+  } else {
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=defaultName;a.click();
+    st('CSV downloaded — '+defaultName+'. (Use Chrome/Edge for a save dialog.)','ok');
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  SAVE PLOT
+// ═══════════════════════════════════════════════════════════════
+
+function savePlot(){
+  const W=parseInt(document.getElementById('expW').value)||1200;
+  const H=parseInt(document.getElementById('expH').value)||900;
+  const fmt2=(gv('expFmt')||'PNG').toLowerCase();
+  const style=getChartStyle();
+
+  // Dashboard: stitch all visible panels into one image (always includes pure_iso)
+  const active=getActivePanels();
+  if(!active.length){st('No panels selected.','err');return;}
+  const cols=active.length<=1?1:active.length<=4?2:3;
+  const rows_=Math.ceil(active.length/cols);
+  const cW=Math.round(W/cols), cH=Math.round(H/rows_);
+
+  // Create a composite off-screen canvas
+  const comp=document.createElement('canvas');
+  comp.width=W; comp.height=H;
+  const compCtx=comp.getContext('2d');
+  compCtx.fillStyle=style.chartBg; compCtx.fillRect(0,0,W,H);
+
+  const pU=gv('pUnits'),qU=qLabel();
+  const pairStr=gv('selPair')||'0,1';
+  const [pi,pj]=pairStr.split(',').map(Number);
+  const N=components.length;
+  const ci=components[Math.min(pi,N-1)]||components[0];
+  const cj=components[Math.min(pj,N-1)]||components[1]||components[0];
+  const names=components.map(c=>c.name);
+  const dataRows=iastResults?iastResults.rows:[];
+  const mode=iastResults?iastResults.mode:'sweep_p';
+
+  active.forEach((p,idx)=>{
+    const col=idx%cols, row=Math.floor(idx/cols);
+    const offX=col*cW, offY=row*cH;
+    // Render each panel to a temp canvas
+    const tmp=document.createElement('canvas');
+    tmp.width=cW; tmp.height=cH;
+    const series=[];
+    const xGetter=p.sweepY&&!p.sweepP?r=>r.y[0]:r=>r.P;
+    const xLbl=p.sweepY&&!p.sweepP?'y₁ (bulk mole fraction)':'Pressure / '+pU;
+    if(p.id==='pure_iso'){
+      renderIsoIntoCanvas(tmp);
+    } else if(p.id==='loading_p'){
+      names.forEach((nm,i)=>series.push({label:'q('+nm+')',color:components[i].color,data:dataRows.map(r=>({x:xGetter(r),y:convertQ(r.qi[i])}))}));
+      series.push({label:'q total',color:'#000000',data:dataRows.map(r=>({x:xGetter(r),y:convertQ(r.qtot)}))});
+      drawChart(tmp,series,style,{xLabel:xLbl,yLabel:'Uptake / '+qU,title:p.title});
+    } else if(p.id==='loading_y'){
+      names.forEach((nm,i)=>series.push({label:'q('+nm+')',color:components[i].color,data:dataRows.map(r=>({x:xGetter(r),y:convertQ(r.qi[i])}))}));
+      series.push({label:'q total',color:'#000000',data:dataRows.map(r=>({x:xGetter(r),y:convertQ(r.qtot)}))});
+      drawChart(tmp,series,style,{xLabel:xLbl,yLabel:'Uptake / '+qU,title:p.title});
+    } else if(p.id==='yx_diagram'){
+      series.push({label:'x = y',color:'#cccccc',dash:[4,4],data:[{x:0,y:0},{x:1,y:1}]});
+      names.forEach((nm,i)=>series.push({label:'x('+nm+')',color:components[i].color,data:dataRows.map(r=>({x:xY(r),y:r.x[i]}))}));
+      drawChart(tmp,series,style,{xLabel:xLblY,yLabel:'Adsorbed mole fraction x',title:p.title});
+    } else if(p.id==='total_p'){
+      series.push({label:'q total',color:components[0].color,data:dataRows.map(r=>({x:xGetter(r),y:convertQ(r.qtot)}))});
+      drawChart(tmp,series,style,{xLabel:xLbl,yLabel:'Total uptake / '+qU,title:p.title});
+    } else if(p.id==='xfrac_p'){
+      names.forEach((nm,i)=>series.push({label:'x('+nm+')',color:components[i].color,data:dataRows.map(r=>({x:xGetter(r),y:r.x[i]}))}));
+      drawChart(tmp,series,style,{xLabel:xLbl,yLabel:'Adsorbed mole fraction',title:p.title});
+    } else if(p.id==='sel_p'||p.id==='sel_y'){
+      series.push({label:'S('+ci.name+'/'+cj.name+')',color:ci.color,
+        data:dataRows.map(r=>{const yi=r.y[pi]||0,yj=r.y[pj]||0;if(yi<=0||yj<=0)return{x:xGetter(r),y:NaN};return{x:xGetter(r),y:(r.x[pi]/r.x[pj])/(yi/yj)};})});
+      drawChart(tmp,series,style,{xLabel:xLbl,yLabel:'Selectivity',title:p.title});
+    }
+    compCtx.drawImage(tmp,offX,offY);
+    // thin separator lines
+    compCtx.strokeStyle='#e0d9cc';compCtx.lineWidth=1;
+    if(col>0){compCtx.beginPath();compCtx.moveTo(offX,offY);compCtx.lineTo(offX,offY+cH);compCtx.stroke();}
+    if(row>0){compCtx.beginPath();compCtx.moveTo(offX,offY);compCtx.lineTo(offX+cW,offY);compCtx.stroke();}
+  });
+
+  const defaultName='iast_'+components.map(c=>c.name).join('_')+'.'+fmt2;
+  const mimeType='image/'+(fmt2==='jpg'?'jpeg':fmt2);
+  const dataUrl=comp.toDataURL(mimeType,0.96);
+  // Convert data URL to Blob for showSaveFilePicker
+  const byteStr=atob(dataUrl.split(',')[1]);
+  const ab=new Uint8Array(byteStr.length);
+  for(let i=0;i<byteStr.length;i++) ab[i]=byteStr.charCodeAt(i);
+  const imgBlob=new Blob([ab],{type:mimeType});
+  if(window.showSaveFilePicker){
+    window.showSaveFilePicker({
+      suggestedName: defaultName,
+      types:[{description:fmt2.toUpperCase()+' image',accept:{[mimeType]:['.'+fmt2]}}]
+    }).then(fh=>fh.createWritable()).then(w=>w.write(imgBlob).then(()=>w.close())).then(()=>{
+      st('Plot saved — '+defaultName,'ok');
+    }).catch(e=>{if(e.name!=='AbortError') st('Save failed: '+e.message,'err');});
+  } else {
+    const a=document.createElement('a');a.href=dataUrl;a.download=defaultName;a.click();
+    st('Plot downloaded — '+defaultName+'. (Use Chrome/Edge for a save dialog.)','ok');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════════════
+
+// Init sliders
+['axSz','tkSz','legSz','ttlSz','gridW','tickLen','frameW','boxW','lnW'].forEach(id=>{
+  const el=document.getElementById(id);
+  if(!el) return;
+  const sp=el.nextElementSibling;
+  if(sp) sp.textContent=parseFloat(el.value).toFixed(el.step&&parseFloat(el.step)<1?1:0);
+});
+
+// Wire up the Add Component button
+document.getElementById('btnAddComp').addEventListener('click', addComponent);
+
+// Auto-add two components on load
+addComponent();
+addComponent();
+
+// Start on the iso tab and render it
+setTimeout(()=>renderIsoChart(), 100);
+
+window.addEventListener('resize',()=>{
+  if(activeTab==='plot') renderDashboard();
+  if(activeTab==='iso') renderIsoChart();
+});
+
+
+
+</script>
+</body>
+</html>

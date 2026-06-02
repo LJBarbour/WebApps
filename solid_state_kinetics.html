@@ -437,9 +437,16 @@ const MODELS = {
     { id:'P2',  name:'Power Law n=2',        eq:'P2',  f: a => Math.sqrt(a) },
     { id:'P3',  name:'Power Law n=3',        eq:'P3',  f: a => Math.cbrt(a) },
     { id:'P4',  name:'Power Law n=4',        eq:'P4',  f: a => Math.pow(a,0.25) },
+    { id:'E1',  name:'Exponential Law (E1)', eq:'E1',  f: a => Math.log(Math.max(a,0.0001)) },
     { id:'A2',  name:'Avrami-Erofeev n=2',   eq:'A2',  f: a => Math.pow(-Math.log(1-Math.min(a,0.9999)),0.5) },
     { id:'A3',  name:'Avrami-Erofeev n=3',   eq:'A3',  f: a => Math.pow(-Math.log(1-Math.min(a,0.9999)),1/3) },
     { id:'A4',  name:'Avrami-Erofeev n=4',   eq:'A4',  f: a => Math.pow(-Math.log(1-Math.min(a,0.9999)),0.25) },
+  ],
+  sigmoidal: [
+    { id:'B1',  name:'Prout-Tompkins (B1)',          eq:'B1',  f: a => { let c=Math.min(Math.max(a,0.0001),0.9999); return Math.log(c/(1-c)); } },
+    { id:'B2',  name:'Prout-Tompkins mod. (B2)',      eq:'B2',  f: a => { let c=Math.min(Math.max(a,0.0001),0.9999); return Math.log(c/(1-c))+2*c-1; } },
+    { id:'SB',  name:'Šesták-Berggren (m=1,n=1)',     eq:'SB',  f: a => { let c=Math.min(Math.max(a,0.0001),0.9999); return -Math.log(c*(1-c)); } },
+    { id:'SB2', name:'Šesták-Berggren (m=1,n=2)',     eq:'SB2', f: a => { let c=Math.min(Math.max(a,0.0001),0.9999); return -Math.log(c*(1-c)*(1-c)); } },
   ],
   contraction: [
     { id:'R2',  name:'Contracting Area',     eq:'R2',  f: a => 1-Math.sqrt(1-Math.min(a,0.9999)) },
@@ -457,7 +464,7 @@ const MODELS = {
     { id:'F3',  name:'Third Order',          eq:'F3',  f: a => { let b=1-Math.min(a,0.9999); return (1/(b*b)-1)/2; } },
   ],
 };
-const GROUP_LABELS = { nucleation:'Nucleation', contraction:'Geometrical Contraction', diffusion:'Diffusion', order:'Reaction Order' };
+const GROUP_LABELS = { nucleation:'Nucleation', sigmoidal:'Sigmoidal (Autocatalytic)', contraction:'Geometrical Contraction', diffusion:'Diffusion', order:'Reaction Order' };
 
 // ════════════════════════════════════════════════════════════════
 //  STATE
@@ -600,6 +607,10 @@ const EQ = {
     x+=T(ctx,'f(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = ',x,cy+5,sz,false);
     x+=T(ctx,'α',x,cy+5,sz,true); T(ctx,'1/4',x,cy-1,sm,false);
   },
+  E1(ctx,w,h){ const cy=h/2,sz=17,sm=11; let x=6;
+    x+=T(ctx,'f(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = ln ',x,cy+5,sz,false);
+    T(ctx,'α',x,cy+5,sz,true);
+  },
   A2(ctx,w,h){ const cy=h/2,sz=17,sm=11; let x=6;
     x+=T(ctx,'f(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = [−ln(1−',x,cy+5,sz,false);
     x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,')]',x,cy+5,sz,false); T(ctx,'1/2',x,cy-1,sm,false);
@@ -670,6 +681,40 @@ const EQ = {
     T(ctx,')',dx,cy+sz-1,sz,false); T(ctx,'2',dx+TW(ctx,')',sz,false),cy+sz-7,sm,false);
     HL(ctx,x,x+fw,cy+1,1); x+=fw+3;
     T(ctx,'− 1',x,cy+5,sz,false);
+  },
+  // ── Sigmoidal models ──
+  B1(ctx,w,h){ const cy=h/2,sz=16,sm=11; let x=4;
+    x+=T(ctx,'f(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = ln',x,cy+5,sz,false);
+    // fraction α/(1−α)
+    const nW=TW(ctx,'α',sz,true), dW=TW(ctx,'1−α',sz,true)+2;
+    const fw=Math.max(nW,dW)+8;
+    x+=4;
+    T(ctx,'α',x+(fw-nW)/2,cy-2,sz,true);
+    T(ctx,'1−',x+(fw-dW)/2,cy+sz-1,sz,false); T(ctx,'α',x+(fw-dW)/2+TW(ctx,'1−',sz,false),cy+sz-1,sz,true);
+    HL(ctx,x,x+fw,cy+1,1); x+=fw+2;
+  },
+  B2(ctx,w,h){ const cy=h/2,sz=14,sm=10; let x=4;
+    x+=T(ctx,'f(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = ln',x,cy+5,sz,false);
+    const nW=TW(ctx,'α',sz,true), dW=TW(ctx,'1−α',sz,true)+2;
+    const fw=Math.max(nW,dW)+8; x+=4;
+    T(ctx,'α',x+(fw-nW)/2,cy-2,sz,true);
+    T(ctx,'1−',x+(fw-dW)/2,cy+sz-1,sz,false); T(ctx,'α',x+(fw-dW)/2+TW(ctx,'1−',sz,false),cy+sz-1,sz,true);
+    HL(ctx,x,x+fw,cy+1,1); x+=fw+2;
+    T(ctx,'+ 2',x,cy+5,sz,false); x+=TW(ctx,'+ 2',sz,false);
+    T(ctx,'α',x,cy+5,sz,true); x+=TW(ctx,'α',sz,true);
+    T(ctx,'− 1',x,cy+5,sz,false);
+  },
+  SB(ctx,w,h){ const cy=h/2,sz=15,sm=11; let x=4;
+    x+=T(ctx,'f(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = −ln[',x,cy+5,sz,false);
+    x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,'(1−',x,cy+5,sz,false);
+    x+=T(ctx,'α',x,cy+5,sz,true); T(ctx,')]',x,cy+5,sz,false);
+  },
+  SB2(ctx,w,h){ const cy=h/2,sz=14,sm=10; let x=4;
+    x+=T(ctx,'f(',x,cy+5,sz,false); x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,') = −ln[',x,cy+5,sz,false);
+    x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,'(1−',x,cy+5,sz,false);
+    x+=T(ctx,'α',x,cy+5,sz,true); x+=T(ctx,')',x,cy+5,sz,false);
+    T(ctx,'2',x,cy-1,sm,false); x+=TW(ctx,'2',sm,false);
+    T(ctx,']',x+2,cy+5,sz,false);
   },
 };
 
@@ -1332,10 +1377,11 @@ function drawFit(){
     ctx.save(); ctx.strokeStyle='#b84a2e'; ctx.lineWidth=1.5*dpr; ctx.setLineDash([4*dpr,3*dpr]);
     ctx.strokeRect(rx2,ry2,rw,rh); ctx.restore();
   }
-  // Legend
-  if(gb('legShow')) drawLegend(ctx, dims, xr, yr);
 
-  ctx.restore();
+  ctx.restore(); // end plot area clip
+
+  // Legend and axes drawn outside clip so they're never cut off
+  if(gb('legShow')) drawLegend(ctx, dims, xr, yr);
 
   // Y-axis label uses model equation string
   const yLbl = selectedModel ? `f(α)  [${selectedModel.id}]` : 'f(α)';
@@ -1351,6 +1397,7 @@ function drawFit(){
 // ════════════════════════════════════════════════════════════════
 function drawLegend(ctx, dims, xr, yr){
   if(!fitReg||!selectedModel||!alphaData.length) return;
+  ctx.save();
   const{l,r,t,b,dpr}=dims;
   const font  = gv('legFont')||"'Palatino Linotype',Palatino,Georgia,serif";
   const sz    = (parseFloat(gv('legSz'))||18) * dpr;
@@ -1365,6 +1412,7 @@ function drawLegend(ctx, dims, xr, yr){
   // returns total advance width
   function drawMixed(ctx, segs, x, y, sz){
     let cx=x;
+    ctx.textAlign='left';
     segs.forEach(s=>{
       const fsz = s.sup ? sz*0.65 : sz;
       const dy  = s.sup ? -sz*0.45 : 0;
@@ -1376,6 +1424,7 @@ function drawLegend(ctx, dims, xr, yr){
   }
   function measureMixed(ctx, segs, sz){
     let w=0;
+    ctx.textAlign='left';
     segs.forEach(s=>{
       const fsz=s.sup?sz*0.65:sz;
       ctx.font=`${s.bold?'bold ':''}${s.italic?'italic ':''}${fsz}px ${font}`;
@@ -1474,7 +1523,7 @@ function drawLegend(ctx, dims, xr, yr){
     drawMixed(ctx, segs, bx+pad, y, sz);
   });
 
-  ctx.restore();
+  ctx.restore(); // end drawLegend save
 }
 
 function drawAxesFit(ctx,dims,xr,yr,xLabel,yLabel){
@@ -1518,7 +1567,26 @@ function fmt4(v){if(v===undefined||v===null||isNaN(v))return'--';const a=Math.ab
 // redraw is called by right-panel controls — redraws fit canvas
 function redraw(){ if(currentTab==='fit'){ recomputeFitFromView(); drawFit(); } }
 
-function savePlot(){
+// Save file with dialog if File System Access API available, else fallback to download
+async function saveWithDialog(blob, suggestedName, description, accept){
+  if(window.showSaveFilePicker){
+    try{
+      const fh=await window.showSaveFilePicker({
+        suggestedName, types:[{description, accept}]
+      });
+      const w=await fh.createWritable();
+      await w.write(blob); await w.close();
+      return;
+    } catch(e){ if(e.name==='AbortError') return; /* user cancelled */ }
+  }
+  // Fallback
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=suggestedName; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+}
+
+async function savePlot(){
   if(!fitPts.length||!fitReg){st('No fit to save.','err');return}
   const W=parseInt(gv('expW'))||1200, H=parseInt(gv('expH'))||900;
   const fmt2=(gv('expFmt')||'PNG').toLowerCase();
@@ -1639,8 +1707,15 @@ function savePlot(){
     ctx.fillText(ttl.trim(),(l+r2)/2,t2-ttlSz*0.4);
   }
 
-  const url=oc.toDataURL(fmt2==='jpeg'?'image/jpeg':'image/png',0.97);
-  const a=document.createElement('a'); a.href=url; a.download='kinetics_fit.'+fmt2; a.click();
+  const mimeType=fmt2==='jpeg'?'image/jpeg':'image/png';
+  const url=oc.toDataURL(mimeType,0.97);
+  // Convert data URL to blob for the dialog
+  const byteStr=atob(url.split(',')[1]);
+  const ab=new Uint8Array(byteStr.length);
+  for(let i=0;i<byteStr.length;i++) ab[i]=byteStr.charCodeAt(i);
+  const imgBlob=new Blob([ab],{type:mimeType});
+  const ext=fmt2==='jpeg'?'jpg':'png';
+  await saveWithDialog(imgBlob,`kinetics_fit.${ext}`,'Plot Image',{[mimeType]:['.'+ext]});
   st('Plot saved.','ok');
 }
 
@@ -1664,7 +1739,7 @@ function switchTab(tab){
 // ════════════════════════════════════════════════════════════════
 //  EXPORT CSV
 // ════════════════════════════════════════════════════════════════
-function exportCSV(){
+async function exportCSV(){
   if(!fitReg||!selectedModel) return;
   // Round to 8 significant figures — avoids over-long strings that spreadsheets read as text
   const r8=v=>parseFloat(v.toPrecision(8));
@@ -1688,7 +1763,7 @@ function exportCSV(){
     lines.push([r8(p.t),r8(p.alpha),r8(fy),r8(fitted),r8(fy-fitted)].join(','));
   });
   const blob=new Blob([lines.join('\r\n')],{type:'text/csv'});
-  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='kinetics_results.csv';a.click();
+  await saveWithDialog(blob,'kinetics_results.csv','CSV File',{'text/csv':['.csv']});
   st('CSV exported.','ok');
 }
 
