@@ -155,6 +155,8 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
       <div style="display:flex;align-items:flex-end"><button class="btn out" style="width:auto;padding:4px 10px;font-size:9px;margin:0" onclick="applyRange()">Apply</button></div>
     </div>
     <button class="btn out" style="margin-top:7px;font-size:9px" onclick="resetSel()">Reset Selection</button>
+    <button class="btn" id="btnSuggest" style="margin-top:6px;font-size:9px;display:none" onclick="suggestModel()">&#9670; Suggest Best Model</button>
+    <div id="suggestOut" style="display:none;margin-top:8px;background:var(--cream);border:1.5px solid var(--rule);padding:9px 11px;font-size:11px;line-height:1.6;font-family:var(--sans)"></div>
   </div>
 
   <div class="sb">
@@ -748,6 +750,8 @@ function computeAlpha(){
   if(Math.abs(rng)<1e-12) return;
   alphaData=seg.map(p=>({t:p.t-tLo, alpha:(p.m-m0)/rng}));
   setStepD(1); setStepD(2); setStepA(3);
+  document.getElementById('btnSuggest').style.display='';
+  document.getElementById('suggestOut').style.display='none';
   if(selectedModel) computeFit();
 }
 
@@ -1309,6 +1313,8 @@ function resetSel(){
   zsMap.alpha={xMin:null,xMax:null,yMin:null,yMax:null};
   zsMap.fit  ={xMin:null,xMax:null,yMin:null,yMax:null};
   document.getElementById('t0inp').value='';document.getElementById('t1inp').value='';
+  document.getElementById('btnSuggest').style.display='none';
+  document.getElementById('suggestOut').style.display='none';
   setStepA(1);
   document.getElementById('resBox').innerHTML='<div class="res-ph">Select a model to see results</div>';
   document.getElementById('btnExport').disabled=true;
@@ -1316,9 +1322,144 @@ function resetSel(){
 }
 
 // ════════════════════════════════════════════════════════════════
-//  FIT CANVAS — zoom/pan state lives in zsMap['fit']
+//  MODEL SUGGESTION — physics-based shape analysis
 // ════════════════════════════════════════════════════════════════
-// zsMap.fit is already declared in STATE block above
+function suggestModel(){
+  if(alphaData.length<10) return;
+  const out=document.getElementById('suggestOut');
+  out.style.display=''; out.innerHTML='<em>Analysing…</em>';
+
+  const ad=alphaData;
+  const n=ad.length;
+
+  // ── 1. Smooth alpha (noise-robust moving average) ────────────────
+  const smW=Math.max(3,Math.floor(n*0.06));
+  function smooth(arr){
+    return arr.map((_,i)=>{
+      const s=Math.max(0,i-smW), e=Math.min(n-1,i+smW);
+      let sum=0; for(let j=s;j<=e;j++) sum+=arr[j]; return sum/(e-s+1);
+    });
+  }
+  const sa=smooth(ad.map(p=>p.alpha));
+  const st2=ad.map(p=>p.t);
+
+  // ── 2. Area ratio (primary shape descriptor, noise-robust) ──────
+  let area=0;
+  for(let i=1;i<n;i++) area+=0.5*(sa[i]+sa[i-1])*(st2[i]-st2[i-1]);
+  const tSpan=st2[n-1]-st2[0];
+  const areaRatio=area/tSpan;
+
+  // ── 3. Inflection detection on smoothed data ───────────────
+  const d1=sa.map((_,i)=>i<n-1?(sa[i+1]-sa[i])/(st2[i+1]-st2[i]):0);
+  const d2=d1.map((_,i)=>i<n-1?(d1[i+1]-d1[i])/(st2[i+1]-st2[i]):0);
+  let inflFrac=-1;
+  for(let i=Math.floor(n*0.10);i<Math.floor(n*0.90)-1;i++){
+    if(d2[i]*d2[i+1]<0){ inflFrac=i/n; break; }
+  }
+  const hasMidInflection=inflFrac>0;
+
+  // ── 4. Early acceleration ───────────────────────────────────────
+  const e20=Math.max(3,Math.floor(n*0.20));
+  const acceleratory=d1[e20]>d1[1]*1.5;
+
+  // ── 5. Early-time power law exponent ────────────────────────
+  const earlyPts=ad.filter((p,i)=>i>0&&i<Math.max(4,Math.floor(n*0.25))&&p.alpha>0.01&&p.t>0);
+  let earlyExp=1;
+  if(earlyPts.length>=3){
+    const reg=linReg(earlyPts.map(p=>Math.log(p.t)),earlyPts.map(p=>Math.log(p.alpha)));
+    if(reg) earlyExp=reg.k;
+  }
+
+  // ── 6. Longest-linear-segment scoring ────────────────────────
+  const WIN_MIN=Math.max(6,Math.floor(n*0.12));
+  const R2_THRESH=0.997;
+
+  function longestLinearWindow(pts){
+    let best=0;
+    for(let s=0;s<pts.length-WIN_MIN;s++){
+      let sx=0,sy=0,sx2=0,sxy=0,cnt=0;
+      for(let e=s;e<pts.length;e++){
+        const x=pts[e].t, y=pts[e].y;
+        sx+=x; sy+=y; sx2+=x*x; sxy+=x*y; cnt++;
+        if(cnt<WIN_MIN) continue;
+        const den=cnt*sx2-sx*sx; if(Math.abs(den)<1e-15) continue;
+        const k2=(cnt*sxy-sx*sy)/den, b2=(sy-k2*sx)/cnt;
+        const mean=sy/cnt;
+        let ssres=0, sstot=0;
+        for(let j=s;j<=e;j++){
+          ssres+=(pts[j].y-(k2*pts[j].t+b2))**2;
+          sstot+=(pts[j].y-mean)**2;
+        }
+        if(sstot<1e-15) continue;
+        if(1-ssres/sstot>=R2_THRESH) best=Math.max(best,cnt);
+      }
+    }
+    return best;
+  }
+
+  const allModels=Object.values(MODELS).flat();
+  const scores=[];
+  for(const m of allModels){
+    const pts=ad.map(p=>({t:p.t,y:m.f(p.alpha)})).filter(p=>isFinite(p.y)&&!isNaN(p.y));
+    if(pts.length<WIN_MIN) continue;
+    const reg=linReg(pts.map(p=>p.t),pts.map(p=>p.y));
+    if(!reg) continue;
+    const linWin=longestLinearWindow(pts);
+    const linFrac=linWin/pts.length;
+    scores.push({m, r2:reg.r2, linFrac, linWin});
+  }
+  scores.sort((a,b)=>b.linFrac-a.linFrac||b.r2-a.r2);
+
+  // ── 7. Shape-based candidate filtering ──────────────────────
+  let mechanismHtml='', candidates=[];
+  if(hasMidInflection||areaRatio>0.55){
+    const inflStr=hasMidInflection?` with inflection at ~${(inflFrac*100).toFixed(0)}% of the time range`:'';
+    mechanismHtml=`<b>Shape:</b> Sigmoidal (area ratio ${areaRatio.toFixed(2)})${inflStr} — the rate accelerates initially then decelerates. Characteristic of <b>nucleation-and-growth</b> or <b>autocatalytic</b> mechanisms.`;
+    candidates=['A2','A3','A4','B1','P2','P3','P4'];
+  } else if(acceleratory&&areaRatio>0.50){
+    mechanismHtml=`<b>Shape:</b> Acceleratory (area ratio ${areaRatio.toFixed(2)}, early exponent ≈${earlyExp.toFixed(1)}) — reaction rate increases throughout. Suggests <b>nucleation</b> or <b>power-law</b> behaviour.`;
+    candidates=earlyExp>1.5?['A2','A3','A4','P3','P4']:['P2','P3','E1','A2'];
+  } else if(areaRatio<0.38){
+    mechanismHtml=`<b>Shape:</b> Strongly decelerating (area ratio ${areaRatio.toFixed(2)}) — reaction is fast early and slows markedly. Typical of <b>diffusion-controlled</b> processes.`;
+    candidates=['D3','D4','D1','D2','R3'];
+  } else if(areaRatio<0.48){
+    mechanismHtml=`<b>Shape:</b> Moderately decelerating (area ratio ${areaRatio.toFixed(2)}) — consistent with <b>geometrical contraction</b> or <b>reaction-order</b> models.`;
+    candidates=['R2','R3','F1','F2','D3'];
+  } else {
+    mechanismHtml=`<b>Shape:</b> Near-linear to mildly decelerating (area ratio ${areaRatio.toFixed(2)}) — consistent with <b>first-order</b> or <b>contracting geometry</b> models.`;
+    candidates=['F1','R2','R3','A2'];
+  }
+
+  const filtered=scores.filter(s=>candidates.includes(s.m.id));
+  const top3=filtered.slice(0,3);
+  const topExtra=scores.slice(0,3).filter(s=>!top3.find(t=>t.m.id===s.m.id));
+  const shown=[...top3,...topExtra].slice(0,4);
+
+  // ── 8. Render output ───────────────────────────────────────────
+  const rowsHtml=shown.map((s,i)=>{
+    const badge=i===0?`<span style="background:var(--accent);color:var(--paper);font-size:9px;padding:1px 5px;border-radius:2px;font-family:var(--mono);letter-spacing:.05em;margin-right:4px">BEST</span>`:'';
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid var(--pale)">
+      <span>${badge}<b>${s.m.name}</b></span>
+      <span style="font-family:var(--mono);font-size:10px;color:#555">linear ${(s.linFrac*100).toFixed(0)}%  R²=${s.r2.toFixed(4)}</span>
+    </div>`;
+  }).join('');
+
+  out.innerHTML=`
+    <div style="margin-bottom:7px;color:#555;font-size:11px">${mechanismHtml}</div>
+    <div style="font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin-bottom:4px">Recommended models</div>
+    ${rowsHtml}
+    <div style="margin-top:7px;font-size:10px;color:#888">"Linear %" = longest contiguous range with R²≥0.997. Click a model in the selector to apply it.</div>
+  `;
+
+  if(shown.length>0){
+    const best=shown[0].m;
+    document.querySelectorAll('[id^="grp-"]').forEach(s=>{ s.value=''; });
+    const grpKey=Object.keys(MODELS).find(k=>MODELS[k].some(m=>m.id===best.id));
+    if(grpKey) document.getElementById('grp-'+grpKey).value=best.id;
+    selectModel(best);
+  }
+}
+
 
 function setupFitCanvas(){
   const c=document.getElementById('fitCanvas'); if(!c) return;
