@@ -1,0 +1,1221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TGA / DSC Viewer</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:wght@300;600&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --ink:#0f0e0d;--paper:#f6f1ea;--cream:#ede7d8;--pale:#e0d9cc;
+  --rule:#c5bba9;--accent:#b84a2e;--green:#2a7a3b;
+  --tga:#2a5caa;--dsc:#b84a2e;
+  --mono:'DM Mono',monospace;--serif:'Fraunces',Georgia,serif;--sans:'DM Sans',sans-serif;
+}
+html,body{height:100%;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:13px}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:var(--pale)}
+::-webkit-scrollbar-thumb{background:var(--rule);border-radius:2px}
+body{display:grid;grid-template-rows:auto 1fr;overflow:hidden}
+header{border-bottom:2px solid var(--ink);padding:12px 22px;display:flex;align-items:baseline;gap:16px;flex-shrink:0}
+header h1{font-family:var(--serif);font-size:22px;font-weight:600;letter-spacing:-.4px}
+header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spacing:.15em;text-transform:uppercase}
+.app{display:grid;grid-template-columns:268px 1fr 268px;height:100%;overflow:hidden;min-height:0}
+
+/* ── LEFT SIDEBAR ── */
+.sidebar{border-right:2px solid var(--ink);overflow-y:auto;display:flex;flex-direction:column;min-height:0}
+.sb{padding:12px 14px;border-bottom:1px solid var(--rule)}
+.sb:last-child{border-bottom:none}
+.lbl{font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:8px}
+.fi-label{font-family:var(--mono);font-size:9px;letter-spacing:.12em;color:#888;margin-bottom:3px;margin-top:6px}
+.dz{border:2px dashed var(--rule);padding:10px 8px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;user-select:none}
+.dz:hover,.dz.over{border-color:var(--accent);background:var(--cream)}
+.dz-ico{font-size:16px;margin-bottom:3px}
+.dz-txt{font-size:10px;color:#888;line-height:1.4;pointer-events:none}
+.dz-name{font-size:10px;font-weight:500;margin-top:3px;word-break:break-all;min-height:1em;font-family:var(--mono);pointer-events:none}
+.dz.tga-dz .dz-name{color:var(--tga)}
+.dz.dsc-dz .dz-name{color:var(--dsc)}
+.swatch{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:middle;flex-shrink:0;border:1.5px solid rgba(0,0,0,.15)}
+.fi-row{display:flex;align-items:center;gap:6px;margin-top:4px}
+.fi-row label{font-family:var(--mono);font-size:9px;color:#888;flex-shrink:0;white-space:nowrap}
+.fi-row input{flex:1;background:var(--cream);border:1.5px solid var(--rule);padding:3px 6px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none}
+.fi-row input:focus{border-color:var(--accent)}
+
+/* range row */
+.range-row{display:flex;gap:7px;margin-top:6px}
+.range-field{flex:1;display:flex;flex-direction:column;gap:3px}
+.range-field label{font-family:var(--mono);font-size:9px;color:#888;letter-spacing:.06em;text-transform:uppercase}
+.range-field input{background:var(--cream);border:1.5px solid var(--rule);padding:4px 7px;font-family:var(--mono);font-size:11px;color:var(--ink);width:100%;outline:none}
+.range-field input:focus{border-color:var(--accent)}
+
+/* info box */
+.info-box{background:var(--cream);border:1.5px solid var(--rule);padding:8px 10px;font-family:var(--mono);font-size:10px;line-height:1.7;margin-top:6px}
+.info-box .il{color:#888}
+.info-box .iv{color:var(--ink);font-weight:500}
+
+/* buttons */
+.btn{display:block;width:100%;padding:7px 12px;font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;border:2px solid var(--ink);background:var(--ink);color:var(--paper);transition:background .15s,border-color .15s;margin-bottom:5px}
+.btn:last-child{margin-bottom:0}
+.btn:hover:not(:disabled){background:var(--accent);border-color:var(--accent)}
+.btn:disabled{opacity:.3;cursor:not-allowed}
+.btn.out{background:transparent;color:var(--ink)}
+.btn.out:hover:not(:disabled){background:var(--ink);color:var(--paper)}
+
+/* ── CENTRE ── */
+.centre{display:flex;flex-direction:column;overflow:hidden;min-height:0;min-width:0}
+.tab-bar{border-bottom:2px solid var(--ink);display:flex;flex-shrink:0;background:var(--paper)}
+.tab{padding:7px 16px;font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;cursor:pointer;border:none;background:none;color:#888;border-right:1px solid var(--rule)}
+.tab:hover{background:var(--cream);color:var(--ink)}
+.tab.active{background:var(--cream);color:var(--accent);border-bottom:2px solid var(--accent);margin-bottom:-2px}
+.raw-area{flex:1;min-height:0;position:relative;padding:10px 14px}
+.raw-canvas-wrap{width:100%;height:100%;position:relative;background:#fff;border:1.5px solid var(--rule);overflow:hidden}
+.raw-canvas-wrap canvas{display:block;width:100%!important;height:100%!important;cursor:crosshair}
+.zoom-reset{position:absolute;top:3px;right:12px;font-family:var(--mono);font-size:9px;padding:3px 8px;background:var(--paper);border:1.5px solid var(--rule);cursor:pointer;z-index:3;color:#888;letter-spacing:.06em;text-transform:uppercase}
+.zoom-reset:hover{border-color:var(--accent);color:var(--accent)}
+.guide-area{flex:1;min-height:0;overflow-y:auto;padding:28px 32px;font-size:13px;line-height:1.8;color:#333;display:none;background:var(--paper)}
+.g-sec{font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin:18px 0 6px;padding-bottom:4px;border-bottom:1px solid var(--rule)}
+#status{padding:4px 16px;font-family:var(--mono);font-size:10px;color:#999;border-top:1px solid var(--rule);flex-shrink:0;letter-spacing:.04em}
+#status.ok{color:var(--green)}#status.err{color:var(--accent)}
+
+/* ── RIGHT PANEL ── */
+.cpanel{border-left:2px solid var(--ink);overflow-y:auto;flex-shrink:0}
+.cp-group{border-bottom:1px solid var(--rule)}
+.cp-head{display:flex;justify-content:space-between;align-items:center;padding:9px 13px;cursor:pointer;user-select:none;background:var(--paper);transition:background .15s}
+.cp-head:hover{background:var(--cream)}
+.cp-head .cp-title{font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent)}
+.cp-head .cp-arr{font-size:10px;color:#888;transition:transform .2s}
+.cp-group.open .cp-arr{transform:rotate(180deg)}
+.cp-body{display:none;padding:10px 13px;border-top:1px solid var(--pale)}
+.cp-group.open .cp-body{display:block}
+.cr{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:6px}
+.cr:last-child{margin-bottom:0}
+.cl{font-size:11px;color:#555;flex:1;white-space:nowrap}
+.cr input[type=number]{width:65px;background:var(--cream);border:1.5px solid var(--rule);padding:3px 5px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none}
+.cr input[type=range]{flex:1;min-width:50px;accent-color:var(--accent)}
+.cr input[type=color]{width:32px;height:22px;border:1.5px solid var(--rule);background:none;cursor:pointer;padding:1px}
+.cr input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--accent)}
+.cr select{flex:1;background:var(--cream);border:1.5px solid var(--rule);padding:3px 5px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none;appearance:none}
+.cr input[type=text]{flex:1;background:var(--cream);border:1.5px solid var(--rule);padding:3px 5px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none}
+.rv2{font-family:var(--mono);font-size:11px;min-width:28px;text-align:right;color:#555}
+#tooltip{position:fixed;background:var(--ink);border:none;border-radius:2px;padding:5px 9px;font-family:var(--mono);font-size:11px;color:var(--paper);pointer-events:none;z-index:100;display:none;line-height:1.7}
+</style>
+</head>
+<body>
+<header>
+  <h1>TGA / DSC Viewer</h1>
+  <span class="sub">Simultaneous Thermal Analysis &mdash; Temperature Programme</span>
+</header>
+<div class="app">
+
+<!-- ══ LEFT SIDEBAR ══ -->
+<aside class="sidebar">
+
+  <div class="sb">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <div class="lbl" style="margin-bottom:0"><span class="swatch" style="background:var(--tga)"></span>TGA Data</div>
+      <button onclick="clearTGA()" title="Remove TGA data" style="background:none;border:none;cursor:pointer;font-family:var(--mono);font-size:9px;color:#aaa;padding:0;letter-spacing:.06em;text-transform:uppercase">✕ Clear</button>
+    </div>
+    <div class="dz tga-dz" id="dzTGA">
+      <div class="dz-ico">&#8679;</div>
+      <div class="dz-txt">Click or drag &amp; drop TGA file</div>
+      <div class="dz-name" id="dzTGAName"></div>
+    </div>
+    <div class="fi-row" style="margin-top:6px">
+      <label>Y label</label>
+      <input type="text" id="tgaLabel" value="Mass / mg" oninput="redraw()">
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;margin-top:7px">
+      <input type="checkbox" id="dtgShow" onchange="computeDTG();redraw()" style="width:14px;height:14px;accent-color:#2a7a3b;cursor:pointer">
+      <label for="dtgShow" style="font-family:var(--mono);font-size:10px;cursor:pointer;color:var(--ink)">Show DTG (first derivative)</label>
+    </div>
+    <div id="dtgControls" style="display:none;margin-top:5px">
+      <div class="fi-row">
+        <label>Y label</label>
+        <input type="text" id="dtgLabel" value="DTG / %/\u00b0C" oninput="redraw()">
+      </div>
+      <div style="font-family:var(--mono);font-size:9px;color:#888;margin-top:6px;margin-bottom:2px">Smoothing window</div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <input type="range" id="dtgSmooth" min="1" max="50" value="15" style="flex:1;accent-color:#2a7a3b" oninput="document.getElementById('dtgSmoothV').textContent=this.value;computeDTG();redraw()">
+        <span id="dtgSmoothV" style="font-family:var(--mono);font-size:11px;color:#555;min-width:20px">15</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="sb">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <div class="lbl" style="margin-bottom:0"><span class="swatch" style="background:var(--dsc)"></span>DSC Data</div>
+      <button onclick="clearDSC()" title="Remove DSC data" style="background:none;border:none;cursor:pointer;font-family:var(--mono);font-size:9px;color:#aaa;padding:0;letter-spacing:.06em;text-transform:uppercase">✕ Clear</button>
+    </div>
+    <div class="dz dsc-dz" id="dzDSC">
+      <div class="dz-ico">&#8679;</div>
+      <div class="dz-txt">Click or drag &amp; drop DSC file</div>
+      <div class="dz-name" id="dzDSCName"></div>
+    </div>
+    <div class="fi-row" style="margin-top:6px">
+      <label>Y label</label>
+      <input type="text" id="dscLabel" value="Heat Flow / mW" oninput="redraw()">
+    </div>
+    <div id="dscLegControls"></div>
+  </div>
+
+  <div class="sb">
+    <div class="lbl">Temperature Range</div>
+    <div class="range-row" style="margin-top:0">
+      <div class="range-field"><label>T min (°C)</label><input type="number" id="tMin" placeholder="auto" oninput="zs.xMin=null;zs.xMax=null;redraw()"></div>
+      <div class="range-field"><label>T max (°C)</label><input type="number" id="tMax" placeholder="auto" oninput="zs.xMin=null;zs.xMax=null;redraw()"></div>
+    </div>
+    <button class="btn out" style="margin-top:7px;font-size:9px" onclick="resetZoom()">&#8635; Reset Zoom</button>
+  </div>
+
+  <div class="sb">
+    <div class="lbl">File Info</div>
+    <div id="fileInfo"><div style="font-family:var(--mono);font-size:10px;color:#aaa;font-style:italic">No files loaded.</div></div>
+  </div>
+
+  <div class="sb" style="flex:0">
+    <button class="btn out" id="btnExport" onclick="exportCSV()" disabled>Export Combined CSV</button>
+  </div>
+
+</aside>
+
+<!-- ══ CENTRE ══ -->
+<div class="centre">
+  <div class="tab-bar">
+    <button class="tab active" id="tab-plot"  onclick="switchTab('plot')">Plot</button>
+    <button class="tab"        id="tab-guide" onclick="switchTab('guide')">Guide</button>
+  </div>
+
+  <div class="raw-area" id="panel-plot">
+    <div class="raw-canvas-wrap">
+      <button class="zoom-reset" onclick="resetZoom()">&#8635; Reset</button>
+      <canvas id="mainCanvas"></canvas>
+    </div>
+  </div>
+
+  <div class="guide-area" id="panel-guide">
+    <h2 style="font-family:var(--serif);font-size:22px;font-weight:600;margin-bottom:4px">TGA / DSC Viewer</h2>
+    <p style="font-family:var(--mono);font-size:9px;letter-spacing:.15em;text-transform:uppercase;color:var(--accent);margin-bottom:20px">User Guide</p>
+
+    <div class="g-sec">Overview</div>
+    <p>This app displays TGA (thermogravimetric analysis) and DSC (differential scanning calorimetry) data on a shared temperature axis. TGA has its own y-axis on the left; DSC on the right. Either or both files can be loaded independently. The first derivative of TGA (DTG) can be overlaid on the same plot.</p>
+
+    <div class="g-sec">File Format</div>
+    <p>The app accepts plain-text files in any common delimiter format (CSV, TXT, DAT). Files may use ASCII or UTF-16 encoding — TA Instruments files are handled automatically.</p>
+    <ul style="margin:8px 0 14px 24px;line-height:1.9">
+      <li>All header lines are ignored until the keyword <code style="font-family:var(--mono);background:var(--cream);padding:1px 5px;border-radius:2px">StartOfData</code> is found.</li>
+      <li>From the line after <code style="font-family:var(--mono);background:var(--cream);padding:1px 5px;border-radius:2px">StartOfData</code>, column 2 is read as temperature (°C) and column 3 as the signal. Column 1 (typically time) is ignored.</li>
+      <li>Columns may be separated by commas, semicolons, tabs, or whitespace.</li>
+      <li>A <code style="font-family:var(--mono);background:var(--cream);padding:1px 5px;border-radius:2px">Size</code> field in the TGA header (e.g. <code style="font-family:var(--mono);background:var(--cream);padding:1px 5px;border-radius:2px">Size    12.34    mg</code>) is read automatically and used to express TGA weight as % of initial mass.</li>
+    </ul>
+
+    <div class="g-sec">Loading and Clearing Data</div>
+    <p>Click or drag a file onto the TGA or DSC drop zone. The file name, point count, temperature range, and sample size (if present) are shown in the File Info panel. Click <strong>✕ Clear</strong> next to either channel header to remove that dataset without restarting the app.</p>
+
+    <div class="g-sec">Heating and Cooling Legs</div>
+    <p>For DSC files that contain multiple temperature ramps (e.g. a heat–cool cycle), the app automatically detects each leg using a sliding-window direction algorithm that is robust to noisy temperature data and spurious points. Each leg is labelled Heating or Cooling and given a distinct colour. Individual legs can be shown or hidden using the checkboxes that appear below the DSC drop zone. The <strong>Color by leg</strong> option in the right panel switches between per-leg colours and a single colour for all legs.</p>
+
+    <div class="g-sec">DTG — First Derivative</div>
+    <p>Check <strong>Show DTG</strong> below the TGA drop zone to overlay the first derivative of the TGA signal. The derivative is computed by central differences and smoothed with a boxcar window whose width is set by the <strong>Smoothing window</strong> slider. The DTG curve shares the temperature axis but has no y-axis scale — it is displayed for qualitative shape reference only.</p>
+
+    <div class="g-sec">Axis Ranges</div>
+    <p>The <strong>Temperature Range</strong> fields in the left sidebar set the x-axis limits exactly. The <strong>Axis Ranges</strong> panel on the right sets the y-axis limits for TGA and DSC independently. All four limits are applied as hard boundaries — the axis starts and ends at exactly the value you enter, with ticks computed within those limits. Leave a field blank to revert to automatic scaling.</p>
+
+    <div class="g-sec">Zooming and Panning</div>
+    <p><strong>Left-drag</strong> on the chart to draw a zoom rectangle (x-axis only; y-axis auto-scales to the zoomed range). <strong>Right-drag</strong> to pan. The Temperature Range fields update to show the current zoom. Click <strong>⟲ Reset</strong> or clear the Temperature Range fields to restore the full range.</p>
+
+    <div class="g-sec">Tooltip</div>
+    <p>Hover over the chart to see the temperature and the nearest TGA, DTG, and DSC values at the cursor position.</p>
+
+    <div class="g-sec">Export</div>
+    <p><strong>Export Combined CSV</strong> saves temperature, TGA, and DSC in three columns. If both datasets are loaded, the DSC signal is interpolated onto the TGA temperature grid. The DTG column is included when active.</p>
+    <p><strong>Save Plot Image</strong> renders the chart at the resolution set in the Width/Height fields and saves as PNG or JPEG.</p>
+    <p><strong>Save Settings JSON</strong> saves all current control values (colours, line widths, axis ranges, font, grid style, etc.) to a JSON file. <strong>Load Settings JSON</strong> restores a previously saved set of settings instantly.</p>
+
+    <p style="margin-top:28px;font-family:var(--mono);font-size:9px;color:#bbb;letter-spacing:.08em">Version 1.0</p>
+  </div>
+
+  <div id="status">Ready &mdash; drop a TGA or DSC file to begin.</div>
+</div>
+
+<!-- ══ RIGHT PANEL ══ -->
+<div class="cpanel">
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Axis Ranges</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Y TGA min</span><input type="number" id="yTGAmin" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Y TGA max</span><input type="number" id="yTGAmax" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Y DSC min</span><input type="number" id="yDSCmin" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Y DSC max</span><input type="number" id="yDSCmax" placeholder="auto" oninput="redraw()"></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Axis Labels &amp; Fonts</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">X label</span><input type="text" id="xLbl" value="Temperature / °C" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Font</span>
+        <select id="fontFam" oninput="redraw()">
+          <option value="Arial,sans-serif" selected>Arial</option>
+          <option value="'Helvetica Neue',Helvetica,sans-serif">Helvetica</option>
+          <option value="Georgia,serif">Georgia</option>
+          <option value="'Times New Roman',serif">Times New Roman</option>
+          <option value="'Courier New',monospace">Courier New</option>
+          <option value="'DM Mono',monospace">DM Mono</option>
+        </select>
+      </div>
+      <div class="cr"><span class="cl">Label size</span><input type="range" id="axSz" min="8" max="72" value="36" oninput="V(this);redraw()"><span class="rv2">36</span></div>
+      <div class="cr"><span class="cl">Tick size</span><input type="range" id="tkSz" min="8" max="64" value="30" oninput="V(this);redraw()"><span class="rv2">30</span></div>
+      <div class="cr"><span class="cl">Axis color</span><input type="color" id="axCol" value="#000000" oninput="redraw()"></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Grid, Ticks &amp; Frame</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Show grid</span><input type="checkbox" id="grid" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Grid color</span><input type="color" id="gridCol" value="#dddddd" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Grid width</span><input type="range" id="gridW" min="0.5" max="3" step=".5" value="1" oninput="V(this);redraw()"><span class="rv2">1</span></div>
+      <div class="cr"><span class="cl">Tick length</span><input type="range" id="tickLen" min="2" max="16" value="8" oninput="V(this);redraw()"><span class="rv2">8</span></div>
+      <div class="cr"><span class="cl">Tick width</span><input type="range" id="majTickW" min="0.5" max="4" step=".5" value="3" oninput="V(this);redraw()"><span class="rv2">3</span></div>
+      <div class="cr"><span class="cl">Tick direction</span>
+        <select id="tickDir" oninput="redraw()">
+          <option value="in">Inward</option><option value="out" selected>Outward</option><option value="both">Both</option>
+        </select>
+      </div>
+      <div class="cr"><span class="cl">Axis width</span><input type="range" id="frameW" min="0.5" max="5" step=".5" value="3" oninput="V(this);redraw()"><span class="rv2">3</span></div>
+      <div class="cr"><span class="cl">Plot box border</span><input type="checkbox" id="boxBdr" checked oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Box border color</span><input type="color" id="boxCol" value="#000000" oninput="redraw()"></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Background &amp; Colors</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Chart bg</span><input type="color" id="chartBg" value="#ffffff" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">TGA color</span><input type="color" id="tgaCol" value="#2a5caa" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">DTG color</span><input type="color" id="dtgCol" value="#2a7a3b" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">DSC color</span><input type="color" id="dscCol" value="#b84a2e" oninput="if(dscLegs.length===1||!gb('dscColorByLeg'))dscLegs.forEach(l=>l.color=this.value);redraw()"></div>
+      <div class="cr"><span class="cl">Color by leg</span><input type="checkbox" id="dscColorByLeg" checked oninput="onDscColorMode()"></div>
+      <div class="cr"><span class="cl">TGA line width</span><input type="range" id="tgaLW" min="0.5" max="8" step="0.5" value="2.5" oninput="V(this);redraw()"><span class="rv2">2.5</span></div>
+      <div class="cr"><span class="cl">DTG line width</span><input type="range" id="dtgLW" min="0.5" max="8" step="0.5" value="1.5" oninput="V(this);redraw()"><span class="rv2">1.5</span></div>
+      <div class="cr"><span class="cl">DSC line width</span><input type="range" id="dscLW" min="0.5" max="8" step="0.5" value="2.5" oninput="V(this);redraw()"><span class="rv2">2.5</span></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Legend</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Show legend</span><input type="checkbox" id="legShow" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Position</span>
+        <select id="legPos" oninput="redraw()">
+          <option value="tl">Top left</option><option value="tr" selected>Top right</option>
+          <option value="bl">Bottom left</option><option value="br">Bottom right</option>
+        </select>
+      </div>
+      <div class="cr"><span class="cl">Legend size</span><input type="range" id="legSz" min="8" max="40" value="16" oninput="V(this);redraw()"><span class="rv2">16</span></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Save Plot</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Width px</span><input type="number" id="expW" value="1400"></div>
+      <div class="cr"><span class="cl">Height px</span><input type="number" id="expH" value="900"></div>
+      <div class="cr"><span class="cl">Format</span><select id="expFmt"><option>PNG</option><option>JPEG</option></select></div>
+      <button class="btn out" style="margin-top:8px;width:100%" onclick="savePlot()">Save Plot Image</button>
+      <button class="btn out" style="margin-top:5px;width:100%" onclick="saveSettings()">Save Settings JSON</button>
+      <button class="btn out" style="margin-top:5px;width:100%" onclick="loadSettingsFile()">Load Settings JSON</button>
+    </div>
+  </div>
+
+</div><!-- cpanel -->
+</div><!-- app -->
+<div id="tooltip"></div>
+
+<script>
+// ════════════════════════════════════════════════════════════════
+//  UTILITIES
+// ════════════════════════════════════════════════════════════════
+function tog(h){h.closest('.cp-group').classList.toggle('open')}
+function gv(id){const e=document.getElementById(id);return e?e.value:'';}
+function gb(id){const e=document.getElementById(id);return e?e.checked:false;}
+function gn(id){const v=parseFloat(gv(id));return isNaN(v)?null:v;}
+function V(el){el.nextElementSibling.textContent=parseFloat(el.value).toFixed(0);}
+function st(msg,cls){const e=document.getElementById('status');e.textContent=msg;e.className=cls||'';}
+
+// ════════════════════════════════════════════════════════════════
+//  STATE
+// ════════════════════════════════════════════════════════════════
+let tgaData=[];   // [{t, v}]
+let dtgData=[];   // [{t, v}]  first derivative of TGA
+let dscLegs=[];   // [{label, data:[{t,v}], color, visible}]
+let tgaMeta={filename:'',npts:0,tMin:0,tMax:0,vMin:0,vMax:0};
+let dscMeta={filename:'',npts:0,tMin:0,tMax:0,vMin:0,vMax:0};
+
+// Derive flat dscData from visible legs (for tooltip, export, etc.)
+function dscVisible(){return dscLegs.filter(l=>l.visible).flatMap(l=>l.data);}
+
+// Compute DTG (first derivative of TGA) using central differences + boxcar smoothing
+function computeDTG(){
+  const show=document.getElementById('dtgShow').checked;
+  document.getElementById('dtgControls').style.display=show?'':'none';
+  if(!show||!tgaData.length){dtgData=[];return;}
+  const win=Math.max(1,parseInt(document.getElementById('dtgSmooth').value)||5);
+  // Central differences
+  const raw=[];
+  for(let i=1;i<tgaData.length-1;i++){
+    const dv=tgaData[i+1].v-tgaData[i-1].v;
+    const dt=tgaData[i+1].t-tgaData[i-1].t;
+    if(Math.abs(dt)>1e-10)raw.push({t:tgaData[i].t,v:dv/dt});
+  }
+  if(!raw.length){dtgData=[];return;}
+  // Boxcar smoothing
+  dtgData=raw.map((d,i)=>{
+    const lo=Math.max(0,i-win),hi=Math.min(raw.length-1,i+win);
+    let s=0;for(let j=lo;j<=hi;j++)s+=raw[j].v;
+    return{t:d.t,v:s/(hi-lo+1)};
+  });
+}
+
+// Colour palette for DSC legs
+const LEG_COLORS=['#b84a2e','#2a5caa','#2a7a3b','#8a4fa0','#c07820','#1a9090'];
+
+function segmentLegs(data){
+  if(!data.length)return[];
+
+  // Step 1: remove isolated spike points (T jumps far away and immediately back)
+  const steps=[];
+  for(let i=1;i<Math.min(data.length,500);i++)steps.push(Math.abs(data[i].t-data[i-1].t));
+  steps.sort((a,b)=>a-b);
+  const medStep=steps[Math.floor(steps.length/2)]||0.01;
+  const outThresh=Math.max(medStep*100,5);
+  const clean=[];
+  for(let i=0;i<data.length;i++){
+    if(i>0&&i<data.length-1){
+      const dPrev=Math.abs(data[i].t-data[i-1].t);
+      const dNext=Math.abs(data[i+1].t-data[i].t);
+      if(dPrev>outThresh&&dNext>outThresh)continue; // isolated spike
+    }
+    clean.push(data[i]);
+  }
+  if(clean.length<4)return[{label:'Heating',data:clean,color:LEG_COLORS[0],visible:true}];
+
+  // Step 2: sliding window direction — net T change over WIN points
+  // A reversal is confirmed when the smoothed direction sign changes and holds
+  const WIN=Math.min(50,Math.floor(clean.length/10));
+  const reversalIdxs=[];
+  let prevSign=null;
+  for(let i=WIN;i<clean.length-WIN;i++){
+    const net=clean[i+WIN].t-clean[i-WIN].t;
+    const sign=net>0?1:-1;
+    if(prevSign!==null&&sign!==prevSign){
+      // Find the actual peak/trough near this index
+      let best=i;
+      for(let j=i-WIN;j<=i+WIN&&j<clean.length;j++){
+        if(sign===-1&&clean[j].t>clean[best].t)best=j; // was heating, now cooling: find max
+        if(sign===1&&clean[j].t<clean[best].t)best=j;  // was cooling, now heating: find min
+      }
+      reversalIdxs.push(best);
+      prevSign=sign;
+      i=best+WIN; // skip ahead past this reversal
+    } else {
+      prevSign=sign;
+    }
+  }
+
+  // Step 3: split into legs at reversal indices
+  if(!reversalIdxs.length){
+    // No reversal found — single leg
+    const dir=clean[clean.length-1].t-clean[0].t;
+    return[{label:dir>=0?'Heating':'Cooling',data:clean,color:LEG_COLORS[0],visible:true}];
+  }
+
+  const breakPoints=[0,...reversalIdxs,clean.length-1];
+  const rawLegs=[];
+  for(let i=0;i<breakPoints.length-1;i++){
+    rawLegs.push(clean.slice(breakPoints[i],breakPoints[i+1]+1));
+  }
+
+  // Step 4: label and return (filter legs with <3 points)
+  let heatCount=0,coolCount=0;
+  return rawLegs.filter(pts=>pts.length>3).map((pts,i)=>{
+    const dir=pts[pts.length-1].t-pts[0].t;
+    const isHeating=dir>=0;
+    if(isHeating)heatCount++;else coolCount++;
+    const label=isHeating?('Heating'+(heatCount>1?' '+heatCount:'')):('Cooling'+(coolCount>1?' '+coolCount:''));
+    return{label,data:pts,color:LEG_COLORS[i%LEG_COLORS.length],visible:true};
+  });
+}
+
+// Zoom/pan state (in data coords)
+let zs={xMin:null,xMax:null};
+
+// Drag state
+let drag={active:false,button:0,x0:0,y0:0,x1:0,y1:0};
+
+// ════════════════════════════════════════════════════════════════
+//  FILE PARSING
+// ════════════════════════════════════════════════════════════════
+function parseText(text){
+  const lines=text.split(/\r?\n/);
+  let dataStarted=false;
+  const data=[];
+  let sampleSize=null;
+
+  for(const ln of lines){
+    const trimmed=ln.trim();
+    if(!dataStarted){
+      if(trimmed.toLowerCase()==='startofdata'){dataStarted=true;continue;}
+      const m=trimmed.match(/^Size[\s,;:]+([0-9]+\.?[0-9]*)/i);
+      if(m){const v=parseFloat(m[1]);if(isFinite(v)&&v>0)sampleSize=v;}
+      continue;
+    }
+    const cols=trimmed.split(/[,;\t]+|\s+/);
+    if(cols.length<3) continue;
+    const t=parseFloat(cols[1]);
+    const v=parseFloat(cols[2]);
+    if(!isFinite(t)||!isFinite(v)) continue;
+    data.push({t,v});
+  }
+  return{data,sampleSize};
+}
+
+// Read file, auto-detecting UTF-16 LE BOM (TA Instruments format)
+function readFile(file,callback){
+  const r1=new FileReader();
+  r1.onload=e=>{
+    const bytes=new Uint8Array(e.target.result.slice(0,2));
+    if(bytes[0]===0xff&&bytes[1]===0xfe){
+      const r2=new FileReader();
+      r2.onload=e2=>callback(e2.target.result);
+      r2.readAsText(file,'utf-16');
+    } else {
+      const r3=new FileReader();
+      r3.onload=e3=>callback(e3.target.result);
+      r3.readAsText(file);
+    }
+  };
+  r1.readAsArrayBuffer(file);
+}
+
+function metaFromData(data,filename){
+  if(!data.length) return{filename,npts:0,tMin:0,tMax:0,vMin:0,vMax:0};
+  const ts=data.map(d=>d.t), vs=data.map(d=>d.v);
+  return{filename,npts:data.length,
+    tMin:Math.min(...ts),tMax:Math.max(...ts),
+    vMin:Math.min(...vs),vMax:Math.max(...vs)};
+}
+
+function loadFileTGA(file){
+  readFile(file,text=>{
+    const {data:parsed,sampleSize}=parseText(text);
+    if(!parsed.length){st('No data found after StartOfData in '+file.name,'err');return;}
+    if(sampleSize){
+      // Convert mg to % of initial mass
+      tgaData=parsed.map(d=>({t:d.t,v:d.v/sampleSize*100}));
+      tgaMeta=metaFromData(tgaData,file.name);
+      tgaMeta.sampleSize=sampleSize;
+      document.getElementById('tgaLabel').value='Mass / %';
+    } else {
+      tgaData=parsed;
+      tgaMeta=metaFromData(parsed,file.name);
+    }
+    document.getElementById('dzTGAName').textContent=file.name;
+    zs={xMin:null,xMax:null};
+    computeDTG();
+    updateFileInfo();
+    redraw();
+    st('TGA loaded: '+file.name+' ('+parsed.length+' points)'+(sampleSize?' — Size: '+sampleSize+' mg':''),'ok');
+  });
+}
+
+function loadFileDSC(file){
+  readFile(file,text=>{
+    const {data:parsed}=parseText(text);
+    if(!parsed.length){st('No data found after StartOfData in '+file.name,'err');return;}
+    dscLegs=segmentLegs(parsed);
+    const allPts=parsed;
+    dscMeta=metaFromData(allPts,file.name);
+    dscMeta.legs=dscLegs.length;
+    document.getElementById('dzDSCName').textContent=file.name;
+    zs={xMin:null,xMax:null};
+    renderLegControls();
+    updateFileInfo();
+    redraw();
+    st('DSC loaded: '+file.name+' ('+parsed.length+' points, '+dscLegs.length+' leg'+(dscLegs.length!==1?'s':'')+')',  'ok');
+  });
+}
+
+function renderLegControls(){
+  const el=document.getElementById('dscLegControls');
+  if(!dscLegs.length){el.innerHTML='';return;}
+  if(dscLegs.length===1){el.innerHTML='';return;}
+  const byLeg=gb('dscColorByLeg');
+  let html='<div style="font-family:var(--mono);font-size:9px;color:#888;margin-top:7px;margin-bottom:4px;letter-spacing:.08em;text-transform:uppercase">Segments</div>';
+  dscLegs.forEach((leg,i)=>{
+    const swatch=byLeg?`<span style="display:inline-block;width:18px;height:3px;background:${leg.color};flex-shrink:0;border-radius:1px"></span>`:'';
+    html+=`<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+      <input type="checkbox" id="leg${i}" ${leg.visible?'checked':''} onchange="onLegToggle(${i},this.checked)" style="width:14px;height:14px;accent-color:${leg.color};cursor:pointer">
+      ${swatch}
+      <label for="leg${i}" style="font-family:var(--mono);font-size:10px;color:var(--ink);cursor:pointer">${leg.label}</label>
+    </div>`;
+  });
+  el.innerHTML=html;
+}
+
+function onDscColorMode(){
+  const byLeg=gb('dscColorByLeg');
+  if(!byLeg){
+    const col=gv('dscCol');
+    dscLegs.forEach(l=>l.color=col);
+  } else {
+    dscLegs.forEach((l,i)=>l.color=LEG_COLORS[i%LEG_COLORS.length]);
+  }
+  renderLegControls();
+  redraw();
+}
+
+function onLegToggle(i,checked){
+  if(dscLegs[i])dscLegs[i].visible=checked;
+  redraw();
+}
+
+function updateFileInfo(){
+  const el=document.getElementById('fileInfo');
+  let html='';
+  function infoBox(label,meta,color){
+    if(!meta.npts) return '';
+    return `<div style="margin-bottom:6px">
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:${color};margin-bottom:3px">${label}</div>
+      <div class="info-box">
+        <span class="il">File: </span><span class="iv">${meta.filename}</span><br>
+        <span class="il">Points: </span><span class="iv">${meta.npts}</span><br>
+        ${meta.legs>1?`<span class="il">Segments: </span><span class="iv">${meta.legs}</span><br>`:''}
+        <span class="il">T range: </span><span class="iv">${meta.tMin.toFixed(1)} \u2013 ${meta.tMax.toFixed(1)} \u00b0C</span><br>
+        ${meta.sampleSize?`<span class="il">Sample size: </span><span class="iv">${meta.sampleSize.toFixed(4)} mg</span><br>`:''}
+        <span class="il">Signal: </span><span class="iv">${meta.vMin.toFixed(3)} \u2013 ${meta.vMax.toFixed(3)}</span>
+      </div>
+    </div>`;
+  }
+  html+=infoBox('TGA',tgaMeta,'var(--tga)');
+  html+=infoBox('DSC',dscMeta,'var(--dsc)');
+  el.innerHTML=html||'<div style="font-family:var(--mono);font-size:10px;color:#aaa;font-style:italic">No files loaded.</div>';
+  document.getElementById('btnExport').disabled=!(tgaData.length||dscLegs.length);
+}
+
+// ════════════════════════════════════════════════════════════════
+//  DROP ZONES & FILE PICKERS
+// ════════════════════════════════════════════════════════════════
+function setupDZ(dzId,loadFn){
+  const dz=document.getElementById(dzId);
+  dz.addEventListener('click',()=>{
+    const fi=document.createElement('input');fi.type='file';fi.accept='.csv,.txt,.dat,.asc';fi.style.display='none';
+    fi.onchange=e=>{if(e.target.files[0])loadFn(e.target.files[0]);document.body.removeChild(fi);};
+    document.body.appendChild(fi);fi.click();
+  });
+  dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('over');});
+  dz.addEventListener('dragleave',e=>{if(!dz.contains(e.relatedTarget))dz.classList.remove('over');});
+  dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('over');const f=e.dataTransfer.files[0];if(f)loadFn(f);});
+}
+setupDZ('dzTGA',loadFileTGA);
+setupDZ('dzDSC',loadFileDSC);
+
+// ════════════════════════════════════════════════════════════════
+//  NICE TICKS
+// ════════════════════════════════════════════════════════════════
+function niceR(min,max,n=5){
+  if(!isFinite(min)||!isFinite(max)||min===max){
+    const c=isFinite(min)?min:0;return{min:c-1,max:c+1,ticks:[c-1,c,c+1]};
+  }
+  const rng=max-min;
+  const step=Math.pow(10,Math.floor(Math.log10(rng/n)));
+  const ns=[1,2,2.5,5,10].map(s=>s*step).find(s=>rng/s<=n+1)||step;
+  const lo=Math.floor(min/ns)*ns,hi=Math.ceil(max/ns)*ns;
+  const ticks=[];for(let v=lo;v<=hi+1e-10;v+=ns)ticks.push(+v.toPrecision(10));
+  return{min:lo,max:hi,ticks};
+}
+function tickDecimals(ticks){
+  if(!ticks||ticks.length<2)return 0;
+  const step=Math.abs(ticks[1]-ticks[0]);if(!step)return 0;
+  if(step>=10)return 0;
+  const s=step.toPrecision(2),dot=s.indexOf('.');if(dot<0)return 0;
+  return s.slice(dot+1).replace(/0+$/,'').length;
+}
+function fmtTick(v,dp){
+  if(Math.abs(v)>=1e5||(Math.abs(v)<0.001&&v!==0))return v.toExponential(2);
+  return v.toFixed(dp);
+}
+
+// ════════════════════════════════════════════════════════════════
+//  CANVAS DRAWING ENGINE
+// ════════════════════════════════════════════════════════════════
+const canvas=document.getElementById('mainCanvas');
+const ctx=canvas.getContext('2d');
+
+function sizeCanvas(){
+  const dpr=window.devicePixelRatio||1;
+  const w=canvas.offsetWidth,h=canvas.offsetHeight;
+  if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)){
+    canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);
+  }
+}
+
+function getDataRanges(){
+  // X range from both datasets
+  const allT=[...tgaData.map(d=>d.t),...dtgData.map(d=>d.t),...dscLegs.flatMap(l=>l.data.map(d=>d.t))];
+  if(!allT.length)return null;
+  const tMinD=Math.min(...allT),tMaxD=Math.max(...allT);
+
+  // Apply zoom / sidebar overrides for X
+  const xMin=zs.xMin!==null?zs.xMin:(gn('tMin')!==null?gn('tMin'):tMinD);
+  const xMax=zs.xMax!==null?zs.xMax:(gn('tMax')!==null?gn('tMax'):tMaxD);
+
+  // TGA Y range — raw data extent within x range
+  let tgaMin,tgaMax;
+  if(tgaData.length){
+    const vs=tgaData.filter(d=>d.t>=xMin&&d.t<=xMax).map(d=>d.v);
+    tgaMin=vs.length?Math.min(...vs):tgaMeta.vMin;
+    tgaMax=vs.length?Math.max(...vs):tgaMeta.vMax;
+  }
+
+  // DSC Y range — raw data extent within x range
+  let dscMin,dscMax;
+  if(dscLegs.length){
+    const vs=dscLegs.filter(l=>l.visible).flatMap(l=>l.data).filter(d=>d.t>=xMin&&d.t<=xMax).map(d=>d.v);
+    const all=dscLegs.flatMap(l=>l.data).map(d=>d.v);
+    dscMin=vs.length?Math.min(...vs):Math.min(...all);
+    dscMax=vs.length?Math.max(...vs):Math.max(...all);
+  }
+
+  // DTG Y range
+  let dtgMin,dtgMax;
+  if(dtgData.length){
+    const vs=dtgData.filter(d=>d.t>=xMin&&d.t<=xMax).map(d=>d.v);
+    if(vs.length){dtgMin=Math.min(...vs);dtgMax=Math.max(...vs);}
+    else{dtgMin=Math.min(...dtgData.map(d=>d.v));dtgMax=Math.max(...dtgData.map(d=>d.v));}
+  }
+
+  return{xMin,xMax,tgaMin,tgaMax,dscMin,dscMax,dtgMin,dtgMax};
+}
+
+function render(exportW,exportH){
+  const isExport=!!(exportW&&exportH);
+  if(!isExport)sizeCanvas();
+  const dpr=isExport?1:(window.devicePixelRatio||1);
+  const W=isExport?exportW:canvas.width;
+  const H=isExport?exportH:canvas.height;
+  const c=isExport?document.createElement('canvas'):canvas;
+  if(isExport){c.width=W;c.height=H;}
+  const cx=isExport?c.getContext('2d'):ctx;
+
+  // Scale context to device pixels so all subsequent coords are in CSS pixels
+  cx.save();
+  cx.scale(dpr,dpr);
+  const CW=W/dpr, CH=H/dpr;  // logical (CSS) dimensions
+
+  // Style params — all in CSS pixels (no dpr multiplication needed)
+  const font   =gv('fontFam')||'Arial,sans-serif';
+  const axSz   =parseFloat(gv('axSz'))||36;
+  const tkSz   =parseFloat(gv('tkSz'))||30;
+  const axC    =gv('axCol')||'#000000';
+  const gridOn =gb('grid');
+  const gridC  =gv('gridCol')||'#dddddd';
+  const gridW  =parseFloat(gv('gridW'))||1;
+  const frameW =parseFloat(gv('frameW'))||3;
+  const TL     =parseFloat(gv('tickLen'))||8;
+  const majTW  =parseFloat(gv('majTickW'))||3;
+  const tickDir=gv('tickDir')||'out';
+  const boxBdr =gb('boxBdr');
+  const boxC   =gv('boxCol')||'#000000';
+  const tgaCol =gv('tgaCol')||'#2a5caa';
+  const dscCol =gv('dscCol')||'#b84a2e';
+  const tgaLW  =parseFloat(gv('tgaLW'))||2.5;
+  const dscLW  =parseFloat(gv('dscLW'))||2.5;
+  const bgCol  =gv('chartBg')||'#ffffff';
+  const legShow=gb('legShow');
+  const legSz  =parseFloat(gv('legSz'))||16;
+  const legPos =gv('legPos')||'tr';
+
+  const hasTGA=tgaData.length>0;
+  const hasDSC=dscLegs.length>0&&dscLegs.some(l=>l.visible);
+  const hasDTG=dtgData.length>0;
+
+  cx.font=`${tkSz}px ${font}`;
+
+  const dr=getDataRanges();
+  // For x-axis: if user has set explicit limits, honour them exactly; otherwise use niceR
+  const userXMin=zs.xMin!==null?zs.xMin:gn('tMin');
+  const userXMax=zs.xMax!==null?zs.xMax:gn('tMax');
+  const xrNice=dr?niceR(dr.xMin,dr.xMax,8):{min:0,max:100,ticks:[0,20,40,60,80,100]};
+  const xMin_=userXMin!==null?userXMin:xrNice.min;
+  const xMax_=userXMax!==null?userXMax:xrNice.max;
+  // Generate ticks within the actual displayed range
+  const xrTicks=niceR(xMin_,xMax_,8).ticks.filter(v=>v>=xMin_-1e-9&&v<=xMax_+1e-9);
+  const xr={min:xMin_,max:xMax_,ticks:xrTicks.length?xrTicks:niceR(xMin_,xMax_,8).ticks};
+  function axisRange(dataMin,dataMax,userMin,userMax,n){
+    const lo=userMin!==null?userMin:niceR(dataMin,dataMax,n).min;
+    const hi=userMax!==null?userMax:niceR(dataMin,dataMax,n).max;
+    const ticks=niceR(lo,hi,n).ticks.filter(v=>v>=lo-1e-9&&v<=hi+1e-9);
+    return{min:lo,max:hi,ticks:ticks.length?ticks:niceR(lo,hi,n).ticks};
+  }
+  const tgaR=hasTGA&&dr?axisRange(dr.tgaMin,dr.tgaMax,gn('yTGAmin'),gn('yTGAmax'),6):{min:0,max:1,ticks:[0,.5,1]};
+  const dscR=hasDSC&&dr?axisRange(dr.dscMin,dr.dscMax,gn('yDSCmin'),gn('yDSCmax'),6):{min:0,max:1,ticks:[0,.5,1]};
+  const dtgR=hasDTG&&dr?axisRange(dr.dtgMin,dr.dtgMax,null,null,6):{min:-1,max:0,ticks:[-1,-0.5,0]};
+
+  const xDp=tickDecimals(xr.ticks);
+  const tgaDp=tickDecimals(tgaR.ticks);
+  const dscDp=tickDecimals(dscR.ticks);
+
+  const tgaTickW=hasTGA?Math.max(...tgaR.ticks.map(v=>cx.measureText(fmtTick(v,tgaDp)).width)):0;
+  const dscTickW=hasDSC?Math.max(...dscR.ticks.map(v=>cx.measureText(fmtTick(v,dscDp)).width)):0;
+  // DTG has no axis scale — curve only, no MR contribution
+  const ML=Math.round(hasTGA?axSz+8+TL+4+tgaTickW:axSz*0.6);
+  const MR=Math.round(hasDSC?axSz+8+TL+4+dscTickW:axSz*0.6);
+  const MT=Math.round(tkSz*0.8+8);
+  const MB=Math.round(axSz+6+TL+tkSz*1.4+6);
+  const PW=CW-ML-MR, PH=CH-MT-MB;
+
+  // Clear
+  cx.fillStyle=bgCol;cx.fillRect(0,0,CW,CH);
+
+  // Grid
+  if(gridOn){
+    cx.save();cx.strokeStyle=gridC;cx.lineWidth=gridW;cx.setLineDash([3,5]);
+    xr.ticks.forEach(v=>{const x=ML+(v-xr.min)/(xr.max-xr.min)*PW;if(x<ML||x>ML+PW)return;cx.beginPath();cx.moveTo(x,MT);cx.lineTo(x,MT+PH);cx.stroke();});
+    (hasTGA?tgaR.ticks:dscR.ticks).forEach(v=>{
+      const yr=hasTGA?tgaR:dscR;
+      const y=MT+PH-(v-yr.min)/(yr.max-yr.min)*PH;if(y<MT||y>MT+PH)return;
+      cx.beginPath();cx.moveTo(ML,y);cx.lineTo(ML+PW,y);cx.stroke();
+    });
+    cx.setLineDash([]);cx.restore();
+  }
+
+  // Frame
+  cx.save();cx.strokeStyle=axC;cx.lineWidth=frameW;cx.strokeRect(ML,MT,PW,PH);
+  if(boxBdr){cx.strokeStyle=boxC;cx.lineWidth=frameW;cx.strokeRect(ML,MT,PW,PH);}
+  cx.restore();
+
+  // X ticks + labels
+  cx.save();cx.strokeStyle=axC;cx.lineWidth=majTW;cx.fillStyle=axC;
+  cx.font=`${tkSz}px ${font}`;cx.textAlign='center';cx.textBaseline='top';
+  xr.ticks.forEach(v=>{
+    const x=ML+(v-xr.min)/(xr.max-xr.min)*PW;if(x<ML-1||x>ML+PW+1)return;
+    if(tickDir==='out'||tickDir==='both'){cx.beginPath();cx.moveTo(x,MT+PH);cx.lineTo(x,MT+PH+TL);cx.stroke();}
+    if(tickDir==='in' ||tickDir==='both'){cx.beginPath();cx.moveTo(x,MT+PH);cx.lineTo(x,MT+PH-TL);cx.stroke();}
+    cx.fillText(fmtTick(v,xDp),x,MT+PH+TL+4);
+  });
+  cx.restore();
+
+  // X axis label
+  cx.save();cx.fillStyle=axC;cx.font=`${axSz}px ${font}`;cx.textAlign='center';cx.textBaseline='top';
+  cx.fillText(gv('xLbl')||'Temperature / \u00b0C', ML+PW/2, MT+PH+TL+tkSz*1.4+4);
+  cx.restore();
+
+  // TGA Y axis (left)
+  if(hasTGA){
+    cx.save();cx.strokeStyle=tgaCol;cx.lineWidth=majTW;cx.fillStyle=tgaCol;
+    cx.font=`${tkSz}px ${font}`;cx.textAlign='right';cx.textBaseline='middle';
+    tgaR.ticks.forEach(v=>{
+      const y=MT+PH-(v-tgaR.min)/(tgaR.max-tgaR.min)*PH;if(y<MT-1||y>MT+PH+1)return;
+      if(tickDir==='out'||tickDir==='both'){cx.beginPath();cx.moveTo(ML,y);cx.lineTo(ML-TL,y);cx.stroke();}
+      if(tickDir==='in' ||tickDir==='both'){cx.beginPath();cx.moveTo(ML,y);cx.lineTo(ML+TL,y);cx.stroke();}
+      cx.fillText(fmtTick(v,tgaDp),ML-TL-4,y);
+    });
+    cx.font=`${axSz}px ${font}`;
+    cx.save();cx.translate(axSz/2+4,MT+PH/2);cx.rotate(-Math.PI/2);
+    cx.textAlign='center';cx.textBaseline='middle';cx.fillText(gv('tgaLabel')||'Mass / mg',0,0);
+    cx.restore();cx.restore();
+  }
+
+  // DSC Y axis (right)
+  if(hasDSC){
+    cx.save();cx.strokeStyle=dscCol;cx.lineWidth=majTW;cx.fillStyle=dscCol;
+    cx.font=`${tkSz}px ${font}`;cx.textAlign='left';cx.textBaseline='middle';
+    dscR.ticks.forEach(v=>{
+      const y=MT+PH-(v-dscR.min)/(dscR.max-dscR.min)*PH;if(y<MT-1||y>MT+PH+1)return;
+      if(tickDir==='out'||tickDir==='both'){cx.beginPath();cx.moveTo(ML+PW,y);cx.lineTo(ML+PW+TL,y);cx.stroke();}
+      if(tickDir==='in' ||tickDir==='both'){cx.beginPath();cx.moveTo(ML+PW,y);cx.lineTo(ML+PW-TL,y);cx.stroke();}
+      cx.fillText(fmtTick(v,dscDp),ML+PW+TL+4,y);
+    });
+    cx.font=`${axSz}px ${font}`;
+    cx.save();cx.translate(CW-axSz/2-4,MT+PH/2);cx.rotate(Math.PI/2);
+    cx.textAlign='center';cx.textBaseline='middle';cx.fillText(gv('dscLabel')||'Heat Flow / mW',0,0);
+    cx.restore();cx.restore();
+  }
+  // DTG: no axis scale drawn — curve only
+
+  // Clip and draw curves
+  cx.save();cx.beginPath();cx.rect(ML,MT,PW,PH);cx.clip();
+
+  function drawCurve(data,yr,color,lw){
+    if(!data.length)return;
+    cx.save();cx.strokeStyle=color;cx.lineWidth=lw;cx.lineJoin='round';cx.lineCap='round';
+    const mid=Math.floor(data.length/2);
+    const medT=data.length>4?Math.abs(data[mid].t-data[mid-1].t):0;
+    const revThresh=Math.max(medT*5,0.05);
+    cx.beginPath();cx.rect(ML,MT,PW,PH);cx.clip();
+    cx.beginPath();let first=true,prevInRange=false;
+    for(let i=0;i<data.length;i++){
+      const d=data[i];
+      if(i>1){
+        const dt=d.t-data[i-1].t;
+        const dtPrev=data[i-1].t-data[i-2].t;
+        if(Math.abs(dt)>revThresh&&Math.abs(dtPrev)>revThresh&&dt*dtPrev<0){first=true;prevInRange=false;}
+      }
+      const inRange=d.t>=xr.min&&d.t<=xr.max;
+      if(!inRange&&!prevInRange){continue;} // skip runs of off-screen points
+      if(!inRange){prevInRange=false;first=true;continue;} // just left range — lift pen
+      const x=ML+(d.t-xr.min)/(xr.max-xr.min)*PW;
+      const y=MT+PH-(d.v-yr.min)/(yr.max-yr.min)*PH;
+      if(first){cx.moveTo(x,y);first=false;}else cx.lineTo(x,y);
+      prevInRange=true;
+    }
+    cx.stroke();cx.restore();
+  }
+  if(hasTGA)drawCurve(tgaData,tgaR,tgaCol,tgaLW);
+  if(hasDTG)drawCurve(dtgData,dtgR,gv('dtgCol')||'#2a7a3b',parseFloat(gv('dtgLW'))||1.5);
+  if(hasDSC)dscLegs.forEach(leg=>{if(leg.visible)drawCurve(leg.data,dscR,leg.color,dscLW);});
+  cx.restore();
+
+  // Legend
+  if(legShow&&(hasTGA||hasDSC)){
+    const lpad=legSz*0.6,lh=legSz*1.6,llen=legSz*1.5;
+    const items=[];
+    if(hasTGA)items.push({label:gv('tgaLabel')||'Mass / mg',color:tgaCol});
+    if(hasDTG)items.push({label:gv('dtgLabel')||'DTG / %/\u00b0C',color:gv('dtgCol')||'#2a7a3b'});
+    if(hasDSC){
+      const byLeg=gb('dscColorByLeg');
+      const visLegs=dscLegs.filter(l=>l.visible);
+      if(!byLeg||visLegs.length===1){
+        items.push({label:gv('dscLabel')||'Heat Flow / mW',color:visLegs[0]?.color||gv('dscCol')});
+      } else {
+        visLegs.forEach(l=>items.push({label:l.label,color:l.color}));
+      }
+    }
+    cx.font=`${legSz}px ${font}`;
+    const maxLW=Math.max(...items.map(it=>cx.measureText(it.label).width));
+    const bW=llen+lpad*2+maxLW+lpad,bH=items.length*lh+lpad;
+    let bx,by;
+    if(legPos==='tl'){bx=ML+legSz*0.5;by=MT+legSz*0.5;}
+    else if(legPos==='tr'){bx=ML+PW-bW-legSz*0.5;by=MT+legSz*0.5;}
+    else if(legPos==='bl'){bx=ML+legSz*0.5;by=MT+PH-bH-legSz*0.5;}
+    else{bx=ML+PW-bW-legSz*0.5;by=MT+PH-bH-legSz*0.5;}
+    cx.save();cx.beginPath();cx.rect(ML,MT,PW,PH);cx.clip();
+    cx.fillStyle='rgba(255,255,255,0.88)';cx.strokeStyle='#ccc';cx.lineWidth=1;
+    cx.beginPath();cx.roundRect(bx,by,bW,bH,legSz*0.25);cx.fill();cx.stroke();
+    items.forEach((it,i)=>{
+      const ly=by+lpad*0.7+legSz+i*lh;
+      cx.strokeStyle=it.color;cx.lineWidth=2.5;
+      cx.beginPath();cx.moveTo(bx+lpad,ly-legSz*0.2);cx.lineTo(bx+lpad+llen,ly-legSz*0.2);cx.stroke();
+      cx.fillStyle=axC;cx.font=`${legSz}px ${font}`;cx.textAlign='left';cx.textBaseline='alphabetic';
+      cx.fillText(it.label,bx+lpad+llen+lpad*0.5,ly);
+    });
+    cx.restore();
+  }
+
+  // Drag rubber band
+  if(drag.active&&drag.button===0&&!isExport){
+    // rubber band coords are in canvas pixels, need to divide by dpr
+    const x0=Math.min(drag.x0,drag.x1)/dpr,y0=Math.min(drag.y0,drag.y1)/dpr;
+    const rw=Math.abs(drag.x1-drag.x0)/dpr,rh=Math.abs(drag.y1-drag.y0)/dpr;
+    cx.save();cx.strokeStyle=axC;cx.lineWidth=1;cx.setLineDash([4,3]);
+    cx.strokeRect(x0,y0,rw,rh);
+    cx.fillStyle='rgba(100,100,200,0.07)';cx.fillRect(x0,y0,rw,rh);
+    cx.setLineDash([]);cx.restore();
+  }
+
+  cx.restore(); // undo dpr scale
+
+  if(isExport)return c;
+  // Store plot info in CSS pixels for hit testing
+  canvas._plotInfo={ML,MR,MT,MB,PW,PH,xr,tgaR,dscR,dpr:1,CW,CH};
+}
+
+function redraw(){
+  if(document.getElementById('panel-plot').style.display==='none')return;
+  render();
+}
+
+// ════════════════════════════════════════════════════════════════
+//  ZOOM & PAN
+// ════════════════════════════════════════════════════════════════
+function resetZoom(){
+  zs={xMin:null,xMax:null};
+  document.getElementById('tMin').value='';
+  document.getElementById('tMax').value='';
+  redraw();
+}
+
+canvas.addEventListener('mousedown',e=>{
+  e.preventDefault();
+  const rect=canvas.getBoundingClientRect();
+  drag.active=true;drag.button=e.button;
+  drag.x0=drag.x1=e.clientX-rect.left;
+  drag.y0=drag.y1=e.clientY-rect.top;
+});
+canvas.addEventListener('mousemove',e=>{
+  if(!drag.active){showTooltip(e);return;}
+  const rect=canvas.getBoundingClientRect();
+  drag.x1=e.clientX-rect.left;
+  drag.y1=e.clientY-rect.top;
+  if(drag.button===0)redraw();
+  if(drag.button===2){
+    const pi=canvas._plotInfo;if(!pi)return;
+    const dx=drag.x1-drag.x0;
+    const dT=(pi.xr.max-pi.xr.min)*(-dx/pi.PW);
+    zs.xMin=(zs.xMin!==null?zs.xMin:pi.xr.min)+dT;
+    zs.xMax=(zs.xMax!==null?zs.xMax:pi.xr.max)+dT;
+    drag.x0=drag.x1;drag.y0=drag.y1;
+    redraw();
+  }
+});
+canvas.addEventListener('mouseup',e=>{
+  if(!drag.active)return;
+  drag.active=false;
+  if(drag.button===0){
+    const pi=canvas._plotInfo;if(!pi)return;
+    const dx=Math.abs(drag.x1-drag.x0),dy=Math.abs(drag.y1-drag.y0);
+    if(dx>8&&dy>8){
+      const x0=Math.min(drag.x0,drag.x1),x1=Math.max(drag.x0,drag.x1);
+      const tLo=pi.xr.min+(x0-pi.ML)/pi.PW*(pi.xr.max-pi.xr.min);
+      const tHi=pi.xr.min+(x1-pi.ML)/pi.PW*(pi.xr.max-pi.xr.min);
+      zs.xMin=tLo;zs.xMax=tHi;
+      document.getElementById('tMin').value=tLo.toFixed(1);
+      document.getElementById('tMax').value=tHi.toFixed(1);
+    }
+    redraw();
+  }
+});
+canvas.addEventListener('contextmenu',e=>e.preventDefault());
+canvas.addEventListener('mouseleave',()=>{
+  document.getElementById('tooltip').style.display='none';
+  if(drag.active){drag.active=false;redraw();}
+});
+
+function showTooltip(e){
+  const pi=canvas._plotInfo;if(!pi)return;
+  const rect=canvas.getBoundingClientRect();
+  const cx=e.clientX-rect.left,cy=e.clientY-rect.top;
+  if(cx<pi.ML||cx>pi.ML+pi.PW||cy<pi.MT||cy>pi.MT+pi.PH){
+    document.getElementById('tooltip').style.display='none';return;
+  }
+  const T=pi.xr.min+(cx-pi.ML)/pi.PW*(pi.xr.max-pi.xr.min);
+  // Find nearest TGA point
+  let html=`<span style="color:#aaa">T = </span>${T.toFixed(1)} \u00b0C`;
+  if(tgaData.length){
+    const near=tgaData.reduce((b,d)=>Math.abs(d.t-T)<Math.abs(b.t-T)?d:b);
+    html+=`<br><span style="color:#7fa8e0">TGA</span> = ${near.v.toFixed(4)}`;
+  }
+  if(dtgData.length){
+    const near=dtgData.reduce((b,d)=>Math.abs(d.t-T)<Math.abs(b.t-T)?d:b);
+    html+=`<br><span style="color:#5aaa6a">DTG</span> = ${near.v.toFixed(4)}`;
+  }
+  if(dscLegs.length){
+    const flat=dscVisible();
+    if(flat.length){
+      const near=flat.reduce((b,d)=>Math.abs(d.t-T)<Math.abs(b.t-T)?d:b);
+      html+=`<br><span style="color:#e07a5f">DSC</span> = ${near.v.toFixed(4)}`;
+    }
+  }
+  const tip=document.getElementById('tooltip');
+  tip.innerHTML=html;tip.style.display='block';
+  tip.style.left=(e.clientX+14)+'px';tip.style.top=(e.clientY-10)+'px';
+}
+
+// ════════════════════════════════════════════════════════════════
+//  TABS
+// ════════════════════════════════════════════════════════════════
+function switchTab(t){
+  document.getElementById('panel-plot').style.display=t==='plot'?'':' none';
+  document.getElementById('panel-guide').style.display=t==='guide'?'block':'none';
+  document.getElementById('tab-plot').classList.toggle('active',t==='plot');
+  document.getElementById('tab-guide').classList.toggle('active',t==='guide');
+  if(t==='plot')setTimeout(redraw,30);
+}
+
+// ════════════════════════════════════════════════════════════════
+//  EXPORT CSV
+// ════════════════════════════════════════════════════════════════
+function exportCSV(){
+  if(!tgaData.length&&!dscLegs.length)return;
+  const dscFlat=dscVisible();
+  const lines=[];
+  lines.push('# TGA/DSC Viewer -- combined export');
+  lines.push('# Generated: '+new Date().toISOString().replace('T',' ').slice(0,19));
+  if(tgaMeta.filename)lines.push('# TGA file: '+tgaMeta.filename);
+  if(dscMeta.filename)lines.push('# DSC file: '+dscMeta.filename);
+  lines.push('');
+
+  const tgaLbl=(gv('tgaLabel')||'Mass').replace(/[,\r\n]/g,' ');
+  const dtgLbl=(gv('dtgLabel')||'DTG').replace(/[,\r\n]/g,' ');
+  const dscLbl=(gv('dscLabel')||'Heat Flow').replace(/[,\r\n]/g,' ');
+  const hasDTGexp=dtgData.length>0;
+
+  if(tgaData.length&&dscFlat.length){
+    lines.push('Temperature (deg C),'+tgaLbl+(hasDTGexp?','+dtgLbl:'')+','+dscLbl);
+    tgaData.forEach(d=>{
+      const dtgV=hasDTGexp?interp(dtgData,d.t):null;
+      const dscV=interp(dscFlat,d.t);
+      lines.push(d.t.toPrecision(8)+','+d.v.toPrecision(8)+(hasDTGexp?','+(dtgV!==null?dtgV.toPrecision(8):''):'')+','+(dscV!==null?dscV.toPrecision(8):''));
+    });
+  } else if(tgaData.length){
+    lines.push('Temperature (deg C),'+tgaLbl+(hasDTGexp?','+dtgLbl:''));
+    tgaData.forEach(d=>{
+      const dtgV=hasDTGexp?interp(dtgData,d.t):null;
+      lines.push(d.t.toPrecision(8)+','+d.v.toPrecision(8)+(hasDTGexp?','+(dtgV!==null?dtgV.toPrecision(8):''):''));
+    });
+  } else if(dscFlat.length){
+    lines.push('Temperature (deg C),'+dscLbl);
+    dscFlat.forEach(d=>lines.push(d.t.toPrecision(8)+','+d.v.toPrecision(8)));
+  }
+  const csvText=lines.join('\r\n');
+  const blob=new Blob([csvText],{type:'text/csv'});
+  const slug=(tgaMeta.filename||dscMeta.filename||'tga_dsc').replace(/\.[^.]+$/,'').replace(/[^A-Za-z0-9]+/g,'_').replace(/_+$/,'');
+  const defaultName=slug+'_combined.csv';
+  if(window.showSaveFilePicker){
+    window.showSaveFilePicker({suggestedName:defaultName,types:[{description:'CSV file',accept:{'text/csv':['.csv']}}]})
+      .then(fh=>fh.createWritable()).then(w=>w.write(csvText).then(()=>w.close()))
+      .then(()=>st('Saved -- '+defaultName,'ok'))
+      .catch(e=>{if(e.name!=='AbortError')st('Save failed: '+e.message,'err');});
+  } else {
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=defaultName;a.click();
+    st('Downloaded -- '+defaultName,'ok');
+  }
+}
+
+function interp(data,t){
+  if(!data.length)return null;
+  if(t<=data[0].t)return data[0].v;
+  if(t>=data[data.length-1].t)return data[data.length-1].v;
+  let lo=0,hi=data.length-1;
+  while(hi-lo>1){const m=(lo+hi)>>1;if(data[m].t<=t)lo=m;else hi=m;}
+  const frac=(t-data[lo].t)/(data[hi].t-data[lo].t);
+  return data[lo].v+frac*(data[hi].v-data[lo].v);
+}
+
+// ════════════════════════════════════════════════════════════════
+//  SAVE PLOT
+// ════════════════════════════════════════════════════════════════
+function savePlot(){
+  const W=parseInt(gv('expW'))||1400,H=parseInt(gv('expH'))||900;
+  const fmt2=(gv('expFmt')||'PNG').toLowerCase();
+  const mimeType=fmt2==='jpeg'?'image/jpeg':'image/png';
+  const oc=render(W,H);
+  const dataUrl=oc.toDataURL(mimeType,0.96);
+  const byteStr=atob(dataUrl.split(',')[1]);
+  const ab=new Uint8Array(byteStr.length);
+  for(let i=0;i<byteStr.length;i++)ab[i]=byteStr.charCodeAt(i);
+  const imgBlob=new Blob([ab],{type:mimeType});
+  const slug=(tgaMeta.filename||dscMeta.filename||'tga_dsc').replace(/\.[^.]+$/,'').replace(/[^A-Za-z0-9]+/g,'_').replace(/_+$/,'');
+  const defaultName=slug+'.'+fmt2;
+  if(window.showSaveFilePicker){
+    window.showSaveFilePicker({suggestedName:defaultName,types:[{description:fmt2.toUpperCase()+' image',accept:{[mimeType]:['.'+fmt2]}}]})
+      .then(fh=>fh.createWritable()).then(w=>w.write(imgBlob).then(()=>w.close()))
+      .then(()=>st('Plot saved -- '+defaultName,'ok'))
+      .catch(e=>{if(e.name!=='AbortError')st('Save failed: '+e.message,'err');});
+  } else {
+    const a=document.createElement('a');a.href=dataUrl;a.download=defaultName;a.click();
+    st('Downloaded -- '+defaultName,'ok');
+  }
+}
+
+function clearTGA(){
+  tgaData=[];dtgData=[];
+  tgaMeta={filename:'',npts:0,tMin:0,tMax:0,vMin:0,vMax:0};
+  document.getElementById('dzTGAName').textContent='';
+  document.getElementById('dtgShow').checked=false;
+  document.getElementById('dtgControls').style.display='none';
+  updateFileInfo();redraw();
+  st('TGA data cleared.','');
+}
+
+function clearDSC(){
+  dscLegs=[];
+  dscMeta={filename:'',npts:0,tMin:0,tMax:0,vMin:0,vMax:0};
+  document.getElementById('dzDSCName').textContent='';
+  document.getElementById('dscLegControls').innerHTML='';
+  updateFileInfo();redraw();
+  st('DSC data cleared.','');
+}
+// ════════════════════════════════════════════════════════════════
+const SETTING_IDS=[
+  'tgaLabel','dscLabel','dtgLabel',
+  'tMin','tMax','yTGAmin','yTGAmax','yDSCmin','yDSCmax',
+  'xLbl','fontFam','axSz','tkSz','axCol',
+  'grid','gridCol','gridW','tickLen','majTickW','tickDir','frameW','boxBdr','boxCol',
+  'chartBg','tgaCol','dtgCol','dscCol','dscColorByLeg','tgaLW','dtgLW','dscLW',
+  'legShow','legPos','legSz',
+  'dtgShow','dtgSmooth',
+  'expW','expH','expFmt'
+];
+
+function collectSettings(){
+  const s={};
+  SETTING_IDS.forEach(id=>{
+    const el=document.getElementById(id);
+    if(!el)return;
+    s[id]=el.type==='checkbox'?el.checked:el.value;
+  });
+  // Also save axis range sidebar values
+  s._zs={xMin:zs.xMin,xMax:zs.xMax};
+  return s;
+}
+
+function applySettings(s){
+  SETTING_IDS.forEach(id=>{
+    const el=document.getElementById(id);
+    if(!el||s[id]===undefined)return;
+    if(el.type==='checkbox')el.checked=!!s[id];
+    else el.value=s[id];
+    // Update rv2 display spans for range inputs
+    if(el.type==='range'&&el.nextElementSibling&&el.nextElementSibling.classList.contains('rv2'))
+      el.nextElementSibling.textContent=parseFloat(el.value).toFixed(0);
+  });
+  if(s._zs){zs.xMin=s._zs.xMin;zs.xMax=s._zs.xMax;}
+  // Re-apply DSC colour mode
+  onDscColorMode();
+  redraw();
+}
+
+function saveSettings(){
+  const s=collectSettings();
+  const json=JSON.stringify(s,null,2);
+  const blob=new Blob([json],{type:'application/json'});
+  const defaultName='tga_dsc_settings.json';
+  if(window.showSaveFilePicker){
+    window.showSaveFilePicker({suggestedName:defaultName,types:[{description:'JSON settings',accept:{'application/json':['.json']}}]})
+      .then(fh=>fh.createWritable()).then(w=>w.write(json).then(()=>w.close()))
+      .then(()=>st('Settings saved -- '+defaultName,'ok'))
+      .catch(e=>{if(e.name!=='AbortError')st('Save failed: '+e.message,'err');});
+  } else {
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=defaultName;a.click();
+    st('Settings downloaded -- '+defaultName,'ok');
+  }
+}
+
+function loadSettingsFile(){
+  const fi=document.createElement('input');fi.type='file';fi.accept='.json';fi.style.display='none';
+  fi.onchange=e=>{
+    const f=e.target.files[0];if(!f)return;
+    const r=new FileReader();
+    r.onload=ev=>{
+      try{
+        const s=JSON.parse(ev.target.result);
+        applySettings(s);
+        st('Settings loaded from '+f.name,'ok');
+      }catch(err){st('Failed to load settings: '+err.message,'err');}
+    };
+    r.readAsText(f);
+    document.body.removeChild(fi);
+  };
+  document.body.appendChild(fi);fi.click();
+}
+
+
+window.addEventListener('resize',()=>{clearTimeout(window._rt);window._rt=setTimeout(redraw,80);});
+redraw();
+</script>
+</body>
+</html>
