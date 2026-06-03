@@ -99,6 +99,8 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
 .cr input[type=text]{flex:1;background:var(--cream);border:1.5px solid var(--rule);padding:3px 5px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none}
 .rv2{font-family:var(--mono);font-size:11px;min-width:28px;text-align:right;color:#555}
 #tooltip{position:fixed;background:var(--ink);border:none;border-radius:2px;padding:5px 9px;font-family:var(--mono);font-size:11px;color:var(--paper);pointer-events:none;z-index:100;display:none;line-height:1.7}
+.picking canvas{cursor:crosshair!important;}
+.picking .raw-canvas-wrap{outline:2px solid var(--accent);outline-offset:-2px;}
 </style>
 </head>
 <body>
@@ -318,6 +320,34 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
     </div>
   </div>
 
+  <div class="cp-group" id="analysisGroup">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Onset Analysis</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+
+      <!-- DSC onset -->
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--dsc);margin-bottom:6px;padding-bottom:3px;border-bottom:1px solid var(--pale)">DSC Onset</div>
+      <div class="cr"><span class="cl">Leg</span>
+        <select id="dscOnsetLeg" onchange="computeOnsets()">
+          <option value="0">Leg 1</option>
+        </select>
+      </div>
+      <div style="font-family:var(--mono);font-size:9px;color:#888;margin:6px 0 4px;line-height:1.6">Click <b>Pick points</b>, then click two points on the plot — one on each side of the peak. The app draws the baseline, finds the peak, fits the leading-edge tangent, and reports the onset.</div>
+      <button id="btnPickDSC" class="btn out" style="width:100%;font-size:9px;margin-bottom:5px" onclick="startPickDSC()">&#9654; Pick two points on plot</button>
+      <div id="dscPickStatus" style="font-family:var(--mono);font-size:9px;color:#888;min-height:1.2em;margin-bottom:4px"></div>
+      <div id="dscOnsetResult" style="font-family:var(--mono);font-size:10px;line-height:1.9;color:#555"></div>
+
+      <!-- TGA onset -->
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--tga);margin-top:12px;margin-bottom:5px;padding-bottom:3px;border-bottom:1px solid var(--pale)">TGA Onset</div>
+      <div style="font-family:var(--mono);font-size:9px;color:#888;margin:6px 0 4px;line-height:1.6">Click <b>Pick points</b>, then click two points — first on the flat plateau before the step, then on the steeply falling region. The app fits the baseline and inflection tangent, and reports the onset.</div>
+      <button id="btnPickTGA" class="btn out" style="width:100%;font-size:9px;margin-bottom:5px" onclick="startPickTGA()">&#9654; Pick two points on plot</button>
+      <div id="tgaPickStatus" style="font-family:var(--mono);font-size:9px;color:#888;min-height:1.2em;margin-bottom:4px"></div>
+      <div id="tgaOnsetResult" style="font-family:var(--mono);font-size:10px;margin-top:5px;line-height:1.8;color:#555"></div>
+
+      <button class="btn out" style="margin-top:10px;width:100%;font-size:9px" onclick="clearOnsets()">Clear Analysis</button>
+      <div class="cr" style="margin-top:8px"><span class="cl">Show vertical lines</span><input type="checkbox" id="onsetVLines" checked oninput="redraw()"></div>
+    </div>
+  </div>
+
   <div class="cp-group">
     <div class="cp-head" onclick="tog(this)"><span class="cp-title">Save Plot</span><span class="cp-arr">&#9660;</span></div>
     <div class="cp-body">
@@ -353,6 +383,11 @@ let dtgData=[];   // [{t, v}]  first derivative of TGA
 let dscLegs=[];   // [{label, data:[{t,v}], color, visible}]
 let tgaMeta={filename:'',npts:0,tMin:0,tMax:0,vMin:0,vMax:0};
 let dscMeta={filename:'',npts:0,tMin:0,tMax:0,vMin:0,vMax:0};
+let onsetTGA=null;
+let onsetDSC=null;
+
+// Zoom/pan state (in data coords)
+let zs={xMin:null,xMax:null};
 
 // Derive flat dscData from visible legs (for tooltip, export, etc.)
 function dscVisible(){return dscLegs.filter(l=>l.visible).flatMap(l=>l.data);}
@@ -449,8 +484,6 @@ function segmentLegs(data){
   });
 }
 
-// Zoom/pan state (in data coords)
-let zs={xMin:null,xMax:null};
 
 // Drag state
 let drag={active:false,button:0,x0:0,y0:0,x1:0,y1:0};
@@ -542,6 +575,7 @@ function loadFileDSC(file){
     document.getElementById('dzDSCName').textContent=file.name;
     zs={xMin:null,xMax:null};
     renderLegControls();
+    updateOnsetLegSelector();
     updateFileInfo();
     redraw();
     st('DSC loaded: '+file.name+' ('+parsed.length+' points, '+dscLegs.length+' leg'+(dscLegs.length!==1?'s':'')+')',  'ok');
@@ -771,9 +805,12 @@ function render(exportW,exportH){
   const tgaTickW=hasTGA?Math.max(...tgaR.ticks.map(v=>cx.measureText(fmtTick(v,tgaDp)).width)):0;
   const dscTickW=hasDSC?Math.max(...dscR.ticks.map(v=>cx.measureText(fmtTick(v,dscDp)).width)):0;
   // DTG has no axis scale — curve only, no MR contribution
-  const ML=Math.round(hasTGA?axSz+8+TL+4+tgaTickW:axSz*0.6);
-  const MR=Math.round(hasDSC?axSz+8+TL+4+dscTickW:axSz*0.6);
-  const MT=Math.round(tkSz*0.8+8);
+  // When only DSC is loaded, put it on the left; otherwise TGA left, DSC right
+  const dscOnLeft=hasDSC&&!hasTGA;
+  const ML=Math.round(hasTGA?axSz+8+TL+4+tgaTickW:dscOnLeft?axSz+8+TL+4+dscTickW:axSz*0.6);
+  const MR=Math.round(!dscOnLeft&&hasDSC?axSz+8+TL+4+dscTickW:axSz*0.6);
+  const hasOnsets=!!(onsetTGA||onsetDSC);
+  const MT=Math.round(tkSz*0.8+8+(hasOnsets?Math.max(10,tkSz*0.85)*2+8:0));
   const MB=Math.round(axSz+6+TL+tkSz*1.4+6);
   const PW=CW-ML-MR, PH=CH-MT-MB;
 
@@ -829,20 +866,36 @@ function render(exportW,exportH){
     cx.restore();cx.restore();
   }
 
-  // DSC Y axis (right)
+  // DSC Y axis — left when DSC-only, right when TGA also present
   if(hasDSC){
     cx.save();cx.strokeStyle=dscCol;cx.lineWidth=majTW;cx.fillStyle=dscCol;
-    cx.font=`${tkSz}px ${font}`;cx.textAlign='left';cx.textBaseline='middle';
-    dscR.ticks.forEach(v=>{
-      const y=MT+PH-(v-dscR.min)/(dscR.max-dscR.min)*PH;if(y<MT-1||y>MT+PH+1)return;
-      if(tickDir==='out'||tickDir==='both'){cx.beginPath();cx.moveTo(ML+PW,y);cx.lineTo(ML+PW+TL,y);cx.stroke();}
-      if(tickDir==='in' ||tickDir==='both'){cx.beginPath();cx.moveTo(ML+PW,y);cx.lineTo(ML+PW-TL,y);cx.stroke();}
-      cx.fillText(fmtTick(v,dscDp),ML+PW+TL+4,y);
-    });
-    cx.font=`${axSz}px ${font}`;
-    cx.save();cx.translate(CW-axSz/2-4,MT+PH/2);cx.rotate(Math.PI/2);
-    cx.textAlign='center';cx.textBaseline='middle';cx.fillText(gv('dscLabel')||'Heat Flow / mW',0,0);
-    cx.restore();cx.restore();
+    cx.font=`${tkSz}px ${font}`;
+    if(dscOnLeft){
+      cx.textAlign='right';cx.textBaseline='middle';
+      dscR.ticks.forEach(v=>{
+        const y=MT+PH-(v-dscR.min)/(dscR.max-dscR.min)*PH;if(y<MT-1||y>MT+PH+1)return;
+        if(tickDir==='out'||tickDir==='both'){cx.beginPath();cx.moveTo(ML,y);cx.lineTo(ML-TL,y);cx.stroke();}
+        if(tickDir==='in' ||tickDir==='both'){cx.beginPath();cx.moveTo(ML,y);cx.lineTo(ML+TL,y);cx.stroke();}
+        cx.fillText(fmtTick(v,dscDp),ML-TL-4,y);
+      });
+      cx.font=`${axSz}px ${font}`;
+      cx.save();cx.translate(axSz/2+4,MT+PH/2);cx.rotate(-Math.PI/2);
+      cx.textAlign='center';cx.textBaseline='middle';cx.fillText(gv('dscLabel')||'Heat Flow / mW',0,0);
+      cx.restore();
+    } else {
+      cx.textAlign='left';cx.textBaseline='middle';
+      dscR.ticks.forEach(v=>{
+        const y=MT+PH-(v-dscR.min)/(dscR.max-dscR.min)*PH;if(y<MT-1||y>MT+PH+1)return;
+        if(tickDir==='out'||tickDir==='both'){cx.beginPath();cx.moveTo(ML+PW,y);cx.lineTo(ML+PW+TL,y);cx.stroke();}
+        if(tickDir==='in' ||tickDir==='both'){cx.beginPath();cx.moveTo(ML+PW,y);cx.lineTo(ML+PW-TL,y);cx.stroke();}
+        cx.fillText(fmtTick(v,dscDp),ML+PW+TL+4,y);
+      });
+      cx.font=`${axSz}px ${font}`;
+      cx.save();cx.translate(CW-axSz/2-4,MT+PH/2);cx.rotate(Math.PI/2);
+      cx.textAlign='center';cx.textBaseline='middle';cx.fillText(gv('dscLabel')||'Heat Flow / mW',0,0);
+      cx.restore();
+    }
+    cx.restore();
   }
   // DTG: no axis scale drawn — curve only
 
@@ -880,6 +933,12 @@ function render(exportW,exportH){
   cx.restore();
 
   // Legend
+  // Onset analysis annotations
+  if(onsetTGA||onsetDSC){
+    drawOnsets(cx,ML,PW,MT,PH,xr,hasTGA?tgaR:null,hasDSC?dscR:null,
+      {font,tkSz,frameW,tgaCol,dscCol:gv('dscCol')||'#b84a2e'});
+  }
+
   if(legShow&&(hasTGA||hasDSC)){
     const lpad=legSz*0.6,lh=legSz*1.6,llen=legSz*1.5;
     const items=[];
@@ -930,7 +989,7 @@ function render(exportW,exportH){
 
   if(isExport)return c;
   // Store plot info in CSS pixels for hit testing
-  canvas._plotInfo={ML,MR,MT,MB,PW,PH,xr,tgaR,dscR,dpr:1,CW,CH};
+  canvas._plotInfo={ML,MR,MT,MB,PW,PH,xr,tgaR,dscR,dscOnLeft,dpr:1,CW,CH};
 }
 
 function redraw(){
@@ -948,8 +1007,8 @@ function resetZoom(){
   redraw();
 }
 
+canvas.style.userSelect='none';
 canvas.addEventListener('mousedown',e=>{
-  e.preventDefault();
   const rect=canvas.getBoundingClientRect();
   drag.active=true;drag.button=e.button;
   drag.x0=drag.x1=e.clientX-rect.left;
@@ -977,6 +1036,7 @@ canvas.addEventListener('mouseup',e=>{
   if(drag.button===0){
     const pi=canvas._plotInfo;if(!pi)return;
     const dx=Math.abs(drag.x1-drag.x0),dy=Math.abs(drag.y1-drag.y0);
+    // pick mode clicks are handled by the 'click' event listener below
     if(dx>8&&dy>8){
       const x0=Math.min(drag.x0,drag.x1),x1=Math.max(drag.x0,drag.x1);
       const tLo=pi.xr.min+(x0-pi.ML)/pi.PW*(pi.xr.max-pi.xr.min);
@@ -989,6 +1049,21 @@ canvas.addEventListener('mouseup',e=>{
   }
 });
 canvas.addEventListener('contextmenu',e=>e.preventDefault());
+canvas.addEventListener('click',e=>{
+  if(!pickMode)return;
+  st('Click received on canvas...','ok');
+  const pi=canvas._plotInfo;
+  if(!pi||!pi.PW||pi.PW<=0){st('No plot info \u2014 try clicking after data loads','err');return;}
+  const rect=canvas.getBoundingClientRect();
+  const clickX=e.clientX-rect.left;
+  const clickY=e.clientY-rect.top;
+  if(clickX<pi.ML||clickX>pi.ML+pi.PW||clickY<pi.MT||clickY>pi.MT+pi.PH){
+    st(`Click outside plot area. ML=${pi.ML.toFixed(0)} PW=${pi.PW.toFixed(0)} MT=${pi.MT.toFixed(0)} PH=${pi.PH.toFixed(0)} x=${clickX.toFixed(0)} y=${clickY.toFixed(0)}`,'err');return;
+  }
+  const T=pi.xr.min+(clickX-pi.ML)/pi.PW*(pi.xr.max-pi.xr.min);
+  if(!isFinite(T)){st('Could not compute temperature from click position','err');return;}
+  handlePickClick(T);
+});
 canvas.addEventListener('mouseleave',()=>{
   document.getElementById('tooltip').style.display='none';
   if(drag.active){drag.active=false;redraw();}
@@ -1140,6 +1215,379 @@ function clearDSC(){
   st('DSC data cleared.','');
 }
 // ════════════════════════════════════════════════════════════════
+//  ONSET ANALYSIS
+// ════════════════════════════════════════════════════════════════
+
+function linReg(pts){
+  const n=pts.length;if(n<2)return null;
+  let sx=0,sy=0,sxx=0,sxy=0;
+  pts.forEach(p=>{sx+=p.x;sy+=p.y;sxx+=p.x*p.x;sxy+=p.x*p.y;});
+  const denom=n*sxx-sx*sx;if(Math.abs(denom)<1e-30)return null;
+  const m=(n*sxy-sx*sy)/denom,b=(sy-m*sx)/n;
+  return{m,b};
+}
+
+function intersectLines(l1,l2){
+  const d=l1.m-l2.m;if(Math.abs(d)<1e-30)return null;
+  const x=(l2.b-l1.b)/d;return{x,y:l1.m*x+l1.b};
+}
+
+// Picking state — shared for DSC and TGA
+let pickMode=false;    // true while waiting for clicks
+let pickTarget='';     // 'dsc' or 'tga'
+let pickPts=[];        // [{t, v}] — up to 2 clicked points
+
+function startPickDSC(){
+  pickMode=true;pickTarget='dsc';pickPts=[];
+  onsetDSC=null;
+  document.getElementById('dscOnsetResult').innerHTML='';
+  document.getElementById('dscPickStatus').textContent='Click left of the peak on the DSC curve...';
+  document.getElementById('btnPickDSC').textContent='\u2715 Cancel';
+  document.getElementById('btnPickDSC').onclick=cancelPick;
+  document.getElementById('panel-plot').classList.add('picking');
+  redraw();
+}
+
+function startPickTGA(){
+  pickMode=true;pickTarget='tga';pickPts=[];
+  onsetTGA=null;
+  document.getElementById('tgaOnsetResult').innerHTML='';
+  document.getElementById('tgaPickStatus').textContent='Click on the flat baseline before the mass-loss step...';
+  document.getElementById('btnPickTGA').textContent='\u2715 Cancel';
+  document.getElementById('btnPickTGA').onclick=cancelPick;
+  document.getElementById('panel-plot').classList.add('picking');
+  redraw();
+}
+
+function cancelPick(){
+  pickMode=false;pickTarget='';pickPts=[];
+  document.getElementById('dscPickStatus').textContent='';
+  document.getElementById('tgaPickStatus').textContent='';
+  document.getElementById('btnPickDSC').textContent='\u25b6 Pick two points on plot';
+  document.getElementById('btnPickDSC').onclick=startPickDSC;
+  document.getElementById('btnPickTGA').textContent='\u25b6 Pick two points on plot';
+  document.getElementById('btnPickTGA').onclick=startPickTGA;
+  document.getElementById('panel-plot').classList.remove('picking');
+  redraw();
+}
+
+function handlePickClick(T){
+  if(pickTarget==='dsc'){
+    const legIdx=parseInt(gv('dscOnsetLeg'))||0;
+    const legData=dscLegs[legIdx]?.data||dscVisible();
+    if(!legData.length){st('No DSC data loaded.','err');return;}
+    const nearest=legData.reduce((b,d)=>Math.abs(d.t-T)<Math.abs(b.t-T)?d:b);
+    pickPts.push(nearest);
+    if(pickPts.length===1){
+      document.getElementById('dscPickStatus').textContent=`Point 1: ${nearest.t.toFixed(1)} \u00b0C \u2014 now click right of the peak...`;
+      st(`DSC onset: first point at ${nearest.t.toFixed(1)} \u00b0C`,'ok');
+      redraw();
+    } else {
+      document.getElementById('dscPickStatus').textContent='';
+      document.getElementById('btnPickDSC').textContent='\u25b6 Pick two points on plot';
+      document.getElementById('btnPickDSC').onclick=startPickDSC;
+      document.getElementById('panel-plot').classList.remove('picking');
+      pickMode=false;
+      st('DSC onset: computing...','ok');
+      computeDSCOnset();
+    }
+  } else if(pickTarget==='tga'){
+    if(!tgaData.length){st('No TGA data loaded.','err');return;}
+    const nearest=tgaData.reduce((b,d)=>Math.abs(d.t-T)<Math.abs(b.t-T)?d:b);
+    pickPts.push(nearest);
+    if(pickPts.length===1){
+      document.getElementById('tgaPickStatus').textContent=`Point 1: ${nearest.t.toFixed(1)} \u00b0C \u2014 now click on the falling region...`;
+      st(`TGA onset: baseline point at ${nearest.t.toFixed(1)} \u00b0C`,'ok');
+      redraw();
+    } else {
+      document.getElementById('tgaPickStatus').textContent='';
+      document.getElementById('btnPickTGA').textContent='\u25b6 Pick two points on plot';
+      document.getElementById('btnPickTGA').onclick=startPickTGA;
+      document.getElementById('panel-plot').classList.remove('picking');
+      pickMode=false;
+      st('TGA onset: computing...','ok');
+      computeTGAOnset();
+    }
+  }
+}
+
+function computeDSCOnset(){
+  if(pickPts.length<2)return;
+  const legIdx=parseInt(gv('dscOnsetLeg'))||0;
+  const legData=dscLegs[legIdx]?.data||dscVisible();
+  const color=dscLegs[legIdx]?.color||gv('dscCol')||'#b84a2e';
+
+  // Find indices by matching temperature values (indexOf fails on object references from different arrays)
+  const findIdx=(pt)=>legData.reduce((best,d,i)=>
+    Math.abs(d.t-pt.t)<Math.abs(legData[best].t-pt.t)?i:best, 0);
+  const idx1=findIdx(pickPts[0]);
+  const idx2=findIdx(pickPts[1]);
+  const iLo=Math.min(idx1,idx2), iHi=Math.max(idx1,idx2);
+  const between=legData.slice(iLo,iHi+1);
+
+  if(between.length<5){
+    document.getElementById('dscOnsetResult').innerHTML='<span style="color:#aaa">Too few points between selected positions</span>';
+    st('DSC onset: too few points between clicks','err');
+    return;
+  }
+
+  // Baseline = straight line through the two clicked points (in data space)
+  const p1=legData[iLo], p2=legData[iHi];
+  const blSlope=(p2.v-p1.v)/(p2.t-p1.t);
+  const blIntercept=p1.v-blSlope*p1.t;
+  const baseline={m:blSlope,b:blIntercept};
+
+  // Peak = max absolute deviation from baseline — track index directly
+  let iPeak=iLo, peakDev=0;
+  between.forEach((d,i)=>{
+    const dev=Math.abs(d.v-(baseline.m*d.t+baseline.b));
+    if(dev>peakDev){peakDev=dev;iPeak=iLo+i;}
+  });
+  const peakPt=legData[iPeak];
+
+  // Leading edge = data from first-clicked point to peak (in data index order)
+  // First-clicked point is pickPts[0], which may be iLo or iHi
+  const iFirst=idx1; // the first point the user clicked
+  const iLeadLo=Math.min(iFirst,iPeak), iLeadHi=Math.max(iFirst,iPeak);
+  const leadPts=legData.slice(iLeadLo,iLeadHi+1).map(d=>({x:d.t,y:d.v}));
+
+  if(leadPts.length<4){
+    document.getElementById('dscOnsetResult').innerHTML='<span style="color:#aaa">Too few points on leading edge — try clicking further from the peak</span>';
+    st('DSC onset: too few points on leading edge','err');
+    return;
+  }
+
+  // Find steepest slope on leading edge using a smoothed derivative
+  // First smooth leadPts to reduce noise sensitivity
+  const smoothed=leadPts.map((p,i)=>{
+    const lo=Math.max(0,i-3),hi=Math.min(leadPts.length-1,i+3);
+    const avg=leadPts.slice(lo,hi+1).reduce((s,q)=>s+q.y,0)/(hi-lo+1);
+    return{x:p.x,y:avg};
+  });
+  const slopes=[];
+  for(let i=1;i<smoothed.length;i++){
+    const dt=smoothed[i].x-smoothed[i-1].x;
+    if(Math.abs(dt)>1e-10)slopes.push({idx:i,s:(smoothed[i].y-smoothed[i-1].y)/dt});
+  }
+  if(!slopes.length){
+    document.getElementById('dscOnsetResult').innerHTML='<span style="color:#aaa">Could not compute slopes on leading edge</span>';
+    return;
+  }
+  const maxSlope=slopes.reduce((b,s)=>Math.abs(s.s)>Math.abs(b.s)?s:b);
+
+  // Use a narrow window (±10% of leading edge, max 15 points) for a tight tangent
+  const win=Math.min(15,Math.max(3,Math.floor(leadPts.length*0.1)));
+  const tLo=Math.max(0,maxSlope.idx-win);
+  const tHi=Math.min(leadPts.length-1,maxSlope.idx+win);
+  const tangent=linReg(leadPts.slice(tLo,tHi+1));
+
+  if(!tangent){
+    document.getElementById('dscOnsetResult').innerHTML='<span style="color:#aaa">Could not fit tangent</span>';
+    return;
+  }
+
+  // Onset = intersection of leading-edge tangent with baseline
+  const onset=intersectLines(baseline,tangent);
+
+  onsetDSC={baseline,tangent,onset,peak:peakPt,
+    p1:legData[iLo],p2:legData[iHi],color,legIdx,
+    tangentRange:[leadPts[tLo].x,leadPts[tHi].x]};
+
+  const dscEl=document.getElementById('dscOnsetResult');
+  let html='';
+  if(onset)html+=`<span style="color:#555">Onset: </span><b>${onset.x.toFixed(1)} \u00b0C</b><br>`;
+  html+=`<span style="color:#555">Peak: </span><b>${peakPt.t.toFixed(1)} \u00b0C</b>`;
+  dscEl.innerHTML=html;
+  st(`DSC onset computed: T\u2080 = ${onset?onset.x.toFixed(1):'?'} \u00b0C`,'ok');
+  redraw();
+}
+
+function computeTGAOnset(){
+  // Two-click version: pickPts[0] = baseline point, pickPts[1] = event point
+  onsetTGA=null;
+  if(pickPts.length<2){redraw();return;}
+  const tgaEl=document.getElementById('tgaOnsetResult');
+
+  // Find indices in tgaData by closest temperature
+  const findIdx=(pt)=>tgaData.reduce((best,d,i)=>
+    Math.abs(d.t-pt.t)<Math.abs(tgaData[best].t-pt.t)?i:best,0);
+  const idx1=findIdx(pickPts[0]); // baseline click
+  const idx2=findIdx(pickPts[1]); // event click
+
+  // Baseline region: window of points around the first click
+  const blWin=Math.max(10,Math.floor(tgaData.length*0.02));
+  const blLo=Math.max(0,idx1-blWin), blHi=Math.min(tgaData.length-1,idx1+blWin);
+  const blPts=tgaData.slice(blLo,blHi+1).map(d=>({x:d.t,y:d.v}));
+  const baseline=linReg(blPts);
+  if(!baseline){tgaEl.innerHTML='<span style="color:#aaa">Too few baseline points</span>';return;}
+
+  // Event region: between the two clicks (in index order)
+  const evLo=Math.min(idx1,idx2), evHi=Math.max(idx1,idx2);
+  const evData=tgaData.slice(evLo,evHi+1);
+  if(evData.length<5){tgaEl.innerHTML='<span style="color:#aaa">Too few points in event region</span>';return;}
+
+  // Find steepest slope in the event region using DTG if available, else finite differences
+  let iSteep=evLo;
+  if(dtgData.length){
+    // Use DTG peak (max absolute derivative) between the two clicks
+    let maxAbs=0;
+    dtgData.forEach((d,i)=>{
+      if(d.t>=evData[0].t&&d.t<=evData[evData.length-1].t&&Math.abs(d.v)>maxAbs){
+        maxAbs=Math.abs(d.v);
+        // find corresponding tgaData index
+        iSteep=tgaData.reduce((best,td,ti)=>Math.abs(td.t-d.t)<Math.abs(tgaData[best].t-d.t)?ti:best,evLo);
+      }
+    });
+  } else {
+    // Finite differences
+    let maxSlope=0;
+    for(let i=evLo+1;i<=evHi;i++){
+      const dt=tgaData[i].t-tgaData[i-1].t;
+      if(Math.abs(dt)<1e-10)continue;
+      const s=Math.abs((tgaData[i].v-tgaData[i-1].v)/dt);
+      if(s>maxSlope){maxSlope=s;iSteep=i;}
+    }
+  }
+
+  // Fit inflection tangent over window around steepest point
+  const tw=Math.max(5,Math.floor(evData.length*0.2));
+  const tLo=Math.max(evLo,iSteep-tw), tHi=Math.min(evHi,iSteep+tw);
+  const tangentPts=tgaData.slice(tLo,tHi+1).map(d=>({x:d.t,y:d.v}));
+  const tangent=linReg(tangentPts);
+  if(!tangent){tgaEl.innerHTML='<span style="color:#aaa">Could not fit tangent</span>';return;}
+
+  const onset=intersectLines(baseline,tangent);
+  const inflT=tgaData[iSteep].t;
+
+  onsetTGA={
+    baseline,tangent,onset,inflection:inflT,
+    blRange:[tgaData[blLo].t,tgaData[blHi].t],
+    evRange:[evData[0].t,evData[evData.length-1].t],
+    tangentRange:[tgaData[tLo].t,tgaData[tHi].t]
+  };
+
+  let html='';
+  if(onset)html+=`<span style="color:#555">Onset: </span><b>${onset.x.toFixed(1)} \u00b0C</b><br>`;
+  html+=`<span style="color:#555">Inflection: </span><b>${inflT.toFixed(1)} \u00b0C</b>`;
+  tgaEl.innerHTML=html;
+  st(`TGA onset: T\u2080 = ${onset?onset.x.toFixed(1):'?'} \u00b0C`,'ok');
+  redraw();
+}
+
+function computeOnsets(){}  // no-op — both channels now use pick mode
+
+function clearOnsets(){
+  onsetTGA=null;onsetDSC=null;
+  pickPts=[];pickMode=false;pickTarget='';
+  document.getElementById('tgaOnsetResult').innerHTML='';
+  document.getElementById('dscOnsetResult').innerHTML='';
+  document.getElementById('dscPickStatus').textContent='';
+  document.getElementById('tgaPickStatus').textContent='';
+  document.getElementById('btnPickDSC').textContent='\u25b6 Pick two points on plot';
+  document.getElementById('btnPickDSC').onclick=startPickDSC;
+  document.getElementById('btnPickTGA').textContent='\u25b6 Pick two points on plot';
+  document.getElementById('btnPickTGA').onclick=startPickTGA;
+  document.getElementById('panel-plot').classList.remove('picking');
+  redraw();
+}
+
+function updateOnsetLegSelector(){
+  const sel=document.getElementById('dscOnsetLeg');if(!sel)return;
+  const cur=parseInt(sel.value)||0;
+  sel.innerHTML=dscLegs.map((l,i)=>`<option value="${i}">${l.label}</option>`).join('');
+  if(cur<dscLegs.length)sel.value=cur;
+}
+
+function drawOnsets(cx,ML,PW,MT,PH,xr,tgaR,dscR,style){
+  const showVLines=gb('onsetVLines');
+  function tX(T){return ML+(T-xr.min)/(xr.max-xr.min)*PW;}
+  function tYtga(v){return tgaR?MT+PH-(v-tgaR.min)/(tgaR.max-tgaR.min)*PH:0;}
+  function tYdsc(v){return dscR?MT+PH-(v-dscR.min)/(dscR.max-dscR.min)*PH:0;}
+  const font=style.font,tkSz=style.tkSz,lw=Math.max(1.5,style.frameW*0.5);
+
+  function lineSeg(line,tLo,tHi,yFn,color,dash){
+    cx.save();cx.beginPath();cx.rect(ML,MT,PW,PH);cx.clip();
+    cx.strokeStyle=color;cx.lineWidth=lw;cx.setLineDash(dash);
+    cx.beginPath();cx.moveTo(tX(tLo),yFn(line.m*tLo+line.b));cx.lineTo(tX(tHi),yFn(line.m*tHi+line.b));
+    cx.stroke();cx.setLineDash([]);cx.restore();
+  }
+  function vDash(T,color){
+    cx.save();cx.beginPath();cx.rect(ML,MT,PW,PH);cx.clip();
+    cx.strokeStyle=color;cx.lineWidth=1.5;cx.setLineDash([4,4]);
+    cx.beginPath();cx.moveTo(tX(T),MT);cx.lineTo(tX(T),MT+PH);cx.stroke();
+    cx.setLineDash([]);cx.restore();
+  }
+  function dot(T,yPx,color,fill){
+    cx.save();cx.beginPath();cx.arc(tX(T),yPx,5,0,2*Math.PI);
+    cx.fillStyle=fill||'#fff';cx.fill();cx.strokeStyle=color;cx.lineWidth=2;cx.stroke();cx.restore();
+  }
+  function labelAbove(T,text,color,row){
+    cx.save();cx.font=`bold ${Math.max(10,tkSz*0.85)}px ${font}`;
+    cx.fillStyle=color;cx.textAlign='center';cx.textBaseline='bottom';
+    cx.fillText(text,tX(T),MT-3-row*(Math.max(10,tkSz*0.85)+3));cx.restore();
+  }
+
+  // ── Pick dots (while or after picking) ──────────────────────────
+  if(pickMode||onsetDSC||onsetTGA){
+    if((pickTarget==='dsc'||onsetDSC)&&pickPts.length&&dscR){
+      const col=dscLegs[parseInt(gv('dscOnsetLeg'))||0]?.color||'#b84a2e';
+      pickPts.forEach(p=>{dot(p.t,tYdsc(p.v),col,'#fff');});
+    }
+    if((pickTarget==='tga'||onsetTGA)&&pickPts.length&&tgaR&&pickTarget==='tga'){
+      const col=gv('tgaCol')||'#2a5caa';
+      pickPts.forEach(p=>{dot(p.t,tYtga(p.v),col,'#fff');});
+    }
+  }
+
+  // ── DSC onset ───────────────────────────────────────────────────
+  if(onsetDSC&&dscR){
+    const{baseline,tangent,onset,peak,p1,p2,color,tangentRange}=onsetDSC;
+    // Baseline line between the two picked points, extended slightly
+    const span=p2.t-p1.t;
+    lineSeg(baseline,p1.t-span*0.05,p2.t+span*0.05,tYdsc,color,[8,5]);
+    // Tangent line extended through onset
+    const tExt=onset?Math.min(onset.x,tangentRange[0])-span*0.05:tangentRange[0];
+    lineSeg(tangent,tExt,tangentRange[1]+span*0.05,tYdsc,color,[4,3]);
+    // Onset marker
+    if(onset&&onset.x>=xr.min&&onset.x<=xr.max){
+      if(showVLines)vDash(onset.x,color);
+      dot(onset.x,tYdsc(onset.y),color,'#fff');
+      labelAbove(onset.x,`T\u2080 = ${onset.x.toFixed(1)}\u00b0C`,color,0);
+    }
+    if(peak&&peak.t>=xr.min&&peak.t<=xr.max){
+      if(showVLines){
+        cx.save();cx.strokeStyle=color;cx.lineWidth=1;cx.setLineDash([2,4]);
+        cx.beginPath();cx.moveTo(tX(peak.t),MT);cx.lineTo(tX(peak.t),MT+PH);cx.stroke();cx.setLineDash([]);cx.restore();
+      }
+      labelAbove(peak.t,`T\u209A = ${peak.t.toFixed(1)}\u00b0C`,color,1);
+    }
+  }
+
+  // ── TGA onset ───────────────────────────────────────────────────
+  if(onsetTGA&&tgaR){
+    const col=gv('tgaCol')||'#2a5caa';
+    const{baseline,tangent,onset,inflection,blRange,evRange,tangentRange}=onsetTGA;
+    const span=evRange[1]-blRange[0];
+    const blEnd=onset?Math.max(evRange[1],onset.x)+span*0.1:evRange[1]+span*0.1;
+    lineSeg(baseline,blRange[0]-span*0.05,blEnd,tYtga,col,[8,5]);
+    const tExt=onset?Math.min(tangentRange[0],onset.x)-span*0.05:tangentRange[0]-span*0.05;
+    lineSeg(tangent,tExt,tangentRange[1]+span*0.05,tYtga,col,[4,3]);
+    if(onset&&onset.x>=xr.min&&onset.x<=xr.max){
+      if(showVLines)vDash(onset.x,col);
+      dot(onset.x,tYtga(onset.y),col,'#fff');
+      labelAbove(onset.x,`T\u2080 = ${onset.x.toFixed(1)}\u00b0C`,col,0);
+    }
+    if(inflection!==null&&inflection>=xr.min&&inflection<=xr.max){
+      if(showVLines){
+        cx.save();cx.strokeStyle=col;cx.lineWidth=1;cx.setLineDash([2,4]);
+        cx.beginPath();cx.moveTo(tX(inflection),MT);cx.lineTo(tX(inflection),MT+PH);cx.stroke();cx.setLineDash([]);cx.restore();
+      }
+      labelAbove(inflection,`T\u1D35 = ${inflection.toFixed(1)}\u00b0C`,col,1);
+    }
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
 const SETTING_IDS=[
   'tgaLabel','dscLabel','dtgLabel',
   'tMin','tMax','yTGAmin','yTGAmax','yDSCmin','yDSCmax',
@@ -1147,7 +1595,8 @@ const SETTING_IDS=[
   'grid','gridCol','gridW','tickLen','majTickW','tickDir','frameW','boxBdr','boxCol',
   'chartBg','tgaCol','dtgCol','dscCol','dscColorByLeg','tgaLW','dtgLW','dscLW',
   'legShow','legPos','legSz',
-  'dtgShow','dtgSmooth',
+  'tgaBL1','tgaBL2','tgaEV1','tgaEV2',
+  'dscBL1','dscBL2','dscEV1','dscEV2','dscOnsetLeg','onsetVLines',
   'expW','expH','expFmt'
 ];
 
