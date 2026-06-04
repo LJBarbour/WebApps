@@ -343,6 +343,13 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
       <div id="tgaPickStatus" style="font-family:var(--mono);font-size:9px;color:#888;min-height:1.2em;margin-bottom:4px"></div>
       <div id="tgaOnsetResult" style="font-family:var(--mono);font-size:10px;margin-top:5px;line-height:1.8;color:#555"></div>
 
+      <!-- TGA mass loss -->
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--tga);margin-top:12px;margin-bottom:5px;padding-bottom:3px;border-bottom:1px solid var(--pale)">TGA Mass Loss</div>
+      <div style="font-family:var(--mono);font-size:9px;color:#888;margin:6px 0 4px;line-height:1.6">Click <b>Pick two points</b>, then click two temperatures on the TGA curve. The mass loss between those points is shown as an annotation on the right of the plot.</div>
+      <button id="btnPickMassLoss" class="btn out" style="width:100%;font-size:9px;margin-bottom:5px" onclick="startPickMassLoss()">&#9654; Pick two points on plot</button>
+      <div id="massLossPickStatus" style="font-family:var(--mono);font-size:9px;color:#888;min-height:1.2em;margin-bottom:4px"></div>
+      <div id="massLossResult" style="font-family:var(--mono);font-size:10px;margin-top:5px;line-height:1.8;color:#555"></div>
+
       <button class="btn out" style="margin-top:10px;width:100%;font-size:9px" onclick="clearOnsets()">Clear Analysis</button>
       <div class="cr" style="margin-top:8px"><span class="cl">Show vertical lines</span><input type="checkbox" id="onsetVLines" checked oninput="redraw()"></div>
       <div class="cr" style="margin-top:4px"><span class="cl">Annotation color</span>
@@ -390,6 +397,7 @@ let tgaMeta={filename:'',npts:0,tMin:0,tMax:0,vMin:0,vMax:0};
 let dscMeta={filename:'',npts:0,tMin:0,tMax:0,vMin:0,vMax:0};
 let onsetTGA=null;
 let onsetDSC=null;
+let massLossTGA=null;  // {t1, v1, t2, v2} — two picked points for mass-loss annotation
 
 // Zoom/pan state (in data coords)
 let zs={xMin:null,xMax:null};
@@ -968,10 +976,10 @@ function render(exportW,exportH){
 
   // Legend
   // Onset analysis annotations
-  if(onsetTGA||onsetDSC){
+  if(onsetTGA||onsetDSC||massLossTGA){
     drawOnsets(cx,ML,PW,MT,PH,xr,hasTGA?tgaR:null,hasDSC?dscR:null,
       {font,tkSz,frameW,tgaCol,dscCol:gv('dscCol')||'#b84a2e',
-       onsetTGAColor:gv('onsetTGAColor')||null,onsetDSCColor:gv('onsetDSCColor')||null});
+       onsetTGAColor:gv('onsetTGAColor')||null,onsetDSCColor:gv('onsetDSCColor')||null,MR});
   }
 
   if(legShow&&(hasTGA||hasDSC)){
@@ -1309,14 +1317,29 @@ function startPickTGA(){
   redraw();
 }
 
+function startPickMassLoss(){
+  if(!tgaData.length){st('Load a TGA file first before picking points.','err');return;}
+  pickMode=true;pickTarget='massloss';pickPts=[];
+  massLossTGA=null;
+  document.getElementById('massLossResult').innerHTML='';
+  document.getElementById('massLossPickStatus').textContent='Click the first temperature on the TGA curve...';
+  document.getElementById('btnPickMassLoss').textContent='\u2715 Cancel';
+  document.getElementById('btnPickMassLoss').onclick=cancelPick;
+  document.getElementById('panel-plot').classList.add('picking');
+  redraw();
+}
+
 function cancelPick(){
   pickMode=false;pickTarget='';pickPts=[];
   document.getElementById('dscPickStatus').textContent='';
   document.getElementById('tgaPickStatus').textContent='';
+  document.getElementById('massLossPickStatus').textContent='';
   document.getElementById('btnPickDSC').textContent='\u25b6 Pick two points on plot';
   document.getElementById('btnPickDSC').onclick=startPickDSC;
   document.getElementById('btnPickTGA').textContent='\u25b6 Pick two points on plot';
   document.getElementById('btnPickTGA').onclick=startPickTGA;
+  document.getElementById('btnPickMassLoss').textContent='\u25b6 Pick two points on plot';
+  document.getElementById('btnPickMassLoss').onclick=startPickMassLoss;
   document.getElementById('panel-plot').classList.remove('picking');
   redraw();
 }
@@ -1358,7 +1381,42 @@ function handlePickClick(T){
       st('TGA onset: computing...','ok');
       computeTGAOnset();
     }
+  } else if(pickTarget==='massloss'){
+    if(!tgaData.length){st('No TGA data loaded.','err');return;}
+    const nearest=tgaData.reduce((b,d)=>Math.abs(d.t-T)<Math.abs(b.t-T)?d:b);
+    pickPts.push(nearest);
+    if(pickPts.length===1){
+      document.getElementById('massLossPickStatus').textContent=`Point 1: ${nearest.t.toFixed(1)} \u00b0C — now click the second temperature...`;
+      st(`Mass loss: first point at ${nearest.t.toFixed(1)} \u00b0C`,'ok');
+      redraw();
+    } else {
+      document.getElementById('massLossPickStatus').textContent='';
+      document.getElementById('btnPickMassLoss').textContent='\u25b6 Pick two points on plot';
+      document.getElementById('btnPickMassLoss').onclick=startPickMassLoss;
+      document.getElementById('panel-plot').classList.remove('picking');
+      pickMode=false;
+      computeMassLoss();
+    }
   }
+}
+
+function computeMassLoss(){
+  if(pickPts.length<2)return;
+  const findNearest=(T)=>tgaData.reduce((b,d)=>Math.abs(d.t-T)<Math.abs(b.t-T)?d:b);
+  const pt1=findNearest(pickPts[0].t);
+  const pt2=findNearest(pickPts[1].t);
+  const pLo=pt1.t<=pt2.t?pt1:pt2;
+  const pHi=pt1.t<=pt2.t?pt2:pt1;
+  const loss=pHi.v-pLo.v; // negative for weight loss
+  massLossTGA={t1:pLo.t,v1:pLo.v,t2:pHi.t,v2:pHi.v,loss};
+  const sign=loss<0?'\u2212':'+';
+  const lbl=gv('tgaLabel')||'Weight / %';
+  const unit=lbl.includes('%')?'%':'mg';
+  const el=document.getElementById('massLossResult');
+  el.innerHTML=`<span style="color:#555">${pLo.t.toFixed(1)} \u2192 ${pHi.t.toFixed(1)} \u00b0C</span><br>`+
+    `<span style="color:#555">Mass loss: </span><b>${sign}${Math.abs(loss).toFixed(2)} ${unit}</b>`;
+  st(`Mass loss: ${sign}${Math.abs(loss).toFixed(2)} ${unit} (${pLo.t.toFixed(1)}\u2013${pHi.t.toFixed(1)} \u00b0C)`,'ok');
+  redraw();
 }
 
 function computeDSCOnset(){
@@ -1565,16 +1623,20 @@ function computeTGAOnset(){
 function computeOnsets(){}  // no-op — both channels now use pick mode
 
 function clearOnsets(){
-  onsetTGA=null;onsetDSC=null;
+  onsetTGA=null;onsetDSC=null;massLossTGA=null;
   pickPts=[];pickMode=false;pickTarget='';
   document.getElementById('tgaOnsetResult').innerHTML='';
   document.getElementById('dscOnsetResult').innerHTML='';
+  document.getElementById('massLossResult').innerHTML='';
   document.getElementById('dscPickStatus').textContent='';
   document.getElementById('tgaPickStatus').textContent='';
+  document.getElementById('massLossPickStatus').textContent='';
   document.getElementById('btnPickDSC').textContent='\u25b6 Pick two points on plot';
   document.getElementById('btnPickDSC').onclick=startPickDSC;
   document.getElementById('btnPickTGA').textContent='\u25b6 Pick two points on plot';
   document.getElementById('btnPickTGA').onclick=startPickTGA;
+  document.getElementById('btnPickMassLoss').textContent='\u25b6 Pick two points on plot';
+  document.getElementById('btnPickMassLoss').onclick=startPickMassLoss;
   document.getElementById('panel-plot').classList.remove('picking');
   redraw();
 }
@@ -1650,6 +1712,10 @@ function drawOnsets(cx,ML,PW,MT,PH,xr,tgaR,dscR,style){
       const col=annoTGACol;
       pickPts.forEach(p=>{dot(p.t,tYtga(p.v),col,'#fff');});
     }
+    if(pickTarget==='massloss'&&pickPts.length&&tgaR){
+      const col=annoTGACol;
+      pickPts.forEach(p=>{dot(p.t,tYtga(p.v),col,'#fff');});
+    }
   }
 
   // ── DSC onset ───────────────────────────────────────────────────
@@ -1698,6 +1764,70 @@ function drawOnsets(cx,ML,PW,MT,PH,xr,tgaR,dscR,style){
       }
       labelAbove(inflection,[{text:'T',italic:true},{text:'p',sub:true},{text:' = '+inflection.toFixed(1)+' \u00b0C',italic:false}],col,1);
     }
+  }
+  // ── TGA mass loss annotation ─────────────────────────────────────
+  if(massLossTGA&&tgaR){
+    const col=annoTGACol;
+    const{t1,v1,t2,v2,loss}=massLossTGA;
+    const xRight=ML+PW;   // right edge of plot area — bracket sits here
+    const y1=tYtga(v1), y2=tYtga(v2);
+    const yMid=(y1+y2)/2;
+    const sz=Math.max(9,tkSz*0.78);
+
+    cx.save();
+
+    // Filled dots on curve at picked points
+    if(t1>=xr.min&&t1<=xr.max) dot(t1,y1,col,'#fff');
+    if(t2>=xr.min&&t2<=xr.max) dot(t2,y2,col,'#fff');
+
+    // Dotted horizontal lines from each point to the right edge of the plot
+    cx.strokeStyle=col;cx.lineWidth=1.5;cx.setLineDash([4,4]);
+    if(t1>=xr.min&&t1<=xr.max){
+      cx.beginPath();cx.moveTo(tX(t1),y1);cx.lineTo(xRight,y1);cx.stroke();
+    }
+    if(t2>=xr.min&&t2<=xr.max){
+      cx.beginPath();cx.moveTo(tX(t2),y2);cx.lineTo(xRight,y2);cx.stroke();
+    }
+    cx.setLineDash([]);
+
+    // Bracket: vertical bar at the right edge, serifs pointing inward (left)
+    const serif=6;
+    cx.strokeStyle=col;cx.lineWidth=1.5;
+    cx.beginPath();cx.moveTo(xRight,y1);cx.lineTo(xRight,y2);cx.stroke();
+    cx.beginPath();cx.moveTo(xRight,y1);cx.lineTo(xRight-serif,y1);cx.stroke();
+    cx.beginPath();cx.moveTo(xRight,y2);cx.lineTo(xRight-serif,y2);cx.stroke();
+
+    // Label: Δm = −X.XX % — horizontal, centred between the two lines,
+    // right-aligned against the bracket so it sits inside the plot
+    const sign=loss<0?'\u2212':'+';
+    const lbl=gv('tgaLabel')||'Weight / %';
+    const unit=lbl.includes('%')?'%':'mg';
+    const valuePart=` = ${sign}${Math.abs(loss).toFixed(2)}\u2009${unit}`;
+    const segments=[
+      {text:'\u0394',italic:false},
+      {text:'m',italic:true},
+      {text:valuePart,italic:false}
+    ];
+
+    // Measure total width so we can right-align against the bracket
+    let totalW=0;
+    segments.forEach(seg=>{
+      cx.font=`${seg.italic?'italic ':''} ${sz}px ${font}`;
+      totalW+=cx.measureText(seg.text).width;
+    });
+
+    // Draw right-aligned, leaving a small gap from the bracket
+    const gap=serif+6;
+    let curX=xRight-gap-totalW;
+    cx.textBaseline='middle';
+    segments.forEach(seg=>{
+      cx.font=`${seg.italic?'italic ':''} ${sz}px ${font}`;
+      cx.fillStyle=col;
+      cx.fillText(seg.text,curX,yMid);
+      curX+=cx.measureText(seg.text).width;
+    });
+
+    cx.restore();
   }
 }
 
