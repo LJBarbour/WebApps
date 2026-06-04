@@ -125,7 +125,7 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
     </div>
     <div class="fi-row" style="margin-top:6px">
       <label>Y label</label>
-      <input type="text" id="tgaLabel" value="Mass / mg" oninput="redraw()">
+      <input type="text" id="tgaLabel" value="Weight / mg" oninput="redraw()">
     </div>
     <div style="display:flex;align-items:center;gap:6px;margin-top:7px">
       <input type="checkbox" id="dtgShow" onchange="computeDTG();redraw()" style="width:14px;height:14px;accent-color:#2a7a3b;cursor:pointer">
@@ -345,6 +345,10 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
 
       <button class="btn out" style="margin-top:10px;width:100%;font-size:9px" onclick="clearOnsets()">Clear Analysis</button>
       <div class="cr" style="margin-top:8px"><span class="cl">Show vertical lines</span><input type="checkbox" id="onsetVLines" checked oninput="redraw()"></div>
+      <div class="cr" style="margin-top:4px"><span class="cl">Annotation color</span>
+        <label style="font-family:var(--mono);font-size:9px;color:#888;margin-right:4px">DSC</label><input type="color" id="onsetDSCColor" value="#b84a2e" oninput="redraw()">
+        <label style="font-family:var(--mono);font-size:9px;color:#888;margin-left:6px;margin-right:4px">TGA</label><input type="color" id="onsetTGAColor" value="#2a5caa" oninput="redraw()">
+      </div>
     </div>
   </div>
 
@@ -355,6 +359,7 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
       <div class="cr"><span class="cl">Height px</span><input type="number" id="expH" value="900"></div>
       <div class="cr"><span class="cl">Format</span><select id="expFmt"><option>PNG</option><option>JPEG</option></select></div>
       <button class="btn out" style="margin-top:8px;width:100%" onclick="savePlot()">Save Plot Image</button>
+      <button class="btn out" style="margin-top:5px;width:100%" onclick="copyPlotToClipboard()">Copy Plot to Clipboard</button>
       <button class="btn out" style="margin-top:5px;width:100%" onclick="saveSettings()">Save Settings JSON</button>
       <button class="btn out" style="margin-top:5px;width:100%" onclick="loadSettingsFile()">Load Settings JSON</button>
     </div>
@@ -496,6 +501,7 @@ function parseText(text){
   let dataStarted=false;
   const data=[];
   let sampleSize=null;
+  let instrumentType=null; // 'TGA', 'DSC', or null
 
   for(const ln of lines){
     const trimmed=ln.trim();
@@ -503,6 +509,15 @@ function parseText(text){
       if(trimmed.toLowerCase()==='startofdata'){dataStarted=true;continue;}
       const m=trimmed.match(/^Size[\s,;:]+([0-9]+\.?[0-9]*)/i);
       if(m){const v=parseFloat(m[1]);if(isFinite(v)&&v>0)sampleSize=v;}
+      // Detect instrument type from "Instrument" header line
+      if(!instrumentType){
+        const im=trimmed.match(/^Instrument[\s,;:]+(.+)/i);
+        if(im){
+          const val=im[1].toUpperCase();
+          if(val.includes('TGA'))instrumentType='TGA';
+          else if(val.includes('DSC'))instrumentType='DSC';
+        }
+      }
       continue;
     }
     const cols=trimmed.split(/[,;\t]+|\s+/);
@@ -512,7 +527,7 @@ function parseText(text){
     if(!isFinite(t)||!isFinite(v)) continue;
     data.push({t,v});
   }
-  return{data,sampleSize};
+  return{data,sampleSize,instrumentType};
 }
 
 // Read file, auto-detecting UTF-16 LE BOM (TA Instruments format)
@@ -543,14 +558,25 @@ function metaFromData(data,filename){
 
 function loadFileTGA(file){
   readFile(file,text=>{
-    const {data:parsed,sampleSize}=parseText(text);
+    const {data:parsed,sampleSize,instrumentType}=parseText(text);
+    if(instrumentType==='DSC'){
+      st('Error: this file appears to be a DSC file (Instrument header says DSC). Please drop it into the DSC zone.','err');
+      return;
+    }
     if(!parsed.length){st('No data found after StartOfData in '+file.name,'err');return;}
+    // Remove spurious trailing zero(s) that can appear in TA Instruments TGA files
+    // (a footer/terminator line sometimes parses as a point with v=0)
+    while(parsed.length>1){
+      const last=parsed[parsed.length-1];
+      const avgV=parsed.slice(Math.max(0,parsed.length-10),parsed.length-1).reduce((s,d)=>s+Math.abs(d.v),0)/Math.min(10,parsed.length-1);
+      if(last.v===0&&avgV>0.1){parsed.pop();}else break;
+    }
     if(sampleSize){
       // Convert mg to % of initial mass
       tgaData=parsed.map(d=>({t:d.t,v:d.v/sampleSize*100}));
       tgaMeta=metaFromData(tgaData,file.name);
       tgaMeta.sampleSize=sampleSize;
-      document.getElementById('tgaLabel').value='Mass / %';
+      document.getElementById('tgaLabel').value='Weight / %';
     } else {
       tgaData=parsed;
       tgaMeta=metaFromData(parsed,file.name);
@@ -566,7 +592,11 @@ function loadFileTGA(file){
 
 function loadFileDSC(file){
   readFile(file,text=>{
-    const {data:parsed}=parseText(text);
+    const {data:parsed,instrumentType}=parseText(text);
+    if(instrumentType==='TGA'){
+      st('Error: this file appears to be a TGA file (Instrument header says TGA). Please drop it into the TGA zone.','err');
+      return;
+    }
     if(!parsed.length){st('No data found after StartOfData in '+file.name,'err');return;}
     dscLegs=segmentLegs(parsed);
     const allPts=parsed;
@@ -862,7 +892,7 @@ function render(exportW,exportH){
     });
     cx.font=`${axSz}px ${font}`;
     cx.save();cx.translate(axSz/2+4,MT+PH/2);cx.rotate(-Math.PI/2);
-    cx.textAlign='center';cx.textBaseline='middle';cx.fillText(gv('tgaLabel')||'Mass / mg',0,0);
+    cx.textAlign='center';cx.textBaseline='middle';cx.fillText(gv('tgaLabel')||'Weight / mg',0,0);
     cx.restore();cx.restore();
   }
 
@@ -936,13 +966,14 @@ function render(exportW,exportH){
   // Onset analysis annotations
   if(onsetTGA||onsetDSC){
     drawOnsets(cx,ML,PW,MT,PH,xr,hasTGA?tgaR:null,hasDSC?dscR:null,
-      {font,tkSz,frameW,tgaCol,dscCol:gv('dscCol')||'#b84a2e'});
+      {font,tkSz,frameW,tgaCol,dscCol:gv('dscCol')||'#b84a2e',
+       onsetTGAColor:gv('onsetTGAColor')||null,onsetDSCColor:gv('onsetDSCColor')||null});
   }
 
   if(legShow&&(hasTGA||hasDSC)){
     const lpad=legSz*0.6,lh=legSz*1.6,llen=legSz*1.5;
     const items=[];
-    if(hasTGA)items.push({label:gv('tgaLabel')||'Mass / mg',color:tgaCol});
+    if(hasTGA)items.push({label:gv('tgaLabel')||'Weight / mg',color:tgaCol});
     if(hasDTG)items.push({label:gv('dtgLabel')||'DTG / %/\u00b0C',color:gv('dtgCol')||'#2a7a3b'});
     if(hasDSC){
       const byLeg=gb('dscColorByLeg');
@@ -1196,6 +1227,19 @@ function savePlot(){
   }
 }
 
+function copyPlotToClipboard(){
+  const W=parseInt(gv('expW'))||1400,H=parseInt(gv('expH'))||900;
+  const oc=render(W,H);
+  oc.toBlob(blob=>{
+    if(!blob){st('Failed to create image blob.','err');return;}
+    try{
+      navigator.clipboard.write([new ClipboardItem({'image/png':blob})])
+        .then(()=>st('Plot copied to clipboard.','ok'))
+        .catch(e=>st('Copy failed: '+e.message,'err'));
+    }catch(e){st('Clipboard API not available in this browser.','err');}
+  },'image/png');
+}
+
 function clearTGA(){
   tgaData=[];dtgData=[];
   tgaMeta={filename:'',npts:0,tMin:0,tMax:0,vMin:0,vMax:0};
@@ -1238,6 +1282,7 @@ let pickTarget='';     // 'dsc' or 'tga'
 let pickPts=[];        // [{t, v}] — up to 2 clicked points
 
 function startPickDSC(){
+  if(!dscLegs.length){st('Load a DSC file first before picking points.','err');return;}
   pickMode=true;pickTarget='dsc';pickPts=[];
   onsetDSC=null;
   document.getElementById('dscOnsetResult').innerHTML='';
@@ -1249,6 +1294,7 @@ function startPickDSC(){
 }
 
 function startPickTGA(){
+  if(!tgaData.length){st('Load a TGA file first before picking points.','err');return;}
   pickMode=true;pickTarget='tga';pickPts=[];
   onsetTGA=null;
   document.getElementById('tgaOnsetResult').innerHTML='';
@@ -1504,6 +1550,9 @@ function drawOnsets(cx,ML,PW,MT,PH,xr,tgaR,dscR,style){
   function tYtga(v){return tgaR?MT+PH-(v-tgaR.min)/(tgaR.max-tgaR.min)*PH:0;}
   function tYdsc(v){return dscR?MT+PH-(v-dscR.min)/(dscR.max-dscR.min)*PH:0;}
   const font=style.font,tkSz=style.tkSz,lw=Math.max(1.5,style.frameW*0.5);
+  // Annotation color overrides (from the color pickers)
+  const annoTGACol=style.onsetTGAColor||style.tgaCol;
+  const annoDSCCol=style.onsetDSCColor||style.dscCol;
 
   function lineSeg(line,tLo,tHi,yFn,color,dash){
     cx.save();cx.beginPath();cx.rect(ML,MT,PW,PH);cx.clip();
@@ -1521,27 +1570,50 @@ function drawOnsets(cx,ML,PW,MT,PH,xr,tgaR,dscR,style){
     cx.save();cx.beginPath();cx.arc(tX(T),yPx,5,0,2*Math.PI);
     cx.fillStyle=fill||'#fff';cx.fill();cx.strokeStyle=color;cx.lineWidth=2;cx.stroke();cx.restore();
   }
-  function labelAbove(T,text,color,row){
-    cx.save();cx.font=`bold ${Math.max(10,tkSz*0.85)}px ${font}`;
-    cx.fillStyle=color;cx.textAlign='center';cx.textBaseline='bottom';
-    cx.fillText(text,tX(T),MT-3-row*(Math.max(10,tkSz*0.85)+3));cx.restore();
+  function labelAbove(T,parts,color,row){
+    // parts: array of {text, italic, sup, sub} segments, or a plain string (legacy)
+    const sz=Math.max(10,tkSz*0.85);
+    const xPos=tX(T);
+    const yPos=MT-3-row*(sz+3);
+    cx.save();cx.fillStyle=color;cx.textBaseline='bottom';cx.textAlign='left';
+    if(typeof parts==='string'){
+      cx.font=`${sz}px ${font}`;cx.textAlign='center';
+      cx.fillText(parts,xPos,yPos);cx.restore();return;
+    }
+    // measure total width first
+    let totalW=0;
+    parts.forEach(seg=>{
+      const fSz=seg.sub||seg.sup?sz*0.72:sz;
+      cx.font=`${seg.italic?'italic ':''} ${fSz}px ${font}`;
+      totalW+=cx.measureText(seg.text).width;
+    });
+    let curX=xPos-totalW/2;
+    parts.forEach(seg=>{
+      const fSz=seg.sub||seg.sup?sz*0.72:sz;
+      const yOff=seg.sub?sz*0.18:seg.sup?-sz*0.3:0;
+      cx.font=`${seg.italic?'italic ':''} ${fSz}px ${font}`;
+      cx.fillText(seg.text,curX,yPos+yOff);
+      curX+=cx.measureText(seg.text).width;
+    });
+    cx.restore();
   }
 
   // ── Pick dots (while or after picking) ──────────────────────────
   if(pickMode||onsetDSC||onsetTGA){
     if((pickTarget==='dsc'||onsetDSC)&&pickPts.length&&dscR){
-      const col=dscLegs[parseInt(gv('dscOnsetLeg'))||0]?.color||'#b84a2e';
+      const col=annoDSCCol;
       pickPts.forEach(p=>{dot(p.t,tYdsc(p.v),col,'#fff');});
     }
     if((pickTarget==='tga'||onsetTGA)&&pickPts.length&&tgaR&&pickTarget==='tga'){
-      const col=gv('tgaCol')||'#2a5caa';
+      const col=annoTGACol;
       pickPts.forEach(p=>{dot(p.t,tYtga(p.v),col,'#fff');});
     }
   }
 
   // ── DSC onset ───────────────────────────────────────────────────
   if(onsetDSC&&dscR){
-    const{baseline,tangent,onset,peak,p1,p2,color,tangentRange}=onsetDSC;
+    const{baseline,tangent,onset,peak,p1,p2,tangentRange}=onsetDSC;
+    const color=annoDSCCol;
     // Baseline line between the two picked points, extended slightly
     const span=p2.t-p1.t;
     lineSeg(baseline,p1.t-span*0.05,p2.t+span*0.05,tYdsc,color,[8,5]);
@@ -1552,20 +1624,20 @@ function drawOnsets(cx,ML,PW,MT,PH,xr,tgaR,dscR,style){
     if(onset&&onset.x>=xr.min&&onset.x<=xr.max){
       if(showVLines)vDash(onset.x,color);
       dot(onset.x,tYdsc(onset.y),color,'#fff');
-      labelAbove(onset.x,`T\u2080 = ${onset.x.toFixed(1)}\u00b0C`,color,0);
+      labelAbove(onset.x,[{text:'T',italic:true},{text:'o',sub:true},{text:' = '+onset.x.toFixed(1)+' \u00b0C',italic:false}],color,0);
     }
     if(peak&&peak.t>=xr.min&&peak.t<=xr.max){
       if(showVLines){
         cx.save();cx.strokeStyle=color;cx.lineWidth=1;cx.setLineDash([2,4]);
         cx.beginPath();cx.moveTo(tX(peak.t),MT);cx.lineTo(tX(peak.t),MT+PH);cx.stroke();cx.setLineDash([]);cx.restore();
       }
-      labelAbove(peak.t,`T\u209A = ${peak.t.toFixed(1)}\u00b0C`,color,1);
+      labelAbove(peak.t,[{text:'T',italic:true},{text:'p',sub:true},{text:' = '+peak.t.toFixed(1)+' \u00b0C',italic:false}],color,1);
     }
   }
 
   // ── TGA onset ───────────────────────────────────────────────────
   if(onsetTGA&&tgaR){
-    const col=gv('tgaCol')||'#2a5caa';
+    const col=annoTGACol;
     const{baseline,tangent,onset,inflection,blRange,evRange,tangentRange}=onsetTGA;
     const span=evRange[1]-blRange[0];
     const blEnd=onset?Math.max(evRange[1],onset.x)+span*0.1:evRange[1]+span*0.1;
@@ -1575,14 +1647,14 @@ function drawOnsets(cx,ML,PW,MT,PH,xr,tgaR,dscR,style){
     if(onset&&onset.x>=xr.min&&onset.x<=xr.max){
       if(showVLines)vDash(onset.x,col);
       dot(onset.x,tYtga(onset.y),col,'#fff');
-      labelAbove(onset.x,`T\u2080 = ${onset.x.toFixed(1)}\u00b0C`,col,0);
+      labelAbove(onset.x,[{text:'T',italic:true},{text:'o',sub:true},{text:' = '+onset.x.toFixed(1)+' \u00b0C',italic:false}],col,0);
     }
     if(inflection!==null&&inflection>=xr.min&&inflection<=xr.max){
       if(showVLines){
         cx.save();cx.strokeStyle=col;cx.lineWidth=1;cx.setLineDash([2,4]);
         cx.beginPath();cx.moveTo(tX(inflection),MT);cx.lineTo(tX(inflection),MT+PH);cx.stroke();cx.setLineDash([]);cx.restore();
       }
-      labelAbove(inflection,`T\u1D35 = ${inflection.toFixed(1)}\u00b0C`,col,1);
+      labelAbove(inflection,[{text:'T',italic:true},{text:'p',sub:true},{text:' = '+inflection.toFixed(1)+' \u00b0C',italic:false}],col,1);
     }
   }
 }
@@ -1596,7 +1668,7 @@ const SETTING_IDS=[
   'chartBg','tgaCol','dtgCol','dscCol','dscColorByLeg','tgaLW','dtgLW','dscLW',
   'legShow','legPos','legSz',
   'tgaBL1','tgaBL2','tgaEV1','tgaEV2',
-  'dscBL1','dscBL2','dscEV1','dscEV2','dscOnsetLeg','onsetVLines',
+  'dscBL1','dscBL2','dscEV1','dscEV2','dscOnsetLeg','onsetVLines','onsetTGAColor','onsetDSCColor',
   'expW','expH','expFmt'
 ];
 
