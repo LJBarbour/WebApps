@@ -524,10 +524,11 @@ function parseText(text){
     if(cols.length<3) continue;
     // Skip TA Instruments termination line: time column (col 0) is exactly -1
     if(parseFloat(cols[0])===-1) continue;
+    const time=parseFloat(cols[0]);
     const t=parseFloat(cols[1]);
     const v=parseFloat(cols[2]);
     if(!isFinite(t)||!isFinite(v)) continue;
-    data.push({t,v});
+    data.push({t,v,time:isFinite(time)?time:null});
   }
   return{data,sampleSize,instrumentType};
 }
@@ -594,7 +595,7 @@ function loadFileTGA(file){
 
 function loadFileDSC(file){
   readFile(file,text=>{
-    const {data:parsed,instrumentType}=parseText(text);
+    const {data:parsed,instrumentType,sampleSize}=parseText(text);
     if(instrumentType==='TGA'){
       st('Error: this file appears to be a TGA file (Instrument header says TGA). Please drop it into the TGA zone.','err');
       return;
@@ -604,6 +605,7 @@ function loadFileDSC(file){
     const allPts=parsed;
     dscMeta=metaFromData(allPts,file.name);
     dscMeta.legs=dscLegs.length;
+    dscMeta.sampleSize=sampleSize;  // mg — used for enthalpy calculation
     document.getElementById('dzDSCName').textContent=file.name;
     zs={xMin:null,xMax:null};
     renderLegControls();
@@ -1441,12 +1443,50 @@ function computeDSCOnset(){
     p1:legData[iLo],p2:legData[iHi],color,legIdx,
     tangentRange:[leadPts[tLo].x,leadPts[tHi].x]};
 
+  // ── Enthalpy integration ─────────────────────────────────────
+  // Integrate (signal − baseline) with respect to TIME over the peak region.
+  // DSC signal is in mW; time in minutes → convert to seconds → result in mJ.
+  // Divide by sample mass (mg) → mJ/mg = J/g.
+  let enthalpy=null;
+  const hasTime=between.every(d=>d.time!=null);
+  if(hasTime){
+    let area=0; // mW·min
+    for(let i=1;i<between.length;i++){
+      const dA=between[i-1], dB=between[i];
+      const dt=dB.time-dA.time; // minutes
+      const blA=baseline.m*dA.t+baseline.b;
+      const blB=baseline.m*dB.t+baseline.b;
+      const devA=dA.v-blA;
+      const devB=dB.v-blB;
+      area+=0.5*(devA+devB)*dt; // trapezoid, mW·min
+    }
+    const areamJ=area*60; // mW·min × 60 s/min = mJ
+    const mass=dscMeta?.sampleSize; // mg
+    if(mass&&mass>0){
+      enthalpy=areamJ/mass; // mJ/mg = J/g
+    }
+    onsetDSC.areamJ=areamJ;
+    onsetDSC.enthalpy=enthalpy;
+    onsetDSC.mass=mass||null;
+  }
+
   const dscEl=document.getElementById('dscOnsetResult');
   let html='';
-  if(onset)html+=`<span style="color:#555">Onset: </span><b>${onset.x.toFixed(1)} \u00b0C</b><br>`;
-  html+=`<span style="color:#555">Peak: </span><b>${peakPt.t.toFixed(1)} \u00b0C</b>`;
+  if(onset)html+=`<span style="color:#555">Onset (<i>T</i><sub>o</sub>): </span><b>${onset.x.toFixed(1)} \u00b0C</b><br>`;
+  html+=`<span style="color:#555">Peak (<i>T</i><sub>p</sub>): </span><b>${peakPt.t.toFixed(1)} \u00b0C</b>`;
+  if(hasTime){
+    html+=`<br><span style="color:#555">Area: </span><b>${onsetDSC.areamJ.toFixed(3)} mJ</b>`;
+    if(enthalpy!=null){
+      html+=`<br><span style="color:#555">Mass: </span><b>${dscMeta.sampleSize.toFixed(4)} mg</b>`;
+      html+=`<br><span style="color:#555">Enthalpy (\u0394<i>H</i>): </span><b>${enthalpy.toFixed(2)} J g<sup>\u22121</sup></b>`;
+    } else {
+      html+=`<br><span style="color:#aaa;font-size:9px">No sample mass in file \u2014 enthalpy not calculated</span>`;
+    }
+  } else {
+    html+=`<br><span style="color:#aaa;font-size:9px">No time data \u2014 area not calculated</span>`;
+  }
   dscEl.innerHTML=html;
-  st(`DSC onset computed: T\u2080 = ${onset?onset.x.toFixed(1):'?'} \u00b0C`,'ok');
+  st(`DSC onset: T\u2080 = ${onset?onset.x.toFixed(1):'?'} \u00b0C${enthalpy!=null?' | \u0394H = '+enthalpy.toFixed(2)+' J/g':''}`, 'ok');
   redraw();
 }
 
