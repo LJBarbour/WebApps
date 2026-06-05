@@ -120,7 +120,7 @@ select:focus{border-color:var(--accent)}
 <body>
 <header>
   <h1>BET Surface Area Analyser</h1>
-  <span class="sub">Brunauer–Emmett–Teller Analysis &mdash; Rouquerol Selection</span>
+  <span class="sub">BETSI &mdash; BET Surface Identification &mdash; Osterrieth et al. 2022</span>
 </header>
 <div class="app">
 
@@ -140,22 +140,6 @@ select:focus{border-color:var(--accent)}
     <div class="assume-banner" id="assumeBanner"></div>
   </div>
 
-  <!-- Host metadata — populated from file, editable -->
-  <div class="sb" id="hostMetaWrap" style="display:none">
-    <div class="lbl">Host (Sorbent) Metadata</div>
-    <div class="pg" id="hostMetaGrid">
-      <label>Formula<span>e.g. ZIF-8, SiO₂</span></label>
-      <input type="text"   id="hostFormula"  placeholder="—" style="font-size:10px">
-      <label>M<sub>w</sub> (g/mol)<span>molecular weight</span></label>
-      <input type="number" id="hostMW"       placeholder="—" step="0.01" min="0" onchange="checkHostConsistency()">
-      <label>ρ (g/cc)<span>bulk density</span></label>
-      <input type="number" id="hostDensity"  placeholder="—" step="0.001" min="0">
-      <label>Mass (mg)<span>sample mass</span></label>
-      <input type="number" id="hostMassMg"   placeholder="—" step="0.01"  min="0" onchange="onHostMassChange()">
-    </div>
-    <div id="hostConsistencyMsg" style="display:none;margin-top:5px;font-size:10px;color:var(--accent);padding:4px 7px;background:#fff0f0;border-left:3px solid var(--accent)"></div>
-  </div>
-
   <div class="sb">
     <div class="lbl">Sorptive</div>
     <select id="sorptiveSel" onchange="onSorptiveChange()">
@@ -172,11 +156,11 @@ select:focus{border-color:var(--accent)}
     <div id="customSorptiveWrap" style="display:none;margin-top:7px">
       <div class="pg">
         <label>σ (ų/molecule)<span>cross-sect. area</span></label>
-        <input type="number" id="customSigma" value="16.2" step="0.1" min="1">
+        <input type="number" id="customSigma" onchange="rerunIfLoaded()" value="16.2" step="0.1" min="1">
         <label>p₀ (kPa)<span>saturation pressure</span></label>
-        <input type="number" id="customP0" value="101.325" step="0.1" min="0.001">
+        <input type="number" id="customP0" onchange="rerunIfLoaded()" value="101.325" step="0.1" min="0.001">
         <label>T (K)<span>experiment temp.</span></label>
-        <input type="number" id="customT" value="77" step="1" min="1">
+        <input type="number" id="customT" onchange="rerunIfLoaded()" value="77" step="1" min="1">
       </div>
     </div>
     <div id="sorptiveInfo" class="note" style="margin-top:7px"></div>
@@ -186,10 +170,10 @@ select:focus{border-color:var(--accent)}
     <div class="lbl">Sample</div>
     <div class="pg">
       <label>Mass (g)<span>dry/degassed mass</span></label>
-      <input type="number" id="sampleMass" value="0.1000" step="0.0001" min="0.0001" placeholder="0.1">
+      <input type="number" id="sampleMass" value="0.1000" step="0.0001" min="0.0001" placeholder="0.1" onchange="rerunIfLoaded()">
       <label>Uptake units<span></span></label>
     </div>
-    <select id="uptakeUnit" style="margin-top:5px">
+    <select id="uptakeUnit" style="margin-top:5px" onchange="rerunIfLoaded()">
       <option value="cm3g">cm³/g (STP) — per gram</option>
       <option value="cm3">cm³ (STP) — absolute</option>
       <option value="mmolg">mmol/g — per gram</option>
@@ -207,7 +191,6 @@ select:focus{border-color:var(--accent)}
   </div>
 
   <div class="sb" style="display:flex;flex-direction:column;gap:6px">
-    <button class="btn" id="btnAnalyse" disabled>Run BET Analysis</button>
     <button class="btn out" id="btnExport" disabled>Export Results CSV</button>
   </div>
 </aside>
@@ -215,20 +198,17 @@ select:focus{border-color:var(--accent)}
 <!-- CENTRE -->
 <div class="centre">
   <div class="tab-bar">
-    <button class="tab active" data-tab="iso">Full Isotherm</button>
-    <button class="tab" data-tab="bet">BET Linear Plot</button>
-    <button class="tab" data-tab="rouq">Rouquerol Plot</button>
-    <button class="tab" data-tab="summary">Summary</button>
+    <button class="tab active" data-tab="betsi">BETSI</button>
+    <button class="tab" data-tab="plots">Plots</button>
+    <button class="tab" data-tab="iso">Isotherm</button>
+    <button class="tab" data-tab="rouq">Rouquerol</button>
+    <button class="tab" data-tab="bet">BET Linear</button>
     <button class="tab" data-tab="guide">Guide</button>
-    <div style="margin-left:auto;display:flex;align-items:center;gap:0;border-left:1px solid var(--rule)">
-      <button class="tab axis-btn active" id="axisBtnFull" onclick="setAxisMode('full')" title="Show full p/p₀ axis (0 to 1)" style="border-right:none">&#8596; Full</button>
-      <button class="tab axis-btn" id="axisBtnZoom" onclick="setAxisMode('zoom')" title="Zoom to relevant region">&#8982; Zoom</button>
-    </div>
   </div>
 
   <div class="tab-panels">
-    <!-- Isotherm tab (first) -->
-    <div class="tab-panel active" id="tab-iso">
+    <!-- Isotherm tab -->
+    <div class="tab-panel" id="tab-iso">
       <div class="chart-area">
         <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
           <span style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#888">Full sorption isotherm</span>
@@ -241,8 +221,8 @@ select:focus{border-color:var(--accent)}
     <div class="tab-panel" id="tab-bet">
       <div class="chart-area">
         <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;flex-wrap:wrap">
-          <span style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#888">BET fit R²:</span>
-          <span id="betR2Label" style="font-family:var(--mono);font-size:11px;color:var(--ink)">—</span>
+          <span style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#888">BET linear plot &mdash; BETSI optimal fit</span>
+          <span id="betR2Label" style="font-family:var(--mono);font-size:11px;color:var(--ink);margin-left:8px">—</span>
           <span id="betFitBadge"></span>
         </div>
         <div class="cw" id="cwBet"><canvas id="chartBet"></canvas></div>
@@ -253,20 +233,30 @@ select:focus{border-color:var(--accent)}
     <div class="tab-panel" id="tab-rouq">
       <div class="chart-area">
         <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;flex-wrap:wrap">
-          <span style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#888">Linear region:</span>
-          <span id="rouqRangeLabel" style="font-family:var(--mono);font-size:11px;color:var(--ink)">—</span>
-          <span id="rouqBadge"></span>
-          <span style="margin-left:auto;font-size:10px;color:#888">Drag handles to adjust range (auto off)</span>
+          <span style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#888">Rouquerol plot &mdash; BETSI optimal range highlighted</span>
+          <span id="rouqRangeLabel" style="display:none"></span><span id="rouqBadge" style="display:none"></span>
         </div>
         <div class="cw" id="cwRouq"><canvas id="chartRouq"></canvas></div>
       </div>
     </div>
 
-    <!-- Summary tab -->
-    <div class="tab-panel" id="tab-summary" style="overflow-y:auto">
-      <div style="padding:18px 20px">
-        <div class="lbl" style="margin-bottom:8px">Results</div>
-        <div id="resContent"><div class="ph">Load a CSV file and click Run BET Analysis.</div></div>
+
+    <!-- BETSI results tab -->
+    <div class="tab-panel active" id="tab-betsi" style="overflow-y:auto">
+      <div style="padding:14px 18px">
+        <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:10px;flex-wrap:wrap">
+          <div class="lbl" style="margin-bottom:0">BETSI Analysis</div>
+          <span id="betsiStatusBadge"></span>
+          <span style="font-size:10px;color:#888;margin-left:auto" id="betsiTimingLabel"></span>
+        </div>
+        <div id="betsiContent"><div class="ph">Load a file to begin.</div></div>
+      </div>
+    </div>
+
+    <!-- BETSI plots tab -->
+    <div class="tab-panel" id="tab-plots" style="overflow-y:auto">
+      <div style="padding:14px 18px" id="betsiPlotsContent">
+        <div class="ph">Load a file to see BETSI plots.</div>
       </div>
     </div>
 
@@ -389,120 +379,23 @@ relative_pressure, uptake (mmol/g)
     </div>
   </div><!-- tab-panels -->
 
-  <div id="status">Ready &mdash; load a CSV file to begin.</div>
+  <div id="status">Ready &mdash; load a CSV or TXT file to begin.</div>
 </div><!-- centre -->
 
 <!-- RIGHT CONTROLS -->
 <div class="cpanel" id="cpanel">
 
-  <div class="cp-group">
-    <div class="cp-head" onclick="tog(this)"><span class="cp-title">BET Range</span><span class="cp-arr">&#9660;</span></div>
+  <div class="cp-group open">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">BETSI Settings</span><span class="cp-arr">&#9660;</span></div>
     <div class="cp-body">
-      <div class="cr"><span class="cl">Auto (Rouquerol)</span><input type="checkbox" id="autoRange" checked onchange="onAutoRangeChange()"></div>
-      <div id="manualRangeWrap" style="display:none">
-        <div class="cr"><span class="cl">p/p₀ min</span><input type="number" id="manualMin" value="0.05" step="0.005" onchange="onManualRange()" style="width:80px"></div>
-        <div class="cr"><span class="cl">p/p₀ max</span><input type="number" id="manualMax" value="0.35" step="0.005" onchange="onManualRange()" style="width:80px"></div>
-      </div>
-      <div class="note" style="margin-top:4px">Auto mode finds the longest p/p₀ window where n(1−p/p₀) increases monotonically. Uncheck to set range manually, or click two points on the Rouquerol plot.</div>
+      <div class="cr"><span class="cl">Min points/fit</span><input type="number" id="betsiMinPts" value="10" min="3" max="50" step="1" style="width:60px" onchange="onBetsiSettingsChange()"></div>
+      <div class="cr"><span class="cl">R² threshold</span><input type="number" id="betsiMinR2" value="0.990" min="0.5" max="1" step="0.001" style="width:70px" onchange="onBetsiSettingsChange()"></div>
+      <div class="cr"><span class="cl">Max % error (C4)</span><input type="number" id="betsiMaxErr" value="20" min="1" max="100" step="1" style="width:60px" onchange="onBetsiSettingsChange()"></div>
+      <div class="note" style="margin-top:5px">BETSI exhaustively tests all consecutive-point combinations using PCHIP criterion 3/4 (Osterrieth et al. 2022). Defaults match the paper.</div>
     </div>
   </div>
 
-  <div class="cp-group">
-    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Plot Style</span><span class="cp-arr">&#9660;</span></div>
-    <div class="cp-body">
-      <div class="cr"><span class="cl">Font</span>
-        <select id="fontFam" onchange="redrawAll()">
-          <option value="Arial,sans-serif" selected>Arial</option>
-          <option value="'Times New Roman',serif">Times New Roman</option>
-          <option value="'Helvetica Neue',sans-serif">Helvetica</option>
-          <option value="Georgia,serif">Georgia</option>
-          <option value="'Courier New',monospace">Courier New</option>
-          <option value="'DM Mono',monospace">DM Mono</option>
-        </select>
-      </div>
-      <div class="cr"><span class="cl">Label size</span><input type="range" id="axSz" min="8" max="60" value="32" oninput="V(this);redrawAll()"><span class="rv2">32</span></div>
-      <div class="cr"><span class="cl">Tick size</span><input type="range" id="tkSz" min="8" max="52" value="26" oninput="V(this);redrawAll()"><span class="rv2">26</span></div>
-      <div class="cr"><span class="cl">Axis width</span><input type="range" id="frameW" min="0.5" max="5" step=".5" value="2.5" oninput="V(this);redrawAll()"><span class="rv2">2.5</span></div>
-      <div class="cr"><span class="cl">Box border</span><input type="checkbox" id="boxBdr" checked onchange="redrawAll()"></div>
-    </div>
-  </div>
-
-  <div class="cp-group">
-    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Data Points</span><span class="cp-arr">&#9660;</span></div>
-    <div class="cp-body">
-      <div class="cr"><span class="cl">In-range color</span><input type="color" id="ptCol" value="#cc2222" onchange="redrawAll()"></div>
-      <div class="cr"><span class="cl">Out-range color</span><input type="color" id="ptColOut" value="#999999" onchange="redrawAll()"></div>
-      <div class="cr"><span class="cl">Size</span><input type="range" id="ptSz" min="2" max="18" value="8" oninput="V(this);redrawAll()"><span class="rv2">8</span></div>
-      <div class="cr"><span class="cl">Style</span>
-        <select id="ptSty" onchange="redrawAll()"><option>circle</option><option>rect</option><option>triangle</option><option>cross</option></select>
-      </div>
-    </div>
-  </div>
-
-  <div class="cp-group">
-    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Fit Line</span><span class="cp-arr">&#9660;</span></div>
-    <div class="cp-body">
-      <div class="cr"><span class="cl">Color</span><input type="color" id="lnCol" value="#cc2222" onchange="redrawAll()"></div>
-      <div class="cr"><span class="cl">Width</span><input type="range" id="lnW" min="0.5" max="8" step=".5" value="2.5" oninput="V(this);redrawAll()"><span class="rv2">2.5</span></div>
-      <div class="cr"><span class="cl">Style</span>
-        <select id="lnDash" onchange="redrawAll()">
-          <option value="">Solid</option><option value="6,3">Dashed</option><option value="2,3">Dotted</option>
-        </select>
-      </div>
-    </div>
-  </div>
-
-  <div class="cp-group">
-    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Grid &amp; Ticks</span><span class="cp-arr">&#9660;</span></div>
-    <div class="cp-body">
-      <div class="cr"><span class="cl">Show grid</span><input type="checkbox" id="grid" onchange="redrawAll()"></div>
-      <div class="cr"><span class="cl">Grid color</span><input type="color" id="gridCol" value="#dddddd" onchange="redrawAll()"></div>
-      <div class="cr"><span class="cl">Major ticks</span><input type="checkbox" id="majTick" checked onchange="redrawAll()"></div>
-      <div class="cr"><span class="cl">Minor ticks</span><input type="checkbox" id="minTick" onchange="redrawAll()"></div>
-      <div class="cr"><span class="cl">Tick length</span><input type="range" id="tickLen" min="2" max="16" value="7" oninput="V(this);redrawAll()"><span class="rv2">7</span></div>
-      <div class="cr"><span class="cl">Tick direction</span><select id="tickDir" onchange="redrawAll()"><option value="in">Inward</option><option value="out" selected>Outward</option><option value="both">Both</option></select></div>
-    </div>
-  </div>
-
-  <div class="cp-group">
-    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Result Legend</span><span class="cp-arr">&#9660;</span></div>
-    <div class="cp-body">
-      <div class="cr"><span class="cl" style="font-size:10px;color:#aaa;font-style:italic">BET linear plot</span></div>
-      <div class="cr"><span class="cl">Show legend</span><input type="checkbox" id="annBetShow" checked onchange="redrawAll()"></div>
-      <div class="cr"><span class="cl">Position</span>
-        <select id="annBetPos" onchange="redrawAll()">
-          <option value="tl" selected>Top left</option>
-          <option value="tr">Top right</option>
-          <option value="bl">Bottom left</option>
-          <option value="br">Bottom right</option>
-        </select>
-      </div>
-      <div class="cr" style="margin-top:6px"><span class="cl" style="font-size:10px;color:#aaa;font-style:italic">Isotherm plot</span></div>
-      <div class="cr"><span class="cl">Show legend</span><input type="checkbox" id="annIsoShow" checked onchange="redrawAll()"></div>
-      <div class="cr"><span class="cl">Position</span>
-        <select id="annIsoPos" onchange="redrawAll()">
-          <option value="tl">Top left</option>
-          <option value="tr">Top right</option>
-          <option value="bl">Bottom left</option>
-          <option value="br" selected>Bottom right</option>
-        </select>
-      </div>
-      <div class="cr" style="margin-top:8px"><span class="cl">Font</span>
-        <select id="annFont" onchange="redrawAll()">
-          <option value="'Palatino Linotype',Palatino,Georgia,serif" selected>Palatino</option>
-          <option value="Georgia,serif">Georgia</option>
-          <option value="'Times New Roman',serif">Times New Roman</option>
-          <option value="Arial,sans-serif">Arial</option>
-          <option value="'Helvetica Neue',Helvetica,sans-serif">Helvetica</option>
-          <option value="'Century Schoolbook',serif">Century Schoolbook</option>
-          <option value="'DM Mono',monospace">DM Mono</option>
-        </select>
-      </div>
-      <div class="cr"><span class="cl">Size</span><input type="range" id="annSz" min="8" max="40" value="18" oninput="V(this);redrawAll()"><span class="rv2">18</span></div>
-    </div>
-  </div>
-
-  <div class="cp-group">
+    <div class="cp-group">
     <div class="cp-head" onclick="tog(this)"><span class="cp-title">Save Plots</span><span class="cp-arr">&#9660;</span></div>
     <div class="cp-body">
       <div class="cr"><span class="cl">Width px</span><input type="number" id="expW" value="1400"></div>
@@ -551,7 +444,6 @@ let betRange = {iMin:0, iMax:0}; // indices into rawData (sorted by pp0)
 let betResult = null;
 
 let charts = {rouq:null, bet:null, iso:null};
-let axisMode = 'full'; // 'full' = all data visible; 'zoom' = BET range window only
 
 // =====================================================================
 // HELPERS
@@ -587,6 +479,7 @@ function onSorptiveChange(){
   wrap.style.display=k==='custom'?'block':'none';
   const s=SORPTIVES[k]||{note:''};
   document.getElementById('sorptiveInfo').textContent=s.note||'';
+  rerunIfLoaded();
 }
 onSorptiveChange();
 
@@ -667,7 +560,8 @@ const PRESSURE_UNIT_MAP = {
 // Uptake unit token → internal key
 const UPTAKE_UNIT_MAP = {
   'cm3/g':'cm3g','cm³/g':'cm3g','cc/g':'cm3g','cm3(stp)/g':'cm3g','cc(stp)/g':'cm3g',
-  'cm3(stp/g)':'cm3g','cc(stp/g)':'cm3g','cm3stp/g':'cm3g',
+  'cm3(stp/g)':'cm3g','cc(stp/g)':'cm3g','cm3stp/g':'cm3g','ccstp/g':'cm3g',
+  'cm3/gstp':'cm3g','cc/gstp':'cm3g','cm3/g(stp)':'cm3g','cc/g(stp)':'cm3g',
   'cm3':'cm3','cm³':'cm3','cc':'cm3','cm3(stp)':'cm3','cc(stp)':'cm3',
   'mmol/g':'mmolg','mmolg':'mmolg',
   'mmol':'mmol',
@@ -752,6 +646,8 @@ function resolveUptakeUnit(str){
   // Careful ordering: try longer patterns first to avoid mmol matching before mmol/g
   if(/mmol\s*\/\s*g|mmol_g|mmolg/.test(s)) return 'mmolg';
   if(/^mmol$/.test(s)) return 'mmol';
+  // cm3/g STP, cm3/g(STP), cc/g STP, cm³/g STP, etc. — unit before or after /g
+  if(/cm3?\s*\/\s*g\s*\(?stp\)?|cc\s*\/\s*g\s*\(?stp\)?/.test(s)) return 'cm3g';
   if(/cm3?\s*\(?stp\)?\s*\/\s*g|cc\s*\(?stp\)?\s*\/\s*g/.test(s)) return 'cm3g';
   if(/cm3?\s*\(?stp|cc\s*\(?stp/.test(s)) return 'cm3';
   if(/^cc\/g$|^cm3\/g$/.test(s)) return 'cm3g';
@@ -999,7 +895,7 @@ function showAssumptionsBanner(meta){
   });
 
   html += `<div style="margin-top:6px;font-size:10px;color:#888;line-height:1.5">
-    Check values below, then click <strong>Run BET Analysis</strong>.</div>`;
+    Analysis runs automatically. Adjust parameters below if needed — any change re-runs immediately.</div>`;
 
   banner.innerHTML = html;
   wrap.style.display='';
@@ -1033,9 +929,48 @@ function onHostMassChange(){
   }
 }
 
+let _rerunTimer=null;
+function rerunIfLoaded(){
+  if(!rawFileData.length) return;
+  // Small debounce so rapid edits (e.g. typing mass) don't spam analysis
+  clearTimeout(_rerunTimer);
+  _rerunTimer=setTimeout(()=>runAnalysis(), 400);
+}
+
+function resetState(){
+  rawData = [];
+  rawFileData = [];
+  betRange = {iMin:0, iMax:0};
+  betResult = null;
+  betsiResult = null;
+  // Reset UI
+  document.getElementById('btnExport').disabled = true;
+  document.getElementById('betR2Label').textContent = '—';
+  document.getElementById('betFitBadge').innerHTML = '';
+  document.getElementById('rouqRangeLabel').textContent = '—';
+  document.getElementById('rouqBadge').innerHTML = '';
+  document.getElementById('betsiContent').innerHTML = '<div class="ph">Load a file to begin.</div>';
+  const pc=document.getElementById('betsiPlotsContent'); if(pc) pc.innerHTML='<div class="ph">Load a file to see BETSI plots.</div>';
+  document.getElementById('betsiStatusBadge').innerHTML = '';
+  document.getElementById('betsiTimingLabel').textContent = '';
+  // Reset auto-range to checked (directly, without triggering side-effects)
+  // Clear all charts
+  ['chartRouq','chartBet','chartIso'].forEach(id=>{
+    const c=document.getElementById(id);
+    if(c){ const ctx=c.getContext('2d'); ctx.clearRect(0,0,c.width,c.height); }
+  });
+  // Switch back to isotherm tab
+  document.querySelectorAll('.tab[data-tab]').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  const betsiTab=document.querySelector('.tab[data-tab="betsi"]');
+  if(betsiTab) betsiTab.classList.add('active');
+  document.getElementById('tab-betsi').classList.add('active');
+}
+
 function loadFile(file){
   const reader=new FileReader();
   reader.onload=e=>{
+    resetState();
     const {meta, dataRows} = parseCSVSmart(e.target.result);
 
     if(dataRows.length<3){st('Error: need at least 3 data points.','err');return;}
@@ -1081,9 +1016,8 @@ function loadFile(file){
     // Show assumptions banner
     showAssumptionsBanner(meta);
 
-    document.getElementById('btnAnalyse').disabled=false;
     document.getElementById('dzName').textContent=file.name;
-    st('Loaded '+rawFileData.length+' points — check detected parameters, then click Run BET Analysis.');
+    st('Loaded '+rawFileData.length+' points — running BETSI analysis…');
     runAnalysis();
   };
   reader.readAsText(file);
@@ -1156,6 +1090,555 @@ function calcSBET(nm_mol_g, sigma_A2){
 }
 
 // =====================================================================
+// BETSI — BET Surface Identification (Osterrieth et al. 2022)
+// Exhaustive n×n matrix approach with correct PCHIP criterion 3/4
+// =====================================================================
+let betsiResult = null;
+
+// ---- PCHIP interpolation (Fritsch-Carlson monotone cubic Hermite) ----
+// Returns a function f(t) that interpolates (xs, ys) at any t in [xs[0], xs[n-1]]
+function buildPCHIP(xs, ys) {
+  const n = xs.length;
+  const h = [], delta = [], d = new Array(n);
+
+  for (let k = 0; k < n - 1; k++) {
+    h[k] = xs[k+1] - xs[k];
+    delta[k] = (ys[k+1] - ys[k]) / h[k];
+  }
+
+  // Endpoint derivatives (one-sided, matches scipy PchipInterpolator)
+  d[0] = delta[0];
+  d[n-1] = delta[n-2];
+
+  // Interior derivatives: Fritsch-Carlson
+  for (let k = 1; k < n - 1; k++) {
+    if (delta[k-1] * delta[k] <= 0) {
+      d[k] = 0;
+    } else {
+      const w1 = 2*h[k] + h[k-1], w2 = h[k] + 2*h[k-1];
+      d[k] = (w1 + w2) / (w1/delta[k-1] + w2/delta[k]);
+    }
+  }
+
+  return function(t) {
+    // Binary search for interval
+    let lo = 0, hi = n - 2;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (xs[mid+1] < t) lo = mid + 1; else hi = mid;
+    }
+    const k = lo;
+    const hk = h[k];
+    const u = (t - xs[k]) / hk;
+    const u2 = u * u, u3 = u2 * u;
+    // Cubic Hermite basis
+    const H00 =  2*u3 - 3*u2 + 1;
+    const H10 =    u3 - 2*u2 + u;
+    const H01 = -2*u3 + 3*u2;
+    const H11 =    u3 -   u2;
+    return H00*ys[k] + H10*hk*d[k] + H01*ys[k+1] + H11*hk*d[k+1];
+  };
+}
+
+// ---- Bisection root-find: find t in [lo,hi] where f(t) = target ----
+// Assumes f is monotonically increasing (isotherm always is)
+function bisectFind(f, target, lo, hi, iters=52) {
+  for (let i = 0; i < iters; i++) {
+    const mid = (lo + hi) * 0.5;
+    if (f(mid) < target) lo = mid; else hi = mid;
+  }
+  return (lo + hi) * 0.5;
+}
+
+// ---- Rouquerol criterion 1a: n(1-p/p0) non-decreasing ----
+function rouqMonotone(data) {
+  for (let i = 1; i < data.length; i++) {
+    if (data[i].uptake_mol_g*(1-data[i].pp0) < data[i-1].uptake_mol_g*(1-data[i-1].pp0)) return false;
+  }
+  return true;
+}
+
+function runBETSI() {
+  if (!rawFileData.length) return;
+
+  const s    = getSorptive();
+  const mass = gn('sampleMass') || 0.1;
+  const unit = gv('uptakeUnit');
+
+  // Work in raw uptake units (same as BETSI source: q in cm3/g STP equivalent)
+  // We use mol/g internally; surface area formula matches via calcSBET
+  const data = rawFileData.map(d => ({
+    pp0: d.pp0,
+    uptake_mol_g: toMolG(d.rawUptake, unit, mass)
+  }));
+  const n = data.length;
+
+  const minPts = Math.max(3, parseInt(document.getElementById('betsiMinPts').value) || 10);
+  const minR2  = parseFloat(document.getElementById('betsiMinR2').value)  || 0.995;
+  const maxErr = parseFloat(document.getElementById('betsiMaxErr').value) || 20;
+
+  // Build PCHIP over full isotherm (pp0 vs uptake_mol_g)
+  const xs = data.map(d => d.pp0);
+  const ys = data.map(d => d.uptake_mol_g);
+  const pchip = buildPCHIP(xs, ys);
+
+  const t0 = performance.now();
+  const validFits = [];
+  let totalFits = 0;
+  let fail_c1a=0, fail_c1b=0, fail_fit=0, fail_c2=0, fail_r2=0, fail_c3=0, fail_c4=0;
+
+  for (let j = 0; j < n - minPts + 1; j++) {
+    for (let i = j + minPts - 1; i < n; i++) {
+      totalFits++;
+      const seg = data.slice(j, i+1);
+
+      // Criterion 1a: n(1-p/p0) non-decreasing
+      if (!rouqMonotone(seg)) { fail_c1a++; continue; }
+
+      // BET linear fit
+      const fit = betLinearFit(data, j, i);
+      if (!fit || !isFinite(fit.nm) || fit.nm <= 0) { fail_fit++; continue; }
+
+      // Criterion 1b (BETSI extended): BET linear slope > 0
+      if (fit.slope <= 0) { fail_c1b++; continue; }
+
+      // Criterion 2: C > 0
+      if (!isFinite(fit.C) || fit.C <= 0) { fail_c2++; continue; }
+
+      // R² threshold
+      if (fit.r2 < minR2) { fail_r2++; continue; }
+
+      // Criterion 3 (BETSI): find p* on PCHIP isotherm where uptake = nm(BET)
+      // then check p* lies within fitting range [pp0[j], pp0[i]]
+      const nm = fit.nm;
+      const pp0_lo = data[j].pp0, pp0_hi = data[i].pp0;
+
+      // calc_pressure = 1/(sqrt(C)+1)  — theoretical p/p0 at monolayer (BET theory)
+      const calc_p = 1 / (Math.sqrt(fit.C) + 1);
+
+      // p* = pressure on isotherm where uptake = nm
+      // Isotherm is monotone increasing so bisection works
+      const p_star = bisectFind(pchip, nm, xs[0], xs[n-1]);
+
+      if (p_star <= pp0_lo || p_star >= pp0_hi) { fail_c3++; continue; }
+
+      // Criterion 4: % error = |p* - calc_p| / p* * 100
+      const pctErr = Math.abs(p_star - calc_p) / p_star * 100;
+      if (pctErr > maxErr) { fail_c4++; continue; }
+
+      const sbet = calcSBET(nm, s.sigma);
+      validFits.push({
+        j, i, fit, sbet, pctErr, calc_p, p_star,
+        pp0lo: pp0_lo, pp0hi: pp0_hi
+      });
+    }
+  }
+
+  const elapsed = performance.now() - t0;
+  const diagnostics = { fail_c1a, fail_c1b, fail_fit, fail_c2, fail_r2, fail_c3, fail_c4 };
+
+  if (!validFits.length) {
+    betsiResult = { valid:false, validFits:[], totalFits, diagnostics, minPts, minR2, maxErr, elapsed, s, mass };
+    try { renderBETSI(); } catch(e) { console.error('renderBETSI error:', e); }
+    return;
+  }
+
+  // Isotherm knee: fits ending on highest upper index
+  const maxI = Math.max(...validFits.map(f => f.i));
+  const kneeGroup = validFits.filter(f => f.i === maxI);
+
+  // BETSI optimal: knee member with lowest C4 % error
+  const optimal = kneeGroup.reduce((best, f) => f.pctErr < best.pctErr ? f : best, kneeGroup[0]);
+
+  const sbets = validFits.map(f => f.sbet);
+  const sbetMin = Math.min(...sbets), sbetMax = Math.max(...sbets);
+  const sbetMean = sbets.reduce((a,b) => a+b, 0) / sbets.length;
+  const sbetSD   = Math.sqrt(sbets.reduce((a,b) => a+(b-sbetMean)**2, 0) / sbets.length);
+  const sbetCV   = sbetSD / sbetMean * 100;
+
+  betsiResult = {
+    valid: true, optimal, kneeGroup, validFits, totalFits, diagnostics,
+    sbetMin, sbetMax, sbetMean, sbetSD, sbetCV,
+    passRate: validFits.length / totalFits * 100,
+    minPts, minR2, maxErr, elapsed, s, mass
+  };
+
+  try { renderBETSI(); } catch(e) { console.error('renderBETSI error:', e); }
+}
+
+function onBetsiSettingsChange() {
+  if (rawFileData.length) runAnalysis();
+}
+
+
+
+// =====================================================================
+// BETSI RESULTS — render helpers
+// =====================================================================
+
+function row2(label, valHtml){
+  return '<div style="display:flex;justify-content:space-between;padding:3px 10px;border-top:1px solid var(--pale);gap:8px">'
+    +'<span style="color:#555;font-size:11px">'+label+'</span>'
+    +'<span style="font-family:var(--mono);font-size:11px;text-align:right">'+valHtml+'</span>'
+    +'</div>';
+}
+
+function classifyIsotherm(r){
+  const passRate=r.passRate, cv=r.sbetCV;
+  if(passRate<1&&cv<3)  return '<span style="color:var(--green)"><b>Type B</b> \u2014 narrow window, narrow spread</span>';
+  if(passRate>=1&&cv<4) return '<span style="color:#2a6b8a"><b>Type A</b> \u2014 wide window, narrow spread</span>';
+  return '<span style="color:var(--accent)"><b>Type C</b> \u2014 wide window, wide spread (ambiguous)</span>';
+}
+
+function renderBETSI(){
+  const el    = document.getElementById('betsiContent');
+  const badge = document.getElementById('betsiStatusBadge');
+  const timing= document.getElementById('betsiTimingLabel');
+  const plotEl= document.getElementById('betsiPlotsContent');
+  if(!el) return;
+
+  if(!betsiResult){
+    el.innerHTML='<div class="ph">Load a file to begin.</div>';
+    if(plotEl) plotEl.innerHTML='<div class="ph">Load a file to see BETSI plots.</div>';
+    return;
+  }
+
+  const r=betsiResult;
+  if(timing) timing.textContent=r.elapsed.toFixed(0)+' ms \u00b7 '+r.totalFits.toLocaleString()+' fits tested';
+
+  // ── No valid fits: diagnostic breakdown ────────────────────────────
+  if(!r.valid){
+    if(badge) badge.innerHTML='<span class="badge warn">No valid fits</span>';
+    const d=r.diagnostics||{};
+    const total=r.totalFits||0;
+    const pct=v=>total>0?' ('+(v/total*100).toFixed(1)+'%)':'';
+    let dhtml='<div style="border:1.5px solid var(--rule);font-size:11px;font-family:Georgia,serif;margin-bottom:8px">';
+    dhtml+='<div style="background:var(--pale);padding:4px 10px;font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)">Rejection breakdown \u2014 '+total.toLocaleString()+' fits tested</div>';
+    dhtml+=row2('Failed C1a \u2014 n(1\u2212p/p\u2080) not monotone','<b>'+(d.fail_c1a||0).toLocaleString()+'</b>'+pct(d.fail_c1a||0));
+    dhtml+=row2('Failed fit \u2014 bad n\u2098 or non-finite','<b>'+(d.fail_fit||0).toLocaleString()+'</b>'+pct(d.fail_fit||0));
+    dhtml+=row2('Failed C1b \u2014 BET slope \u2264 0','<b>'+(d.fail_c1b||0).toLocaleString()+'</b>'+pct(d.fail_c1b||0));
+    dhtml+=row2('Failed C2 \u2014 C constant \u2264 0','<b>'+(d.fail_c2||0).toLocaleString()+'</b>'+pct(d.fail_c2||0));
+    dhtml+=row2('Failed R\u00b2 threshold ('+r.minR2+')','<b>'+(d.fail_r2||0).toLocaleString()+'</b>'+pct(d.fail_r2||0));
+    dhtml+=row2('Failed C3 \u2014 p\u2217 outside fitting range','<b>'+(d.fail_c3||0).toLocaleString()+'</b>'+pct(d.fail_c3||0));
+    dhtml+=row2('Failed C4 \u2014 % error > '+r.maxErr+'%','<b>'+(d.fail_c4||0).toLocaleString()+'</b>'+pct(d.fail_c4||0));
+    dhtml+='</div>';
+    dhtml+='<div style="font-size:10px;color:#888;line-height:1.5;padding:6px 8px;background:var(--cream);border-left:3px solid var(--accent)">Relax the BETSI settings on the right.</div>';
+    el.innerHTML=dhtml;
+    if(plotEl) plotEl.innerHTML='<div class="ph">No valid fits \u2014 see BETSI tab for details.</div>';
+    return;
+  }
+
+  // ── Valid fits ──────────────────────────────────────────────────────
+  if(badge) badge.innerHTML='<span class="badge good">'+r.validFits.length+' valid fit'+(r.validFits.length!==1?'s':'')+' found</span>';
+  const opt=r.optimal;
+  const Cfmt=isFinite(opt.fit.C)?fmt(opt.fit.C,5):'--';
+
+  // ── BETSI tab: result boxes + stats ────────────────────────────────
+  let html='';
+  html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px">';
+  html+='<div style="border:1.5px solid var(--rule);font-size:11px;font-family:Georgia,serif">';
+  html+='<div style="background:var(--cream);padding:4px 10px;font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)">BETSI Optimal Result</div>';
+  html+=row2('S<sub>BET</sub>','<b>'+fmt(opt.sbet,5)+'</b> m\u00b2 g\u207b\u00b9');
+  html+=row2('S<sub>BET</sub> total','<b>'+fmt(opt.sbet*r.mass,5)+'</b> m\u00b2');
+  html+=row2('C constant','<b>'+Cfmt+'</b>');
+  html+=row2('n<sub>m</sub>','<b>'+fmt(opt.fit.nm*1000,4)+'</b> mmol g\u207b\u00b9');
+  html+=row2('V<sub>m</sub> (STP)','<b>'+(opt.fit.nm*22414).toFixed(3)+'</b> cm\u00b3 g\u207b\u00b9');
+  html+=row2('R\u00b2','<b>'+opt.fit.r2.toFixed(5)+'</b>');
+  html+='</div>';
+  html+='<div style="border:1.5px solid var(--rule);font-size:11px;font-family:Georgia,serif">';
+  html+='<div style="background:var(--cream);padding:4px 10px;font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)">Fitting Range</div>';
+  html+=row2('p/p\u2080 range','<b>'+opt.pp0lo.toFixed(4)+'\u2013'+opt.pp0hi.toFixed(4)+'</b>');
+  html+=row2('Points in range','<b>'+(opt.i-opt.j+1)+'</b>');
+  html+=row2('C4 error','<b>'+opt.pctErr.toFixed(2)+'%</b>');
+  html+=row2('p\u2217 (isotherm)','<b>'+opt.p_star.toFixed(5)+'</b>');
+  html+=row2('p<sub>calc</sub> (BET)','<b>'+opt.calc_p.toFixed(5)+'</b>');
+  html+=row2('Sorptive','<b>'+r.s.label+'</b>');
+  html+='</div>';
+  html+='</div>';
+
+  html+='<div style="border:1.5px solid var(--rule);font-size:11px;font-family:Georgia,serif;margin-bottom:10px">';
+  html+='<div style="background:var(--cream);padding:4px 10px;font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)">Valid Fits Summary</div>';
+  html+=row2('Valid fits','<b>'+r.validFits.length+'</b> of '+r.totalFits.toLocaleString()+' tested');
+  html+=row2('Pass rate','<b>'+r.passRate.toFixed(3)+'%</b>');
+  html+=row2('S<sub>BET</sub> range','<b>'+fmt(r.sbetMin,5)+'\u2013'+fmt(r.sbetMax,5)+'</b> m\u00b2 g\u207b\u00b9');
+  html+=row2('Spread (max\u2212min)','<b>'+fmt(r.sbetMax-r.sbetMin,4)+'</b> m\u00b2 g\u207b\u00b9');
+  html+=row2('Variation coeff.','<b>'+r.sbetCV.toFixed(3)+'%</b>');
+  html+=row2('Knee group','<b>'+r.kneeGroup.length+'</b> fit'+(r.kneeGroup.length!==1?'s':''));
+  html+=row2('Isotherm type',classifyIsotherm(r));
+  html+=row2('Settings','min '+r.minPts+' pts \u00b7 R\u00b2\u2265'+r.minR2+' \u00b7 C4\u2264'+r.maxErr+'%');
+  html+='</div>';
+
+  html+='<div style="font-size:10px;color:#888;line-height:1.5;padding:6px 8px;background:var(--cream);border-left:3px solid var(--rule)">'
+    +'<b>Ref:</b> Osterrieth et al., <i>Advanced Materials</i> 2022. '
+    +'BETSI uses PCHIP interpolation and pressure-domain C4 error.'
+    +'</div>';
+
+  el.innerHTML=html;
+
+  // ── Plots tab: three stacked full-height canvases ──────────────────
+  if(plotEl){
+    plotEl.innerHTML=
+      '<div style="margin-bottom:14px">'
+        +'<div style="background:var(--cream);padding:4px 10px;font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);border:1.5px solid var(--rule);border-bottom:none">BET Area vs. Criterion 4 Error</div>'
+        +'<div style="border:1.5px solid var(--rule);height:300px;position:relative"><canvas id="chartBetsi" style="position:absolute;inset:0;width:100%;height:100%"></canvas></div>'
+      +'</div>'
+      +'<div style="margin-bottom:14px">'
+        +'<div style="background:var(--cream);padding:4px 10px;font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);border:1.5px solid var(--rule);border-bottom:none">Valid BET Areas Distribution</div>'
+        +'<div style="border:1.5px solid var(--rule);height:300px;position:relative"><canvas id="chartBetsiHist" style="position:absolute;inset:0;width:100%;height:100%"></canvas></div>'
+      +'</div>'
+      +'<div style="margin-bottom:14px">'
+        +'<div style="background:var(--cream);padding:4px 10px;font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);border:1.5px solid var(--rule);border-bottom:none">Monolayer Loading on Isotherm</div>'
+        +'<div style="border:1.5px solid var(--rule);height:300px;position:relative"><canvas id="chartBetsiMono" style="position:absolute;inset:0;width:100%;height:100%"></canvas></div>'
+      +'</div>';
+    requestAnimationFrame(()=>{ drawBetsiScatter(); drawBetsiHist(); drawBetsiMono(); });
+  }
+}
+
+
+// =====================================================================
+// BETSI CHART HELPER — size canvas to its container
+// =====================================================================
+function sizeCanvas(id){
+  const canvas=document.getElementById(id);
+  if(!canvas) return null;
+  const dpr=window.devicePixelRatio||1;
+  const W=canvas.offsetWidth||canvas.parentElement?.offsetWidth||500;
+  const H=canvas.offsetHeight||canvas.parentElement?.offsetHeight||300;
+  canvas.width=W*dpr; canvas.height=H*dpr;
+  const ctx=canvas.getContext('2d');
+  ctx.scale(dpr,dpr);
+  return {canvas,ctx,W,H,dpr};
+}
+
+// =====================================================================
+// BETSI HISTOGRAM — distribution of valid BET areas
+// =====================================================================
+function drawBetsiHist(){
+  if(!betsiResult||!betsiResult.valid) return;
+  const s=sizeCanvas('chartBetsiHist'); if(!s) return;
+  const {canvas,ctx,W,H}=s;
+  const r=betsiResult;
+  const M={top:20,right:18,bottom:46,left:56};
+  const pL=M.left,pR=W-M.right,pT=M.top,pB=H-M.bottom;
+
+  ctx.fillStyle='#fff'; ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle='#555'; ctx.lineWidth=1.2; ctx.strokeRect(pL,pT,pR-pL,pB-pT);
+
+  const areas=r.validFits.map(f=>f.sbet);
+  const amin=Math.min(...areas),amax=Math.max(...areas);
+  const nbins=Math.max(5,Math.min(30,Math.round(Math.sqrt(areas.length))));
+  const bw=(amax-amin)/nbins||1;
+  const bins=new Array(nbins).fill(0);
+  areas.forEach(a=>{const b=Math.min(nbins-1,Math.floor((a-amin)/bw));bins[b]++;});
+  const bmax=Math.max(...bins);
+  const bx=i=>pL+(i/nbins)*(pR-pL);
+  const by=v=>pB-(v/bmax)*(pB-pT);
+
+  bins.forEach((cnt,i)=>{
+    const x1=bx(i)+1,x2=bx(i+1)-1;
+    const barC=amin+bw*(i+0.5);
+    const isKnee=r.kneeGroup.some(f=>Math.abs(f.sbet-barC)<bw);
+    const isOpt=Math.abs(r.optimal.sbet-barC)<bw;
+    ctx.fillStyle=isOpt?'rgba(220,160,0,0.85)':isKnee?'rgba(30,100,190,0.55)':'rgba(150,150,200,0.45)';
+    ctx.fillRect(x1,by(cnt),x2-x1,pB-by(cnt));
+    ctx.strokeStyle='rgba(80,80,140,0.4)';ctx.lineWidth=0.5;
+    ctx.strokeRect(x1,by(cnt),x2-x1,pB-by(cnt));
+  });
+
+  const ox=pL+((r.optimal.sbet-amin)/(amax-amin||1))*(pR-pL);
+  ctx.strokeStyle='rgba(180,74,46,0.85)';ctx.lineWidth=1.5;ctx.setLineDash([3,2]);
+  ctx.beginPath();ctx.moveTo(ox,pT);ctx.lineTo(ox,pB);ctx.stroke();ctx.setLineDash([]);
+
+  ctx.fillStyle='#333';ctx.font='11px Arial';ctx.textAlign='center';
+  ctx.fillText('BET Area (m\u00b2 g\u207b\u00b9)',(pL+pR)/2,H-8);
+  [amin,(amin+amax)/2,amax].forEach(v=>{
+    const x=pL+(v-amin)/(amax-amin||1)*(pR-pL);
+    ctx.fillStyle='#555';ctx.textAlign='center';ctx.font='10px Arial';
+    ctx.fillText(v>=1000?(v/1000).toFixed(1)+'k':v.toFixed(0),x,pB+16);
+  });
+  ctx.save();ctx.translate(14,(pT+pB)/2);ctx.rotate(-Math.PI/2);
+  ctx.fillStyle='#333';ctx.textAlign='center';ctx.font='11px Arial';ctx.fillText('Count',0,0);ctx.restore();
+  [0,Math.round(bmax/2),bmax].forEach(v=>{
+    const y=by(v);ctx.fillStyle='#555';ctx.textAlign='right';ctx.font='10px Arial';ctx.fillText(v,pL-4,y+3);
+  });
+}
+
+// =====================================================================
+// BETSI SCATTER — BET area vs criterion-4 % error
+// =====================================================================
+function drawBetsiScatter(){
+  if(!betsiResult||!betsiResult.valid) return;
+  const s=sizeCanvas('chartBetsi'); if(!s) return;
+  const {canvas,ctx,W,H}=s;
+  const r=betsiResult;
+  const M={top:20,right:22,bottom:46,left:72};
+  const pL=M.left,pR=W-M.right,pT=M.top,pB=H-M.bottom;
+
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle='#555';ctx.lineWidth=1.2;ctx.strokeRect(pL,pT,pR-pL,pB-pT);
+
+  const xs=r.validFits.map(f=>f.sbet);
+  const ys=r.validFits.map(f=>f.pctErr);
+  const xlo=Math.min(...xs),xhi=Math.max(...xs);
+  const ylo=0,yhi=Math.max(...ys)*1.15||1;
+  const px=v=>pL+(v-xlo)/((xhi-xlo)||1)*(pR-pL);
+  const py=v=>pB-(v-ylo)/((yhi-ylo)||1)*(pB-pT);
+
+  // Grid lines
+  [0,0.25,0.5,0.75,1].forEach(t=>{
+    const x=px(xlo+t*(xhi-xlo));
+    ctx.strokeStyle='#ebebeb';ctx.lineWidth=0.7;
+    ctx.beginPath();ctx.moveTo(x,pT);ctx.lineTo(x,pB);ctx.stroke();
+  });
+  niceTickVals(ylo,yhi,5).ticks.forEach(v=>{
+    const y=py(v);
+    ctx.strokeStyle='#ebebeb';ctx.lineWidth=0.7;
+    ctx.beginPath();ctx.moveTo(pL,y);ctx.lineTo(pR,y);ctx.stroke();
+  });
+
+  // Points
+  r.validFits.forEach(f=>{
+    ctx.beginPath();ctx.arc(px(f.sbet),py(f.pctErr),3.5,0,2*Math.PI);
+    ctx.fillStyle='rgba(150,150,200,0.55)';ctx.fill();
+  });
+  r.kneeGroup.forEach(f=>{
+    ctx.beginPath();ctx.arc(px(f.sbet),py(f.pctErr),4.5,0,2*Math.PI);
+    ctx.fillStyle='rgba(30,100,190,0.75)';ctx.fill();
+  });
+  drawStar(ctx,px(r.optimal.sbet),py(r.optimal.pctErr),9,'rgba(220,160,0,0.95)','#996600');
+
+  // Axis labels + ticks
+  ctx.fillStyle='#333';ctx.font='11px Arial';ctx.textAlign='center';
+  ctx.fillText('BET Area (m\u00b2 g\u207b\u00b9)',(pL+pR)/2,H-8);
+  ctx.save();ctx.translate(14,(pT+pB)/2);ctx.rotate(-Math.PI/2);
+  ctx.fillText('C4 Error (%)',0,0);ctx.restore();
+  [0,0.25,0.5,0.75,1].forEach(t=>{
+    const v=xlo+t*(xhi-xlo),x=px(v);
+    ctx.fillStyle='#555';ctx.textAlign='center';ctx.font='10px Arial';
+    ctx.fillText(v>=1000?(v/1000).toFixed(1)+'k':v.toFixed(0),x,pB+16);
+  });
+  niceTickVals(ylo,yhi,5).ticks.forEach(v=>{
+    const y=py(v);ctx.fillStyle='#555';ctx.textAlign='right';ctx.font='10px Arial';
+    ctx.fillText(v.toFixed(1),pL-4,y+3);
+  });
+
+  // Legend
+  const ly=pT+12;
+  [{col:'rgba(150,150,200,0.7)',label:'All valid',r:3.5,star:false},
+   {col:'rgba(30,100,190,0.85)',label:'Knee',r:4.5,star:false},
+   {col:'rgba(220,160,0,0.95)',label:'Optimal',r:8,star:true}
+  ].forEach((e,i)=>{
+    const ex=pR-8,ey=ly+i*18;
+    if(e.star) drawStar(ctx,ex,ey,e.r,e.col,'#996600');
+    else{ctx.beginPath();ctx.arc(ex,ey,e.r,0,2*Math.PI);ctx.fillStyle=e.col;ctx.fill();}
+    ctx.fillStyle='#333';ctx.font='10px Arial';ctx.textAlign='right';
+    ctx.fillText(e.label,ex-e.r-5,ey+3);
+  });
+}
+
+// =====================================================================
+// BETSI MONOLAYER LOADING — nm positions on isotherm
+// =====================================================================
+function drawBetsiMono(){
+  if(!betsiResult||!betsiResult.valid||!rawData.length) return;
+  const s=sizeCanvas('chartBetsiMono'); if(!s) return;
+  const {canvas,ctx,W,H}=s;
+  const r=betsiResult;
+  const M={top:20,right:20,bottom:46,left:72};
+  const pL=M.left,pR=W-M.right,pT=M.top,pB=H-M.bottom;
+
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle='#555';ctx.lineWidth=1.2;ctx.strokeRect(pL,pT,pR-pL,pB-pT);
+
+  const allX=rawData.map(d=>d.pp0);
+  const allY=rawData.map(d=>d.uptake_mol_g*1000);
+  const xhi=Math.max(...allX)*1.02,yhi=Math.max(...allY)*1.08;
+  const px=v=>pL+v/xhi*(pR-pL);
+  const py=v=>pB-v/yhi*(pB-pT);
+
+  // Grid
+  niceTickVals(0,xhi,5).ticks.forEach(v=>{
+    const x=px(v);ctx.strokeStyle='#ebebeb';ctx.lineWidth=0.7;
+    ctx.beginPath();ctx.moveTo(x,pT);ctx.lineTo(x,pB);ctx.stroke();
+  });
+  niceTickVals(0,yhi,5).ticks.forEach(v=>{
+    const y=py(v);ctx.strokeStyle='#ebebeb';ctx.lineWidth=0.7;
+    ctx.beginPath();ctx.moveTo(pL,y);ctx.lineTo(pR,y);ctx.stroke();
+  });
+
+  // Isotherm line
+  ctx.strokeStyle='rgba(130,130,130,0.5)';ctx.lineWidth=1;
+  ctx.beginPath();
+  rawData.forEach((d,i)=>{i===0?ctx.moveTo(px(d.pp0),py(d.uptake_mol_g*1000)):ctx.lineTo(px(d.pp0),py(d.uptake_mol_g*1000));});
+  ctx.stroke();
+
+  // All valid nm — grey
+  r.validFits.forEach(f=>{
+    const y=py(f.fit.nm*1000);if(y<pT||y>pB)return;
+    ctx.strokeStyle='rgba(150,150,200,0.25)';ctx.lineWidth=0.7;
+    ctx.beginPath();ctx.moveTo(pL,y);ctx.lineTo(pR,y);ctx.stroke();
+  });
+  // Knee nm — blue
+  r.kneeGroup.forEach(f=>{
+    const y=py(f.fit.nm*1000);if(y<pT||y>pB)return;
+    ctx.strokeStyle='rgba(30,100,190,0.45)';ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(pL,y);ctx.lineTo(pR,y);ctx.stroke();
+  });
+  // Optimal nm — gold + p* marker
+  const opt=r.optimal;
+  const opt_y=py(opt.fit.nm*1000);
+  ctx.strokeStyle='rgba(200,140,0,0.9)';ctx.lineWidth=2;ctx.setLineDash([5,2]);
+  ctx.beginPath();ctx.moveTo(pL,opt_y);ctx.lineTo(pR,opt_y);ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.strokeStyle='rgba(180,74,46,0.8)';ctx.lineWidth=1.5;ctx.setLineDash([3,2]);
+  ctx.beginPath();ctx.moveTo(px(opt.p_star),pT);ctx.lineTo(px(opt.p_star),pB);ctx.stroke();
+  ctx.setLineDash([]);
+  // Intersection dot
+  ctx.beginPath();ctx.arc(px(opt.p_star),opt_y,5,0,2*Math.PI);
+  ctx.fillStyle='rgba(180,74,46,0.9)';ctx.fill();
+
+  // Isotherm points
+  rawData.forEach(d=>{
+    const inRange=betRange&&d.pp0>=rawData[betRange.iMin].pp0&&d.pp0<=rawData[betRange.iMax].pp0;
+    ctx.beginPath();ctx.arc(px(d.pp0),py(d.uptake_mol_g*1000),3,0,2*Math.PI);
+    ctx.fillStyle=inRange?'#cc2222':'#999';ctx.fill();
+  });
+
+  // Axis labels + ticks
+  ctx.fillStyle='#333';ctx.font='11px Arial';ctx.textAlign='center';
+  ctx.fillText('p/p\u2080',(pL+pR)/2,H-8);
+  ctx.save();ctx.translate(14,(pT+pB)/2);ctx.rotate(-Math.PI/2);
+  ctx.fillText('n (mmol g\u207b\u00b9)',0,0);ctx.restore();
+  niceTickVals(0,xhi,5).ticks.forEach(v=>{
+    const x=px(v);ctx.fillStyle='#555';ctx.textAlign='center';ctx.font='10px Arial';
+    ctx.fillText(v.toFixed(2),x,pB+16);
+  });
+  niceTickVals(0,yhi,5).ticks.forEach(v=>{
+    const y=py(v);ctx.fillStyle='#555';ctx.textAlign='right';ctx.font='10px Arial';
+    ctx.fillText(v.toFixed(1),pL-4,y+3);
+  });
+
+  // Label
+  ctx.font='bold 10px Arial';ctx.textAlign='left';ctx.fillStyle='rgba(200,140,0,0.9)';
+  if(opt_y>pT+14) ctx.fillText('n\u2098 opt',pL+4,opt_y-4);
+}
+
+function drawStar(ctx,cx,cy,r,fill,stroke){
+  ctx.beginPath();
+  for(let i=0;i<5;i++){
+    const a=i*4*Math.PI/5-Math.PI/2,b=a+2*Math.PI/5;
+    i===0?ctx.moveTo(cx+r*Math.cos(a),cy+r*Math.sin(a)):ctx.lineTo(cx+r*Math.cos(a),cy+r*Math.sin(a));
+    ctx.lineTo(cx+r*0.42*Math.cos(b),cy+r*0.42*Math.sin(b));
+  }
+  ctx.closePath();
+  ctx.fillStyle=fill;ctx.fill();
+  ctx.strokeStyle=stroke;ctx.lineWidth=0.8;ctx.stroke();
+}
+
+
+
+
+// =====================================================================
 // MAIN ANALYSIS
 // =====================================================================
 function runAnalysis(){
@@ -1167,24 +1650,22 @@ function runAnalysis(){
   // Recompute rawData from the stored file values using current mass/unit/sorptive
   rawData = rawFileData.map(d=>({pp0: d.pp0, uptake_mol_g: toMolG(d.rawUptake, unit, mass)}));
 
-  // Determine range
+  // Run BETSI first — range is driven by BETSI optimal
+  try { runBETSI(); } catch(e){ console.error('BETSI error:',e); betsiResult=null; }
+
+  // Use BETSI optimal range if available, else Rouquerol auto-range as fallback
   let range;
-  if(gb('autoRange')){
-    range=findRouquerolRange(rawData);
+  if(betsiResult && betsiResult.valid){
+    range = {iMin: betsiResult.optimal.j, iMax: betsiResult.optimal.i};
   } else {
-    const mn=gn('manualMin')||0.05, mx=gn('manualMax')||0.35;
-    const iMin=rawData.findIndex(d=>d.pp0>=mn);
-    let iMax=rawData.length-1;
-    for(let i=rawData.length-1;i>=0;i--){if(rawData[i].pp0<=mx){iMax=i;break;}}
-    range={iMin:Math.max(0,iMin), iMax};
+    range = findRouquerolRange(rawData);
   }
   betRange=range;
 
   // BET fit
   const fit=betLinearFit(rawData,range.iMin,range.iMax);
   if(!fit||!isFinite(fit.nm)||fit.nm<=0){
-    st('BET fit failed: negative nm or insufficient points in range.','err');
-    document.getElementById('resContent').innerHTML='<div class="ph">BET fit failed. Adjust the range or check data.</div>';
+    st('BET fit failed — check data or relax BETSI settings.','err');
     return;
   }
 
@@ -1199,8 +1680,7 @@ function runAnalysis(){
 
   betResult={fit,sbet,s,mass,range,pp0_nm,check1_C,check2_nm,allChecks};
 
-  // Render results
-  renderResults();
+  // (Summary results suppressed — BETSI panel is primary output)
   // Update labels
   document.getElementById('rouqRangeLabel').textContent=
     rawData[range.iMin].pp0.toFixed(4)+' – '+rawData[range.iMax].pp0.toFixed(4);
@@ -1213,56 +1693,19 @@ function runAnalysis(){
     '<span class="badge">Good fit</span>':
     '<span class="badge warn">Poor fit — check range</span>';
 
-  // Update manual range inputs
-  document.getElementById('manualMin').value=rawData[range.iMin].pp0.toFixed(5);
-  document.getElementById('manualMax').value=rawData[range.iMax].pp0.toFixed(5);
-
   drawAllCharts();
   document.getElementById('btnExport').disabled=false;
-  // Switch to BET linear plot tab after analysis
   document.querySelectorAll('.tab[data-tab]').forEach(t=>t.classList.remove('active'));
   document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
-  document.querySelector('.tab[data-tab="bet"]').classList.add('active');
-  document.getElementById('tab-bet').classList.add('active');
-  st('Analysis complete — S_BET = '+fmt(sbet,4)+' m²/g · C = '+fmt(fit.C,4),'ok');
+  document.querySelector('.tab[data-tab="betsi"]').classList.add('active');
+  document.getElementById('tab-betsi').classList.add('active');
+  // renderBETSI already populated plots tab; give layout time then draw canvases
+  setTimeout(()=>{ drawBetsiScatter(); drawBetsiHist(); drawBetsiMono(); }, 80);
+  const betsiLabel = betsiResult&&betsiResult.valid ? ' · BETSI optimal = '+fmt(betsiResult.optimal.sbet,5)+' m²/g ('+betsiResult.validFits.length+' valid fits)' : '';
+  st('Analysis complete — S_BET = '+fmt(sbet,4)+' m²/g'+betsiLabel,'ok');
 }
 
-function renderResults(){
-  const r=betResult;
-  const el=document.getElementById('resContent');
-  if(!r){el.innerHTML='<div class="ph">Run analysis first.</div>';return;}
-  const f=r.fit;
-  const Cfmt=isFinite(f.C)?fmt(f.C,5):'--';
-
-  const fitDiv=document.createElement('div');
-  fitDiv.style.cssText='border:1.5px solid var(--rule);font-size:11px;font-family:Georgia,serif;line-height:1.7;margin-bottom:12px';
-
-  const hdr=document.createElement('div');
-  hdr.style.cssText='background:var(--cream);padding:4px 10px;font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)';
-  hdr.textContent='BET Analysis Results \u2014 '+r.s.label;
-  fitDiv.appendChild(hdr);
-
-  function noteRow(html,hi){
-    const row=document.createElement('div');
-    row.style.cssText='padding:3px 10px;border-top:1px solid var(--pale);background:'+(hi?'var(--cream)':'#fff')+';color:#333';
-    row.innerHTML=html;
-    fitDiv.appendChild(row);
-  }
-
-  noteRow('\u2713 <i>S</i><sub>BET</sub> = <b>'+fmt(r.sbet,5)+'</b> m\u00b2/g', false);
-  noteRow('\u2713 Total <i>S</i><sub>BET</sub> = <b>'+fmt(r.sbet*r.mass,5)+'</b> m\u00b2', false);
-  noteRow('\u2713 <i>C</i> constant = <b>'+Cfmt+'</b>', false);
-  noteRow('\u2713 <i>n</i><sub>m</sub> = <b>'+fmt(f.nm*1000,4)+'</b> mmol/g', false);
-  noteRow('\u2713 <i>V</i><sub>m</sub> (STP) = <b>'+(f.nm*VM).toFixed(4)+'</b> cm\u00b3/g', false);
-  noteRow('\u2713 R\u00b2 = <b>'+f.r2.toFixed(6)+'</b>', false);
-  noteRow('\u2713 Range <i>p</i>/p\u2080 = <b>'+rawData[r.range.iMin].pp0.toFixed(4)+'\u2013'+rawData[r.range.iMax].pp0.toFixed(4)+'</b>', false);
-  noteRow('\u2713 Rouquerol criteria: <b>'+(r.allChecks?'all satisfied \u2713':'see plot \u26a0')+'</b>', false);
-  noteRow('\u2713 Sorptive: <b>'+r.s.label+'</b> &nbsp;\u00b7&nbsp; \u03c3 = <b>'+r.s.sigma+'</b> \u00c5\u00b2 &nbsp;\u00b7&nbsp; <i>p</i>\u2080 = <b>'+r.s.p0+'</b> kPa', false);
-  noteRow('\u2713 Sample mass = <b>'+r.mass.toFixed(6)+'</b> g', false);
-
-  el.innerHTML='';
-  el.appendChild(fitDiv);
-}
+function renderResults(){} // Summary tab removed
 
 // =====================================================================
 // CHART DRAWING (pure Canvas 2D — publication-ready)
@@ -1602,24 +2045,24 @@ function drawChart(canvasId, cfg){
 
 function chartCfg(extra){
   return Object.assign({
-    font:gv('fontFam'),
-    axSz:gn('axSz')||32,
-    tkSz:gn('tkSz')||26,
-    frameW:gn('frameW')||2.5,
-    tickLen:gn('tickLen')||7,
-    tickDir:gv('tickDir'),
-    ptSz:gn('ptSz')||8,
-    ptSty:gv('ptSty'),
-    ptCol:gv('ptCol')||'#cc2222',
-    ptColOut:gv('ptColOut')||'#999999',
-    lnCol:gv('lnCol')||'#cc2222',
-    lnW:gn('lnW')||2.5,
-    lnDash:gv('lnDash'),
-    showGrid:gb('grid'),
-    gridCol:gv('gridCol'),
-    majTick:gb('majTick'),
-    minTick:gb('minTick'),
-    boxBdr:gb('boxBdr')
+    font:'Arial,sans-serif',
+    axSz:32,
+    tkSz:26,
+    frameW:2.5,
+    tickLen:7,
+    tickDir:'out',
+    ptSz:8,
+    ptSty:'circle',
+    ptCol:'#cc2222'||'#cc2222',
+    ptColOut:'#999999'||'#999999',
+    lnCol:'#cc2222'||'#cc2222',
+    lnW:2.5,
+    lnDash:'',
+    showGrid:false,
+    gridCol:'#dddddd',
+    majTick:true,
+    minTick:false,
+    boxBdr:true
   }, extra);
 }
 
@@ -1631,9 +2074,8 @@ function drawRouquerolChart(expW,expH){
   const inY=rq.slice(r.iMin,r.iMax+1).map(d=>d.rouq*1000);
   const outX=[...rq.slice(0,r.iMin).map(d=>d.pp0), ...rq.slice(r.iMax+1).map(d=>d.pp0)];
   const outY=[...rq.slice(0,r.iMin).map(d=>d.rouq*1000), ...rq.slice(r.iMax+1).map(d=>d.rouq*1000)];
-  const full = (axisMode === 'full');
-  const scaleX = full ? [...inX, ...outX] : inX;
-  const scaleY = full ? [...inY, ...outY] : inY;
+  const scaleX = [...inX, ...outX];
+  const scaleY = [...inY, ...outY];
   drawChart('chartRouq', chartCfg({
     dataX: inX, dataY: inY,          // in-range: drawn in ptCol
     dataX2: outX, dataY2: outY,      // out-of-range: drawn in ptColOut
@@ -1644,7 +2086,7 @@ function drawRouquerolChart(expW,expH){
     title:'Rouquerol Plot',
     expW,expH
   }));
-  if(!expW) drawHandles('chartRouq');
+  drawRouquerolAnnotation(expW,expH);
 }
 
 function drawBETChart(expW,expH){
@@ -1659,9 +2101,8 @@ function drawBETChart(expW,expH){
   const x1=Math.min(...inX)*0.98, x2=Math.max(...inX)*1.02;
   const lineX=[x1,x2];
   const lineY=[f.slope*x1+f.intercept, f.slope*x2+f.intercept];
-  const full = (axisMode === 'full');
-  const scaleX = full ? [...inX, ...outX] : inX;
-  const scaleY = full ? [...inY, ...outY.filter(isFinite)] : inY;
+  const scaleX = [...inX, ...outX];
+  const scaleY = [...inY, ...outY.filter(isFinite)];
   drawChart('chartBet', chartCfg({
     dataX: inX, dataY: inY,          // in-range: drawn in ptCol
     dataX2: outX, dataY2: outY,      // out-of-range: drawn in ptColOut
@@ -1674,7 +2115,6 @@ function drawBETChart(expW,expH){
     expW,expH
   }));
   drawBETAnnotation(expW,expH);
-  if(!expW) drawHandles('chartBet');
 }
 
 // =====================================================================
@@ -1767,14 +2207,36 @@ function drawLegendBox(canvas, lines, posCode, sz, font, dpr){
   ctx.restore();
 }
 
+
+function drawRouquerolAnnotation(expW, expH){
+  if(!betResult) return;
+  const canvas = document.getElementById('chartRouq');
+  if(!canvas) return;
+  const f = betResult.fit, s = betResult.s;
+  const font = "'Palatino Linotype',Palatino,Georgia,serif";
+  const sz   = (18) * (expW ? 1 : window.devicePixelRatio||1);
+  const pos  = 'br';
+  const dpr  = expW ? 1 : window.devicePixelRatio||1;
+  const pp0min = rawData[betResult.range.iMin].pp0.toFixed(4);
+  const pp0max = rawData[betResult.range.iMax].pp0.toFixed(4);
+  const lines = [
+    [{text:'S', italic:true},{text:'BET'},{text:' = '+fmt(betResult.sbet,5)+' m² g⁻¹'}],
+    [{text:'C', italic:true},{text:' = '+fmt(f.C,5)}],
+    [{text:'R', italic:true},{text:'²',sup:true},{text:' = '+f.r2.toFixed(5)}],
+    [{text:'Range: '+pp0min+'–'+pp0max}],
+    [{text:'Sorptive: '+s.label}],
+  ];
+  drawLegendBox(canvas, lines, pos, sz, font, dpr);
+}
+
 function drawBETAnnotation(expW, expH){
-  if(!betResult||!gb('annBetShow')) return;
+  if(!betResult) return;
   const canvas = document.getElementById('chartBet');
   if(!canvas) return;
   const f = betResult.fit, s = betResult.s;
-  const font = gv('annFont') || "'Palatino Linotype',Palatino,Georgia,serif";
-  const sz   = (gn('annSz')||18) * (expW ? 1 : window.devicePixelRatio||1);
-  const pos  = gv('annBetPos')||'tl';
+  const font = "'Palatino Linotype',Palatino,Georgia,serif";
+  const sz   = (18) * (expW ? 1 : window.devicePixelRatio||1);
+  const pos  = 'tl';
   const dpr  = expW ? 1 : window.devicePixelRatio||1;
 
   const lines = [
@@ -1788,13 +2250,13 @@ function drawBETAnnotation(expW, expH){
 }
 
 function drawIsoAnnotation(expW, expH){
-  if(!betResult||!gb('annIsoShow')) return;
+  if(!betResult) return;
   const canvas = document.getElementById('chartIso');
   if(!canvas) return;
   const f = betResult.fit, s = betResult.s;
-  const font = gv('annFont') || "'Palatino Linotype',Palatino,Georgia,serif";
-  const sz   = (gn('annSz')||18) * (expW ? 1 : window.devicePixelRatio||1);
-  const pos  = gv('annIsoPos')||'br';
+  const font = "'Palatino Linotype',Palatino,Georgia,serif";
+  const sz   = (18) * (expW ? 1 : window.devicePixelRatio||1);
+  const pos  = 'br';
   const dpr  = expW ? 1 : window.devicePixelRatio||1;
 
   const lines = [
@@ -1820,30 +2282,12 @@ function drawIsoChart(expW,expH){
     lineX=[rawData[r.iMin].pp0, rawData[r.iMax].pp0];
     lineY=[betResult.fit.nm*1000, betResult.fit.nm*1000];
   }
-  const full = (axisMode === 'full');
-  let forceYLo, forceYHi;
-  // Zoom mode: restrict both axes to the BET range window
-  if(!full && betResult){
-    const xPad=(rawData[r.iMax].pp0-rawData[r.iMin].pp0)*0.15;
-    const zoomXLo=Math.max(0, rawData[r.iMin].pp0-xPad);
-    const zoomXHi=Math.min(1, rawData[r.iMax].pp0+xPad);
-    const inRangeY=rawData.filter(d=>d.pp0>=zoomXLo&&d.pp0<=zoomXHi).map(d=>d.uptake_mol_g*1000);
-    if(inRangeY.length){
-      const yMax=Math.max(...inRangeY);
-      forceYLo=0;
-      forceYHi=yMax + yMax*0.08;
-    }
-  }
-  const scaleX = full ? allX : rawData.filter(d=>{
-    const xPad=(rawData[r.iMax].pp0-rawData[r.iMin].pp0)*0.15;
-    return d.pp0>=(rawData[r.iMin].pp0-xPad) && d.pp0<=(rawData[r.iMax].pp0+xPad);
-  }).map(d=>d.pp0);
-  const scaleY = full ? allY : inY;
+  const scaleX = allX;
+  const scaleY = allY;
   drawChart('chartIso', chartCfg({
     dataX: inX, dataY: inY,
     dataX2: outX, dataY2: outY,
-    scaleX: scaleX.length ? scaleX : allX, scaleY,
-    forceYLo, forceYHi,
+    scaleX: allX, scaleY,
     lineX, lineY,
     shadeX: betResult ? [rawData[r.iMin].pp0, rawData[r.iMax].pp0] : null,
     xVar:'p/p\u2080', xUnit:'',
@@ -1852,7 +2296,6 @@ function drawIsoChart(expW,expH){
     expW,expH
   }));
   drawIsoAnnotation(expW, expH);
-  if(!expW) drawHandles('chartIso');
 }
 
 function drawAllCharts(){
@@ -1865,15 +2308,6 @@ function redrawAll(){
   if(rawData.length) drawAllCharts();
 }
 
-// =====================================================================
-// AXIS MODE TOGGLE
-// =====================================================================
-function setAxisMode(mode){
-  axisMode = mode;
-  document.getElementById('axisBtnFull').classList.toggle('active', mode==='full');
-  document.getElementById('axisBtnZoom').classList.toggle('active', mode==='zoom');
-  if(rawData.length) drawAllCharts();
-}
 
 // =====================================================================
 // TAB SWITCHING
@@ -1887,6 +2321,9 @@ document.querySelectorAll('.tab[data-tab]').forEach(btn=>{
     // Redraw active chart after layout
     setTimeout(()=>{
       if(rawData.length) drawAllCharts();
+      if(btn.dataset.tab==='plots' && betsiResult && betsiResult.valid){
+        requestAnimationFrame(()=>{ drawBetsiScatter(); drawBetsiHist(); drawBetsiMono(); });
+      }
     },50);
   });
 });
@@ -1894,215 +2331,9 @@ document.querySelectorAll('.tab[data-tab]').forEach(btn=>{
 // =====================================================================
 // DRAG HANDLES — shared across all three plots
 // =====================================================================
-const drag = { active: false, handle: null, canvasId: null };
-const HANDLE_HIT_PX = 14;
 
-// Build the x-axis scale for any of the three charts, matching their draw functions exactly
-function getChartScaleX(canvasId){
-  const canvas = document.getElementById(canvasId);
-  if(!canvas) return null;
-  const M = getMargins();
-  const W = canvas.offsetWidth;
-  const pL = M.left, pR = W - M.right;
-  const r = betRange;
-  const full = (axisMode === 'full');
 
-  if(canvasId === 'chartRouq'){
-    const rq = rouquerolTransform(rawData);
-    const inX = rq.slice(r.iMin,r.iMax+1).map(d=>d.pp0);
-    const outX = [...rq.slice(0,r.iMin).map(d=>d.pp0), ...rq.slice(r.iMax+1).map(d=>d.pp0)];
-    return makeScale(full ? [...inX,...outX] : inX, pL, pR);
-  }
-  if(canvasId === 'chartBet'){
-    const inX = rawData.slice(r.iMin,r.iMax+1).map(d=>d.pp0);
-    const outX = [...rawData.slice(0,r.iMin),...rawData.slice(r.iMax+1)].map(d=>d.pp0);
-    return makeScale(full ? [...inX,...outX] : inX, pL, pR);
-  }
-  if(canvasId === 'chartIso'){
-    const allX = rawData.map(d=>d.pp0);
-    if(!full){
-      const xPad = (rawData[r.iMax].pp0 - rawData[r.iMin].pp0) * 0.15;
-      const zLo = Math.max(0, rawData[r.iMin].pp0 - xPad);
-      const zHi = Math.min(1, rawData[r.iMax].pp0 + xPad);
-      const zX = rawData.filter(d=>d.pp0>=zLo && d.pp0<=zHi).map(d=>d.pp0);
-      return makeScale(zX.length ? zX : allX, pL, pR);
-    }
-    return makeScale(allX, pL, pR);
-  }
-  return null;
-}
 
-// Draw handles on a canvas — called after each chart draw
-function drawHandles(canvasId){
-  if(!rawData.length || gb('autoRange')) return;
-  const canvas = document.getElementById(canvasId);
-  if(!canvas) return;
-  const ctx = canvas.getContext('2d');
-  const dpr = window.devicePixelRatio || 1;
-  const W = canvas.offsetWidth, H = canvas.offsetHeight;
-  const M = getMargins();
-  const pL=M.left, pR=W-M.right, pT=M.top, pB=H-M.bottom;
-
-  const scX = getChartScaleX(canvasId);
-  if(!scX) return;
-  const r = betRange;
-  const xMin = scX.toPixel(rawData[r.iMin].pp0);
-  const xMax = scX.toPixel(rawData[r.iMax].pp0);
-
-  // Skip handles that fall outside the plot area (e.g. zoom mode on iso)
-  const midY = (pT + pB) / 2;
-  const tabH = 28, tabW = 10, rc = 3;
-
-  ctx.save();
-  ctx.scale(dpr, dpr);
-
-  function drawOneHandle(x, side){
-    const isDragging = drag.active && drag.handle===side && drag.canvasId===canvasId;
-    const col = isDragging ? 'rgba(180,30,30,0.9)' : 'rgba(180,30,30,0.6)';
-    const fill = isDragging ? 'rgba(180,30,30,0.20)' : 'rgba(180,30,30,0.10)';
-
-    // Only draw if handle is within plot area
-    if(x < pL || x > pR) return;
-
-    // Clipped dashed vertical line
-    ctx.save();
-    ctx.beginPath(); ctx.rect(pL,pT,pR-pL,pB-pT); ctx.clip();
-    ctx.strokeStyle=col; ctx.lineWidth=1.5; ctx.setLineDash([4,3]);
-    ctx.beginPath(); ctx.moveTo(x,pT); ctx.lineTo(x,pB); ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.restore();
-
-    // Rounded grip tab — left of line for min, right of line for max
-    const tx = side==='min' ? x-tabW : x;
-    const ty = midY - tabH/2;
-    ctx.beginPath();
-    ctx.moveTo(tx+rc,ty);
-    ctx.lineTo(tx+tabW-rc,ty); ctx.arcTo(tx+tabW,ty,tx+tabW,ty+rc,rc);
-    ctx.lineTo(tx+tabW,ty+tabH-rc); ctx.arcTo(tx+tabW,ty+tabH,tx+tabW-rc,ty+tabH,rc);
-    ctx.lineTo(tx+rc,ty+tabH); ctx.arcTo(tx,ty+tabH,tx,ty+tabH-rc,rc);
-    ctx.lineTo(tx,ty+rc); ctx.arcTo(tx,ty,tx+rc,ty,rc);
-    ctx.closePath();
-    ctx.fillStyle=fill; ctx.fill();
-    ctx.strokeStyle=col; ctx.lineWidth=1.5; ctx.stroke();
-
-    // Three horizontal grip lines
-    ctx.strokeStyle=col; ctx.lineWidth=1.2;
-    const cx = tx + tabW/2;
-    [-4,0,4].forEach(dy=>{
-      ctx.beginPath(); ctx.moveTo(cx-3,midY+dy); ctx.lineTo(cx+3,midY+dy); ctx.stroke();
-    });
-  }
-
-  drawOneHandle(xMin, 'min');
-  drawOneHandle(xMax, 'max');
-  ctx.restore();
-}
-
-// Attach mouse events to a canvas element
-function attachHandleEvents(canvasId){
-  const canvas = document.getElementById(canvasId);
-  if(!canvas) return;
-
-  function clientXToPP0(clientX){
-    const rect = canvas.getBoundingClientRect();
-    const M = getMargins();
-    const pL = M.left, pR = canvas.offsetWidth - M.right;
-    const frac = (clientX - rect.left - pL) / (pR - pL);
-    const scX = getChartScaleX(canvasId);
-    if(!scX) return null;
-    return Math.max(scX.lo, Math.min(scX.hi, scX.lo + frac*(scX.hi-scX.lo)));
-  }
-
-  function hitTest(clientX){
-    if(!rawData.length || gb('autoRange')) return null;
-    const rect = canvas.getBoundingClientRect();
-    const px = clientX - rect.left;
-    const scX = getChartScaleX(canvasId);
-    if(!scX) return null;
-    const r = betRange;
-    const xMin = scX.toPixel(rawData[r.iMin].pp0);
-    const xMax = scX.toPixel(rawData[r.iMax].pp0);
-    if(Math.abs(px-xMin) <= HANDLE_HIT_PX) return 'min';
-    if(Math.abs(px-xMax) <= HANDLE_HIT_PX) return 'max';
-    return null;
-  }
-
-  canvas.addEventListener('mousemove', e=>{
-    if(!rawData.length || gb('autoRange')){ canvas.style.cursor=''; return; }
-    if(drag.active && drag.canvasId===canvasId){
-      const pp0 = clientXToPP0(e.clientX);
-      if(pp0===null) return;
-      const r = betRange;
-      const curMin = rawData[r.iMin].pp0, curMax = rawData[r.iMax].pp0;
-      if(drag.handle==='min'){
-        document.getElementById('manualMin').value = Math.min(pp0, curMax-0.005).toFixed(5);
-      } else {
-        document.getElementById('manualMax').value = Math.max(pp0, curMin+0.005).toFixed(5);
-      }
-      onManualRange();
-    } else if(!drag.active) {
-      const M = getMargins();
-      const rect = canvas.getBoundingClientRect();
-      const py = e.clientY - rect.top;
-      const H = canvas.offsetHeight;
-      if(py < M.top || py > H-M.bottom){ canvas.style.cursor=''; return; }
-      canvas.style.cursor = hitTest(e.clientX) ? 'ew-resize' : 'default';
-    }
-  });
-
-  canvas.addEventListener('mousedown', e=>{
-    if(!rawData.length) return;
-    const handle = hitTest(e.clientX);
-    if(handle){
-      e.preventDefault();
-      document.getElementById('autoRange').checked = false;
-      onAutoRangeChange();
-      drag.active = true; drag.handle = handle; drag.canvasId = canvasId;
-      canvas.style.cursor = 'ew-resize';
-    }
-  });
-
-  canvas.addEventListener('mouseleave', ()=>{
-    if(!drag.active) canvas.style.cursor = '';
-  });
-}
-
-window.addEventListener('mouseup', ()=>{
-  if(drag.active){
-    drag.active = false; drag.handle = null; drag.canvasId = null;
-    // Snap to nearest data point
-    if(rawData.length){
-      const r = betRange;
-      document.getElementById('manualMin').value = rawData[r.iMin].pp0.toFixed(5);
-      document.getElementById('manualMax').value = rawData[r.iMax].pp0.toFixed(5);
-    }
-    ['chartRouq','chartBet','chartIso'].forEach(id=>{
-      const c = document.getElementById(id); if(c) c.style.cursor='default';
-    });
-  }
-});
-
-// Attach to all three canvases
-attachHandleEvents('chartRouq');
-attachHandleEvents('chartBet');
-attachHandleEvents('chartIso');
-
-// =====================================================================
-// MANUAL RANGE
-// =====================================================================
-function onAutoRangeChange(){
-  const auto=gb('autoRange');
-  const wrap=document.getElementById('manualRangeWrap');
-  if(wrap) wrap.style.display=auto?'none':'block';
-  if(rawData.length){
-    if(auto) runAnalysis(); // re-run with Rouquerol auto-selection
-    else drawAllCharts();   // just redraw to show/hide handles without changing the range
-  }
-}
-
-function onManualRange(){
-  if(rawData.length) runAnalysis();
-}
 
 // =====================================================================
 // FILE DRAG & DROP
@@ -2125,8 +2356,6 @@ dz.addEventListener('drop',e=>{
 // =====================================================================
 // BUTTONS
 // =====================================================================
-document.getElementById('btnAnalyse').addEventListener('click', runAnalysis);
-
 document.getElementById('btnExport').addEventListener('click',()=>{
   if(!betResult) return;
   const r=betResult, f=r.fit, s=r.s;
@@ -2214,16 +2443,15 @@ function savePlot(which){
   }
 }
 
-// =====================================================================
-// RESIZE OBSERVER
-// =====================================================================
-const resizeObs=new ResizeObserver(()=>{
-  if(rawData.length) drawAllCharts();
+// ResizeObserver — redraw all charts when any panel resizes
+const resizeObs=new ResizeObserver(()=>{ if(rawData.length) drawAllCharts(); });
+['cwRouq','cwBet','cwIso'].forEach(id=>{ const el=document.getElementById(id); if(el) resizeObs.observe(el); });
+// ResizeObserver for BETSI panel (canvases injected dynamically)
+const betsiResizeObs=new ResizeObserver(()=>{
+  if(betsiResult&&betsiResult.valid){ drawBetsiScatter(); drawBetsiHist(); drawBetsiMono(); }
 });
-['cwRouq','cwBet','cwIso'].forEach(id=>{
-  const el=document.getElementById(id);
-  if(el) resizeObs.observe(el);
-});
+const betsiEl=document.getElementById('betsiPlotsContent');
+if(betsiEl) betsiResizeObs.observe(betsiEl);
 
 // Initial hint
 onSorptiveChange();
