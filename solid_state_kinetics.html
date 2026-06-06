@@ -423,6 +423,7 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
         <select id="expFmt"><option>PNG</option><option>JPEG</option></select>
       </div>
       <button class="btn out" style="margin-top:8px;width:100%" onclick="savePlot()">Save Plot Image</button>
+      <button class="btn out" style="margin-top:5px;width:100%" onclick="copyPlot()">Copy Plot to Clipboard</button>
     </div>
   </div>
 
@@ -1899,6 +1900,121 @@ async function savePlot(){
   const ext=fmt2==='jpeg'?'jpg':'png';
   await saveWithDialog(imgBlob,`kinetics_fit.${ext}`,'Plot Image',{[mimeType]:['.'+ext]});
   st('Plot saved.','ok');
+}
+
+async function copyPlot(){
+  if(!fitPts.length||!fitReg){st('No fit to copy.','err');return}
+  const W=parseInt(gv('expW'))||1200, H=parseInt(gv('expH'))||900;
+
+  const oc=document.createElement('canvas');
+  oc.width=W; oc.height=H;
+  const ctx=oc.getContext('2d');
+
+  ctx.fillStyle=gv('chartBg')||'#ffffff';
+  ctx.fillRect(0,0,W,H);
+
+  const dpr=1;
+  const pad={top:PAD.top, right:PAD.right, bottom:PAD.bottom, left:PAD.left};
+  const scale=Math.min(W/800, H/600);
+  const l=Math.round(pad.left*scale*2.5);
+  const r2=W-Math.round(pad.right*scale*2.5);
+  const t2=Math.round(pad.top*scale*2.5);
+  const b2=H-Math.round(pad.bottom*scale*2.5);
+  const pw=r2-l, ph=b2-t2;
+
+  const dims={w:W,h:H,dpr:1,l,r:r2,t:t2,b:b2,pw,ph};
+  const{xr,yr}=getRanges('fit');
+
+  ctx.fillStyle=gv('plotBg')||'#ffffff';
+  ctx.fillRect(l,t2,pw,ph);
+
+  ctx.save(); ctx.beginPath(); ctx.rect(l,t2,pw,ph); ctx.clip();
+
+  const gridOn=gb('grid'), gridC=gv('gridCol')||'#dddddd';
+  const gridW=parseFloat(gv('gridW'))||1;
+  if(gridOn){
+    ctx.strokeStyle=gridC; ctx.lineWidth=gridW; ctx.setLineDash([3,5]);
+    xr.ticks.forEach(v=>{const cx=l+(v-xr.min)/(xr.max-xr.min)*pw;ctx.beginPath();ctx.moveTo(cx,t2);ctx.lineTo(cx,b2);ctx.stroke()});
+    yr.ticks.forEach(v=>{const cy=b2-(v-yr.min)/(yr.max-yr.min)*ph;ctx.beginPath();ctx.moveTo(l,cy);ctx.lineTo(r2,cy);ctx.stroke()});
+    ctx.setLineDash([]);
+  }
+
+  const lnC=gv('lnCol')||'#b84a2e', lnW2=parseFloat(gv('lnW'))||3;
+  const dashStr=gv('lnDash');
+  ctx.save();
+  ctx.strokeStyle=lnC; ctx.lineWidth=lnW2*scale;
+  if(dashStr) ctx.setLineDash(dashStr.split(',').map(v=>parseFloat(v)*scale));
+  const{cx:lx,cy:ly}=toC(xr.min,fitReg.k*xr.min+fitReg.b,dims,xr,yr);
+  const{cx:rx3,cy:ry3}=toC(xr.max,fitReg.k*xr.max+fitReg.b,dims,xr,yr);
+  ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(rx3,ry3); ctx.stroke();
+  ctx.restore();
+
+  const ptC=gv('ptCol')||'#000000', ptS2=(parseFloat(gv('ptSz'))||5)*scale;
+  const ptA=parseFloat(gv('ptOp'))||1, ptBW2=(parseFloat(gv('ptBW'))||1.5)*scale;
+  ctx.fillStyle=ha(ptC,ptA); ctx.strokeStyle=ha(ptC,Math.min(ptA+0.2,1)); ctx.lineWidth=ptBW2;
+  fitPts.forEach(p=>{
+    const{cx,cy}=toC(p.t,p.y,dims,xr,yr);
+    if(cx<l-ptS2||cx>r2+ptS2||cy<t2-ptS2||cy>b2+ptS2) return;
+    ctx.beginPath(); ctx.arc(cx,cy,ptS2,0,Math.PI*2);
+    ctx.fill(); if(ptBW2>0) ctx.stroke();
+  });
+
+  ctx.restore();
+
+  if(gb('legShow')) drawLegend(ctx, dims, xr, yr);
+
+  const axC=gv('axCol')||'#000000', font=gv('fontFam')||'Arial,sans-serif';
+  const axSz=(parseFloat(gv('axSz'))||36)*scale;
+  const tkSz=(parseFloat(gv('tkSz'))||30)*scale;
+  const frameW2=(parseFloat(gv('frameW'))||3)*scale;
+  const TL=(parseFloat(gv('tickLen'))||8)*scale;
+  const tickDir=gv('tickDir')||'out';
+  const majTickW2=(parseFloat(gv('majTickW'))||3)*scale;
+  const boxBdr=gb('boxBdr'), boxW2=(parseFloat(gv('boxW'))||3)*scale, boxC=gv('boxCol')||'#000000';
+  const xLblTxt=gv('xLbl')||'Time (t − t₀)', yLblTxt=gv('yLbl')||'f(α)';
+  const ttl=gv('ttl'), ttlSz=(parseFloat(gv('ttlSz'))||30)*scale;
+
+  const xDp=tickDecimals(xr.ticks), yDp=tickDecimals(yr.ticks);
+
+  ctx.strokeStyle=axC; ctx.lineWidth=frameW2;
+  ctx.strokeRect(l,t2,pw,ph);
+  if(boxBdr){ ctx.strokeStyle=boxC; ctx.lineWidth=boxW2; ctx.strokeRect(l,t2,pw,ph); }
+
+  ctx.strokeStyle=axC; ctx.lineWidth=majTickW2;
+  ctx.fillStyle=axC; ctx.font=`${tkSz}px ${font}`; ctx.textAlign='center';
+  xr.ticks.forEach(v=>{
+    const cx=l+(v-xr.min)/(xr.max-xr.min)*pw; if(cx<l-1||cx>r2+1) return;
+    if(tickDir==='out'||tickDir==='both'){ctx.beginPath();ctx.moveTo(cx,b2);ctx.lineTo(cx,b2+TL);ctx.stroke()}
+    if(tickDir==='in' ||tickDir==='both'){ctx.beginPath();ctx.moveTo(cx,b2);ctx.lineTo(cx,b2-TL);ctx.stroke()}
+    ctx.fillText(fmtTick(v,xDp),cx,b2+TL+tkSz*1.1);
+  });
+  ctx.textAlign='right';
+  yr.ticks.forEach(v=>{
+    const cy=b2-(v-yr.min)/(yr.max-yr.min)*ph; if(cy<t2-1||cy>b2+1) return;
+    if(tickDir==='out'||tickDir==='both'){ctx.beginPath();ctx.moveTo(l,cy);ctx.lineTo(l-TL,cy);ctx.stroke()}
+    if(tickDir==='in' ||tickDir==='both'){ctx.beginPath();ctx.moveTo(l,cy);ctx.lineTo(l+TL,cy);ctx.stroke()}
+    ctx.fillText(fmtTick(v,yDp),l-TL-4*scale,cy+tkSz*0.35);
+  });
+  ctx.font=`${tkSz}px ${font}`;
+  const maxTkW=Math.max(...yr.ticks.map(v=>ctx.measureText(fmtTick(v,yDp)).width));
+  ctx.fillStyle=axC; ctx.textAlign='center'; ctx.font=`${axSz}px ${font}`;
+  ctx.fillText(xLblTxt,(l+r2)/2,b2+TL+tkSz*1.1+axSz*1.3);
+  const yLblX2=l-TL-4*scale-maxTkW-axSz*0.8;
+  ctx.save(); ctx.translate(yLblX2,(t2+b2)/2); ctx.rotate(-Math.PI/2);
+  ctx.fillText(yLblTxt,0,0); ctx.restore();
+
+  if(ttl&&ttl.trim()){
+    ctx.textAlign='center'; ctx.font=`${ttlSz}px ${font}`; ctx.fillStyle=axC;
+    ctx.fillText(ttl.trim(),(l+r2)/2,t2-ttlSz*0.4);
+  }
+
+  try{
+    const blob=await new Promise(res=>oc.toBlob(res,'image/png'));
+    await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);
+    st('Plot copied to clipboard.','ok');
+  } catch(err){
+    st('Copy to clipboard not supported in this browser.','err');
+  }
 }
 
 // ════════════════════════════════════════════════════════════════

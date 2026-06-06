@@ -397,6 +397,7 @@ canvas.plot{position:absolute;top:0;left:0;width:100%;height:100%}
       <div class="cr"><span class="cl">Height px</span><input type="number" id="expH" value="900"></div>
       <div class="cr"><span class="cl">Format</span><select id="expFmt"><option>PNG</option><option>JPEG</option></select></div>
       <button class="btn out" style="margin-top:8px;width:100%" onclick="savePlot()">Save Plot Image</button>
+      <button class="btn out" style="margin-top:5px;width:100%" onclick="copyPlot()">Copy Plot to Clipboard</button>
       <div style="margin-top:6px;font-family:var(--mono);font-size:9px;color:#aaa">Saves whichever tab is currently shown (Plot or Isotherms)</div>
     </div>
   </div>
@@ -2163,9 +2164,79 @@ function savePlot(){
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  INIT
-// ═══════════════════════════════════════════════════════════════
+async function copyPlot(){
+  const W=parseInt(document.getElementById('expW').value)||1200;
+  const H=parseInt(document.getElementById('expH').value)||900;
+  const style=getChartStyle();
+
+  const active=getActivePanels();
+  if(!active.length){st('No panels selected.','err');return;}
+  const cols=active.length<=1?1:active.length<=4?2:3;
+  const rows_=Math.ceil(active.length/cols);
+  const cW=Math.round(W/cols), cH=Math.round(H/rows_);
+
+  const comp=document.createElement('canvas');
+  comp.width=W; comp.height=H;
+  const compCtx=comp.getContext('2d');
+  compCtx.fillStyle=style.chartBg; compCtx.fillRect(0,0,W,H);
+
+  const pU=gv('pUnits'),qU=qLabel();
+  const pairStr=gv('selPair')||'0,1';
+  const [pi,pj]=pairStr.split(',').map(Number);
+  const N=components.length;
+  const ci=components[Math.min(pi,N-1)]||components[0];
+  const cj=components[Math.min(pj,N-1)]||components[1]||components[0];
+  const names=components.map(c=>c.name);
+  const dataRows=iastResults?iastResults.rows:[];
+  const mode=iastResults?iastResults.mode:'sweep_p';
+
+  active.forEach((p,idx)=>{
+    const col=idx%cols, row=Math.floor(idx/cols);
+    const offX=col*cW, offY=row*cH;
+    const tmp=document.createElement('canvas');
+    tmp.width=cW; tmp.height=cH;
+    const series=[];
+    const xGetter=p.sweepY&&!p.sweepP?r=>r.y[0]:r=>r.P;
+    const xLbl=p.sweepY&&!p.sweepP?'y₁ (bulk mole fraction)':'Pressure / '+pU;
+    if(p.id==='pure_iso'){
+      renderIsoIntoCanvas(tmp);
+    } else if(p.id==='loading_p'){
+      names.forEach((nm,i)=>series.push({label:'q('+nm+')',color:components[i].color,data:dataRows.map(r=>({x:xGetter(r),y:convertQ(r.qi[i])}))}));
+      series.push({label:'q total',color:'#000000',data:dataRows.map(r=>({x:xGetter(r),y:convertQ(r.qtot)}))});
+      drawChart(tmp,series,style,{xLabel:xLbl,yLabel:'Uptake / '+qU,title:p.title});
+    } else if(p.id==='loading_y'){
+      names.forEach((nm,i)=>series.push({label:'q('+nm+')',color:components[i].color,data:dataRows.map(r=>({x:xGetter(r),y:convertQ(r.qi[i])}))}));
+      series.push({label:'q total',color:'#000000',data:dataRows.map(r=>({x:xGetter(r),y:convertQ(r.qtot)}))});
+      drawChart(tmp,series,style,{xLabel:xLbl,yLabel:'Uptake / '+qU,title:p.title});
+    } else if(p.id==='yx_diagram'){
+      series.push({label:'x = y',color:'#cccccc',dash:[4,4],data:[{x:0,y:0},{x:1,y:1}]});
+      names.forEach((nm,i)=>series.push({label:'x('+nm+')',color:components[i].color,data:dataRows.map(r=>({x:r.y[0],y:r.x[i]}))}));
+      drawChart(tmp,series,style,{xLabel:'y₁ (bulk mole fraction)',yLabel:'Adsorbed mole fraction x',title:p.title});
+    } else if(p.id==='total_p'){
+      series.push({label:'q total',color:components[0].color,data:dataRows.map(r=>({x:xGetter(r),y:convertQ(r.qtot)}))});
+      drawChart(tmp,series,style,{xLabel:xLbl,yLabel:'Total uptake / '+qU,title:p.title});
+    } else if(p.id==='xfrac_p'){
+      names.forEach((nm,i)=>series.push({label:'x('+nm+')',color:components[i].color,data:dataRows.map(r=>({x:xGetter(r),y:r.x[i]}))}));
+      drawChart(tmp,series,style,{xLabel:xLbl,yLabel:'Adsorbed mole fraction',title:p.title});
+    } else if(p.id==='sel_p'||p.id==='sel_y'){
+      series.push({label:'S('+ci.name+'/'+cj.name+')',color:ci.color,
+        data:dataRows.map(r=>{const yi=r.y[pi]||0,yj=r.y[pj]||0;if(yi<=0||yj<=0)return{x:xGetter(r),y:NaN};return{x:xGetter(r),y:(r.x[pi]/r.x[pj])/(yi/yj)};})});
+      drawChart(tmp,series,style,{xLabel:xLbl,yLabel:'Selectivity',title:p.title});
+    }
+    compCtx.drawImage(tmp,offX,offY);
+    compCtx.strokeStyle='#e0d9cc';compCtx.lineWidth=1;
+    if(col>0){compCtx.beginPath();compCtx.moveTo(offX,offY);compCtx.lineTo(offX,offY+cH);compCtx.stroke();}
+    if(row>0){compCtx.beginPath();compCtx.moveTo(offX,offY);compCtx.lineTo(offX+cW,offY);compCtx.stroke();}
+  });
+
+  try{
+    const blob=await new Promise(res=>comp.toBlob(res,'image/png'));
+    await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);
+    st('Plot copied to clipboard.','ok');
+  } catch(err){
+    st('Copy to clipboard not supported in this browser.','err');
+  }
+}
 
 // Init sliders
 ['axSz','tkSz','legSz','ttlSz','gridW','tickLen','frameW','boxW','lnW'].forEach(id=>{

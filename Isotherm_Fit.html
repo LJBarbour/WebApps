@@ -393,6 +393,7 @@ select:focus{border-color:var(--accent)}
         <select id="expFmt"><option>PNG</option><option>JPEG</option></select>
       </div>
       <button class="btn out" style="margin-top:8px;width:100%" onclick="savePlot()">Save Plot Image</button>
+      <button class="btn out" style="margin-top:5px;width:100%" onclick="copyPlot()">Copy Plot to Clipboard</button>
     </div>
   </div>
 </div>
@@ -2055,8 +2056,36 @@ function savePlot(){
   },350);
 }
 
-// =====================================================================
-//  AUTO-SELECT BEST MODEL
+async function copyPlot(){
+  if(!chartInst){st('No chart to copy.','err');return}
+  const W=parseInt(gv('expW'))||1200,H=parseInt(gv('expH'))||900;
+  const oc=document.createElement('canvas');oc.width=W;oc.height=H;
+  const cfg=buildConfig();cfg.options.animation={duration:0};cfg.options.responsive=false;cfg.options.maintainAspectRatio=false;
+  const tmp=new Chart(oc.getContext('2d'),cfg);
+  setTimeout(async()=>{
+    if(gb('annShow')&&fitResult){
+      const mod=MOD[fitResult.mod||document.getElementById('modelSel').value];
+      if(mod&&tmp.chartArea){
+        const sz=parseFloat(gv('annSz'))||16;
+        const font=gv('annFont')||"'Palatino Linotype',Palatino,Georgia,serif";
+        const pos=gv('annPos')||'br';
+        const lines=buildLegendLines(fitResult,mod);
+        const savedInst=chartInst;
+        chartInst=tmp;
+        drawLegendBox(oc,lines,pos,sz,font);
+        chartInst=savedInst;
+      }
+    }
+    try{
+      const blob=await new Promise(res=>oc.toBlob(res,'image/png'));
+      await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);
+      st('Plot copied to clipboard.','ok');
+    } catch(err){
+      st('Copy to clipboard not supported in this browser.','err');
+    }
+    tmp.destroy();
+  },350);
+}
 // =====================================================================
 document.getElementById('btnAuto').addEventListener('click',()=>{
   if(!rawData.length)return;

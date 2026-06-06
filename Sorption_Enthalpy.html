@@ -309,8 +309,11 @@ canvas.plot{position:absolute;top:0;left:0;width:100%;height:100%}
       <div class="cr"><span class="cl">Height px</span><input type="number" id="expH" value="900"></div>
       <div class="cr"><span class="cl">Format</span><select id="expFmt"><option>PNG</option><option>JPEG</option></select></div>
       <button class="btn out" style="margin-top:8px;width:100%" onclick="savePlot('iso')">Save Isotherm Plot</button>
+      <button class="btn out" style="margin-top:5px;width:100%" onclick="copyPlot('iso')">Copy Isotherm Plot</button>
       <button class="btn out" style="margin-top:5px;width:100%" onclick="savePlot('cc')">Save C–C Plot</button>
+      <button class="btn out" style="margin-top:5px;width:100%" onclick="copyPlot('cc')">Copy C–C Plot</button>
       <button class="btn out" style="margin-top:5px;width:100%" onclick="savePlot('dh')">Save Enthalpy Plot</button>
+      <button class="btn out" style="margin-top:5px;width:100%" onclick="copyPlot('dh')">Copy Enthalpy Plot</button>
     </div>
   </div>
 
@@ -1387,9 +1390,30 @@ function savePlot(which){
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  INIT
-// ═══════════════════════════════════════════════════════════════
+async function copyPlot(which){
+  const W=parseInt(gv('expW'))||1200,H=parseInt(gv('expH'))||900;
+  const canvasId={iso:'cvIso',cc:'cvCC',dh:'cvDH'}[which];
+  if(!canvasId)return;
+  const cvs=document.getElementById(canvasId);
+  if(!cvs)return;
+  const ow=cvs.width,oh=cvs.height;
+  cvs.width=W;cvs.height=H;
+  if(which==='iso')renderIsoChart();
+  else if(which==='cc')renderCCChart();
+  else if(which==='dh')renderDHChart();
+  try{
+    const blob=await new Promise(res=>cvs.toBlob(res,'image/png'));
+    await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);
+    st('Plot copied to clipboard.','ok');
+  } catch(err){
+    st('Copy to clipboard not supported in this browser.','err');
+  } finally{
+    cvs.width=ow;cvs.height=oh;
+    if(which==='iso')renderIsoChart();
+    else if(which==='cc')renderCCChart();
+    else if(which==='dh')renderDHChart();
+  }
+}
 ['axSz','tkSz','legSz','frameW','tickLen','lnW','ptSz'].forEach(id=>{
   const el=document.getElementById(id);if(!el)return;
   const sp=el.nextElementSibling;if(sp&&sp.classList.contains('rv2'))sp.textContent=parseFloat(el.value).toFixed(0);

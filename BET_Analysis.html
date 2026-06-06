@@ -422,8 +422,11 @@ select:focus{border-color:var(--accent)}
       <div class="cr"><span class="cl">Height px</span><input type="number" id="expH" value="1000"></div>
       <div class="cr"><span class="cl">Format</span><select id="expFmt"><option>PNG</option><option>JPEG</option></select></div>
       <button class="btn out" style="margin-top:6px;width:100%" onclick="savePlot('rouq')">Save Rouquerol Plot</button>
+      <button class="btn out" style="margin-top:5px;width:100%" onclick="copyPlot('rouq')">Copy Rouquerol Plot</button>
       <button class="btn out" style="margin-top:5px;width:100%" onclick="savePlot('bet')">Save BET Linear Plot</button>
+      <button class="btn out" style="margin-top:5px;width:100%" onclick="copyPlot('bet')">Copy BET Linear Plot</button>
       <button class="btn out" style="margin-top:5px;width:100%" onclick="savePlot('iso')">Save Isotherm Plot</button>
+      <button class="btn out" style="margin-top:5px;width:100%" onclick="copyPlot('iso')">Copy Isotherm Plot</button>
     </div>
   </div>
 
@@ -2463,7 +2466,29 @@ function savePlot(which){
   }
 }
 
-// ResizeObserver — redraw all charts when any panel resizes
+async function copyPlot(which){
+  if(!rawData.length) return;
+  const expW=parseInt(gv('expW'))||1400;
+  const expH=parseInt(gv('expH'))||1000;
+  const canvasId={'rouq':'chartRouq','bet':'chartBet','iso':'chartIso'}[which];
+  if(which==='rouq') drawRouquerolChart(expW,expH);
+  if(which==='bet') drawBETChart(expW,expH);
+  if(which==='iso') drawIsoChart(expW,expH);
+  const canvas=document.getElementById(canvasId);
+  try{
+    const blob=await new Promise(res=>canvas.toBlob(res,'image/png'));
+    await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);
+    st('Plot copied to clipboard.','ok');
+  } catch(err){
+    st('Copy to clipboard not supported in this browser.','err');
+  } finally{
+    setTimeout(()=>{
+      if(which==='rouq') drawRouquerolChart();
+      if(which==='bet') drawBETChart();
+      if(which==='iso') drawIsoChart();
+    },100);
+  }
+}
 const resizeObs=new ResizeObserver(()=>{ if(rawData.length) drawAllCharts(); });
 ['cwRouq','cwBet','cwIso'].forEach(id=>{ const el=document.getElementById(id); if(el) resizeObs.observe(el); });
 // ResizeObserver for BETSI panel (canvases injected dynamically)
