@@ -501,6 +501,15 @@ function segmentLegs(data){
 // Drag state
 let drag={active:false,button:0,x0:0,y0:0,x1:0,y1:0};
 
+// Draggable annotation labels
+const annotOffsets={
+  dscOnset:{dx:0,dy:0}, dscPeak:{dx:0,dy:0},
+  tgaOnset:{dx:0,dy:0},
+  massLoss:{dx:0,dy:0}
+};
+let annotLabelBoxes=[];  // [{id, x, y, w, h}] in CSS px — rebuilt each frame
+let annDrag={active:false,id:'',x0:0,y0:0,ox:0,oy:0};
+
 // ════════════════════════════════════════════════════════════════
 //  FILE PARSING
 // ════════════════════════════════════════════════════════════════
@@ -977,9 +986,11 @@ function render(exportW,exportH){
   // Legend
   // Onset analysis annotations
   if(onsetTGA||onsetDSC||massLossTGA){
+    if(!isExport)annotLabelBoxes=[];
     drawOnsets(cx,ML,PW,MT,PH,xr,hasTGA?tgaR:null,hasDSC?dscR:null,
       {font,tkSz,frameW,tgaCol,dscCol:gv('dscCol')||'#b84a2e',
-       onsetTGAColor:gv('onsetTGAColor')||null,onsetDSCColor:gv('onsetDSCColor')||null,MR});
+       onsetTGAColor:gv('onsetTGAColor')||null,onsetDSCColor:gv('onsetDSCColor')||null,MR},
+      isExport?null:annotLabelBoxes, annotOffsets);
   }
 
   if(legShow&&(hasTGA||hasDSC)){
@@ -1051,17 +1062,47 @@ function resetZoom(){
 }
 
 canvas.style.userSelect='none';
+
+function hitLabel(cx,cy){
+  const pad=4;
+  for(const b of annotLabelBoxes){
+    if(cx>=b.x-pad&&cx<=b.x+b.w+pad&&cy>=b.y-pad&&cy<=b.y+b.h+pad)return b.id;
+  }
+  return null;
+}
+
 canvas.addEventListener('mousedown',e=>{
   const rect=canvas.getBoundingClientRect();
+  const cx=e.clientX-rect.left, cy=e.clientY-rect.top;
+  if(e.button===0&&!pickMode){
+    const hit=hitLabel(cx,cy);
+    if(hit){
+      annDrag.active=true;annDrag.id=hit;annDrag.x0=cx;annDrag.y0=cy;
+      annDrag.ox=annotOffsets[hit].dx;annDrag.oy=annotOffsets[hit].dy;
+      canvas.style.cursor='grabbing';
+      return;
+    }
+  }
   drag.active=true;drag.button=e.button;
-  drag.x0=drag.x1=e.clientX-rect.left;
-  drag.y0=drag.y1=e.clientY-rect.top;
+  drag.x0=drag.x1=cx;
+  drag.y0=drag.y1=cy;
 });
 canvas.addEventListener('mousemove',e=>{
-  if(!drag.active){showTooltip(e);return;}
   const rect=canvas.getBoundingClientRect();
-  drag.x1=e.clientX-rect.left;
-  drag.y1=e.clientY-rect.top;
+  const cx=e.clientX-rect.left, cy=e.clientY-rect.top;
+  if(annDrag.active){
+    annotOffsets[annDrag.id].dx=annDrag.ox+(cx-annDrag.x0);
+    annotOffsets[annDrag.id].dy=annDrag.oy+(cy-annDrag.y0);
+    redraw();return;
+  }
+  if(!drag.active){
+    // Update cursor based on hover
+    if(!pickMode&&hitLabel(cx,cy))canvas.style.cursor='grab';
+    else canvas.style.cursor=pickMode?'crosshair':'crosshair';
+    showTooltip(e);return;
+  }
+  drag.x1=cx;
+  drag.y1=cy;
   if(drag.button===0)redraw();
   if(drag.button===2){
     const pi=canvas._plotInfo;if(!pi)return;
@@ -1074,6 +1115,7 @@ canvas.addEventListener('mousemove',e=>{
   }
 });
 canvas.addEventListener('mouseup',e=>{
+  if(annDrag.active){annDrag.active=false;canvas.style.cursor='crosshair';redraw();return;}
   if(!drag.active)return;
   drag.active=false;
   if(drag.button===0){
@@ -1109,6 +1151,7 @@ canvas.addEventListener('click',e=>{
 });
 canvas.addEventListener('mouseleave',()=>{
   document.getElementById('tooltip').style.display='none';
+  if(annDrag.active){annDrag.active=false;canvas.style.cursor='crosshair';redraw();}
   if(drag.active){drag.active=false;redraw();}
 });
 
@@ -1625,6 +1668,8 @@ function computeOnsets(){}  // no-op — both channels now use pick mode
 function clearOnsets(){
   onsetTGA=null;onsetDSC=null;massLossTGA=null;
   pickPts=[];pickMode=false;pickTarget='';
+  Object.keys(annotOffsets).forEach(k=>{annotOffsets[k]={dx:0,dy:0};});
+  annotLabelBoxes=[];
   document.getElementById('tgaOnsetResult').innerHTML='';
   document.getElementById('dscOnsetResult').innerHTML='';
   document.getElementById('massLossResult').innerHTML='';
@@ -1648,7 +1693,7 @@ function updateOnsetLegSelector(){
   if(cur<dscLegs.length)sel.value=cur;
 }
 
-function drawOnsets(cx,ML,PW,MT,PH,xr,tgaR,dscR,style){
+function drawOnsets(cx,ML,PW,MT,PH,xr,tgaR,dscR,style,labelBoxes,offsets){
   const showVLines=gb('onsetVLines');
   function tX(T){return ML+(T-xr.min)/(xr.max-xr.min)*PW;}
   function tYtga(v){return tgaR?MT+PH-(v-tgaR.min)/(tgaR.max-tgaR.min)*PH:0;}
@@ -1674,15 +1719,19 @@ function drawOnsets(cx,ML,PW,MT,PH,xr,tgaR,dscR,style){
     cx.save();cx.beginPath();cx.arc(tX(T),yPx,5,0,2*Math.PI);
     cx.fillStyle=fill||'#fff';cx.fill();cx.strokeStyle=color;cx.lineWidth=2;cx.stroke();cx.restore();
   }
-  function labelAbove(T,parts,color,row){
-    // parts: array of {text, italic, sup, sub} segments, or a plain string (legacy)
+  // Draw a segmented label with optional offset, record bounding box
+  function labelAbove(T,parts,color,row,offsetId){
     const sz=Math.max(10,tkSz*0.85);
-    const xPos=tX(T);
-    const yPos=MT-3-row*(sz+3);
+    const off=offsets&&offsetId?offsets[offsetId]:{dx:0,dy:0};
+    const xPos=tX(T)+off.dx;
+    const yPos=MT-3-row*(sz+3)+off.dy;
     cx.save();cx.fillStyle=color;cx.textBaseline='bottom';cx.textAlign='left';
     if(typeof parts==='string'){
       cx.font=`${sz}px ${font}`;cx.textAlign='center';
-      cx.fillText(parts,xPos,yPos);cx.restore();return;
+      const tw=cx.measureText(parts).width;
+      cx.fillText(parts,xPos,yPos);
+      if(labelBoxes)labelBoxes.push({id:offsetId,x:xPos-tw/2,y:yPos-sz,w:tw,h:sz*1.2});
+      cx.restore();return;
     }
     // measure total width first
     let totalW=0;
@@ -1692,6 +1741,7 @@ function drawOnsets(cx,ML,PW,MT,PH,xr,tgaR,dscR,style){
       totalW+=cx.measureText(seg.text).width;
     });
     let curX=xPos-totalW/2;
+    const startX=curX;
     parts.forEach(seg=>{
       const fSz=seg.sub||seg.sup?sz*0.72:sz;
       const yOff=seg.sub?sz*0.18:seg.sup?-sz*0.3:0;
@@ -1699,6 +1749,7 @@ function drawOnsets(cx,ML,PW,MT,PH,xr,tgaR,dscR,style){
       cx.fillText(seg.text,curX,yPos+yOff);
       curX+=cx.measureText(seg.text).width;
     });
+    if(labelBoxes)labelBoxes.push({id:offsetId,x:startX,y:yPos-sz*1.1,w:totalW,h:sz*1.4});
     cx.restore();
   }
 
@@ -1732,14 +1783,14 @@ function drawOnsets(cx,ML,PW,MT,PH,xr,tgaR,dscR,style){
     if(onset&&onset.x>=xr.min&&onset.x<=xr.max){
       if(showVLines)vDash(onset.x,color);
       dot(onset.x,tYdsc(onset.y),color,'#fff');
-      labelAbove(onset.x,[{text:'T',italic:true},{text:'o',sub:true},{text:' = '+onset.x.toFixed(1)+' \u00b0C',italic:false}],color,0);
+      labelAbove(onset.x,[{text:'T',italic:true},{text:'o',sub:true},{text:' = '+onset.x.toFixed(1)+' \u00b0C',italic:false}],color,0,'dscOnset');
     }
     if(peak&&peak.t>=xr.min&&peak.t<=xr.max){
       if(showVLines){
         cx.save();cx.strokeStyle=color;cx.lineWidth=1;cx.setLineDash([2,4]);
         cx.beginPath();cx.moveTo(tX(peak.t),MT);cx.lineTo(tX(peak.t),MT+PH);cx.stroke();cx.setLineDash([]);cx.restore();
       }
-      labelAbove(peak.t,[{text:'T',italic:true},{text:'p',sub:true},{text:' = '+peak.t.toFixed(1)+' \u00b0C',italic:false}],color,1);
+      labelAbove(peak.t,[{text:'T',italic:true},{text:'p',sub:true},{text:' = '+peak.t.toFixed(1)+' \u00b0C',italic:false}],color,1,'dscPeak');
     }
   }
 
@@ -1755,14 +1806,7 @@ function drawOnsets(cx,ML,PW,MT,PH,xr,tgaR,dscR,style){
     if(onset&&onset.x>=xr.min&&onset.x<=xr.max){
       if(showVLines)vDash(onset.x,col);
       dot(onset.x,tYtga(onset.y),col,'#fff');
-      labelAbove(onset.x,[{text:'T',italic:true},{text:'o',sub:true},{text:' = '+onset.x.toFixed(1)+' \u00b0C',italic:false}],col,0);
-    }
-    if(inflection!==null&&inflection>=xr.min&&inflection<=xr.max){
-      if(showVLines){
-        cx.save();cx.strokeStyle=col;cx.lineWidth=1;cx.setLineDash([2,4]);
-        cx.beginPath();cx.moveTo(tX(inflection),MT);cx.lineTo(tX(inflection),MT+PH);cx.stroke();cx.setLineDash([]);cx.restore();
-      }
-      labelAbove(inflection,[{text:'T',italic:true},{text:'p',sub:true},{text:' = '+inflection.toFixed(1)+' \u00b0C',italic:false}],col,1);
+      labelAbove(onset.x,[{text:'T',italic:true},{text:'o',sub:true},{text:' = '+onset.x.toFixed(1)+' \u00b0C',italic:false}],col,0,'tgaOnset');
     }
   }
   // ── TGA mass loss annotation ─────────────────────────────────────
@@ -1771,7 +1815,8 @@ function drawOnsets(cx,ML,PW,MT,PH,xr,tgaR,dscR,style){
     const{t1,v1,t2,v2,loss}=massLossTGA;
     const xRight=ML+PW;   // right edge of plot area — bracket sits here
     const y1=tYtga(v1), y2=tYtga(v2);
-    const yMid=(y1+y2)/2;
+    const off=offsets&&offsets.massLoss?offsets.massLoss:{dx:0,dy:0};
+    const yMid=(y1+y2)/2+off.dy;
     const sz=Math.max(9,tkSz*0.78);
 
     cx.save();
@@ -1816,9 +1861,9 @@ function drawOnsets(cx,ML,PW,MT,PH,xr,tgaR,dscR,style){
       totalW+=cx.measureText(seg.text).width;
     });
 
-    // Draw right-aligned, leaving a small gap from the bracket
+    // Draw right-aligned, leaving a small gap from the bracket, applying dx offset
     const gap=serif+6;
-    let curX=xRight-gap-totalW;
+    let curX=xRight-gap-totalW+off.dx;
     cx.textBaseline='middle';
     segments.forEach(seg=>{
       cx.font=`${seg.italic?'italic ':''} ${sz}px ${font}`;
@@ -1826,6 +1871,7 @@ function drawOnsets(cx,ML,PW,MT,PH,xr,tgaR,dscR,style){
       cx.fillText(seg.text,curX,yMid);
       curX+=cx.measureText(seg.text).width;
     });
+    if(labelBoxes)labelBoxes.push({id:'massLoss',x:xRight-gap-totalW+off.dx,y:yMid-sz*0.8,w:totalW,h:sz*1.6});
 
     cx.restore();
   }
