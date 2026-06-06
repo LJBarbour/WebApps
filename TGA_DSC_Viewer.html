@@ -99,6 +99,9 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
 .cr input[type=text]{flex:1;background:var(--cream);border:1.5px solid var(--rule);padding:3px 5px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none}
 .rv2{font-family:var(--mono);font-size:11px;min-width:28px;text-align:right;color:#555}
 #tooltip{position:fixed;background:var(--ink);border:none;border-radius:2px;padding:5px 9px;font-family:var(--mono);font-size:11px;color:var(--paper);pointer-events:none;z-index:100;display:none;line-height:1.7}
+.ctx-item{padding:7px 14px;cursor:pointer;color:var(--ink);white-space:nowrap;letter-spacing:.04em}
+.ctx-item:hover{background:var(--cream);color:var(--accent)}
+.ctx-sep{height:1px;background:var(--rule);margin:2px 0}
 .picking canvas{cursor:crosshair!important;}
 .picking .raw-canvas-wrap{outline:2px solid var(--accent);outline-offset:-2px;}
 </style>
@@ -375,6 +378,11 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
 </div><!-- cpanel -->
 </div><!-- app -->
 <div id="tooltip"></div>
+<div id="ctxMenu" style="display:none;position:fixed;z-index:200;background:var(--paper);border:1.5px solid var(--rule);box-shadow:2px 3px 8px rgba(0,0,0,.18);min-width:180px;font-family:var(--mono);font-size:11px;">
+  <div class="ctx-item" id="ctxCopy">Copy canvas to clipboard</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item" id="ctxReset">Reset zoom</div>
+</div>
 
 <script>
 // ════════════════════════════════════════════════════════════════
@@ -1133,7 +1141,36 @@ canvas.addEventListener('mouseup',e=>{
     redraw();
   }
 });
-canvas.addEventListener('contextmenu',e=>e.preventDefault());
+// ── Context menu ────────────────────────────────────────────────
+const ctxMenu=document.getElementById('ctxMenu');
+function showCtxMenu(x,y){
+  ctxMenu.style.left=x+'px'; ctxMenu.style.top=y+'px';
+  ctxMenu.style.display='block';
+  // Flip if too close to viewport edge
+  const r=ctxMenu.getBoundingClientRect();
+  if(r.right>window.innerWidth) ctxMenu.style.left=(x-r.width)+'px';
+  if(r.bottom>window.innerHeight) ctxMenu.style.top=(y-r.height)+'px';
+}
+function hideCtxMenu(){ctxMenu.style.display='none';}
+document.addEventListener('mousedown',e=>{if(!ctxMenu.contains(e.target))hideCtxMenu();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')hideCtxMenu();});
+
+document.getElementById('ctxCopy').addEventListener('click',()=>{
+  hideCtxMenu();
+  canvas.toBlob(blob=>{
+    if(!blob)return;
+    navigator.clipboard.write([new ClipboardItem({'image/png':blob})])
+      .then(()=>st('Canvas copied to clipboard.','ok'))
+      .catch(()=>st('Copy to clipboard not supported in this browser.','err'));
+  });
+});
+document.getElementById('ctxReset').addEventListener('click',()=>{hideCtxMenu();resetZoom();});
+
+canvas.addEventListener('contextmenu',e=>{
+  e.preventDefault();
+  const dx=Math.abs(drag.x1-drag.x0), dy=Math.abs(drag.y1-drag.y0);
+  if(dx<=4&&dy<=4) showCtxMenu(e.clientX, e.clientY);
+});
 canvas.addEventListener('click',e=>{
   if(!pickMode)return;
   st('Click received on canvas...','ok');
@@ -1879,15 +1916,16 @@ function drawOnsets(cx,ML,PW,MT,PH,xr,tgaR,dscR,style,labelBoxes,offsets){
 
 // ════════════════════════════════════════════════════════════════
 const SETTING_IDS=[
-  'tgaLabel','dscLabel','dtgLabel',
-  'tMin','tMax','yTGAmin','yTGAmax','yDSCmin','yDSCmax',
+  // Axis Labels & Fonts
   'xLbl','fontFam','axSz','tkSz','axCol',
+  // Grid, Ticks & Frame
   'grid','gridCol','gridW','tickLen','majTickW','tickDir','frameW','boxBdr','boxCol',
+  // Background & Colors
   'chartBg','tgaCol','dtgCol','dscCol','dscColorByLeg','tgaLW','dtgLW','dscLW',
+  // Legend
   'legShow','legPos','legSz',
-  'tgaBL1','tgaBL2','tgaEV1','tgaEV2',
-  'dscBL1','dscBL2','dscEV1','dscEV2','dscOnsetLeg','onsetVLines','onsetTGAColor','onsetDSCColor',
-  'expW','expH','expFmt'
+  // Analysis — vertical lines checkbox + annotation colors only
+  'onsetVLines','onsetTGAColor','onsetDSCColor'
 ];
 
 function collectSettings(){
@@ -1897,8 +1935,6 @@ function collectSettings(){
     if(!el)return;
     s[id]=el.type==='checkbox'?el.checked:el.value;
   });
-  // Also save axis range sidebar values
-  s._zs={xMin:zs.xMin,xMax:zs.xMax};
   return s;
 }
 
@@ -1912,7 +1948,6 @@ function applySettings(s){
     if(el.type==='range'&&el.nextElementSibling&&el.nextElementSibling.classList.contains('rv2'))
       el.nextElementSibling.textContent=parseFloat(el.value).toFixed(0);
   });
-  if(s._zs){zs.xMin=s._zs.xMin;zs.xMax=s._zs.xMax;}
   // Re-apply DSC colour mode
   onDscColorMode();
   redraw();
