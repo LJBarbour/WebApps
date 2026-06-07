@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Resources Admin</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,300;0,400;0,600;1,300&family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --paper:        #f5f0e8;
+    --paper-mid:    #ede7d9;
+    --paper-low:    #e4ddd0;
+    --ink:          #2c2416;
+    --ink-mid:      #5a4f3e;
+    --ink-light:    #8c7f6b;
+    --border:       #cfc5b0;
+    --border-light: #ddd5c2;
+    --accent:       #6b4f2a;
+    --accent-hover: #8b6535;
+    --danger:       #8b3a2a;
+    --danger-bg:    #fdf0ee;
+    --danger-bdr:   #e8c4bc;
+    --success:      #2a6b3a;
+    --success-bg:   #eef4f0;
+    --success-bdr:  #b8d4c0;
+    --shadow:       rgba(44,36,22,0.08);
+  }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    min-height: 100vh;
+  }
+
+  /* ── LOGIN ── */
+  #login-overlay {
+    position: fixed;
+    inset: 0;
+    background: var(--paper);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 1.5rem;
+  }
+
+  .login-card {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2.5rem 2.25rem;
+    width: 100%;
+    max-width: 380px;
+    box-shadow: 0 4px 24px var(--shadow);
+  }
+
+  .login-title {
+    font-family: 'Fraunces', serif;
+    font-size: 1.75rem;
+    font-weight: 300;
+    color: var(--ink);
+    margin-bottom: 0.25rem;
+  }
+
+  .login-subtitle {
+    font-size: 0.8rem;
+    color: var(--ink-light);
+    margin-bottom: 2rem;
+    font-family: 'DM Mono', monospace;
+    letter-spacing: 0.03em;
+  }
+
+  .field { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 1rem; }
+
+  .field label {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--ink-mid);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .field input {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.9rem;
+    padding: 0.6rem 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--paper);
+    color: var(--ink);
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  .field input:focus { border-color: var(--accent); background: #fff; }
+
+  .primary-btn {
+    width: 100%;
+    padding: 0.7rem;
+    margin-top: 0.5rem;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.9rem;
+    font-weight: 500;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .primary-btn:hover { background: var(--accent-hover); }
+  .primary-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+  .msg-error {
+    margin-top: 0.85rem;
+    padding: 0.6rem 0.85rem;
+    background: var(--danger-bg);
+    border: 1px solid var(--danger-bdr);
+    border-radius: 8px;
+    font-size: 0.8rem;
+    color: var(--danger);
+    display: none;
+  }
+
+  /* ── ACCESS DENIED ── */
+  #access-denied {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: var(--paper);
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+
+  .denied-card {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2.5rem 2.25rem;
+    max-width: 360px;
+    text-align: center;
+  }
+
+  .denied-card i { font-size: 2rem; color: var(--danger); margin-bottom: 1rem; }
+  .denied-card h2 { font-family: 'Fraunces', serif; font-weight: 300; margin-bottom: 0.5rem; }
+  .denied-card p { font-size: 0.85rem; color: var(--ink-mid); margin-bottom: 1.5rem; }
+
+  /* ── MAIN ── */
+  #main-content { display: none; }
+
+  .topbar {
+    background: #fff;
+    border-bottom: 1px solid var(--border);
+    padding: 0.75rem 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .topbar-title {
+    font-family: 'Fraunces', serif;
+    font-size: 1.2rem;
+    font-weight: 300;
+    color: var(--ink);
+    flex: 1;
+  }
+
+  .topbar-badge {
+    font-size: 0.7rem;
+    font-family: 'DM Mono', monospace;
+    background: var(--accent);
+    color: #fff;
+    padding: 2px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.05em;
+  }
+
+  .logout-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.78rem;
+    color: var(--ink-mid);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.35rem 0.75rem;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .logout-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .wrap {
+    max-width: 820px;
+    margin: 0 auto;
+    padding: 1.5rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+
+  /* ── CARDS ── */
+  .card {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 1px 4px var(--shadow);
+  }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: var(--paper-mid);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .card-title {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--ink-mid);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    flex: 1;
+  }
+
+  .card-header > i { color: var(--accent); font-size: 16px; }
+
+  .card-body { padding: 1rem; }
+
+  /* ── INVITE FORM ── */
+  .invite-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: flex-end;
+  }
+
+  .invite-row .field { flex: 1; min-width: 180px; margin-bottom: 0; }
+
+  .inline-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0.6rem 1rem;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 500;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+    white-space: nowrap;
+  }
+
+  .inline-btn:hover { background: var(--accent-hover); }
+  .inline-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+  .inline-btn.secondary {
+    background: none;
+    color: var(--ink-mid);
+    border: 1px solid var(--border);
+  }
+
+  .inline-btn.secondary:hover { border-color: var(--accent); color: var(--accent); background: none; }
+
+  .inline-btn.danger {
+    background: none;
+    color: var(--danger);
+    border: 1px solid var(--danger-bdr);
+  }
+
+  .inline-btn.danger:hover { background: var(--danger-bg); }
+
+  /* ── FLASH MESSAGES ── */
+  .flash {
+    padding: 0.6rem 0.85rem;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    margin-top: 0.75rem;
+    display: none;
+  }
+
+  .flash.error { background: var(--danger-bg); border: 1px solid var(--danger-bdr); color: var(--danger); }
+  .flash.success { background: var(--success-bg); border: 1px solid var(--success-bdr); color: var(--success); }
+
+  /* ── USER TABLES ── */
+  .user-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    margin-top: 0.75rem;
+  }
+
+  .user-table th {
+    text-align: left;
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--ink-light);
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border-light);
+    font-weight: 500;
+  }
+
+  .user-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-light);
+    vertical-align: middle;
+    color: var(--ink);
+  }
+
+  .user-table tr:last-child td { border-bottom: none; }
+  .user-table tr:hover td { background: var(--paper); }
+
+  .user-name { font-weight: 500; }
+  .user-email { font-family: 'DM Mono', monospace; font-size: 11.5px; color: var(--ink-mid); }
+
+  /* Toggle switch — robust implementation */
+  .toggle-wrap { display: flex; align-items: center; gap: 10px; }
+
+  .toggle {
+    display: inline-block;
+    width: 48px;
+    height: 26px;
+    flex-shrink: 0;
+    position: relative;
+  }
+
+  .toggle input {
+    position: absolute;
+    opacity: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    cursor: pointer;
+    z-index: 2;
+  }
+
+  .slider {
+    display: block;
+    width: 48px;
+    height: 26px;
+    background: #888;
+    border-radius: 26px;
+    position: relative;
+    transition: background 0.25s;
+    cursor: pointer;
+  }
+
+  .slider::after {
+    content: '';
+    display: block;
+    width: 20px;
+    height: 20px;
+    background: #fff;
+    border-radius: 50%;
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+    transition: left 0.25s;
+  }
+
+  .toggle input:checked ~ .slider {
+    background: #2e7d3e;
+  }
+
+  .toggle input:checked ~ .slider::after {
+    left: 25px;
+  }
+
+  .toggle-label { font-size: 12px; color: var(--ink-mid); font-weight: 500; }
+
+  .empty-state {
+    text-align: center;
+    padding: 2rem;
+    font-size: 0.82rem;
+    color: var(--ink-light);
+    font-family: 'DM Mono', monospace;
+  }
+
+  .loading-state {
+    text-align: center;
+    padding: 1.5rem;
+    font-size: 0.82rem;
+    color: var(--ink-light);
+  }
+
+  /* Section separator inside card */
+  .section-sep {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--ink-light);
+    padding: 0.75rem 0 0.25rem;
+    border-top: 1px solid var(--border-light);
+    margin-top: 0.75rem;
+  }
+
+  .section-sep:first-child { border-top: none; margin-top: 0; padding-top: 0; }
+</style>
+</head>
+<body>
+
+<!-- ── LOGIN ── -->
+<div id="login-overlay">
+  <div class="login-card">
+    <div class="login-title">Resources Admin</div>
+    <div class="login-subtitle">Administrator access only</div>
+    <div class="field">
+      <label>Email</label>
+      <input type="email" id="login-email" autocomplete="email">
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input type="password" id="login-password" autocomplete="current-password">
+    </div>
+    <button class="primary-btn" id="login-btn" onclick="doLogin()">Sign in</button>
+    <div class="msg-error" id="login-error"></div>
+  </div>
+</div>
+
+<!-- ── ACCESS DENIED ── -->
+<div id="access-denied">
+  <div class="denied-card">
+    <i class="ti ti-shield-off"></i>
+    <h2>Administrator access only</h2>
+    <p>This page is restricted to the site administrator.</p>
+    <button class="primary-btn" style="width:auto; padding: 0.6rem 1.25rem;" onclick="doSignOut()">Sign out</button>
+  </div>
+</div>
+
+<!-- ── MAIN ── -->
+<div id="main-content">
+
+  <div class="topbar">
+    <span class="topbar-title">Resources Admin</span>
+    <span class="topbar-badge">ADMIN</span>
+    <button class="logout-btn" onclick="doSignOut()">
+      <i class="ti ti-logout" style="font-size:13px;"></i> Sign out
+    </button>
+  </div>
+
+  <div class="wrap">
+
+    <!-- ── INVITE NEW USER ── -->
+    <div class="card">
+      <div class="card-header">
+        <i class="ti ti-user-plus"></i>
+        <span class="card-title">Invite new user</span>
+      </div>
+      <div class="card-body">
+        <p style="font-size:13px; color:var(--ink-mid); margin-bottom:0.85rem;">
+          Sends a Supabase invitation email. The user sets their own password on first login.
+          New users added here are <em>external</em> (resources access only, not shown in booking lists).
+        </p>
+        <div class="invite-row">
+          <div class="field">
+            <label>Full name</label>
+            <input type="text" id="invite-name" placeholder="Jane Smith">
+          </div>
+          <div class="field">
+            <label>Email address</label>
+            <input type="email" id="invite-email" placeholder="jane@example.com">
+          </div>
+          <button class="inline-btn" onclick="doInvite()">
+            <i class="ti ti-send" style="font-size:14px;"></i> Send invite
+          </button>
+        </div>
+        <div class="flash" id="invite-flash"></div>
+      </div>
+    </div>
+
+    <!-- ── UOL USERS ── -->
+    <div class="card">
+      <div class="card-header">
+        <i class="ti ti-building"></i>
+        <span class="card-title">UoL booking users — resources access</span>
+      </div>
+      <div class="card-body">
+        <p style="font-size:13px; color:var(--ink-mid); margin-bottom:0.5rem;">
+          Toggle resources access for existing UoL instrument booking users.
+        </p>
+        <div id="uol-table-wrap">
+          <div class="loading-state">Loading users…</div>
+        </div>
+        <div class="flash" id="uol-flash"></div>
+      </div>
+    </div>
+
+    <!-- ── EXTERNAL (resource_users) ── -->
+    <div class="card">
+      <div class="card-header">
+        <i class="ti ti-users"></i>
+        <span class="card-title">External resource users</span>
+      </div>
+      <div class="card-body">
+        <p style="font-size:13px; color:var(--ink-mid); margin-bottom:0.5rem;">
+          Users who have resources access only (not UoL booking users).
+        </p>
+        <div id="ext-table-wrap">
+          <div class="loading-state">Loading users…</div>
+        </div>
+        <div class="flash" id="ext-flash"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  // ── SUPABASE ──
+  const SUPABASE_URL  = 'https://mqpvnisphntdwhqoiqlt.supabase.co';
+  const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xcHZuaXNwaG50ZHdocW9pcWx0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc1NzM5NjIsImV4cCI6MjA5MzE0OTk2Mn0.7eAeXAh0heqiaTLclqUzAeNY2gQDcbxNRe2LrLXvpHg';
+  const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+  const ADMIN_EMAIL = 'lbarbour@lincoln.ac.uk';
+
+  // ── INIT ──
+  async function init() {
+    const { data: { session } } = await sb.auth.getSession();
+    if (session) await handleLoggedIn(session.user);
+  }
+
+  async function handleLoggedIn(user) {
+    document.getElementById('login-overlay').style.display = 'none';
+    if (user.email !== ADMIN_EMAIL) {
+      document.getElementById('access-denied').style.display = 'flex';
+      return;
+    }
+    document.getElementById('main-content').style.display = 'block';
+    loadUolUsers();
+    loadExtUsers();
+  }
+
+  // ── LOGIN ──
+  async function doLogin() {
+    const email    = document.getElementById('login-email').value.trim();
+    const password = document.getElementById('login-password').value;
+    const btn      = document.getElementById('login-btn');
+    const errEl    = document.getElementById('login-error');
+
+    errEl.style.display = 'none';
+    btn.disabled = true;
+    btn.textContent = 'Signing in…';
+
+    const { data, error } = await sb.auth.signInWithPassword({ email, password });
+
+    btn.disabled = false;
+    btn.textContent = 'Sign in';
+
+    if (error) {
+      errEl.textContent = error.message;
+      errEl.style.display = 'block';
+      return;
+    }
+    await handleLoggedIn(data.user);
+  }
+
+  document.getElementById('login-password').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doLogin();
+  });
+
+  async function doSignOut() {
+    await sb.auth.signOut();
+    location.reload();
+  }
+
+  // ── FLASH HELPERS ──
+  function flash(id, msg, type = 'success') {
+    const el = document.getElementById(id);
+    el.textContent = msg;
+    el.className = `flash ${type}`;
+    el.style.display = 'block';
+    setTimeout(() => { el.style.display = 'none'; }, 4000);
+  }
+
+  // ── LOAD UOL USERS ──
+  async function loadUolUsers() {
+    const wrap = document.getElementById('uol-table-wrap');
+    const { data, error } = await sb
+      .from('users')
+      .select('id, name, email, can_access_resources')
+      .order('name');
+
+    if (error) {
+      wrap.innerHTML = `<div class="empty-state" style="color:var(--danger)">Error loading users: ${error.message}</div>`;
+      return;
+    }
+
+    if (!data || data.length === 0) {
+      wrap.innerHTML = '<div class="empty-state">No UoL users found.</div>';
+      return;
+    }
+
+    const rows = data.map(u => `
+      <tr>
+        <td>
+          <div class="user-name">${esc(u.name)}</div>
+          <div class="user-email">${esc(u.email || '—')}</div>
+        </td>
+        <td>
+          <div class="toggle-wrap">
+            <div class="toggle">
+              <input type="checkbox" ${u.can_access_resources ? 'checked' : ''}
+                onchange="toggleUolAccess('${u.id}', this.checked, '${esc(u.name)}')">
+              <span class="slider"></span>
+            </div>
+            <span class="toggle-label">${u.can_access_resources ? 'Granted' : 'Denied'}</span>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+
+    wrap.innerHTML = `
+      <table class="user-table">
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Resources access</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+  }
+
+  async function toggleUolAccess(rowId, granted, name) {
+    const { error } = await sb
+      .from('users')
+      .update({ can_access_resources: granted })
+      .eq('id', rowId);
+
+    if (error) {
+      flash('uol-flash', `Error updating ${name}: ${error.message}`, 'error');
+      loadUolUsers(); // revert
+    } else {
+      flash('uol-flash', `${name}: resources access ${granted ? 'granted' : 'revoked'}.`, 'success');
+    }
+  }
+
+  // ── LOAD EXTERNAL USERS ──
+  async function loadExtUsers() {
+    const wrap = document.getElementById('ext-table-wrap');
+    const { data, error } = await sb
+      .from('resource_users')
+      .select('id, user_id, name, email, can_access_resources, created_at')
+      .order('name');
+
+    if (error) {
+      wrap.innerHTML = `<div class="empty-state" style="color:var(--danger)">Error loading users: ${error.message}</div>`;
+      return;
+    }
+
+    if (!data || data.length === 0) {
+      wrap.innerHTML = '<div class="empty-state">No external users yet. Use the invite form above to add users.</div>';
+      return;
+    }
+
+    const rows = data.map(u => `
+      <tr>
+        <td>
+          <div class="user-name">${esc(u.name)}</div>
+          <div class="user-email">${esc(u.email || '—')}</div>
+        </td>
+        <td>
+          <div class="toggle-wrap">
+            <div class="toggle">
+              <input type="checkbox" ${u.can_access_resources ? 'checked' : ''}
+                onchange="toggleExtAccess('${u.id}', this.checked, '${esc(u.name)}')">
+              <span class="slider"></span>
+            </div>
+            <span class="toggle-label">${u.can_access_resources ? 'Granted' : 'Denied'}</span>
+          </div>
+        </td>
+        <td>
+          <button class="inline-btn danger" onclick="removeExtUser('${u.id}', '${esc(u.name)}')">
+            <i class="ti ti-trash" style="font-size:13px;"></i> Remove
+          </button>
+        </td>
+      </tr>
+    `).join('');
+
+    wrap.innerHTML = `
+      <table class="user-table">
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Resources access</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+  }
+
+  async function toggleExtAccess(rowId, granted, name) {
+    const { error } = await sb
+      .from('resource_users')
+      .update({ can_access_resources: granted })
+      .eq('id', rowId);
+
+    if (error) {
+      flash('ext-flash', `Error updating ${name}: ${error.message}`, 'error');
+      loadExtUsers();
+    } else {
+      flash('ext-flash', `${name}: resources access ${granted ? 'granted' : 'revoked'}.`, 'success');
+    }
+  }
+
+  async function removeExtUser(rowId, name) {
+    if (!confirm(`Remove ${name} from external resource users? This cannot be undone.`)) return;
+
+    const { error } = await sb
+      .from('resource_users')
+      .delete()
+      .eq('id', rowId);
+
+    if (error) {
+      flash('ext-flash', `Error removing ${name}: ${error.message}`, 'error');
+    } else {
+      flash('ext-flash', `${name} removed.`, 'success');
+      loadExtUsers();
+    }
+  }
+
+  // ── INVITE ──
+  async function doInvite() {
+    const name  = document.getElementById('invite-name').value.trim();
+    const email = document.getElementById('invite-email').value.trim();
+
+    if (!name || !email) {
+      flash('invite-flash', 'Please enter both name and email.', 'error');
+      return;
+    }
+
+    // 1. Send Supabase Auth invite email
+    const { data: invData, error: invError } = await sb.auth.admin.inviteUserByEmail(email);
+
+    // Note: auth.admin requires service_role key — see note below.
+    // If this fails, we insert the resource_users row and note the manual step.
+    let userId = invData?.user?.id || null;
+
+    if (invError) {
+      // Fallback: insert into resource_users without auth invite.
+      // Admin will need to manually create the auth user in Supabase dashboard.
+      const { error: insertError } = await sb
+        .from('resource_users')
+        .insert({ name, email, can_access_resources: true });
+
+      if (insertError) {
+        flash('invite-flash', `Error: ${insertError.message}`, 'error');
+      } else {
+        flash('invite-flash',
+          `${name} added to resource_users. Note: You must also invite them manually via the Supabase dashboard (Authentication → Users → Invite user) so they can set a password.`,
+          'success');
+        document.getElementById('invite-name').value = '';
+        document.getElementById('invite-email').value = '';
+        loadExtUsers();
+      }
+      return;
+    }
+
+    // 2. Insert into resource_users with their new auth user_id
+    const { error: insertError } = await sb
+      .from('resource_users')
+      .insert({ name, email, user_id: userId, can_access_resources: true });
+
+    if (insertError) {
+      flash('invite-flash', `Auth invite sent but failed to add to resource_users: ${insertError.message}`, 'error');
+    } else {
+      flash('invite-flash', `Invite sent to ${email} and user added successfully.`, 'success');
+      document.getElementById('invite-name').value = '';
+      document.getElementById('invite-email').value = '';
+      loadExtUsers();
+    }
+  }
+
+  // ── ESCAPE HTML ──
+  function esc(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  init();
+</script>
+</body>
+</html>
