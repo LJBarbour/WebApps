@@ -548,6 +548,25 @@
   </div>
 </div>
 
+<!-- ── SET PASSWORD OVERLAY (invitation / password reset) ── -->
+<div id="setpw-overlay" style="display:none; position:fixed; inset:0; background:var(--paper); align-items:center; justify-content:center; z-index:1001; padding:1.5rem;">
+  <div class="login-card">
+    <div class="login-title">Set your password</div>
+    <div class="login-subtitle" id="setpw-subtitle">Choose a password for your account.</div>
+    <div class="field">
+      <label>New password</label>
+      <input type="password" id="setpw-password" placeholder="••••••••" autocomplete="new-password">
+    </div>
+    <div class="field">
+      <label>Confirm password</label>
+      <input type="password" id="setpw-confirm" placeholder="••••••••" autocomplete="new-password">
+    </div>
+    <button class="login-btn" id="setpw-btn" onclick="doSetPassword()">Set password</button>
+    <div class="login-error" id="setpw-error"></div>
+    <div class="login-info" id="setpw-info"></div>
+  </div>
+</div>
+
 <!-- ── ACCESS DENIED ── -->
 <div id="access-denied">
   <div class="denied-card">
@@ -943,8 +962,29 @@
 
   // ── AUTH CHECK ON LOAD ──
   async function checkSession() {
+    // Supabase puts the token in the URL hash after an invite or password reset link is clicked.
+    // Calling getSession() processes it automatically and establishes a session.
     const { data: { session } } = await sb.auth.getSession();
+
     if (session) {
+      // Check if this session was established from an invite/recovery token
+      // by looking for the type in the hash before Supabase clears it
+      const hash = window.location.hash;
+      const isInvite   = hash.includes('type=invite');
+      const isRecovery = hash.includes('type=recovery');
+
+      if (isInvite || isRecovery) {
+        // Show set-password screen
+        const subtitle = document.getElementById('setpw-subtitle');
+        subtitle.textContent = isInvite
+          ? 'Welcome! Please choose a password for your account.'
+          : 'Please enter your new password.';
+        document.getElementById('setpw-overlay').style.display = 'flex';
+        // Clear the hash so the token isn't visible in the URL
+        history.replaceState(null, '', window.location.pathname);
+        return;
+      }
+
       await handleLoggedIn(session.user);
     }
   }
@@ -977,6 +1017,51 @@
     } else {
       document.getElementById('access-denied').style.display = 'flex';
     }
+  }
+
+  // ── SET PASSWORD (invitation / reset) ──
+  async function doSetPassword() {
+    const pw      = document.getElementById('setpw-password').value;
+    const confirm = document.getElementById('setpw-confirm').value;
+    const btn     = document.getElementById('setpw-btn');
+    const errEl   = document.getElementById('setpw-error');
+    const infoEl  = document.getElementById('setpw-info');
+
+    errEl.style.display  = 'none';
+    infoEl.style.display = 'none';
+
+    if (pw.length < 8) {
+      errEl.textContent = 'Password must be at least 8 characters.';
+      errEl.style.display = 'block';
+      return;
+    }
+    if (pw !== confirm) {
+      errEl.textContent = 'Passwords do not match.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+
+    const { data, error } = await sb.auth.updateUser({ password: pw });
+
+    btn.disabled = false;
+    btn.textContent = 'Set password';
+
+    if (error) {
+      errEl.textContent = error.message;
+      errEl.style.display = 'block';
+      return;
+    }
+
+    infoEl.textContent = 'Password set successfully. Taking you to the resources page…';
+    infoEl.style.display = 'block';
+
+    setTimeout(async () => {
+      document.getElementById('setpw-overlay').style.display = 'none';
+      await handleLoggedIn(data.user);
+    }, 1500);
   }
 
   // ── LOGIN ──
