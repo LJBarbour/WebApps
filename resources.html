@@ -962,31 +962,63 @@
 
   // ── AUTH CHECK ON LOAD ──
   async function checkSession() {
-    // Supabase puts the token in the URL hash after an invite or password reset link is clicked.
-    // Calling getSession() processes it automatically and establishes a session.
+    // Supabase v2 uses the PKCE flow — tokens arrive as ?code= query params,
+    // but for email links (invite, recovery) they still use the hash fragment.
+    // We check the hash first, then let getSession() process whatever is there.
+
+    const hash   = window.location.hash;
+    const search = window.location.search;
+
+    // Check for errors in the hash (e.g. expired link)
+    if (hash.includes('error=')) {
+      const params = new URLSearchParams(hash.slice(1));
+      const desc = params.get('error_description') || 'The link is invalid or has expired.';
+      const errEl = document.getElementById('login-error');
+      errEl.textContent = desc.replace(/\+/g, ' ');
+      errEl.style.display = 'block';
+      history.replaceState(null, '', window.location.pathname);
+      return;
+    }
+
+    // Detect invite/recovery type from hash before getSession() clears it
+    const isInvite   = hash.includes('type=invite');
+    const isRecovery = hash.includes('type=recovery') || search.includes('type=recovery');
+
+    // Let Supabase process the token
     const { data: { session } } = await sb.auth.getSession();
 
     if (session) {
-      // Check if this session was established from an invite/recovery token
-      // by looking for the type in the hash before Supabase clears it
-      const hash = window.location.hash;
-      const isInvite   = hash.includes('type=invite');
-      const isRecovery = hash.includes('type=recovery');
-
       if (isInvite || isRecovery) {
-        // Show set-password screen
         const subtitle = document.getElementById('setpw-subtitle');
         subtitle.textContent = isInvite
           ? 'Welcome! Please choose a password for your account.'
           : 'Please enter your new password.';
         document.getElementById('setpw-overlay').style.display = 'flex';
-        // Clear the hash so the token isn't visible in the URL
         history.replaceState(null, '', window.location.pathname);
         return;
       }
-
       await handleLoggedIn(session.user);
+      return;
     }
+
+    // No session yet — listen for auth state changes (handles PKCE code exchange)
+    sb.auth.onAuthStateChange(async (event, newSession) => {
+      if (event === 'SIGNED_IN' && newSession) {
+        if (isInvite || event === 'USER_UPDATED') {
+          const subtitle = document.getElementById('setpw-subtitle');
+          subtitle.textContent = 'Welcome! Please choose a password for your account.';
+          document.getElementById('setpw-overlay').style.display = 'flex';
+          history.replaceState(null, '', window.location.pathname);
+        } else {
+          await handleLoggedIn(newSession.user);
+        }
+      }
+      if (event === 'PASSWORD_RECOVERY') {
+        document.getElementById('setpw-subtitle').textContent = 'Please enter your new password.';
+        document.getElementById('setpw-overlay').style.display = 'flex';
+        history.replaceState(null, '', window.location.pathname);
+      }
+    });
   }
 
   async function handleLoggedIn(user) {
