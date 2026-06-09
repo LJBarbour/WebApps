@@ -690,9 +690,26 @@
         return;
       }
 
-      const { error } = await sb
+      // Check if a row already exists (safety check against duplicates)
+      const { data: existing } = await sb
         .from('resource_users')
-        .insert({ name: enteredName, email: email, can_access_resources: true });
+        .select('id')
+        .eq('email', email)
+        .limit(1)
+        .maybeSingle();
+
+      let error;
+      if (existing) {
+        // Row exists — just update it
+        ({ error } = await sb
+          .from('resource_users')
+          .update({ name: enteredName, can_access_resources: true })
+          .eq('id', existing.id));
+      } else {
+        ({ error } = await sb
+          .from('resource_users')
+          .insert({ name: enteredName, email: email, can_access_resources: true }));
+      }
 
       if (error) {
         flash('all-flash', `Error creating user: ${error.message}`, 'error');
