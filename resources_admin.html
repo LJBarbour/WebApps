@@ -618,18 +618,17 @@
         const rowId   = uol ? uol.id : (ext ? ext.id : null);
         const rowType = isUol ? 'uol' : (isExt ? 'ext' : 'none');
         const displayName = uol ? uol.name : (ext ? ext.name : '');
-        const emailKey = esc(a.email).replace('@','_at_').replace(/\./g,'_');
 
         const nameCell = hasRow
           ? `<div class="user-name">${esc(displayName) || '<em style="color:var(--ink-light)">—</em>'}</div>`
-          : `<input type="text" class="name-input" id="name-${emailKey}"
+          : `<input type="text" class="name-input"
                placeholder="Enter name to grant access"
                style="font-family:'DM Sans',sans-serif; font-size:12.5px; padding:3px 7px;
                       border:1px solid var(--border); border-radius:6px; background:var(--paper);
                       color:var(--ink); outline:none; width:100%;">`;
 
         return `
-          <tr>
+          <tr data-email="${esc(a.email)}" data-type="${rowType}" data-rowid="${rowId || ''}" data-name="${esc(displayName)}">
             <td>
               ${nameCell}
               <div class="user-email">${esc(a.email)}</div>
@@ -645,8 +644,7 @@
             <td>
               <div class="toggle-wrap">
                 <div class="toggle">
-                  <input type="checkbox" ${hasAccess ? 'checked' : ''}
-                    onchange="toggleAccess('${rowType}', '${rowId}', '${esc(a.email)}', this.checked, '${esc(displayName)}', 'name-${emailKey}')">
+                  <input type="checkbox" ${hasAccess ? 'checked' : ''} onchange="handleToggle(this)">
                   <span class="slider"></span>
                 </div>
                 <span class="toggle-label">${hasAccess ? 'Granted' : 'Denied'}</span>
@@ -674,54 +672,33 @@
   }
 
   // ── TOGGLE ACCESS ──
-  async function toggleAccess(type, rowId, email, granted, name, nameInputId) {
-    // New user — no row in either table yet. Create one in resource_users.
-    if (type === 'none' || !rowId) {
-      if (!granted) return; // Toggling off a user with no row — nothing to do
+  async function handleToggle(checkbox) {
+    const row     = checkbox.closest('tr');
+    const email   = row.dataset.email;
+    const type    = row.dataset.type;
+    const rowId   = row.dataset.rowid;
+    const granted = checkbox.checked;
 
-      // Get the name from the input field
-      const nameInput = nameInputId ? document.getElementById(nameInputId) : null;
+    // New user — no row yet
+    if (type === 'none' || !rowId) {
+      if (!granted) return;
+
+      const nameInput = row.querySelector('.name-input');
       const enteredName = nameInput ? nameInput.value.trim() : '';
       if (!enteredName) {
         flash('all-flash', 'Please enter a name for this user before granting access.', 'error');
         if (nameInput) nameInput.focus();
-        // Revert the toggle visually
-        loadAllUsers();
+        checkbox.checked = false;
         return;
       }
 
-      // Check if a row already exists (safety check against duplicates)
-      const { data: existing, error: lookupError } = await sb
+      const { error } = await sb
         .from('resource_users')
-        .select('id')
-        .eq('email', email)
-        .limit(1)
-        .maybeSingle();
+        .insert({ name: enteredName, email: email, can_access_resources: true });
 
-      console.log('Lookup result:', existing, 'Lookup error:', lookupError);
-
-      let dbError;
-      if (existing) {
-        console.log('Updating existing row:', existing.id);
-        const { error: updateError } = await sb
-          .from('resource_users')
-          .update({ name: enteredName, can_access_resources: true })
-          .eq('id', existing.id);
-        dbError = updateError;
-        console.log('Update error:', updateError);
-      } else {
-        console.log('Inserting new row for:', email);
-        const { data: insertData, error: insertError } = await sb
-          .from('resource_users')
-          .insert({ name: enteredName, email: email, can_access_resources: true })
-          .select();
-        dbError = insertError;
-        console.log('Insert data:', insertData, 'Insert error:', insertError);
-      }
-
-      if (dbError) {
-        flash('all-flash', `Error: ${dbError.message}`, 'error');
-        loadAllUsers();
+      if (error) {
+        flash('all-flash', `Error: ${error.message}`, 'error');
+        checkbox.checked = false;
       } else {
         flash('all-flash', `${enteredName} added and access granted.`, 'success');
         loadAllUsers();
@@ -737,10 +714,12 @@
       .eq('id', rowId);
 
     if (error) {
-      flash('all-flash', `Error updating ${name || email}: ${error.message}`, 'error');
-      loadAllUsers();
+      flash('all-flash', `Error: ${error.message}`, 'error');
+      checkbox.checked = !granted;
     } else {
-      flash('all-flash', `${name || email}: resources access ${granted ? 'granted' : 'revoked'}.`, 'success');
+      const label = checkbox.closest('.toggle-wrap').querySelector('.toggle-label');
+      if (label) label.textContent = granted ? 'Granted' : 'Denied';
+      flash('all-flash', `${email}: resources access ${granted ? 'granted' : 'revoked'}.`, 'success');
     }
   }
 
