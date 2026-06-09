@@ -691,28 +691,36 @@
       }
 
       // Check if a row already exists (safety check against duplicates)
-      const { data: existing } = await sb
+      const { data: existing, error: lookupError } = await sb
         .from('resource_users')
         .select('id')
         .eq('email', email)
         .limit(1)
         .maybeSingle();
 
-      let error;
+      console.log('Lookup result:', existing, 'Lookup error:', lookupError);
+
+      let dbError;
       if (existing) {
-        // Row exists — just update it
-        ({ error } = await sb
+        console.log('Updating existing row:', existing.id);
+        const { error: updateError } = await sb
           .from('resource_users')
           .update({ name: enteredName, can_access_resources: true })
-          .eq('id', existing.id));
+          .eq('id', existing.id);
+        dbError = updateError;
+        console.log('Update error:', updateError);
       } else {
-        ({ error } = await sb
+        console.log('Inserting new row for:', email);
+        const { data: insertData, error: insertError } = await sb
           .from('resource_users')
-          .insert({ name: enteredName, email: email, can_access_resources: true }));
+          .insert({ name: enteredName, email: email, can_access_resources: true })
+          .select();
+        dbError = insertError;
+        console.log('Insert data:', insertData, 'Insert error:', insertError);
       }
 
-      if (error) {
-        flash('all-flash', `Error creating user: ${error.message}`, 'error');
+      if (dbError) {
+        flash('all-flash', `Error: ${dbError.message}`, 'error');
         loadAllUsers();
       } else {
         flash('all-flash', `${enteredName} added and access granted.`, 'success');
