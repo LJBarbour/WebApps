@@ -613,15 +613,25 @@
         const ext = extMap[a.email] || null;
         const isUol = !!uol;
         const isExt = !!ext;
+        const hasRow = isUol || isExt;
         const hasAccess = (uol && uol.can_access_resources) || (ext && ext.can_access_resources) || false;
         const rowId   = uol ? uol.id : (ext ? ext.id : null);
         const rowType = isUol ? 'uol' : (isExt ? 'ext' : 'none');
-        const displayName = uol ? uol.name : (ext ? ext.name : '—');
+        const displayName = uol ? uol.name : (ext ? ext.name : '');
+        const emailKey = esc(a.email).replace('@','_at_').replace(/\./g,'_');
+
+        const nameCell = hasRow
+          ? `<div class="user-name">${esc(displayName) || '<em style="color:var(--ink-light)">—</em>'}</div>`
+          : `<input type="text" class="name-input" id="name-${emailKey}"
+               placeholder="Enter name to grant access"
+               style="font-family:'DM Sans',sans-serif; font-size:12.5px; padding:3px 7px;
+                      border:1px solid var(--border); border-radius:6px; background:var(--paper);
+                      color:var(--ink); outline:none; width:100%;">`;
 
         return `
           <tr>
             <td>
-              <div class="user-name">${esc(displayName)}</div>
+              ${nameCell}
               <div class="user-email">${esc(a.email)}</div>
             </td>
             <td>
@@ -629,15 +639,14 @@
                 ? '<span class="type-badge type-uol">UoL</span>'
                 : isExt
                   ? '<span class="type-badge type-ext">Ext</span>'
-                  : '<span class="type-badge" style="background:#f0f0ee;color:#999;border:1px solid #ddd;">—</span>'
+                  : '<span class="type-badge" style="background:#f0f0ee;color:#999;border:1px solid #ddd;">New</span>'
               }
             </td>
             <td>
               <div class="toggle-wrap">
                 <div class="toggle">
                   <input type="checkbox" ${hasAccess ? 'checked' : ''}
-                    ${!rowId ? 'disabled' : ''}
-                    onchange="toggleAccess('${rowType}', '${rowId}', '${esc(a.email)}', this.checked, '${esc(displayName)}')">
+                    onchange="toggleAccess('${rowType}', '${rowId}', '${esc(a.email)}', this.checked, '${esc(displayName)}', 'name-${emailKey}')">
                   <span class="slider"></span>
                 </div>
                 <span class="toggle-label">${hasAccess ? 'Granted' : 'Denied'}</span>
@@ -665,13 +674,37 @@
   }
 
   // ── TOGGLE ACCESS ──
-  async function toggleAccess(type, rowId, email, granted, name) {
-    if (!rowId || type === 'none') {
-      flash('all-flash', `${email} has no entry in users or resource_users — cannot toggle.`, 'error');
-      loadAllUsers();
+  async function toggleAccess(type, rowId, email, granted, name, nameInputId) {
+    // New user — no row in either table yet. Create one in resource_users.
+    if (type === 'none' || !rowId) {
+      if (!granted) return; // Toggling off a user with no row — nothing to do
+
+      // Get the name from the input field
+      const nameInput = nameInputId ? document.getElementById(nameInputId) : null;
+      const enteredName = nameInput ? nameInput.value.trim() : '';
+      if (!enteredName) {
+        flash('all-flash', 'Please enter a name for this user before granting access.', 'error');
+        if (nameInput) nameInput.focus();
+        // Revert the toggle visually
+        loadAllUsers();
+        return;
+      }
+
+      const { error } = await sb
+        .from('resource_users')
+        .insert({ name: enteredName, email: email, can_access_resources: true });
+
+      if (error) {
+        flash('all-flash', `Error creating user: ${error.message}`, 'error');
+        loadAllUsers();
+      } else {
+        flash('all-flash', `${enteredName} added and access granted.`, 'success');
+        loadAllUsers();
+      }
       return;
     }
 
+    // Existing user — update their row
     const table = type === 'uol' ? 'users' : 'resource_users';
     const { error } = await sb
       .from(table)
@@ -679,10 +712,9 @@
       .eq('id', rowId);
 
     if (error) {
-      flash('all-flash', `Error updating ${name}: ${error.message}`, 'error');
+      flash('all-flash', `Error updating ${name || email}: ${error.message}`, 'error');
       loadAllUsers();
     } else {
-      // Update the label next to the toggle without reloading the whole table
       flash('all-flash', `${name || email}: resources access ${granted ? 'granted' : 'revoked'}.`, 'success');
     }
   }
