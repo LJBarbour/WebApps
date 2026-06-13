@@ -2,27 +2,6 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-
-<!-- ── RESOURCE ACCESS CHECK ── -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script>
-(async function() {
-  const sb = supabase.createClient(
-    'https://mqpvnisphntdwhqoiqlt.supabase.co',
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xcHZuaXNwaG50ZHdocW9pcWx0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc1NzM5NjIsImV4cCI6MjA5MzE0OTk2Mn0.7eAeXAh0heqiaTLclqUzAeNY2gQDcbxNRe2LrLXvpHg'
-  );
-  const { data: { session } } = await sb.auth.getSession();
-  if (!session) { window.location.href = 'https://ljbarbour.github.io/WebApps/resources.html'; return; }
-  const email = session.user.email;
-  const { data: u } = await sb.from('users').select('can_access_resources').eq('email', email).maybeSingle();
-  const { data: r } = await sb.from('resource_users').select('can_access_resources').eq('email', email).maybeSingle();
-  if (!(u?.can_access_resources || r?.can_access_resources)) {
-    window.location.href = 'https://ljbarbour.github.io/WebApps/resources.html';
-  }
-})();
-</script>
-<!-- ── END RESOURCE ACCESS CHECK ── -->
-
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sorption Calorimetry Viewer</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:wght@300;600&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
@@ -203,6 +182,18 @@ select:focus{border-color:var(--accent)}
     </div>
   </div>
 
+  <div class="sb">
+    <div class="lbl">Desorption tail extension</div>
+    <div style="font-size:10px;color:#888;margin-bottom:6px;font-family:var(--mono);line-height:1.5">Extend data retention beyond t<sub>end</sub> to capture slow kinetics. Default: ends at extrapolated P=0.</div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <input type="range" id="tailExtend" min="0" max="3600" value="0" step="60"
+             style="flex:1;accent-color:var(--accent)"
+             oninput="document.getElementById('tailExtendVal').textContent=this.value+' s';renderRawChart();redraw();">
+      <span id="tailExtendVal" style="font-family:var(--mono);font-size:11px;min-width:50px">0 s</span>
+    </div>
+    <div style="font-size:9px;color:#aaa;font-family:var(--mono);margin-top:3px">Slider max auto-set on file load</div>
+  </div>
+
   <div class="sb" style="display:flex;flex-direction:column;gap:5px">
     <button class="btn" id="btnExp" disabled onclick="exportCSV()">Export CSV</button>
     <button class="btn out" id="btnExpRaw" disabled onclick="exportRawCSV()">Export Raw CSV</button>
@@ -215,6 +206,7 @@ select:focus{border-color:var(--accent)}
   <div class="chart-tabs">
     <button class="chart-tab active" id="tab-raw"    onclick="switchTab('raw')">Raw Data</button>
     <button class="chart-tab"        id="tab-interp" onclick="switchTab('interp')">Pressure Interpolation</button>
+    <button class="chart-tab"        id="tab-detail" onclick="switchTab('detail')">Interpolation Detail</button>
     <button class="chart-tab"        id="tab-hf"     onclick="switchTab('hf')">Heat Flow vs Pressure</button>
     <button class="chart-tab"        id="tab-guide"  onclick="switchTab('guide')">Guide</button>
   </div>
@@ -223,6 +215,20 @@ select:focus{border-color:var(--accent)}
   <div class="tab-content" id="tc-raw" style="display:none">
     <div class="chart-area">
       <div class="cw"><canvas id="rawChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- DETAIL TAB -->
+  <div class="tab-content" id="tc-detail" style="display:none;flex-direction:row;overflow:hidden">
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--rule)">
+      <div class="chart-area" style="flex:1;min-height:0">
+        <div class="cw"><canvas id="detailAdsChart"></canvas></div>
+      </div>
+    </div>
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+      <div class="chart-area" style="flex:1;min-height:0">
+        <div class="cw"><canvas id="detailDesChart"></canvas></div>
+      </div>
     </div>
   </div>
 
@@ -251,18 +257,61 @@ select:focus{border-color:var(--accent)}
   <div class="tab-content guide-body" id="tc-guide" style="display:none">
     <h2 style="font-family:var(--serif);font-size:22px;font-weight:600;margin-bottom:4px">Sorption Calorimetry Viewer</h2>
     <p style="font-family:var(--mono);font-size:9px;letter-spacing:.15em;text-transform:uppercase;color:var(--accent);margin-bottom:20px">User Guide</p>
-    <p>This app processes heat flow and pressure data from Setaram/BV sorption calorimetry instruments. Drop a tab-delimited <code>.txt</code> file onto the drop zone to begin. The file is expected to contain a short metadata header followed by five tab-separated columns: Index, Time (s), Temperature (°C), HeatFlow (mW/g), and Analog signal (bar or mbar).</p>
+
+    <p>This app processes heat flow and pressure data from Setaram/BV sorption calorimetry instruments. It handles the pressure signal reconstruction required when a gauge-type pressure transmitter is used, and produces publication-quality heat flow vs pressure plots with integrated peak areas.</p>
+
+    <div class="g-sec">Instrument background</div>
+    <p>In a sorption calorimetry experiment, the sample cell pressure is controlled by a ProportionAir pressure valve (0–10 bar) and a syringe pump (10 bar upward). The calorimeter reads only the transmitter near the sample cell. Two types of transmitter are used:</p>
+    <p style="margin-top:8px"><b>Absolute transmitter</b> (experiments below ~40 bar): reads correctly from 0 bar upward. No pressure reconstruction is needed.</p>
+    <p style="margin-top:8px"><b>Gauge transmitter</b> (experiments above ~40 bar): has a lower floor, typically around 0.9–1.1 bar. Below this floor, the transmitter saturates and reports a constant value equal to the floor. It cannot read the 0–floor bar region, which must be reconstructed by extrapolation (see Pressure Interpolation below).</p>
+    <p style="margin-top:8px">The experiment proceeds as follows: the system equilibrates at vacuum (pressure ≈ 0 bar) while the calorimeter records data. Once a stable heat flow baseline is achieved, the user starts the pressure ramp using the pressure valve. When the valve reaches its limit (~10 bar), the user manually switches to the syringe pump to reach higher pressures. At the peak pressure, the syringe pump ramps back down to ~10 bar, then the user switches back to the pressure valve to return to vacuum. Any delay during the valve/pump changeovers results in a flat pressure hold that is detected and removed by the app.</p>
+
+    <div class="g-sec">File format</div>
+    <p>Drop a tab-delimited <code>.txt</code> file onto the drop zone, or click the drop zone to browse. The file must contain a short metadata header followed by a data table with the header row <code>Index&nbsp;&nbsp;Time (s)&nbsp;&nbsp;Temperature (°C)&nbsp;&nbsp;HeatFlow (mW/g)&nbsp;&nbsp;Analog signal (bar)</code>. The pressure unit is read from this header line. Metadata fields parsed from the header: <em>Creation Date</em>, <em>User</em>, <em>Initial Mass</em> (mg), and <em>Molar Mass</em> (g/mol).</p>
+
     <div class="g-sec">Raw Data tab</div>
-    <p>Shows heat flow (left axis, orange) and raw pressure (right axis, blue) versus time. Use the Subsample control in the sidebar to reduce the number of plotted points for performance — the full dataset is always used for analysis.</p>
+    <p>Shows heat flow (left axis) and raw pressure (right axis) versus time. The traces are colour-coded by region:</p>
+    <p style="margin-top:6px">&#9632; <b>Orange / blue — kept:</b> data in the active ramp window (t₀ to t_end), excluding holds.</p>
+    <p style="margin-top:4px">&#9632; <b>Amber / green — interpolated P region:</b> data between t₀ and the transmitter wake point (adsorption) or between the transmitter sleep point and t_end (desorption). Heat flow here is real measured data; pressure is reconstructed by extrapolation.</p>
+    <p style="margin-top:4px">&#9632; <b>Grey — omitted:</b> pre-ramp baseline, mid-experiment valve/pump hold regions, and post-experiment baseline.</p>
+    <p style="margin-top:8px">Use the <em>Subsample</em> control to reduce the number of plotted points for display performance — the full dataset is always used for analysis. The <em>Desorption tail extension</em> slider extends the data retention window beyond t_end (the extrapolated P=0 point) to capture slow post-desorption kinetics.</p>
+
     <div class="g-sec">Pressure Interpolation tab</div>
-    <p>The main pressure transmitter near the sample cell is a gauge device below ~40 bar, flooring at ~1 bar when pressure is below its range. The app fits a linear P–t line through the ramp region (default 1.5–8.5 bar) for both the adsorption and desorption legs, then extrapolates back to t₀ (when P = 0) and forward to the end of desorption. The corrected pressure is used for all subsequent analysis and export.</p>
-    <p>The transmitter floor is detected automatically from the median of the first 500 data points. You can override this with the <em>Tx floor</em> field. Adjust <em>Fit from / Fit to</em> to control which portion of the ramp is used for the linear regression, then click <b>Recalculate</b>.</p>
+    <p>This tab shows the full pressure correction applied to the gauge transmitter data, with fit statistics.</p>
+    <p style="margin-top:8px"><b>Transmitter floor (Tx floor):</b> the pressure value the transmitter reports when the true pressure is below its range. Detected automatically as the median of the first 500 data points (the pre-ramp baseline). You can override this with the <em>Tx floor</em> field.</p>
+    <p style="margin-top:8px"><b>Wake threshold:</b> the transmitter is considered to have "woken up" (i.e. to be reporting reliable values) when the raw pressure exceeds <em>Tx floor + 0.1 bar</em>. This 0.1 bar safety margin is hardcoded to avoid using noisy readings near the floor. If your transmitter floor is, say, 2.0 bar, the interpolated region extends from 0 to approximately 2.1 bar, and the fit data begins at 2.1 bar.</p>
+    <p style="margin-top:8px"><b>Fit from / Fit to:</b> the pressure range used for the linear regression of P vs t on each leg. Default 1.5–8.5 bar. The fit should be performed in the linear ramp region, avoiding the transmitter floor transition (lower end) and the syringe pump plateau or pressure overshoot (upper end). After changing these values, click <em>Recalculate</em>.</p>
+    <p style="margin-top:8px"><b>Pressure reconstruction:</b> a straight line P = m·t + b is fitted through the [Fit from, Fit to] region on each leg. This line is extrapolated back to find t₀ (where P = 0 on adsorption) and t_end (where P = 0 on desorption). Points between t₀ and the wake threshold use the extrapolated line as their corrected pressure. Points above the wake threshold use the raw transmitter reading. The fit slope gives the ramp rate in mbar/min.</p>
+
+    <div class="g-sec">Interpolation Detail tab</div>
+    <p>Shows a zoomed view of the pressure reconstruction for adsorption (left) and desorption (right), from the start of the fit range down to P = 0. Each plot shows:</p>
+    <p style="margin-top:6px">&#9632; <b>Grey line:</b> raw pressure from the transmitter.</p>
+    <p style="margin-top:4px">&#9632; <b>Coloured dots:</b> points in the [Fit from, Fit to] range used for the linear regression.</p>
+    <p style="margin-top:4px">&#9632; <b>Green dots/line:</b> the interpolated region — points below the wake threshold (Tx floor + 0.1 bar) where pressure is reconstructed.</p>
+    <p style="margin-top:4px">&#9632; <b>Black solid line:</b> the linear fit over the [Fit from, Fit to] range, with equation and R² in the legend.</p>
+    <p style="margin-top:4px">&#9632; <b>Orange dashed line:</b> the extrapolation of the fit below Fit from down to P = 0.</p>
+
+    <div class="g-sec">Flat-segment detection</div>
+    <p>Flat pressure segments are detected using a rolling variance window of ±400 data points (~200 s at 0.5 s/point). Any region where the local variance stays below 0.005 bar² for at least 200 consecutive points is classified as flat and removed from the analysis and export. Three types of flat segment are removed:</p>
+    <p style="margin-top:6px">1. <b>Pre-ramp baseline:</b> the equilibration period before the pressure ramp starts (before t₀).</p>
+    <p style="margin-top:4px">2. <b>Mid-experiment hold:</b> the flat plateau that occurs when the user is not present to switch between the pressure valve and syringe pump (typically at ~10 bar).</p>
+    <p style="margin-top:4px">3. <b>Post-experiment baseline:</b> the period after the pressure has returned to vacuum.</p>
+    <p style="margin-top:8px">Note: the interpolated P regions (0 to wake threshold on each leg) are <em>never</em> removed even if their pressure variance is low, because the heat flow data there is real and scientifically important.</p>
+
     <div class="g-sec">Heat Flow vs Pressure tab</div>
-    <p>Plots heat flow against the corrected pressure. Use the Adsorption / Desorption toggles in the sidebar to show or hide each leg. The right-hand control panel provides full publication-quality styling: axis labels and ranges, fonts, grid, tick marks, point and line styles, legend, title, and image export.</p>
-    <div class="g-sec">Flat-segment removal in CSV export</div>
-    <p>When exporting, the app automatically detects and removes flat pressure segments (pre-ramp baseline, mid-experiment valve/pump holds at ~10 bar, and post-ramp baseline). Detection uses a rolling variance window; any region where the local pressure variance stays below 0.005 bar² for more than 50 consecutive points is removed. The exported time column reflects only the time spent actively ramping — hold durations are not added to the clock.</p>
-    <div class="g-sec">Save dialog</div>
-    <p>In Chrome and Edge, the <b>Export CSV</b> button opens a native Save As dialog so you can choose the filename and folder. In Firefox and Safari, the file is downloaded with an auto-generated name.</p>
+    <p>Plots heat flow (mW/g) against the corrected pressure for the adsorption and/or desorption legs. Use the toggle buttons in the sidebar to show or hide each leg. The <em>Remove holds</em> toggle excludes flat-segment data points from the plot. The right-hand control panel provides full publication-quality styling controls: axis ranges, labels and fonts, grid and tick marks, line colours and styles, legend position, chart title, and image export (PNG or JPEG at any resolution).</p>
+    <p style="margin-top:8px"><b>Zoom:</b> click and drag to rubber-band zoom, scroll wheel to zoom in/out centred on the cursor, double-click to reset zoom. The ⟲ Reset button in the top-right corner of the chart also resets zoom.</p>
+
+    <div class="g-sec">Running integral</div>
+    <p>Enable in the Integration panel (right-hand controls). Displays the cumulative integral of heat flow with respect to time as a dashed overlay on the Heat Flow vs Pressure chart. Time is not directly available in the P-space plot, but is reconstructed from the pressure ramp rate: dt = |dP / ramp rate|, where the ramp rate (bar/s) comes from the linear fit on each leg.</p>
+    <p style="margin-top:8px">The adsorption integral accumulates from low P to high P (upward on screen). The desorption integral is vertically mirrored — it accumulates from high P to low P and is displayed inverted, so both integrals visually resemble sorption isotherms. Each leg is independently scaled to fill the full plot height. The integral units are mJ/g (mW/g × s).</p>
+
+    <div class="g-sec">Peak area integration</div>
+    <p>Click <em>Pick two points</em> in the Integration panel, then click two points on the Heat Flow vs Pressure chart to bracket a peak. A straight-line baseline is drawn between the two clicked points; the area between the signal and the baseline is integrated. The result is reported in mJ/g, using the ramp rate to convert pressure intervals to time: ∫ (HF − baseline) · dt where dt = |dP / ramp rate|. If the sample mass is available from the file header, the total energy in mJ is also reported.</p>
+    <p style="margin-top:8px">For the low-pressure peak at the start of adsorption or end of desorption: click the first point near or below P = 0 (the left edge of the plot). If the click is below the lowest pressure data point, the baseline anchor is automatically set to (P = 0, HF = 0). Click the second point on the other side of the peak. Up to one adsorption and one desorption integration can be shown simultaneously. Click <em>Clear all</em> to remove both.</p>
+
+    <div class="g-sec">CSV export</div>
+    <p>The <em>Export CSV</em> button exports the processed data with flat segments removed and the time axis adjusted to reflect only active ramp time. Columns: adjusted time (s), corrected pressure (bar or mbar), heat flow (mW/g), leg (adsorption/desorption). The <em>Export Raw CSV</em> button exports the full raw dataset without any processing. In Chrome and Edge, both buttons open a native Save As dialog so you can choose the filename and folder directly.</p>
   </div>
 
   <div id="status">Ready — drop a data file to begin.</div>
@@ -367,8 +416,10 @@ select:focus{border-color:var(--accent)}
       <div class="cr"><span class="cl">Show legend</span><input type="checkbox" id="legShow" checked oninput="redraw()"></div>
       <div class="cr"><span class="cl">Position</span>
         <select id="legPos" oninput="redraw()">
-          <option value="top">Top</option><option value="bottom">Bottom</option>
-          <option value="left">Left</option><option value="right">Right</option>
+          <option value="top-right">Top right</option>
+          <option value="top-left">Top left</option>
+          <option value="bottom-right">Bottom right</option>
+          <option value="bottom-left">Bottom left</option>
         </select>
       </div>
       <div class="cr"><span class="cl">Font size</span><input type="range" id="legSz" min="8" max="36" value="14" oninput="V(this);redraw()"><span class="rv2">14</span></div>
@@ -449,6 +500,7 @@ function formatTime(s){
 let RAW=[], META={}, INTERP=null, CHARTS={};
 let showAds=true, showDes=true;
 let IS_FLAT=null; // Uint8Array — 1 = flat/hold segment, 0 = active ramp
+let P_SMOOTH=null; // cached smoothed pressure array, recomputed when smoothWin changes
 
 // zoom state — null means "auto" (full data range)
 let ZOOM={xMin:null,xMax:null,yMin:null,yMax:null};
@@ -476,11 +528,12 @@ dz.addEventListener('click',()=>{
 
 function handleFile(file){
   if(!file)return;
+  st('Loading: '+file.name+'...');
   setLoading(true);
   const reader=new FileReader();
   reader.onload=e=>{
     try{ parseFileBuffer(e.target.result,file.name); }
-    catch(err){ setLoading(false); st('Error: '+err.message+' — '+err.stack,'err'); console.error(err); }
+    catch(err){ setLoading(false); st('Error: '+err.message,'err'); console.error(err); }
   };
   reader.onerror=()=>{setLoading(false);st('Could not read file.','err')};
   reader.readAsArrayBuffer(file);
@@ -491,6 +544,7 @@ function handleFile(file){
 // ═══════════════════════════════════════════
 function parseFileBuffer(buffer,fileName){
   const bytes=new Uint8Array(buffer);
+  // Detect encoding from BOM; default to windows-1252 (handles latin-1 too)
   let encoding='windows-1252';
   if(bytes[0]===0xFF&&bytes[1]===0xFE)encoding='utf-16le';
   else if(bytes[0]===0xFE&&bytes[1]===0xFF)encoding='utf-16be';
@@ -554,14 +608,14 @@ function parseFileBuffer(buffer,fileName){
   document.getElementById('btnInterp').disabled=false;
   document.getElementById('btnExp').disabled=false;
   document.getElementById('btnExpRaw').disabled=false;
+  // Set tail slider max to full remaining duration after halfway point
+  const tailMax=Math.round(META.tMax-META.tMin);
+  const tailEl=document.getElementById('tailExtend');
+  tailEl.max=tailMax; tailEl.value=0;
+  document.getElementById('tailExtendVal').textContent='0 s';
 
-  st('Parsed '+RAW.length.toLocaleString()+' rows — rendering…');
   renderMetaStrip();
-  st('Meta strip done — rendering raw chart…');
-  renderRawChart();
-  st('Raw chart done — running interpolation…');
   runInterpolation();
-  st('Interpolation done — switching tab…');
   switchTab('raw');
   setLoading(false);
   st('Loaded '+RAW.length.toLocaleString()+' data points.','ok');
@@ -589,7 +643,7 @@ function renderMetaStrip(){
 // ═══════════════════════════════════════════
 //  Tab switching
 // ═══════════════════════════════════════════
-const TAB_IDS=['raw','interp','hf','guide'];
+const TAB_IDS=['raw','interp','detail','hf','guide'];
 function switchTab(id){
   TAB_IDS.forEach(t=>{
     document.getElementById('tab-'+t).classList.toggle('active',t===id);
@@ -604,27 +658,112 @@ function switchTab(id){
 function destroyChart(id){if(CHARTS[id]){CHARTS[id].destroy();delete CHARTS[id];}}
 
 // ═══════════════════════════════════════════
-//  TAB 1: RAW CHART
+//  TAB 1: RAW CHART (colour-coded by region)
 // ═══════════════════════════════════════════
+// Region colours:
+//   Active ramp (kept):        HF=#b84a2e  P=#2a6496
+//   Interpolated 0-floor bar:  HF=#b84a2e  P=#7bae4a  (HF kept, P reconstructed)
+//   Flat hold (omitted):       HF=#bbbbbb  P=#cccccc
+function getTailEnd(){
+  // t0down + user extension (seconds)
+  const ext=parseInt(document.getElementById('tailExtend')?.value||0);
+  return (INTERP?.t0down??-Infinity)+ext;
+}
+
+function rawRegion(i){
+  // Returns 'active' | 'interp' | 'flat'
+  if(!IS_FLAT||!INTERP) return 'active';
+  const{upWakeIdx,downSleepIdx,peakIdx,t0up,t0down}=INTERP;
+  const t=RAW[i].t;
+  const tStart=t0up??Infinity;
+  const tEnd=getTailEnd();
+  // Points between tStart and tEnd are always KEPT
+  if(t>=tStart && t<=tEnd){
+    if(i<=peakIdx && i<upWakeIdx) return 'interp'; // ads interpolated P region
+    if(i>peakIdx  && i>downSleepIdx) return 'interp'; // des interpolated P region
+    if(IS_FLAT[i]) return 'flat'; // mid-experiment hold
+    return 'active';
+  }
+  return 'flat';
+}
+
 function renderRawChart(){
+  if(!RAW.length)return;
   const N=parseInt(document.getElementById('rawSubsample').value)||50;
-  const sub=RAW.filter((_,i)=>i%N===0);
+
+  // HF: two series — kept (active+interp combined, no break) and omitted (flat)
+  // P:  three series — measured (active), interpolated (interp), omitted (flat)
+  const hfKept=[], hfOmit=[];
+  const pMeas=[], pInterp=[], pOmit=[];
+
+  let lastHfKept=true; // track transitions for null-break on HF omit only
+  let lastPReg=null;
+
+  for(let i=0;i<RAW.length;i++){
+    if(i%N!==0) continue;
+    const reg=rawRegion(i);
+    const t=RAW[i].t, hf=RAW[i].hf, p=RAW[i].p_raw;
+
+    // HF: kept = active or interp (continuous, no break between them)
+    //     omit = flat only
+    const hfKeptNow=(reg==='active'||reg==='interp');
+    if(hfKeptNow){
+      // If previous point was omitted, add a bridging null to the omit series
+      // and a real point to kept to resume the line
+      hfKept.push({x:t,y:hf});
+      // break the omit line if switching
+      if(!lastHfKept) hfOmit.push({x:t,y:null});
+    } else {
+      // break the kept line if switching from kept to flat
+      if(lastHfKept) hfKept.push({x:t,y:null});
+      hfOmit.push({x:t,y:hf});
+    }
+    lastHfKept=hfKeptNow;
+
+    // P: separate series per region, null-break on transition
+    const pTarget=reg==='active'?pMeas:reg==='interp'?pInterp:pOmit;
+    if(lastPReg&&lastPReg!==reg){
+      // close off old series and start new one
+      const pOld=lastPReg==='active'?pMeas:lastPReg==='interp'?pInterp:pOmit;
+      pOld.push({x:t,y:null});
+    }
+    pTarget.push({x:t,y:p});
+    lastPReg=reg;
+  }
+
+  const datasets=[
+    {label:'HF — kept',data:hfKept,
+     borderColor:'#b84a2e',backgroundColor:'transparent',
+     borderWidth:1.4,pointRadius:0,yAxisID:'yHF',tension:0.1},
+    {label:'HF — omitted (hold/baseline)',data:hfOmit,
+     borderColor:'#bbbbbb',backgroundColor:'transparent',
+     borderWidth:1,pointRadius:0,yAxisID:'yHF',tension:0.1},
+    {label:'P — measured',data:pMeas,
+     borderColor:'#2a6496',backgroundColor:'transparent',
+     borderWidth:1.4,pointRadius:0,yAxisID:'yP',tension:0.1},
+    {label:'P — interpolated (0–floor)',data:pInterp,
+     borderColor:'#7bae4a',backgroundColor:'transparent',
+     borderWidth:1.4,pointRadius:0,yAxisID:'yP',tension:0.1},
+    {label:'P — omitted (hold/baseline)',data:pOmit,
+     borderColor:'#cccccc',backgroundColor:'transparent',
+     borderWidth:1,pointRadius:0,yAxisID:'yP',
+     borderDash:[4,3],tension:0.1},
+  ];
+
   destroyChart('rawChart');
   const ctx=document.getElementById('rawChart').getContext('2d');
   CHARTS.rawChart=new Chart(ctx,{
     type:'line',
-    data:{datasets:[
-      {label:'Heat Flow (mW/g)',data:sub.map(r=>({x:r.t,y:r.hf})),
-       borderColor:'#b84a2e',backgroundColor:'transparent',borderWidth:1.2,pointRadius:0,yAxisID:'yHF',tension:0.1},
-      {label:'Pressure ('+META.pressureUnit+')',data:sub.map(r=>({x:r.t,y:r.p_raw})),
-       borderColor:'#2a6496',backgroundColor:'transparent',borderWidth:1.2,pointRadius:0,yAxisID:'yP',tension:0.1},
-    ]},
+    data:{datasets},
     options:{
       animation:false,responsive:true,maintainAspectRatio:false,
       interaction:{mode:'index',intersect:false},
+      spanGaps:false,
       plugins:{
-        legend:{position:'top',labels:{font:{family:'DM Sans',size:12},boxWidth:16,padding:14}},
-        tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${d4(c.raw.y)}`,title:i=>`t = ${d1(i[0].raw.x)} s`}}
+        legend:{position:'top',labels:{font:{family:'DM Sans',size:11},boxWidth:14,padding:10,
+          filter:item=>item.text!==''  // hide empty
+        }},
+        tooltip:{callbacks:{label:c=>c.raw.y!=null?`${c.dataset.label}: ${d4(c.raw.y)}`:'',title:i=>`t = ${d1(i[0].raw.x)} s`}}
       },
       scales:{
         x:{type:'linear',title:{display:true,text:'Time (s)',font:{family:'DM Mono',size:11}},ticks:{font:{family:'DM Mono',size:10}},grid:{color:'#ede7d8'}},
@@ -669,8 +808,11 @@ function runInterpolation(){
 
   buildCorrectedPressure();
   buildFlatMask();
+  P_SMOOTH=null;
   renderInterpChart();
   renderInterpStats();
+  renderDetailCharts();
+  renderRawChart();
   ZOOM={xMin:null,xMax:null,yMin:null,yMax:null};
   redraw();
 }
@@ -678,7 +820,7 @@ function runInterpolation(){
 function buildFlatMask(){
   const n=RAW.length;
   IS_FLAT=new Uint8Array(n);
-  const WIN=400, VTHR=0.005, MINTHR=50;
+  const WIN=400, VTHR=0.005, MINTHR=200;
   const vals=RAW.map(r=>r.p_raw);
   let sum=0,sum2=0,wlen=0;
   for(let j=0;j<Math.min(WIN,n);j++){sum+=vals[j];sum2+=vals[j]*vals[j];wlen++;}
@@ -791,6 +933,128 @@ function renderInterpStats(){
 }
 
 // ═══════════════════════════════════════════
+//  TAB: INTERPOLATION DETAIL
+// ═══════════════════════════════════════════
+function renderDetailCharts(){
+  if(!INTERP)return;
+  const{upFit,downFit,t0up,t0down,txFloor,upWakeIdx,downSleepIdx,peakIdx,fitFrom,fitTo}=INTERP;
+  const fitToVal=parseFloat(document.getElementById('fitTo').value)||8.5;
+  const fitFromVal=parseFloat(document.getElementById('fitFrom').value)||1.5;
+
+  function makeDetailChart(canvasId,fit,t0,wakeIdx,isAds){
+    destroyChart(canvasId);
+    if(!fit||t0===null)return;
+
+    // Raw points from t0 to where P reaches fitTo — ads: before peak, des: after peak
+    // For adsorption: collect from t0 up to where P first reaches fitToVal
+    // For desorption: collect from where P first drops to fitToVal down to t0down
+    const ptsRaw=[];
+    if(isAds){
+      // Find first index where p_raw exceeds fitToVal — that's our end point
+      let adsEnd=peakIdx;
+      for(let i=0;i<=peakIdx;i++){
+        if(RAW[i].p_raw>fitToVal){adsEnd=i;break;}
+      }
+      for(let i=0;i<=adsEnd;i++){
+        const r=RAW[i];
+        if(r.t<t0-200)continue;
+        ptsRaw.push({x:r.t,y:r.p_raw});
+      }
+    } else {
+      // Find first index on desorption leg where p_raw drops to fitToVal
+      let desStart=peakIdx;
+      for(let i=peakIdx;i<RAW.length;i++){
+        if(RAW[i].p_raw<=fitToVal){desStart=i;break;}
+      }
+      for(let i=desStart;i<RAW.length;i++){
+        const r=RAW[i];
+        if(t0!==null&&r.t>t0+300)break;
+        ptsRaw.push({x:r.t,y:r.p_raw});
+      }
+    }
+
+    // Points used for the fit (fitFrom..fitTo)
+    const ptsFit=ptsRaw.filter(p=>p.y>=fitFromVal&&p.y<=fitToVal);
+
+    // Interpolated region: points before upWakeIdx (ads) or after downSleepIdx (des)
+    // ptsRaw was built with RAW indices in order, so just check the time boundary
+    const wakeT   = RAW[upWakeIdx]?.t ?? Infinity;
+    const sleepT  = RAW[downSleepIdx]?.t ?? -Infinity;
+    const ptsInterp = isAds
+      ? ptsRaw.filter(p=>p.x < wakeT)
+      : ptsRaw.filter(p=>p.x > sleepT);
+
+    // Fit line: from fitToVal down to 0 (for desorption) or 0 up to fitToVal (ads)
+    // Compute t values where the line hits P=fitToVal and P=0
+    // P = fit.m * t + fit.b  =>  t = (P - fit.b) / fit.m
+    const tAtFitTo   = (fitToVal  - fit.b) / fit.m;
+    const tAtFitFrom = (fitFromVal - fit.b) / fit.m;
+    const tAtZero    = (0          - fit.b) / fit.m;
+    // Two line segments: fit range (fitFrom→fitTo) and extrapolated (0→fitFrom)
+    function linePts(pLo, pHi){
+      const tLo=Math.min((pLo-fit.b)/fit.m,(pHi-fit.b)/fit.m)-50;
+      const tHi=Math.max((pLo-fit.b)/fit.m,(pHi-fit.b)/fit.m)+50;
+      const out=[];
+      for(let k=0;k<=100;k++){
+        const t=tLo+(tHi-tLo)*k/100;
+        const p=fit.m*t+fit.b;
+        if(p>=pLo-0.01&&p<=pHi+0.01)out.push({x:t,y:p});
+      }
+      return out;
+    }
+    const fitLine      = linePts(fitFromVal, fitToVal);  // fit range
+    const extrapLine   = linePts(0, fitFromVal);          // extrapolated below fitFrom
+
+    const label=isAds?'Adsorption':'Desorption';
+    const col  =isAds?'#b84a2e':'#2a6496';
+
+    const ctx=document.getElementById(canvasId).getContext('2d');
+    CHARTS[canvasId]=new Chart(ctx,{
+      type:'scatter',
+      data:{datasets:[
+        {label:'Raw P',data:ptsRaw,
+         borderColor:'#aaaaaa',backgroundColor:'transparent',
+         pointRadius:1,showLine:true,borderWidth:1,tension:0},
+        {label:'Fit range ('+fitFromVal+'–'+fitToVal+' '+META.pressureUnit+')',
+         data:ptsFit,
+         borderColor:col,backgroundColor:col,
+         pointRadius:3,showLine:false},
+        {label:'Interpolated P (extrapolated)',data:ptsInterp,
+         borderColor:'#7bae4a',backgroundColor:'#7bae4a',
+         pointRadius:3,showLine:true,borderWidth:2,tension:0},
+        {label:`Linear fit (R²=${fit.r2.toFixed(5)})`,
+         data:fitLine,
+         borderColor:'#000000',backgroundColor:'transparent',
+         pointRadius:0,showLine:true,borderWidth:2,borderDash:[],tension:0},
+        {label:`Extrapolated to P=0  P=${fit.m.toFixed(6)}t${fit.b>=0?'+':''}${fit.b.toFixed(3)}`,
+         data:extrapLine,
+         borderColor:'#e07020',backgroundColor:'transparent',
+         pointRadius:0,showLine:true,borderWidth:2,borderDash:[6,3],tension:0},
+      ]},
+      options:{
+        animation:false,responsive:true,maintainAspectRatio:false,
+        plugins:{
+          legend:{position:'top',labels:{font:{family:'DM Sans',size:11},boxWidth:14,padding:8}},
+          title:{display:true,text:label+' leg — interpolation detail',
+                 font:{family:'DM Sans',size:12},color:'#444'},
+          tooltip:{callbacks:{label:c=>`P=${d4(c.raw.y)} ${META.pressureUnit} @ t=${d1(c.raw.x)} s`}}
+        },
+        scales:{
+          x:{type:'linear',title:{display:true,text:'Time (s)',font:{family:'DM Mono',size:11}},
+             ticks:{font:{family:'DM Mono',size:10}},grid:{color:'#ede7d8'}},
+          y:{type:'linear',min:0,max:fitToVal,
+             title:{display:true,text:'Pressure ('+META.pressureUnit+')',font:{family:'DM Mono',size:11}},
+             ticks:{font:{family:'DM Mono',size:10}},grid:{color:'#ede7d8'}},
+        }
+      }
+    });
+  }
+
+  makeDetailChart('detailAdsChart',upFit,  INTERP.t0up,  upWakeIdx,  true);
+  makeDetailChart('detailDesChart',downFit, INTERP.t0down, downSleepIdx, false);
+}
+
+// ═══════════════════════════════════════════
 //  TAB 3: HF vs PRESSURE — custom canvas render
 // ═══════════════════════════════════════════
 // ── helpers ──
@@ -845,28 +1109,87 @@ function computePeakArea(leg, pt1, pt2){
   if(!INTERP||!IS_FLAT)return;
   const N=parseInt(document.getElementById('hfSubsample').value)||10;
   const win=parseInt(document.getElementById('smoothWin').value)||1;
-  const p_smooth=smoothArray(RAW.map(r=>r.p_corr??r.p_raw),win);
+  if(!P_SMOOTH||P_SMOOTH.length!==RAW.length||P_SMOOTH._win!==win){
+    P_SMOOTH=smoothArray(RAW.map(r=>r.p_corr??r.p_raw),win);
+    P_SMOOTH._win=win;
+  }
+  const p_smooth=P_SMOOTH;
   const pi=INTERP.peakIdx;
 
   // Build the series for this leg (same filter as drawHFPlot)
+  // Also include the interpolated pressure region (before upWakeIdx / after downSleepIdx)
+  // even if IS_FLAT would normally exclude them — they are valid data points.
+  const tStart=INTERP.t0up??-Infinity;
+  const tEnd=getTailEnd();
+  const{upWakeIdx:uwi,downSleepIdx:dsi}=INTERP;
   const pts=[];
   const start=leg==='ads'?0:pi;
   const end=leg==='ads'?pi:RAW.length-1;
+  let reachedZero=false;
   for(let i=start;i<=end;i+=N){
-    if(removeFlat&&IS_FLAT&&IS_FLAT[i])continue;
-    const x=p_smooth[i],y=RAW[i].hf;
-    if(x>=0&&isFinite(x)&&isFinite(y))pts.push({x,y,t:RAW[i].t});
+    const r=RAW[i];
+    if(r.t<tStart||r.t>tEnd)continue;
+    // Skip flat holds but NOT the interpolated region
+    const inInterpRegion=(leg==='ads'&&i<uwi)||(leg==='des'&&i>dsi);
+    if(removeFlat&&IS_FLAT&&IS_FLAT[i]&&!inInterpRegion)continue;
+    const x=p_smooth[i],y=r.hf;
+    if(!isFinite(x)||!isFinite(y))continue;
+    if(x<=0){
+      if(!reachedZero){pts.push({x:0,y,t:r.t});reachedZero=true;}
+      continue; // only include the first P=0 point
+    }
+    pts.push({x,y,t:r.t});
   }
   if(pts.length<5)return;
 
-  // Find the two bracketing indices in pts closest to the clicked pressures
-  const findIdx=px=>pts.reduce((b,_,i)=>Math.abs(pts[i].x-px)<Math.abs(pts[b].x-px)?i:b,0);
-  const i1=findIdx(pt1.x), i2=findIdx(pt2.x);
+  // Find closest point to each click independently.
+  // For adsorption: pts are ordered low-P → high-P (index increases with P)
+  // For desorption: pts are ordered high-P → low-P (index increases as P decreases)
+  const findIdx=(px,lo,hi)=>{
+    let best=lo, bestD=Infinity;
+    for(let k=lo;k<=hi;k++){
+      const d=Math.abs(pts[k].x-px);
+      if(d<bestD){bestD=d;best=k;}
+    }
+    return best;
+  };
+  // Find i1 across all pts
+  const i1=findIdx(pt1.x, 0, pts.length-1);
+  // For pt2: constrain search to the correct half based on leg order
+  // Adsorption (low→high P): higher P = higher index
+  //   pt2.x > pt1.x → search i1..end; pt2.x < pt1.x → search 0..i1
+  // Desorption (high→low P): lower P = higher index
+  //   pt2.x < pt1.x → search i1..end; pt2.x > pt1.x → search 0..i1
+  let i2;
+  if(leg==='ads'){
+    i2 = pt2.x>=pt1.x ? findIdx(pt2.x, i1, pts.length-1) : findIdx(pt2.x, 0, i1);
+  } else {
+    i2 = pt2.x<=pt1.x ? findIdx(pt2.x, i1, pts.length-1) : findIdx(pt2.x, 0, i1);
+  }
   const iLo=Math.min(i1,i2), iHi=Math.max(i1,i2);
   if(iHi-iLo<2)return;
 
-  const p1=pts[iLo], p2=pts[iHi];
-  const between=pts.slice(iLo,iHi+1);
+  // "Beyond the data at low P" means:
+  //   adsorption: click.x < pts[0].x       (click is left of first point)
+  //   desorption: click.x < pts[last].x    (click is left of last point, since P decreases)
+  const ptsFirst=pts[0], ptsLast=pts[pts.length-1];
+  const lowestPinPts = leg==='ads' ? ptsFirst.x : ptsLast.x;
+
+  const snap = (clickPt, snappedIdx) =>
+    clickPt.x < lowestPinPts ? {x:Math.max(0,clickPt.x), y:0} : pts[snappedIdx];
+
+  const raw1 = snap(pt1, i1);
+  const raw2 = snap(pt2, i2);
+  const p1 = iLo===i1 ? raw1 : raw2;
+  const p2 = iLo===i1 ? raw2 : raw1;
+
+  // Build between — always runs from iLo to iHi in pts order
+  // Prepend p1 if it was snapped beyond start (ads), append p2 if beyond end (des)
+  let between = pts.slice(iLo, iHi+1);
+  if(leg==='ads' && p1.x < ptsFirst.x)
+    between = [{...p1}, ...between];
+  if(leg==='des' && p2.x < ptsLast.x)
+    between = [...between, {...p2}];
 
   // Straight-line baseline between the two clicked points
   const blSlope=(p2.y-p1.y)/(p2.x-p1.x);
@@ -919,6 +1242,8 @@ function computePeakArea(leg, pt1, pt2){
   const rateStr=rampRate?`${(Math.abs(rampRate)*60000).toFixed(2)} mbar min⁻¹`:'n/a';
   let html=`<span style="letter-spacing:.1em;text-transform:uppercase;font-size:9px;color:${leg==='ads'?gv('adsCol'):gv('desCol')}">${legLabel}</span><br>`;
   html+=`<span style="color:#888">Ramp rate: </span>${rateStr}<br>`;
+  html+=`<span style="color:#888">P1 (snapped): </span>${p1.x.toFixed(3)} ${META.pressureUnit}<br>`;
+  html+=`<span style="color:#888">P2 (snapped): </span>${p2.x.toFixed(3)} ${META.pressureUnit}<br>`;
   if(areamJg!==null){
     html+=`<span style="color:#888">P range: </span>${p1.x.toFixed(3)}–${p2.x.toFixed(3)} ${META.pressureUnit}<br>`;
     html+=`<span style="color:#888">Area (∫HF·dτ): </span><b>${areamJg.toFixed(3)} mJ g⁻¹</b>`;
@@ -991,22 +1316,34 @@ function drawHFPlot(ctx,W,H,forExport){
   const N=parseInt(document.getElementById('hfSubsample').value)||10;
   const win=parseInt(document.getElementById('smoothWin').value)||1;
 
-  // smooth corrected pressure
-  const p_smooth=smoothArray(RAW.map(r=>r.p_corr??r.p_raw),win);
+  // Use cached smoothed pressure; recompute if win changed or cache is stale
+  if(!P_SMOOTH||P_SMOOTH.length!==RAW.length||P_SMOOTH._win!==win){
+    P_SMOOTH=smoothArray(RAW.map(r=>r.p_corr??r.p_raw),win);
+    P_SMOOTH._win=win;
+  }
+  const p_smooth=P_SMOOTH;
 
-  // build series — optionally skip flat hold segments
+  // build series — skip flat holds and points outside kept window
+  // Interpolated regions (before upWakeIdx / after downSleepIdx) are always kept
   const adsData=[], desData=[];
   const pi=INTERP.peakIdx;
+  const tStart=INTERP.t0up??-Infinity;
+  const tEnd=getTailEnd();
+  const{upWakeIdx,downSleepIdx}=INTERP;
   if(showAds){
     for(let i=0;i<=pi;i+=N){
-      if(removeFlat&&IS_FLAT&&IS_FLAT[i])continue;
+      if(RAW[i].t<tStart)continue;
+      // skip flat only if NOT in the interpolated region
+      if(removeFlat&&IS_FLAT&&IS_FLAT[i]&&i>=upWakeIdx)continue;
       const x=p_smooth[i],y=RAW[i].hf;
       if(x>=0&&isFinite(x)&&isFinite(y))adsData.push({x,y});
     }
   }
   if(showDes){
     for(let i=pi;i<RAW.length;i+=N){
-      if(removeFlat&&IS_FLAT&&IS_FLAT[i])continue;
+      if(RAW[i].t>tEnd)break;
+      // skip flat only if NOT in the interpolated region
+      if(removeFlat&&IS_FLAT&&IS_FLAT[i]&&i<=downSleepIdx)continue;
       const x=p_smooth[i],y=RAW[i].hf;
       if(x>=0&&isFinite(x)&&isFinite(y))desData.push({x,y});
     }
@@ -1327,10 +1664,11 @@ function drawHFPlot(ctx,W,H,forExport){
     const lw=Math.max(...textW)+boxS+14;
     const lhh=lh*legItems.length+10;
     let lx,ly;
-    if(legPos==='top'){lx=ml+pw-lw-10;ly=mt+10;}
-    else if(legPos==='bottom'){lx=ml+pw-lw-10;ly=mt+ph-lhh-10;}
-    else if(legPos==='left'){lx=ml+10;ly=mt+10;}
-    else{lx=ml+pw-lw-10;ly=mt+10;}
+    if(legPos==='top-right')   {lx=ml+pw-lw-10; ly=mt+10;}
+    else if(legPos==='top-left')    {lx=ml+10;        ly=mt+10;}
+    else if(legPos==='bottom-right'){lx=ml+pw-lw-10; ly=mt+ph-lhh-10;}
+    else if(legPos==='bottom-left') {lx=ml+10;        ly=mt+ph-lhh-10;}
+    else                            {lx=ml+pw-lw-10; ly=mt+10;}
 
     ctx.fillStyle='rgba(255,255,255,0.88)';
     ctx.fillRect(lx-4,ly-4,lw+8,lhh+2);
@@ -1418,7 +1756,7 @@ function copyPlot(){
 function exportCSV(){
   if(!INTERP)return;
 
-  const WIN=400, VTHR=0.005, MINTHR=50;
+  const WIN=400, VTHR=0.005, MINTHR=200;
   const n=RAW.length;
   const isFlat=new Uint8Array(n);
   const vals=RAW.map(r=>r.p_raw);
@@ -1459,8 +1797,12 @@ function exportCSV(){
   lines.push('');
   lines.push('Time_adj (s),Pressure_corr ('+META.pressureUnit+'),HeatFlow (mW/g),Leg');
 
+  const tStart=INTERP.t0up??-Infinity;
+  const tEndExp=getTailEnd();
   let tAdj=0, prevActiveT=null;
   for(let i=firstActive;i<=lastActive;i++){
+    if(RAW[i].t<tStart)continue;
+    if(RAW[i].t>tEndExp)break;
     if(isFlat[i]){prevActiveT=null;continue;}
     const r=RAW[i];
     if(prevActiveT!==null)tAdj+=(r.t-prevActiveT);
@@ -1614,7 +1956,8 @@ new ResizeObserver(()=>{if(INTERP)redraw();}).observe(document.getElementById('h
         const leg=pickMode;
         const capLeg=leg.charAt(0).toUpperCase()+leg.slice(1);
         if(pickPts.length===1){
-          document.getElementById('pickStatus'+capLeg).textContent='First point set. Click second point...';
+          document.getElementById('pickStatus'+capLeg).textContent=
+            `P1 = ${pd.x.toFixed(3)} ${META.pressureUnit||'bar'}. Click second point...`;
           redraw();
         } else if(pickPts.length>=2){
           pickMode=null;
