@@ -1,0 +1,1716 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+
+<!-- ── RESOURCE ACCESS CHECK ── -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+(async function() {
+  const sb = supabase.createClient(
+    'https://mqpvnisphntdwhqoiqlt.supabase.co',
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xcHZuaXNwaG50ZHdocW9pcWx0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc1NzM5NjIsImV4cCI6MjA5MzE0OTk2Mn0.7eAeXAh0heqiaTLclqUzAeNY2gQDcbxNRe2LrLXvpHg'
+  );
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { window.location.href = 'https://ljbarbour.github.io/WebApps/resources.html'; return; }
+  const email = session.user.email;
+  const { data: u } = await sb.from('users').select('can_access_resources').eq('email', email).maybeSingle();
+  const { data: r } = await sb.from('resource_users').select('can_access_resources').eq('email', email).maybeSingle();
+  if (!(u?.can_access_resources || r?.can_access_resources)) {
+    window.location.href = 'https://ljbarbour.github.io/WebApps/resources.html';
+  }
+})();
+</script>
+<!-- ── END RESOURCE ACCESS CHECK ── -->
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sorption Calorimetry Viewer</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:wght@300;600&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --ink:#0f0e0d;--paper:#f6f1ea;--cream:#ede7d8;--pale:#e0d9cc;
+  --rule:#c5bba9;--accent:#b84a2e;
+  --ads:#b84a2e;--des:#2a6496;
+  --mono:'DM Mono',monospace;--serif:'Fraunces',Georgia,serif;--sans:'DM Sans',sans-serif;
+}
+html,body{height:100%;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:13px}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:var(--pale)}
+::-webkit-scrollbar-thumb{background:var(--rule);border-radius:2px}
+body{display:grid;grid-template-rows:auto 1fr}
+header{border-bottom:2px solid var(--ink);padding:12px 22px;display:flex;align-items:baseline;gap:16px}
+header h1{font-family:var(--serif);font-size:23px;font-weight:600;letter-spacing:-.4px}
+header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spacing:.15em;text-transform:uppercase}
+.app{display:grid;grid-template-columns:255px 1fr 268px;height:calc(100vh - 50px);overflow:hidden}
+
+/* ── LEFT SIDEBAR ── */
+.sidebar{border-right:2px solid var(--ink);overflow-y:auto;display:flex;flex-direction:column}
+.sb{padding:12px 14px;border-bottom:1px solid var(--rule)}
+.sb:last-child{border-bottom:none}
+.lbl{font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:8px}
+.dz{border:2px dashed var(--rule);padding:12px 8px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;user-select:none}
+.dz.over{border-color:var(--accent);background:var(--cream)}
+.dz-ico{font-size:18px;margin-bottom:4px}
+.dz-txt{font-size:10px;color:#888;line-height:1.5}
+.dz-name{font-size:11px;font-weight:500;color:var(--accent);margin-top:3px;word-break:break-all;min-height:1em}
+.dz>*{pointer-events:none}
+
+/* ── CONTROLS ── */
+.pg{display:grid;grid-template-columns:1fr 82px;gap:5px 7px;align-items:center;margin-top:4px}
+.pg label{font-size:12px;color:#444;line-height:1.4}
+.pg label span{display:block;font-size:10px;color:#888}
+.pg input{background:var(--cream);border:1.5px solid var(--rule);padding:4px 6px;font-family:var(--mono);font-size:11px;color:var(--ink);width:100%;outline:none}
+.pg input:focus{border-color:var(--accent)}
+select{width:100%;background:var(--cream);border:1.5px solid var(--rule);padding:5px 8px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none;cursor:pointer;-webkit-appearance:none;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center}
+select:focus{border-color:var(--accent)}
+
+/* ── BUTTONS ── */
+.btn{display:block;width:100%;padding:8px 12px;font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;border:2px solid var(--ink);background:var(--ink);color:var(--paper);transition:background .15s,border-color .15s}
+.btn:hover:not(:disabled){background:var(--accent);border-color:var(--accent)}
+.btn:disabled{opacity:.3;cursor:not-allowed}
+.btn.out{background:transparent;color:var(--ink)}
+.btn.out:hover:not(:disabled){background:var(--ink);color:var(--paper)}
+.btn-sm{display:inline-block;padding:4px 10px;font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;border:1.5px solid var(--ink);background:transparent;color:var(--ink);transition:background .15s}
+.btn-sm:hover{background:var(--ink);color:var(--paper)}
+.tog-wrap{display:flex;gap:5px;margin-top:4px}
+.tog{flex:1;padding:5px 6px;font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;border:1.5px solid var(--rule);background:var(--paper);color:#888;transition:all .15s;text-align:center}
+.tog.on-ads{background:var(--ads);border-color:var(--ads);color:#fff}
+.tog.on-des{background:var(--des);border-color:var(--des);color:#fff}
+
+/* ── META STRIP ── */
+.meta-strip{display:flex;flex-wrap:wrap;gap:0;background:var(--cream);border-bottom:1px solid var(--rule);flex-shrink:0}
+.mi{padding:6px 14px;border-right:1px solid var(--rule)}
+.mi:last-child{border-right:none}
+.mi .ml{font-family:var(--mono);font-size:8px;letter-spacing:.14em;text-transform:uppercase;color:#aaa}
+.mi .mv{font-size:12px;font-family:Georgia,serif;color:var(--ink)}
+
+/* ── CENTRE ── */
+.centre{display:flex;flex-direction:column;overflow:hidden;min-height:0;min-width:0}
+.chart-tabs{border-bottom:2px solid var(--ink);display:flex;flex-shrink:0;background:var(--paper)}
+.chart-tab{padding:7px 16px;font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;cursor:pointer;border:none;background:none;color:#888;border-right:1px solid var(--rule)}
+.chart-tab:hover{background:var(--cream);color:var(--ink)}
+.chart-tab.active{background:var(--cream);color:var(--accent);border-bottom:2px solid var(--accent);margin-bottom:-2px}
+.tab-content{flex:1;min-height:0;flex-direction:column;overflow:hidden}
+.chart-area{flex:1;padding:10px 14px;display:flex;flex-direction:column;gap:6px;min-height:0;overflow:hidden}
+.cw{flex:1;min-height:0;min-width:0;width:100%;overflow:hidden;position:relative}
+.cw canvas{display:block;width:100% !important;height:100% !important}
+.zoom-reset{position:absolute;top:3px;right:12px;font-family:var(--mono);font-size:9px;padding:3px 8px;background:var(--paper);border:1.5px solid var(--rule);cursor:pointer;z-index:3;color:#888;letter-spacing:.06em;text-transform:uppercase}
+.zoom-reset:hover{border-color:var(--accent);color:var(--accent)}
+#status{padding:4px 18px;font-family:var(--mono);font-size:10px;color:#999;border-top:1px solid var(--rule);flex-shrink:0;letter-spacing:.05em}
+#status.ok{color:#2a7a3b}#status.err{color:var(--accent)}
+
+/* ── INTERP NOTICE ── */
+.notice{padding:7px 11px;font-family:var(--mono);font-size:10px;border:1px solid;margin-bottom:7px}
+.notice-ok{background:#f0faf2;border-color:#a3d4ad;color:#1a5228}
+.notice-warn{background:#fff8f0;border-color:#e8c07a;color:#6b4200}
+
+/* ── STATS GRID ── */
+.stat-row{display:flex;gap:1px;background:var(--rule);border:1.5px solid var(--rule);margin-top:8px;flex-wrap:wrap}
+.sc{background:var(--paper);padding:7px 11px;flex:1;min-width:120px}
+.sc .sl{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#888;font-family:var(--mono)}
+.sc .sv{font-size:13px;font-family:Georgia,serif;color:var(--ink)}
+.sc.hi{background:var(--cream)}
+
+/* ── RIGHT PANEL ── */
+.cpanel{border-left:2px solid var(--ink);overflow-y:auto;flex-shrink:0}
+.cp-group{border-bottom:1px solid var(--rule)}
+.cp-head{display:flex;justify-content:space-between;align-items:center;padding:9px 13px;cursor:pointer;user-select:none;background:var(--paper);transition:background .15s}
+.cp-head:hover{background:var(--cream)}
+.cp-head .cp-title{font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent)}
+.cp-head .cp-arr{font-size:10px;color:#888;transition:transform .2s}
+.cp-group.open .cp-arr{transform:rotate(180deg)}
+.cp-body{display:none;padding:10px 13px;border-top:1px solid var(--pale)}
+.cp-group.open .cp-body{display:block}
+.cr{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:6px}
+.cr:last-child{margin-bottom:0}
+.cl{font-size:11px;color:#555;flex:1;white-space:nowrap}
+.cr input[type=number]{width:65px;background:var(--cream);border:1.5px solid var(--rule);padding:3px 5px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none}
+.cr input[type=number]:focus{border-color:var(--accent)}
+.cr input[type=range]{flex:1;min-width:55px;accent-color:var(--accent)}
+.cr input[type=color]{width:32px;height:22px;border:1.5px solid var(--rule);background:none;cursor:pointer;padding:1px}
+.cr input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--accent)}
+.cr select{flex:1;background:var(--cream);border:1.5px solid var(--rule);padding:3px 5px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none;appearance:none}
+.cr input[type=text]{flex:1;background:var(--cream);border:1.5px solid var(--rule);padding:3px 5px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none}
+.rv2{font-family:var(--mono);font-size:11px;min-width:28px;text-align:right}
+
+/* ── GUIDE ── */
+.guide-body{flex:1;overflow-y:auto;padding:24px 32px;font-size:13px;line-height:1.75;color:#333}
+.g-sec{font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin:16px 0 6px;padding-bottom:4px;border-bottom:1px solid var(--rule)}
+
+/* ── LOADING ── */
+#loadingBar{display:none;position:fixed;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--accent) 0%,#e09070 100%);z-index:999;animation:lpulse 1s ease-in-out infinite}
+@keyframes lpulse{0%,100%{opacity:1}50%{opacity:.4}}
+@keyframes spin{to{transform:rotate(360deg)}}
+.sp{display:inline-block;width:9px;height:9px;border:2px solid var(--rule);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:5px}
+</style>
+</head>
+<body>
+<div id="loadingBar"></div>
+<header>
+  <h1>Sorption Calorimetry Viewer</h1>
+  <span class="sub">Heat Flow &amp; Pressure Analysis</span>
+</header>
+
+<div class="app">
+
+<!-- ════════════════ LEFT SIDEBAR ════════════════ -->
+<aside class="sidebar">
+  <div class="sb">
+    <div class="lbl">Data file</div>
+    <div class="dz" id="dz" title="Click to browse or drag and drop">
+      <div class="dz-ico">&#8679;</div>
+      <div class="dz-txt">Click or drag &amp; drop<br><span style="font-size:9px;color:#aaa">Setaram/BV tab-delimited .txt</span></div>
+      <div class="dz-name" id="dzName"></div>
+    </div>
+  </div>
+
+  <div class="sb">
+    <div class="lbl">Pressure interpolation</div>
+    <div class="pg">
+      <label>Fit from<span>(bar)</span></label>
+      <input type="number" id="fitFrom" value="1.5" step="0.1" min="0.1">
+      <label>Fit to<span>(bar)</span></label>
+      <input type="number" id="fitTo" value="8.5" step="0.1" min="1">
+      <label>Tx floor<span>(blank = auto)</span></label>
+      <input type="number" id="txFloor" step="0.01" placeholder="auto">
+    </div>
+    <button class="btn out" style="margin-top:8px" id="btnInterp" disabled onclick="runInterpolation()">Recalculate</button>
+  </div>
+
+  <div class="sb">
+    <div class="lbl">HF vs P display</div>
+    <div style="margin-bottom:5px">
+      <div style="font-size:10px;color:#888;margin-bottom:3px;font-family:var(--mono)">Show legs</div>
+      <div class="tog-wrap">
+        <div class="tog on-ads" id="togAds" onclick="toggleLeg('ads')">&#9650; Adsorption</div>
+        <div class="tog on-des" id="togDes" onclick="toggleLeg('des')">&#9660; Desorption</div>
+      </div>
+      <div style="margin-top:5px">
+        <div style="font-size:10px;color:#888;margin-bottom:3px;font-family:var(--mono)">Flat holds</div>
+        <div class="tog-wrap">
+          <div class="tog on-ads" id="togFlat" onclick="toggleFlat()" style="background:#888;border-color:#888">&#10005; Remove holds</div>
+        </div>
+      </div>
+    </div>
+    <div class="pg">
+      <label>Subsample (1:N)<span>Raw / interp charts</span></label>
+      <input type="number" id="rawSubsample" value="50" min="1" max="5000" oninput="renderRawChart()">
+      <label>Subsample (1:N)<span>HF vs P chart</span></label>
+      <input type="number" id="hfSubsample" value="10" min="1" max="500">
+      <label>P smooth window<span>odd number</span></label>
+      <input type="number" id="smoothWin" value="1" min="1" max="101" step="2">
+    </div>
+  </div>
+
+  <div class="sb" style="display:flex;flex-direction:column;gap:5px">
+    <button class="btn" id="btnExp" disabled onclick="exportCSV()">Export CSV</button>
+    <button class="btn out" id="btnExpRaw" disabled onclick="exportRawCSV()">Export Raw CSV</button>
+  </div>
+</aside>
+
+<!-- ════════════════ CENTRE ════════════════ -->
+<div class="centre">
+  <div class="meta-strip" id="metaStrip"></div>
+  <div class="chart-tabs">
+    <button class="chart-tab active" id="tab-raw"    onclick="switchTab('raw')">Raw Data</button>
+    <button class="chart-tab"        id="tab-interp" onclick="switchTab('interp')">Pressure Interpolation</button>
+    <button class="chart-tab"        id="tab-hf"     onclick="switchTab('hf')">Heat Flow vs Pressure</button>
+    <button class="chart-tab"        id="tab-guide"  onclick="switchTab('guide')">Guide</button>
+  </div>
+
+  <!-- RAW TAB -->
+  <div class="tab-content" id="tc-raw" style="display:none">
+    <div class="chart-area">
+      <div class="cw"><canvas id="rawChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- INTERP TAB -->
+  <div class="tab-content" id="tc-interp" style="display:none;overflow-y:auto">
+    <div style="padding:10px 14px;flex-shrink:0">
+      <div id="interpNotice"></div>
+      <div class="stat-row" id="interpStats"></div>
+    </div>
+    <div class="chart-area" style="min-height:260px">
+      <div class="cw"><canvas id="interpChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- HF TAB -->
+  <div class="tab-content" id="tc-hf" style="display:none;flex-direction:column">
+    <div class="chart-area">
+      <div class="cw"><button class="zoom-reset" onclick="resetZoom()">&#8635; Reset</button><canvas id="hfChart"></canvas></div>
+    </div>
+    <div style="padding:0 14px 10px;flex-shrink:0">
+      <div class="stat-row" id="hfStats"></div>
+    </div>
+  </div>
+
+  <!-- GUIDE TAB -->
+  <div class="tab-content guide-body" id="tc-guide" style="display:none">
+    <h2 style="font-family:var(--serif);font-size:22px;font-weight:600;margin-bottom:4px">Sorption Calorimetry Viewer</h2>
+    <p style="font-family:var(--mono);font-size:9px;letter-spacing:.15em;text-transform:uppercase;color:var(--accent);margin-bottom:20px">User Guide</p>
+    <p>This app processes heat flow and pressure data from Setaram/BV sorption calorimetry instruments. Drop a tab-delimited <code>.txt</code> file onto the drop zone to begin. The file is expected to contain a short metadata header followed by five tab-separated columns: Index, Time (s), Temperature (°C), HeatFlow (mW/g), and Analog signal (bar or mbar).</p>
+    <div class="g-sec">Raw Data tab</div>
+    <p>Shows heat flow (left axis, orange) and raw pressure (right axis, blue) versus time. Use the Subsample control in the sidebar to reduce the number of plotted points for performance — the full dataset is always used for analysis.</p>
+    <div class="g-sec">Pressure Interpolation tab</div>
+    <p>The main pressure transmitter near the sample cell is a gauge device below ~40 bar, flooring at ~1 bar when pressure is below its range. The app fits a linear P–t line through the ramp region (default 1.5–8.5 bar) for both the adsorption and desorption legs, then extrapolates back to t₀ (when P = 0) and forward to the end of desorption. The corrected pressure is used for all subsequent analysis and export.</p>
+    <p>The transmitter floor is detected automatically from the median of the first 500 data points. You can override this with the <em>Tx floor</em> field. Adjust <em>Fit from / Fit to</em> to control which portion of the ramp is used for the linear regression, then click <b>Recalculate</b>.</p>
+    <div class="g-sec">Heat Flow vs Pressure tab</div>
+    <p>Plots heat flow against the corrected pressure. Use the Adsorption / Desorption toggles in the sidebar to show or hide each leg. The right-hand control panel provides full publication-quality styling: axis labels and ranges, fonts, grid, tick marks, point and line styles, legend, title, and image export.</p>
+    <div class="g-sec">Flat-segment removal in CSV export</div>
+    <p>When exporting, the app automatically detects and removes flat pressure segments (pre-ramp baseline, mid-experiment valve/pump holds at ~10 bar, and post-ramp baseline). Detection uses a rolling variance window; any region where the local pressure variance stays below 0.005 bar² for more than 50 consecutive points is removed. The exported time column reflects only the time spent actively ramping — hold durations are not added to the clock.</p>
+    <div class="g-sec">Save dialog</div>
+    <p>In Chrome and Edge, the <b>Export CSV</b> button opens a native Save As dialog so you can choose the filename and folder. In Firefox and Safari, the file is downloaded with an auto-generated name.</p>
+  </div>
+
+  <div id="status">Ready — drop a data file to begin.</div>
+</div>
+
+<!-- ════════════════ RIGHT CONTROL PANEL ════════════════ -->
+<div class="cpanel" id="cpanel">
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Axis Ranges</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">X min</span><input type="number" id="xmin" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">X max</span><input type="number" id="xmax" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Y min</span><input type="number" id="ymin" placeholder="auto" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Y max</span><input type="number" id="ymax" placeholder="auto" oninput="redraw()"></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Axis Labels &amp; Fonts</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">X label</span><input type="text" id="xLbl" value="Pressure (bar)" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Y label</span><input type="text" id="yLbl" value="Heat Flow (mW g⁻¹)" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Font</span>
+        <select id="fontFam" oninput="redraw()">
+          <option value="'DM Mono',monospace">DM Mono</option>
+          <option value="Arial,sans-serif" selected>Arial</option>
+          <option value="'Times New Roman',serif">Times New Roman</option>
+          <option value="'Helvetica Neue',Helvetica,sans-serif">Helvetica</option>
+          <option value="Georgia,serif">Georgia</option>
+          <option value="'Courier New',monospace">Courier New</option>
+          <option value="'Palatino Linotype',serif">Palatino</option>
+        </select>
+      </div>
+      <div class="cr"><span class="cl">Label size</span><input type="range" id="axSz" min="8" max="72" value="36" oninput="V(this);redraw()"><span class="rv2">36</span></div>
+      <div class="cr"><span class="cl">Tick size</span><input type="range" id="tkSz" min="8" max="64" value="30" oninput="V(this);redraw()"><span class="rv2">30</span></div>
+      <div class="cr"><span class="cl">Axis color</span><input type="color" id="axCol" value="#000000" oninput="redraw()"></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Grid, Ticks &amp; Frame</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Show grid</span><input type="checkbox" id="grid" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Grid color</span><input type="color" id="gridCol" value="#dddddd" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Grid width</span><input type="range" id="gridW" min="0.5" max="3" step=".5" value="1" oninput="V(this);redraw()"><span class="rv2">1</span></div>
+      <div class="cr"><span class="cl">Major ticks</span><input type="checkbox" id="majTick" checked oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Minor ticks</span><input type="checkbox" id="minTick" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Tick length</span><input type="range" id="tickLen" min="2" max="16" value="8" oninput="V(this);redraw()"><span class="rv2">8</span></div>
+      <div class="cr"><span class="cl">Minor tick len</span><input type="range" id="minTickLen" min="1" max="10" value="5" oninput="V(this);redraw()"><span class="rv2">5</span></div>
+      <div class="cr"><span class="cl">Maj tick width</span><input type="range" id="majTickW" min="0.5" max="4" step=".5" value="3" oninput="V(this);redraw()"><span class="rv2">3</span></div>
+      <div class="cr"><span class="cl">Min tick width</span><input type="range" id="minTickW" min="0.5" max="3" step=".5" value="2" oninput="V(this);redraw()"><span class="rv2">2</span></div>
+      <div class="cr"><span class="cl">Tick direction</span>
+        <select id="tickDir" oninput="redraw()"><option value="in">Inward</option><option value="out" selected>Outward</option><option value="both">Both</option></select>
+      </div>
+      <div class="cr"><span class="cl">Axis width</span><input type="range" id="frameW" min="0.5" max="5" step=".5" value="3" oninput="V(this);redraw()"><span class="rv2">3</span></div>
+      <div class="cr"><span class="cl">Plot box border</span><input type="checkbox" id="boxBdr" checked oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Box border width</span><input type="range" id="boxW" min="0.5" max="5" step=".5" value="3" oninput="V(this);redraw()"><span class="rv2">3</span></div>
+      <div class="cr"><span class="cl">Box border color</span><input type="color" id="boxCol" value="#000000" oninput="redraw()"></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Background &amp; Colors</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Chart bg</span><input type="color" id="chartBg" value="#ffffff" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Plot area bg</span><input type="color" id="plotBg" value="#ffffff" oninput="redraw()"></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Adsorption Line</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Color</span><input type="color" id="adsCol" value="#b84a2e" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Width</span><input type="range" id="adsW" min="0.5" max="8" step=".5" value="2" oninput="V(this);redraw()"><span class="rv2">2</span></div>
+      <div class="cr"><span class="cl">Style</span>
+        <select id="adsDash" oninput="redraw()">
+          <option value="">Solid</option><option value="6,3">Dashed</option>
+          <option value="2,3">Dotted</option><option value="8,3,2,3">Dash-dot</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Desorption Line</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Color</span><input type="color" id="desCol" value="#2a6496" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Width</span><input type="range" id="desW" min="0.5" max="8" step=".5" value="2" oninput="V(this);redraw()"><span class="rv2">2</span></div>
+      <div class="cr"><span class="cl">Style</span>
+        <select id="desDash" oninput="redraw()">
+          <option value="">Solid</option><option value="6,3">Dashed</option>
+          <option value="2,3">Dotted</option><option value="8,3,2,3">Dash-dot</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Legend</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Show legend</span><input type="checkbox" id="legShow" checked oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Position</span>
+        <select id="legPos" oninput="redraw()">
+          <option value="top">Top</option><option value="bottom">Bottom</option>
+          <option value="left">Left</option><option value="right">Right</option>
+        </select>
+      </div>
+      <div class="cr"><span class="cl">Font size</span><input type="range" id="legSz" min="8" max="36" value="14" oninput="V(this);redraw()"><span class="rv2">14</span></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Chart Title</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Title text</span><input type="text" id="ttl" placeholder="none" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Title size</span><input type="range" id="ttlSz" min="10" max="60" value="16" oninput="V(this);redraw()"><span class="rv2">16</span></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Integration</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div style="font-family:var(--mono);font-size:9px;color:#888;line-height:1.5;margin-bottom:6px">
+        <b>Running integral:</b> cumulative area under each leg vs pressure.
+      </div>
+      <div class="cr"><span class="cl">Show running integral</span><input type="checkbox" id="showIntegral" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Ads. integral color</span><input type="color" id="intAdsCol" value="#e8a87c" oninput="redraw()"></div>
+      <div class="cr"><span class="cl">Des. integral color</span><input type="color" id="intDesCol" value="#7cb8e8" oninput="redraw()"></div>
+      <div style="border-top:1px solid var(--pale);margin:8px 0 6px"></div>
+      <div style="font-family:var(--mono);font-size:9px;color:#888;line-height:1.5;margin-bottom:6px">
+        <b>Peak area:</b> click two points bracketing a feature. A linear baseline is drawn between the clicks; the area between signal and baseline is integrated.
+      </div>
+      <button class="btn out" id="btnPickAds" style="width:100%;font-size:9px;margin-bottom:4px" onclick="startPick('ads')">&#9654; Pick two points — adsorption</button>
+      <button class="btn out" id="btnPickDes" style="width:100%;font-size:9px;margin-bottom:4px" onclick="startPick('des')">&#9654; Pick two points — desorption</button>
+      <button class="btn out" id="btnPickClear" style="width:100%;font-size:9px;margin-bottom:6px" onclick="clearPicks()">&#10005; Clear all</button>
+      <div id="pickStatusAds" style="font-family:var(--mono);font-size:9px;color:#888;min-height:1em"></div>
+      <div id="pickStatusDes" style="font-family:var(--mono);font-size:9px;color:#888;min-height:1em;margin-top:2px"></div>
+      <div id="areaResultAds" style="font-family:var(--mono);font-size:10px;line-height:1.9;color:#555;margin-top:5px;min-height:1em"></div>
+      <div id="areaResultDes" style="font-family:var(--mono);font-size:10px;line-height:1.9;color:#555;margin-top:4px;min-height:1em"></div>
+    </div>
+  </div>
+
+  <div class="cp-group">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Save Plot</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+      <div class="cr"><span class="cl">Width px</span><input type="number" id="expW" value="1200"></div>
+      <div class="cr"><span class="cl">Height px</span><input type="number" id="expH" value="900"></div>
+      <div class="cr"><span class="cl">Format</span>
+        <select id="expFmt"><option>PNG</option><option>JPEG</option></select>
+      </div>
+      <button class="btn out" style="margin-top:8px;width:100%" onclick="savePlot()">Save Plot Image</button>
+      <button class="btn out" style="margin-top:5px;width:100%" onclick="copyPlot()">Copy to Clipboard</button>
+    </div>
+  </div>
+
+</div><!-- /cpanel -->
+</div><!-- /app -->
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+// ═══════════════════════════════════════════
+//  Helpers
+// ═══════════════════════════════════════════
+function tog(head){head.closest('.cp-group').classList.toggle('open')}
+function V(el,dp){el.nextElementSibling.textContent=parseFloat(el.value).toFixed(dp||0)}
+function gv(id){return document.getElementById(id).value}
+function gb(id){return document.getElementById(id).checked}
+function gn(id){const v=parseFloat(gv(id));return isNaN(v)?undefined:v}
+function st(msg,cls){const e=document.getElementById('status');e.textContent=msg;e.className=cls||''}
+function setLoading(on){document.getElementById('loadingBar').style.display=on?'block':'none'}
+
+const d1=v=>(+v).toFixed(1), d2=v=>(+v).toFixed(2),
+      d4=v=>(+v).toFixed(4), d5=v=>(+v).toFixed(5);
+function formatTime(s){
+  if(s<120)return s.toFixed(0)+' s';
+  if(s<7200)return (s/60).toFixed(1)+' min';
+  return (s/3600).toFixed(2)+' hr';
+}
+
+// ═══════════════════════════════════════════
+//  State
+// ═══════════════════════════════════════════
+let RAW=[], META={}, INTERP=null, CHARTS={};
+let showAds=true, showDes=true;
+let IS_FLAT=null; // Uint8Array — 1 = flat/hold segment, 0 = active ramp
+
+// zoom state — null means "auto" (full data range)
+let ZOOM={xMin:null,xMax:null,yMin:null,yMax:null};
+// rubber-band drag state
+let _drag=null; // {startX,startY,curX,curY,active}
+let _plotBox=null; // {ml,mt,pw,ph,W,H,xMin,xMax,yMin,yMax} set each redraw
+
+// ═══════════════════════════════════════════
+//  Drop zone / file input
+// ═══════════════════════════════════════════
+const dz=document.getElementById('dz');
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('over');});
+dz.addEventListener('dragleave',()=>dz.classList.remove('over'));
+dz.addEventListener('drop',e=>{
+  e.preventDefault();dz.classList.remove('over');
+  const f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];
+  if(f)handleFile(f);
+});
+dz.addEventListener('click',()=>{
+  const fi=document.createElement('input');
+  fi.type='file';fi.accept='.txt,.dat';
+  fi.onchange=e=>{if(e.target.files[0])handleFile(e.target.files[0]);};
+  fi.click();
+});
+
+function handleFile(file){
+  if(!file)return;
+  setLoading(true);
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{ parseFileBuffer(e.target.result,file.name); }
+    catch(err){ setLoading(false); st('Error: '+err.message+' — '+err.stack,'err'); console.error(err); }
+  };
+  reader.onerror=()=>{setLoading(false);st('Could not read file.','err')};
+  reader.readAsArrayBuffer(file);
+}
+
+// ═══════════════════════════════════════════
+//  Parser
+// ═══════════════════════════════════════════
+function parseFileBuffer(buffer,fileName){
+  const bytes=new Uint8Array(buffer);
+  let encoding='windows-1252';
+  if(bytes[0]===0xFF&&bytes[1]===0xFE)encoding='utf-16le';
+  else if(bytes[0]===0xFE&&bytes[1]===0xFF)encoding='utf-16be';
+  else if(bytes[0]===0xEF&&bytes[1]===0xBB&&bytes[2]===0xBF)encoding='utf-8';
+  let fullText;
+  try{fullText=new TextDecoder(encoding).decode(bytes);}
+  catch(e){fullText=new TextDecoder('utf-8',{fatal:false}).decode(bytes);}
+
+  META={fileName};
+  RAW=[];
+  let pressureUnit='bar', dataStarted=false;
+  let pos=0;
+  const len=fullText.length;
+
+  while(pos<len){
+    let end=pos;
+    while(end<len&&fullText[end]!=='\n'&&fullText[end]!=='\r')end++;
+    const line=fullText.slice(pos,end).replace(/\r/g,'').trim();
+    pos=end;
+    if(pos<len&&fullText[pos]==='\r')pos++;
+    if(pos<len&&fullText[pos]==='\n')pos++;
+    if(!line)continue;
+
+    if(!dataStarted){
+      let m;
+      if(!META.mass&&(m=line.match(/Initial Mass\s*:\s*([\d.]+)\s*mg/i)))META.mass=parseFloat(m[1]);
+      if(!META.molarMass&&(m=line.match(/Molar Mass\s*:\s*([\d.]+)\s*g\/mol/i)))META.molarMass=parseFloat(m[1]);
+      if(!META.date&&(m=line.match(/Creation Date\s*:\s*(.+)/i)))META.date=m[1].trim();
+      if(!META.user&&(m=line.match(/^User\s*:\s*(.+)/i)))META.user=m[1].trim();
+      if(/^Index\s*\t/i.test(line)){
+        const um=line.match(/Analog signal\s*\(([^)]+)\)/i);
+        if(um)pressureUnit=um[1].trim();
+        dataStarted=true;
+      }
+      continue;
+    }
+    const parts=line.split('\t');
+    if(parts.length<5)continue;
+    const t=parseFloat(parts[1]),hf=parseFloat(parts[3]),p=parseFloat(parts[4]);
+    if(isNaN(t)||isNaN(hf)||isNaN(p))continue;
+    RAW.push({t,hf,p_raw:p,temp:parseFloat(parts[2])||0});
+  }
+
+  META.pressureUnit=pressureUnit;
+  META.nPoints=RAW.length;
+  if(RAW.length<10)throw new Error('No data rows found — check file format.');
+
+  // pre-compute p range
+  let pMin=Infinity,pMax=-Infinity;
+  for(let i=0;i<RAW.length;i++){
+    if(RAW[i].p_raw<pMin)pMin=RAW[i].p_raw;
+    if(RAW[i].p_raw>pMax)pMax=RAW[i].p_raw;
+  }
+  META.pMin=pMin; META.pMax=pMax;
+  META.tMin=RAW[0].t; META.tMax=RAW[RAW.length-1].t;
+
+  // Update X label to use detected unit
+  document.getElementById('xLbl').value='Pressure ('+pressureUnit+')';
+
+  document.getElementById('dzName').textContent=fileName;
+  document.getElementById('btnInterp').disabled=false;
+  document.getElementById('btnExp').disabled=false;
+  document.getElementById('btnExpRaw').disabled=false;
+
+  st('Parsed '+RAW.length.toLocaleString()+' rows — rendering…');
+  renderMetaStrip();
+  st('Meta strip done — rendering raw chart…');
+  renderRawChart();
+  st('Raw chart done — running interpolation…');
+  runInterpolation();
+  st('Interpolation done — switching tab…');
+  switchTab('raw');
+  setLoading(false);
+  st('Loaded '+RAW.length.toLocaleString()+' data points.','ok');
+}
+
+// ═══════════════════════════════════════════
+//  Meta strip
+// ═══════════════════════════════════════════
+function renderMetaStrip(){
+  const M=META;
+  const items=[
+    ['File',M.fileName],['Date',M.date||'—'],
+    ['Mass',M.mass?M.mass+' mg':'—'],
+    ['Molar mass',M.molarMass?M.molarMass+' g mol⁻¹':'—'],
+    ['P unit',M.pressureUnit],
+    ['Points',M.nPoints.toLocaleString()],
+    ['Duration',formatTime(M.tMax-M.tMin)],
+    ['P range',d2(M.pMin)+'–'+d2(M.pMax)+' '+M.pressureUnit],
+  ];
+  document.getElementById('metaStrip').innerHTML=items.map(([l,v])=>
+    `<div class="mi"><div class="ml">${l}</div><div class="mv">${v}</div></div>`
+  ).join('');
+}
+
+// ═══════════════════════════════════════════
+//  Tab switching
+// ═══════════════════════════════════════════
+const TAB_IDS=['raw','interp','hf','guide'];
+function switchTab(id){
+  TAB_IDS.forEach(t=>{
+    document.getElementById('tab-'+t).classList.toggle('active',t===id);
+    document.getElementById('tc-'+t).style.display=(t===id)?'flex':'none';
+  });
+  setTimeout(()=>Object.values(CHARTS).forEach(c=>c.resize&&c.resize()),30);
+}
+
+// ═══════════════════════════════════════════
+//  Chart helpers
+// ═══════════════════════════════════════════
+function destroyChart(id){if(CHARTS[id]){CHARTS[id].destroy();delete CHARTS[id];}}
+
+// ═══════════════════════════════════════════
+//  TAB 1: RAW CHART
+// ═══════════════════════════════════════════
+function renderRawChart(){
+  const N=parseInt(document.getElementById('rawSubsample').value)||50;
+  const sub=RAW.filter((_,i)=>i%N===0);
+  destroyChart('rawChart');
+  const ctx=document.getElementById('rawChart').getContext('2d');
+  CHARTS.rawChart=new Chart(ctx,{
+    type:'line',
+    data:{datasets:[
+      {label:'Heat Flow (mW/g)',data:sub.map(r=>({x:r.t,y:r.hf})),
+       borderColor:'#b84a2e',backgroundColor:'transparent',borderWidth:1.2,pointRadius:0,yAxisID:'yHF',tension:0.1},
+      {label:'Pressure ('+META.pressureUnit+')',data:sub.map(r=>({x:r.t,y:r.p_raw})),
+       borderColor:'#2a6496',backgroundColor:'transparent',borderWidth:1.2,pointRadius:0,yAxisID:'yP',tension:0.1},
+    ]},
+    options:{
+      animation:false,responsive:true,maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{position:'top',labels:{font:{family:'DM Sans',size:12},boxWidth:16,padding:14}},
+        tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${d4(c.raw.y)}`,title:i=>`t = ${d1(i[0].raw.x)} s`}}
+      },
+      scales:{
+        x:{type:'linear',title:{display:true,text:'Time (s)',font:{family:'DM Mono',size:11}},ticks:{font:{family:'DM Mono',size:10}},grid:{color:'#ede7d8'}},
+        yHF:{type:'linear',position:'left',title:{display:true,text:'Heat Flow (mW/g)',font:{family:'DM Mono',size:11},color:'#b84a2e'},ticks:{font:{family:'DM Mono',size:10},color:'#b84a2e'},grid:{color:'#ede7d8'}},
+        yP:{type:'linear',position:'right',title:{display:true,text:'Pressure ('+META.pressureUnit+')',font:{family:'DM Mono',size:11},color:'#2a6496'},ticks:{font:{family:'DM Mono',size:10},color:'#2a6496'},grid:{drawOnChartArea:false}},
+      }
+    }
+  });
+}
+
+// ═══════════════════════════════════════════
+//  TAB 2: PRESSURE INTERPOLATION
+// ═══════════════════════════════════════════
+function runInterpolation(){
+  if(!RAW.length)return;
+  const fitFrom=parseFloat(document.getElementById('fitFrom').value)||1.5;
+  const fitTo=parseFloat(document.getElementById('fitTo').value)||8.5;
+  const floorInput=parseFloat(document.getElementById('txFloor').value);
+
+  const earlyP=RAW.slice(0,Math.min(500,RAW.length)).map(r=>r.p_raw).sort((a,b)=>a-b);
+  const autoFloor=earlyP[Math.floor(earlyP.length/2)];
+  const txFloor=isNaN(floorInput)?autoFloor:floorInput;
+
+  let peakIdx=0,peakP=-Infinity;
+  for(let i=0;i<RAW.length;i++)if(RAW[i].p_raw>peakP){peakP=RAW[i].p_raw;peakIdx=i;}
+
+  const upFitPts=RAW.slice(0,peakIdx+1).filter(r=>r.p_raw>=fitFrom&&r.p_raw<=fitTo);
+  const downFitPts=RAW.slice(peakIdx).filter(r=>r.p_raw>=fitFrom&&r.p_raw<=fitTo);
+  const upFit=linearFit(upFitPts.map(r=>r.t),upFitPts.map(r=>r.p_raw));
+  const downFit=linearFit(downFitPts.map(r=>r.t),downFitPts.map(r=>r.p_raw));
+  const t0up=upFit?-upFit.b/upFit.m:null;
+  const t0down=downFit?-downFit.b/downFit.m:null;
+
+  const wakeThresh=txFloor+0.1;
+  let upWakeIdx=0;
+  for(let i=1;i<peakIdx;i++)if(RAW[i].p_raw>wakeThresh){upWakeIdx=i;break;}
+  let downSleepIdx=RAW.length-1;
+  for(let i=peakIdx;i<RAW.length;i++)if(RAW[i].p_raw<=wakeThresh){downSleepIdx=i;break;}
+
+  INTERP={txFloor,autoFloor,peakIdx,peakP,peakT:RAW[peakIdx].t,
+          upFit,downFit,t0up,t0down,upWakeIdx,downSleepIdx,fitFrom,fitTo,wakeThresh};
+
+  buildCorrectedPressure();
+  buildFlatMask();
+  renderInterpChart();
+  renderInterpStats();
+  ZOOM={xMin:null,xMax:null,yMin:null,yMax:null};
+  redraw();
+}
+
+function buildFlatMask(){
+  const n=RAW.length;
+  IS_FLAT=new Uint8Array(n);
+  const WIN=400, VTHR=0.005, MINTHR=50;
+  const vals=RAW.map(r=>r.p_raw);
+  let sum=0,sum2=0,wlen=0;
+  for(let j=0;j<Math.min(WIN,n);j++){sum+=vals[j];sum2+=vals[j]*vals[j];wlen++;}
+  for(let i=0;i<n;i++){
+    const a=i+WIN, r=i-WIN-1;
+    if(a<n){sum+=vals[a];sum2+=vals[a]*vals[a];wlen++;}
+    if(r>=0){sum-=vals[r];sum2-=vals[r]*vals[r];wlen--;}
+    const mean=sum/wlen, v=sum2/wlen-mean*mean;
+    IS_FLAT[i]=(v<VTHR)?1:0;
+  }
+  // remove short spurious flat runs
+  let ri=0;
+  while(ri<n){
+    if(IS_FLAT[ri]){
+      let rj=ri; while(rj<n&&IS_FLAT[rj])rj++;
+      if(rj-ri<MINTHR)for(let k=ri;k<rj;k++)IS_FLAT[k]=0;
+      ri=rj;
+    } else ri++;
+  }
+}
+
+function buildCorrectedPressure(){
+  if(!INTERP)return;
+  const{upFit,downFit,t0up,t0down,peakIdx,upWakeIdx,downSleepIdx}=INTERP;
+  for(let i=0;i<RAW.length;i++){
+    const r=RAW[i];
+    if(i<=peakIdx){
+      if(upFit&&r.t>=(t0up??0)&&i<upWakeIdx)RAW[i].p_corr=Math.max(0,upFit.m*r.t+upFit.b);
+      else if(i<upWakeIdx)RAW[i].p_corr=0;
+      else RAW[i].p_corr=r.p_raw;
+    } else {
+      if(downFit&&i>downSleepIdx)RAW[i].p_corr=Math.max(0,downFit.m*r.t+downFit.b);
+      else RAW[i].p_corr=r.p_raw;
+    }
+  }
+  if(t0up!==null)for(let i=0;i<RAW.length;i++){if(RAW[i].t<t0up)RAW[i].p_corr=0;else break;}
+}
+
+function renderInterpChart(){
+  if(!INTERP)return;
+  const{upFit,downFit,t0up,t0down,peakIdx,upWakeIdx,downSleepIdx,peakT}=INTERP;
+  const N=parseInt(document.getElementById('rawSubsample').value)||20;
+  const subUp=RAW.slice(0,peakIdx+1).filter((_,i)=>i%N===0);
+  const subDown=RAW.slice(peakIdx).filter((_,i)=>i%N===0);
+
+  const upLine=[];
+  if(upFit&&t0up!==null){
+    const tEnd=Math.min(peakT,(RAW[upWakeIdx]?.t??peakT)+500);
+    for(let t=Math.max(0,t0up-200);t<=tEnd;t+=50)upLine.push({x:t,y:Math.max(0,upFit.m*t+upFit.b)});
+  }
+  const downLine=[];
+  if(downFit&&t0down!==null){
+    const tS=RAW[downSleepIdx]?.t??peakT;
+    for(let t=tS-500;t<=Math.min(t0down+200,RAW[RAW.length-1].t);t+=50)
+      downLine.push({x:t,y:Math.max(0,downFit.m*t+downFit.b)});
+  }
+
+  destroyChart('interpChart');
+  const ctx=document.getElementById('interpChart').getContext('2d');
+  CHARTS.interpChart=new Chart(ctx,{
+    type:'scatter',
+    data:{datasets:[
+      {label:'Raw P (adsorption)',data:subUp.map(r=>({x:r.t,y:r.p_raw})),borderColor:'#b84a2e88',backgroundColor:'#b84a2e44',pointRadius:1.5,showLine:true,borderWidth:1,tension:0},
+      {label:'Raw P (desorption)',data:subDown.map(r=>({x:r.t,y:r.p_raw})),borderColor:'#2a649688',backgroundColor:'#2a649644',pointRadius:1.5,showLine:true,borderWidth:1,tension:0},
+      {label:'Linear fit (adsorption)',data:upLine,borderColor:'#2a7a3b',backgroundColor:'transparent',pointRadius:0,showLine:true,borderWidth:2,borderDash:[6,3],tension:0},
+      {label:'Linear fit (desorption)',data:downLine,borderColor:'#7a3b7a',backgroundColor:'transparent',pointRadius:0,showLine:true,borderWidth:2,borderDash:[6,3],tension:0},
+      {label:'Corrected P (adsorption)',data:subUp.map(r=>({x:r.t,y:r.p_corr})),borderColor:'#b84a2e',backgroundColor:'transparent',pointRadius:0,showLine:true,borderWidth:1.5,tension:0},
+      {label:'Corrected P (desorption)',data:subDown.map(r=>({x:r.t,y:r.p_corr})),borderColor:'#2a6496',backgroundColor:'transparent',pointRadius:0,showLine:true,borderWidth:1.5,tension:0},
+    ]},
+    options:{
+      animation:false,responsive:true,maintainAspectRatio:false,
+      plugins:{
+        legend:{position:'top',labels:{font:{family:'DM Sans',size:11},boxWidth:14,padding:10}},
+        tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${d4(c.raw.y)} ${META.pressureUnit} @ t=${d1(c.raw.x)}s`}},
+      },
+      scales:{
+        x:{type:'linear',title:{display:true,text:'Time (s)',font:{family:'DM Mono',size:11}},ticks:{font:{family:'DM Mono',size:10}},grid:{color:'#ede7d8'}},
+        y:{type:'linear',title:{display:true,text:'Pressure ('+META.pressureUnit+')',font:{family:'DM Mono',size:11}},ticks:{font:{family:'DM Mono',size:10}},grid:{color:'#ede7d8'},min:0},
+      }
+    }
+  });
+
+  // notice
+  const msgs=[];
+  if(upFit)msgs.push(`Ads. ramp: <b>${d4(upFit.m*60000)} mbar/min</b> · R²=${d5(upFit.r2)}`);
+  if(t0up!==null)msgs.push(`t₀ = <b>${d1(t0up)} s</b>`);
+  if(downFit)msgs.push(`Des. ramp: <b>${d4(Math.abs(downFit.m)*60000)} mbar/min</b> · R²=${d5(downFit.r2)}`);
+  if(t0down!==null)msgs.push(`t_end = <b>${d1(t0down)} s</b>`);
+  document.getElementById('interpNotice').innerHTML=msgs.length
+    ?`<div class="notice notice-ok">${msgs.join(' &nbsp;·&nbsp; ')}</div>`
+    :`<div class="notice notice-warn">⚠ Could not determine ramp parameters — try adjusting fit range.</div>`;
+}
+
+function renderInterpStats(){
+  if(!INTERP)return;
+  const{txFloor,autoFloor,peakP,peakT,t0up,t0down,upFit,downFit}=INTERP;
+  const items=[
+    ['Tx floor',d4(txFloor)+' '+META.pressureUnit+(autoFloor===txFloor?' (auto)':''),false],
+    ['Peak P',d4(peakP)+' '+META.pressureUnit,true],
+    ['Peak time',d1(peakT)+' s',false],
+    ['Ramp start t₀',t0up!==null?d1(t0up)+' s':'—',false],
+    ['Ads. rate',upFit?d4(upFit.m*60000)+' mbar/min':'—',false],
+    ['Des. rate',downFit?d4(Math.abs(downFit.m)*60000)+' mbar/min':'—',false],
+    ['Ads. R²',upFit?d5(upFit.r2):'—',false],
+    ['Des. R²',downFit?d5(downFit.r2):'—',false],
+  ];
+  document.getElementById('interpStats').innerHTML=items.map(([l,v,hi])=>
+    `<div class="sc${hi?' hi':''}"><div class="sl">${l}</div><div class="sv">${v}</div></div>`
+  ).join('');
+}
+
+// ═══════════════════════════════════════════
+//  TAB 3: HF vs PRESSURE — custom canvas render
+// ═══════════════════════════════════════════
+// ── helpers ──
+function linReg2(pts){ // pts = [{x,y}]
+  const n=pts.length; if(n<2)return null;
+  let sx=0,sy=0,sxy=0,sx2=0;
+  pts.forEach(p=>{sx+=p.x;sy+=p.y;sxy+=p.x*p.y;sx2+=p.x*p.x;});
+  const m=(n*sxy-sx*sy)/(n*sx2-sx*sx);
+  const b=(sy-m*sx)/n;
+  return{m,b};
+}
+function intersect2(l1,l2){
+  // l1,l2: {m,b} — y=mx+b
+  if(Math.abs(l1.m-l2.m)<1e-12)return null;
+  const x=(l2.b-l1.b)/(l1.m-l2.m);
+  return{x,y:l1.m*x+l1.b};
+}
+
+function startPick(leg){
+  if(pickMode===leg){cancelPick();return;}
+  cancelPick();
+  pickMode=leg; pickPts=[];
+  const btn=document.getElementById(leg==='ads'?'btnPickAds':'btnPickDes');
+  btn.textContent='✕ Cancel ('+leg+')';
+  document.getElementById('pickStatus'+leg.charAt(0).toUpperCase()+leg.slice(1))
+    .textContent='Click first point on the plot...';
+  document.getElementById('hfChart').style.cursor='crosshair';
+}
+function cancelPick(){
+  if(!pickMode)return;
+  const leg=pickMode;
+  pickMode=null; pickPts=[];
+  const btn=document.getElementById(leg==='ads'?'btnPickAds':'btnPickDes');
+  btn.textContent='▶ Pick two points — '+leg;
+  document.getElementById('pickStatus'+leg.charAt(0).toUpperCase()+leg.slice(1)).textContent='';
+  document.getElementById('hfChart').style.cursor='default';
+  redraw();
+}
+function clearPicks(){
+  cancelPick();
+  peakAreaAds=null; peakAreaDes=null;
+  document.getElementById('areaResultAds').innerHTML='';
+  document.getElementById('areaResultDes').innerHTML='';
+  document.getElementById('pickStatusAds').textContent='';
+  document.getElementById('pickStatusDes').textContent='';
+  document.getElementById('btnPickAds').textContent='▶ Pick two points — adsorption';
+  document.getElementById('btnPickDes').textContent='▶ Pick two points — desorption';
+  redraw();
+}
+
+function computePeakArea(leg, pt1, pt2){
+  if(!INTERP||!IS_FLAT)return;
+  const N=parseInt(document.getElementById('hfSubsample').value)||10;
+  const win=parseInt(document.getElementById('smoothWin').value)||1;
+  const p_smooth=smoothArray(RAW.map(r=>r.p_corr??r.p_raw),win);
+  const pi=INTERP.peakIdx;
+
+  // Build the series for this leg (same filter as drawHFPlot)
+  const pts=[];
+  const start=leg==='ads'?0:pi;
+  const end=leg==='ads'?pi:RAW.length-1;
+  for(let i=start;i<=end;i+=N){
+    if(removeFlat&&IS_FLAT&&IS_FLAT[i])continue;
+    const x=p_smooth[i],y=RAW[i].hf;
+    if(x>=0&&isFinite(x)&&isFinite(y))pts.push({x,y,t:RAW[i].t});
+  }
+  if(pts.length<5)return;
+
+  // Find the two bracketing indices in pts closest to the clicked pressures
+  const findIdx=px=>pts.reduce((b,_,i)=>Math.abs(pts[i].x-px)<Math.abs(pts[b].x-px)?i:b,0);
+  const i1=findIdx(pt1.x), i2=findIdx(pt2.x);
+  const iLo=Math.min(i1,i2), iHi=Math.max(i1,i2);
+  if(iHi-iLo<2)return;
+
+  const p1=pts[iLo], p2=pts[iHi];
+  const between=pts.slice(iLo,iHi+1);
+
+  // Straight-line baseline between the two clicked points
+  const blSlope=(p2.y-p1.y)/(p2.x-p1.x);
+  const blIntercept=p1.y-blSlope*p1.x;
+  const baseline={m:blSlope,b:blIntercept};
+
+  // Find peak (max absolute deviation from baseline)
+  let iPeak=0,peakDev=0;
+  between.forEach((p,i)=>{
+    const dev=Math.abs(p.y-(baseline.m*p.x+baseline.b));
+    if(dev>peakDev){peakDev=dev;iPeak=i;}
+  });
+  const peakPt=between[iPeak];
+
+  // Integrate (signal − baseline) over TIME using ramp rate to convert dP → dt
+  // rampRate is in bar/s from the linear fit; dt = |dP / rampRate|
+  const rampRate=leg==='ads'?(INTERP.upFit?.m||null):(INTERP.downFit?.m||null);
+  const mass=META.mass; // mg — from file header
+  let areamJg=null;  // mJ/g (or J/g if mass known)
+
+  if(rampRate){
+    let areaT=0; // mW/g · s = mJ/g
+    for(let i=1;i<between.length;i++){
+      const a=between[i-1], b=between[i];
+      const dp=b.x-a.x;                     // bar (signed)
+      const dt=Math.abs(dp/rampRate);        // seconds, always positive
+      const blA=baseline.m*a.x+baseline.b;
+      const blB=baseline.m*b.x+baseline.b;
+      const devA=a.y-blA, devB=b.y-blB;
+      areaT+=0.5*(devA+devB)*dt;             // trapezoid, mJ/g
+    }
+    // Convert to J/g if mass available: mJ/g ÷ 1000 → J/g? No:
+    // mW/g × s = mJ/g already. Divide by sample mass (mg) to get J/g:
+    // Actually mW = mJ/s, so mW/g × s = mJ/g. That's per gram of sample.
+    // If mass given we can also express as total mJ: areaT × mass / 1000 → mJ total
+    if(mass&&mass>0){
+      areamJg=areaT;        // mJ/g (per gram of sample)
+    } else {
+      areamJg=areaT;        // mJ/g (no mass available, still per gram)
+    }
+  }
+
+  const result={p1,p2,baseline,peakPt,between,rampRate,areamJg,leg};
+  if(leg==='ads') peakAreaAds=result;
+  else peakAreaDes=result;
+
+  // Show result — styled like TGA/DSC app
+  const elId=leg==='ads'?'areaResultAds':'areaResultDes';
+  const legLabel=leg==='ads'?'Adsorption':'Desorption';
+  const rateStr=rampRate?`${(Math.abs(rampRate)*60000).toFixed(2)} mbar min⁻¹`:'n/a';
+  let html=`<span style="letter-spacing:.1em;text-transform:uppercase;font-size:9px;color:${leg==='ads'?gv('adsCol'):gv('desCol')}">${legLabel}</span><br>`;
+  html+=`<span style="color:#888">Ramp rate: </span>${rateStr}<br>`;
+  if(areamJg!==null){
+    html+=`<span style="color:#888">P range: </span>${p1.x.toFixed(3)}–${p2.x.toFixed(3)} ${META.pressureUnit}<br>`;
+    html+=`<span style="color:#888">Area (∫HF·dτ): </span><b>${areamJg.toFixed(3)} mJ g⁻¹</b>`;
+    if(mass&&mass>0)
+      html+=`<br><span style="color:#888">Total (×${mass.toFixed(2)} mg): </span><b>${(areamJg*mass/1000).toFixed(4)} mJ</b>`;
+    else
+      html+=`<br><span style="color:#aaa;font-size:9px">No sample mass — total not calculated</span>`;
+  } else {
+    html+=`<span style="color:#aaa;font-size:9px">No ramp rate — run interpolation first</span>`;
+  }
+  document.getElementById(elId).innerHTML=html;
+  document.getElementById('pickStatus'+leg.charAt(0).toUpperCase()+leg.slice(1)).textContent='';
+  document.getElementById(leg==='ads'?'btnPickAds':'btnPickDes').textContent='▶ Pick two points — '+leg;
+  redraw();
+}
+
+function resetZoom(){
+  ZOOM={xMin:null,xMax:null,yMin:null,yMax:null};
+  redraw();
+  st('Zoom reset.','ok');
+}
+
+let removeFlat=true; // default: holds removed from plot
+
+// Peak area pick state
+let pickMode=null;   // null | 'ads' | 'des'
+let pickPts=[];      // [{x,y}] in data coords, max 2
+let peakAreaAds=null; // {p1,p2,baseline,areamWbar,areamJg}
+let peakAreaDes=null;
+
+function toggleFlat(){
+  removeFlat=!removeFlat;
+  const btn=document.getElementById('togFlat');
+  btn.textContent=removeFlat?'✕ Remove holds':'○ Show holds';
+  btn.style.background=removeFlat?'#888':'var(--paper)';
+  btn.style.borderColor=removeFlat?'#888':'var(--rule)';
+  btn.style.color=removeFlat?'#fff':'#888';
+  redraw();
+}
+
+function toggleLeg(leg){
+  if(leg==='ads'){showAds=!showAds;document.getElementById('togAds').className='tog'+(showAds?' on-ads':'');}
+  if(leg==='des'){showDes=!showDes;document.getElementById('togDes').className='tog'+(showDes?' on-des':'');}
+  redraw();
+}
+
+// The HF chart is a fully custom canvas renderer (not Chart.js) so we can match
+// the Isotherm Fitter's publication-quality output pipeline exactly.
+function redraw(){
+  if(!INTERP)return;
+  const canvas=document.getElementById('hfChart');
+  const dw=canvas.clientWidth||800, dh=canvas.clientHeight||500;
+  canvas.width=dw; canvas.height=dh;
+  const ctx=canvas.getContext('2d');
+  drawHFPlot(ctx,dw,dh,false);
+  renderHFStats();
+  // draw rubber-band rect if dragging
+  if(_drag&&_drag.active){
+    const x=Math.min(_drag.startX,_drag.curX), y=Math.min(_drag.startY,_drag.curY);
+    const w=Math.abs(_drag.curX-_drag.startX), h=Math.abs(_drag.curY-_drag.startY);
+    ctx.save();
+    ctx.strokeStyle='#b84a2e'; ctx.lineWidth=1.5; ctx.setLineDash([4,3]);
+    ctx.strokeRect(x,y,w,h);
+    ctx.fillStyle='rgba(184,74,46,0.08)'; ctx.fillRect(x,y,w,h);
+    ctx.restore();
+  }
+}
+
+function drawHFPlot(ctx,W,H,forExport){
+  const N=parseInt(document.getElementById('hfSubsample').value)||10;
+  const win=parseInt(document.getElementById('smoothWin').value)||1;
+
+  // smooth corrected pressure
+  const p_smooth=smoothArray(RAW.map(r=>r.p_corr??r.p_raw),win);
+
+  // build series — optionally skip flat hold segments
+  const adsData=[], desData=[];
+  const pi=INTERP.peakIdx;
+  if(showAds){
+    for(let i=0;i<=pi;i+=N){
+      if(removeFlat&&IS_FLAT&&IS_FLAT[i])continue;
+      const x=p_smooth[i],y=RAW[i].hf;
+      if(x>=0&&isFinite(x)&&isFinite(y))adsData.push({x,y});
+    }
+  }
+  if(showDes){
+    for(let i=pi;i<RAW.length;i+=N){
+      if(removeFlat&&IS_FLAT&&IS_FLAT[i])continue;
+      const x=p_smooth[i],y=RAW[i].hf;
+      if(x>=0&&isFinite(x)&&isFinite(y))desData.push({x,y});
+    }
+  }
+
+  // get all data for axis ranging
+  const allX=[...adsData,...desData].map(d=>d.x);
+  const allY=[...adsData,...desData].map(d=>d.y);
+  if(!allX.length)return;
+
+  const xMinAuto=Math.min(...allX), xMaxAuto=Math.max(...allX);
+  const yMinAuto=Math.min(...allY), yMaxAuto=Math.max(...allY);
+  const xPad=(xMaxAuto-xMinAuto)*0.03, yPad=(yMaxAuto-yMinAuto)*0.06;
+
+  const xMin=ZOOM.xMin??gn('xmin')??xMinAuto-xPad;
+  const xMax=ZOOM.xMax??gn('xmax')??xMaxAuto+xPad;
+  const yMin=ZOOM.yMin??gn('ymin')??yMinAuto-yPad;
+  const yMax=ZOOM.yMax??gn('ymax')??yMaxAuto+yPad;
+
+  // layout
+  const font=gv('fontFam');
+  const axSz=parseInt(gv('axSz'));
+  const tkSz=parseInt(gv('tkSz'));
+  const ttlText=gv('ttl');
+  const ttlSz=parseInt(gv('ttlSz'));
+  const axCol=gv('axCol');
+  const chartBg=gv('chartBg');
+  const plotBg=gv('plotBg');
+  const frameW=parseFloat(gv('frameW'));
+  const showGrid=gb('grid');
+  const gridCol=gv('gridCol');
+  const gridW=parseFloat(gv('gridW'));
+  const majTick=gb('majTick'), minTick=gb('minTick');
+  const tickLen=parseInt(gv('tickLen'));
+  const minTickLen=parseInt(gv('minTickLen'));
+  const majTickW=parseFloat(gv('majTickW')), minTickW=parseFloat(gv('minTickW'));
+  const tickDir=gv('tickDir');
+  const boxBdr=gb('boxBdr'), boxW=parseFloat(gv('boxW')), boxCol=gv('boxCol');
+  const legShow=gb('legShow'), legPos=gv('legPos'), legSz=parseInt(gv('legSz'));
+  const adsCol=gv('adsCol'), adsW=parseFloat(gv('adsW')), adsDash=gv('adsDash');
+  const desCol=gv('desCol'), desW=parseFloat(gv('desW')), desDash=gv('desDash');
+
+  // margins — measure widest y tick label to avoid overlap with y-axis label
+  const titleH=ttlText?(ttlSz+12):0;
+  const mr=20, mt=titleH+18, mb=axSz+tkSz+28;
+  // measure widest tick label using the actual y range already resolved above
+  const _yT=niceTicksFor(yMin,yMax,6);
+  ctx.font=`${tkSz}px ${font}`;
+  const tickLblW=Math.max(..._yT.map(v=>ctx.measureText(fmtTick(v)).width),20);
+  const tickOutset=(gv('tickDir')==='in')?0:parseInt(gv('tickLen'));
+  const ml=axSz+14+tickLblW+tickOutset+10, pw=W-ml-mr, ph=H-mt-mb;
+
+  // coordinate mappers
+  const cx=x=>ml+(x-xMin)/(xMax-xMin)*pw;
+  const cy=y=>mt+ph-(y-yMin)/(yMax-yMin)*ph;
+  // store for hit-testing in mouse events (display render only, not export)
+  if(!forExport) _plotBox={ml,mt,pw,ph,W,H,xMin,xMax,yMin,yMax,cx,cy};
+
+  // chart background
+  ctx.fillStyle=chartBg;
+  ctx.fillRect(0,0,W,H);
+
+  // plot area background
+  ctx.fillStyle=plotBg;
+  ctx.fillRect(ml,mt,pw,ph);
+
+  // clip to plot area
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(ml,mt,pw,ph);
+  ctx.clip();
+
+  // grid
+  if(showGrid){
+    ctx.strokeStyle=gridCol; ctx.lineWidth=gridW;
+    const xTicks=niceTicksFor(xMin,xMax,6);
+    const yTicks=niceTicksFor(yMin,yMax,6);
+    xTicks.forEach(x=>{ctx.beginPath();ctx.moveTo(cx(x),mt);ctx.lineTo(cx(x),mt+ph);ctx.stroke();});
+    yTicks.forEach(y=>{ctx.beginPath();ctx.moveTo(ml,cy(y));ctx.lineTo(ml+pw,cy(y));ctx.stroke();});
+  }
+
+  // series
+  function drawLine(data,col,lw,dashStr){
+    if(!data.length)return;
+    const dash=dashStr?dashStr.split(',').map(Number):[];
+    ctx.save();
+    ctx.strokeStyle=col; ctx.lineWidth=lw; ctx.setLineDash(dash);
+    ctx.beginPath();
+    let first=true;
+    for(const d of data){
+      const x=cx(d.x), y=cy(d.y);
+      if(first){ctx.moveTo(x,y);first=false;}else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+  if(showAds)drawLine(adsData,adsCol,adsW,adsDash);
+  if(showDes)drawLine(desData,desCol,desW,desDash);
+
+  // ── Running integral overlay ──
+  // Integration over time: dt = |dP / rampRate|  (rampRate in bar/s from linear fit)
+  const showIntegral=document.getElementById('showIntegral')?.checked;
+  if(showIntegral){
+    const intAdsCol=gv('intAdsCol'), intDesCol=gv('intDesCol');
+    const adsRate=INTERP.upFit?.m||null;
+    const desRate=INTERP.downFit?.m||null;
+
+    function buildCumul(data,rampRate){
+      const c=[0];
+      for(let i=1;i<data.length;i++){
+        const dp=data[i].x-data[i-1].x;
+        const dt=Math.abs(dp/rampRate);
+        c.push(c[i-1]+0.5*(data[i].y+data[i-1].y)*dt);
+      }
+      return c;
+    }
+
+    // Compute cumulative integrals — both may be negative (exo/endothermic HF)
+    // Negate both so they plot as positive values (upward on screen)
+    // For desorption, additionally apply the vertical mirror:
+    //   raw desC goes [0 ... negative_peak ... less_negative]
+    //   negate → [0 ... positive_peak ... smaller_positive]
+    //   mirror → subtract each from its own max so it starts at max and ends at 0
+    //   this gives the isotherm-like shape: starts low (0), ends high
+    //   which matches adsorption direction
+    const adsRaw=showAds&&adsData.length&&adsRate?buildCumul(adsData,adsRate):null;
+    const desRaw=showDes&&desData.length&&desRate?buildCumul(desData,desRate):null;
+
+    // Negate adsorption (heat flow is negative → integral is negative → flip to positive)
+    const adsC=adsRaw;
+
+    // For desorption: negate, then the values go [0...positive_peak...smaller]
+    // We want it mirrored: apply Yi → (Ymax - Yi) so [peak...0...peak-small]
+    // which makes it start low and end high — the mirror of adsorption
+    let desC=null;
+    if(desRaw){
+      const neg=desRaw.map(v=>-v);
+      const dMax=Math.max(...neg);
+      desC=neg.map(v=>dMax-v);
+    }
+
+    // Scale each leg independently to fill the full plot area
+    const adsMin=adsC?Math.min(...adsC):0, adsMax=adsC?Math.max(...adsC):1;
+    const adsRange=adsMax-adsMin||1;
+    const desMin2=desC?Math.min(...desC):0, desMax2=desC?Math.max(...desC):1;
+    const desRange2=desMax2-desMin2||1;
+
+    const icyAds=v=>mt+ph-(v-adsMin)/adsRange*ph;
+    const icyDes=v=>mt+ph-(v-desMin2)/desRange2*ph;
+
+    function drawIntegral(data,cumul,col,ymap){
+      ctx.save();
+      ctx.strokeStyle=col; ctx.lineWidth=1.5; ctx.setLineDash([4,4]);
+      ctx.globalAlpha=0.7;
+      ctx.beginPath();
+      data.forEach((d,i)=>{
+        const px2=cx(d.x), py2=ymap(cumul[i]);
+        if(i===0)ctx.moveTo(px2,py2); else ctx.lineTo(px2,py2);
+      });
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    if(adsC)drawIntegral(adsData,adsC,intAdsCol,icyAds);
+    if(desC)drawIntegral(desData,desC,intDesCol,icyDes);
+  }
+
+  // ── Peak area shading and baseline ──
+  function drawPeakArea(result,lineCol){
+    if(!result)return;
+    const{p1,p2,baseline,peakPt,between}=result;
+    // shaded area between signal and baseline
+    ctx.save();
+    ctx.globalAlpha=0.18;
+    ctx.fillStyle=lineCol;
+    ctx.beginPath();
+    between.forEach((p,i)=>{
+      const px2=cx(p.x);
+      if(i===0)ctx.moveTo(px2,cy(p.y)); else ctx.lineTo(px2,cy(p.y));
+    });
+    // close along baseline back to start
+    for(let i=between.length-1;i>=0;i--){
+      const p=between[i];
+      ctx.lineTo(cx(p.x),cy(baseline.m*p.x+baseline.b));
+    }
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+    // baseline line
+    ctx.save();
+    ctx.strokeStyle=lineCol; ctx.lineWidth=1.5; ctx.setLineDash([7,4]);
+    ctx.beginPath();
+    ctx.moveTo(cx(p1.x),cy(baseline.m*p1.x+baseline.b));
+    ctx.lineTo(cx(p2.x),cy(baseline.m*p2.x+baseline.b));
+    ctx.stroke(); ctx.restore();
+    // endpoint dots
+    ctx.save();
+    ctx.fillStyle='#fff'; ctx.strokeStyle=lineCol; ctx.lineWidth=1.5;
+    [p1,p2].forEach(p=>{
+      ctx.beginPath(); ctx.arc(cx(p.x),cy(p.y),4,0,2*Math.PI);
+      ctx.fill(); ctx.stroke();
+    });
+    // peak dot (solid)
+    ctx.fillStyle=lineCol; ctx.beginPath();
+    ctx.arc(cx(peakPt.x),cy(peakPt.y),4,0,2*Math.PI); ctx.fill();
+    ctx.restore();
+  }
+  if(peakAreaAds)drawPeakArea(peakAreaAds,adsCol);
+  if(peakAreaDes)drawPeakArea(peakAreaDes,desCol);
+
+  // ── First pick-point marker ──
+  if(pickMode&&pickPts.length===1&&_plotBox){
+    const col=pickMode==='ads'?gv('adsCol'):gv('desCol');
+    ctx.save(); ctx.strokeStyle=col; ctx.lineWidth=1.5;
+    ctx.setLineDash([3,3]);
+    ctx.beginPath(); ctx.arc(cx(pickPts[0].x),cy(pickPts[0].y),5,0,2*Math.PI);
+    ctx.stroke(); ctx.restore();
+  }
+
+  ctx.restore(); // end clip
+
+  // box border
+  if(boxBdr){
+    ctx.strokeStyle=boxCol; ctx.lineWidth=boxW;
+    ctx.strokeRect(ml,mt,pw,ph);
+  }
+
+  // axes
+  ctx.strokeStyle=axCol; ctx.lineWidth=frameW;
+  ctx.beginPath();
+  ctx.moveTo(ml,mt); ctx.lineTo(ml,mt+ph); // y-axis
+  ctx.moveTo(ml,mt+ph); ctx.lineTo(ml+pw,mt+ph); // x-axis
+  ctx.stroke();
+
+  // ticks and tick labels
+  ctx.fillStyle=axCol;
+  ctx.font=`${tkSz}px ${font}`;
+  ctx.textAlign='center'; ctx.textBaseline='top';
+
+  const xTicks=niceTicksFor(xMin,xMax,6);
+  const yTicks=niceTicksFor(yMin,yMax,6);
+
+  // minor tick intervals
+  const xMinorStep=(xTicks.length>1)?(xTicks[1]-xTicks[0])/5:0;
+  const yMinorStep=(yTicks.length>1)?(yTicks[1]-yTicks[0])/5:0;
+
+  function drawTick(x1,y1,x2,y2,w){
+    ctx.save();ctx.strokeStyle=axCol;ctx.lineWidth=w;
+    ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();ctx.restore();
+  }
+
+  // major X ticks
+  if(majTick) xTicks.forEach(x=>{
+    const px=cx(x); if(px<ml||px>ml+pw)return;
+    const by=mt+ph;
+    if(tickDir==='out'||tickDir==='both')drawTick(px,by,px,by+tickLen,majTickW);
+    if(tickDir==='in' ||tickDir==='both')drawTick(px,by,px,by-tickLen,majTickW);
+    ctx.fillStyle=axCol;ctx.font=`${tkSz}px ${font}`;ctx.textAlign='center';ctx.textBaseline='top';
+    ctx.fillText(fmtTick(x),px,by+tickLen+(tickDir==='in'?-tickLen-2:2)+3);
+  });
+
+  // minor X ticks
+  if(minTick&&xMinorStep>0){
+    const xs=xTicks[0]-xMinorStep;
+    for(let x=xs;x<=xMax+xMinorStep;x+=xMinorStep){
+      const px=cx(x); if(px<ml||px>ml+pw)continue;
+      const by=mt+ph;
+      if(tickDir==='out'||tickDir==='both')drawTick(px,by,px,by+minTickLen,minTickW);
+      if(tickDir==='in' ||tickDir==='both')drawTick(px,by,px,by-minTickLen,minTickW);
+    }
+  }
+
+  // major Y ticks
+  ctx.textAlign='right'; ctx.textBaseline='middle';
+  if(majTick) yTicks.forEach(y=>{
+    const py=cy(y); if(py<mt||py>mt+ph)return;
+    if(tickDir==='out'||tickDir==='both')drawTick(ml,py,ml-tickLen,py,majTickW);
+    if(tickDir==='in' ||tickDir==='both')drawTick(ml,py,ml+tickLen,py,majTickW);
+    ctx.fillStyle=axCol;ctx.font=`${tkSz}px ${font}`;ctx.textAlign='right';ctx.textBaseline='middle';
+    ctx.fillText(fmtTick(y),ml-tickLen-(tickDir==='in'?-tickLen-2:2)-3,py);
+  });
+
+  // minor Y ticks
+  if(minTick&&yMinorStep>0){
+    const ys=yTicks[0]-yMinorStep;
+    for(let y=ys;y<=yMax+yMinorStep;y+=yMinorStep){
+      const py=cy(y); if(py<mt||py>mt+ph)continue;
+      if(tickDir==='out'||tickDir==='both')drawTick(ml,py,ml-minTickLen,py,minTickW);
+      if(tickDir==='in' ||tickDir==='both')drawTick(ml,py,ml+minTickLen,py,minTickW);
+    }
+  }
+
+  // axis labels
+  const xLbl=gv('xLbl'), yLbl=gv('yLbl');
+  ctx.fillStyle=axCol; ctx.font=`${axSz}px ${font}`;
+  ctx.textAlign='center'; ctx.textBaseline='bottom';
+  ctx.fillText(xLbl, ml+pw/2, H-4);
+  ctx.save();
+  ctx.translate(axSz/2+2, mt+ph/2);
+  ctx.rotate(-Math.PI/2);
+  ctx.textAlign='center'; ctx.textBaseline='top';
+  ctx.fillText(yLbl, 0, 0);
+  ctx.restore();
+
+  // title
+  if(ttlText){
+    ctx.fillStyle=axCol; ctx.font=`${ttlSz}px ${font}`;
+    ctx.textAlign='center'; ctx.textBaseline='top';
+    ctx.fillText(ttlText, ml+pw/2, 6);
+  }
+
+  // legend
+  if(legShow&&(showAds||showDes)){
+    const legItems=[];
+    if(showAds)legItems.push({label:'Adsorption',col:adsCol});
+    if(showDes)legItems.push({label:'Desorption',col:desCol});
+    const fs=legSz; const lh=fs+6; const boxS=fs-2;
+    const textW=legItems.map(li=>{ctx.font=`${fs}px ${font}`;return ctx.measureText(li.label).width;});
+    const lw=Math.max(...textW)+boxS+14;
+    const lhh=lh*legItems.length+10;
+    let lx,ly;
+    if(legPos==='top'){lx=ml+pw-lw-10;ly=mt+10;}
+    else if(legPos==='bottom'){lx=ml+pw-lw-10;ly=mt+ph-lhh-10;}
+    else if(legPos==='left'){lx=ml+10;ly=mt+10;}
+    else{lx=ml+pw-lw-10;ly=mt+10;}
+
+    ctx.fillStyle='rgba(255,255,255,0.88)';
+    ctx.fillRect(lx-4,ly-4,lw+8,lhh+2);
+    ctx.strokeStyle='#ccc';ctx.lineWidth=1;
+    ctx.strokeRect(lx-4,ly-4,lw+8,lhh+2);
+    legItems.forEach((li,k)=>{
+      const y=ly+5+k*lh;
+      ctx.fillStyle=li.col;
+      ctx.fillRect(lx,y+(lh-boxS)/2,boxS,boxS);
+      ctx.fillStyle=axCol; ctx.font=`${fs}px ${font}`;
+      ctx.textAlign='left'; ctx.textBaseline='middle';
+      ctx.fillText(li.label,lx+boxS+6,y+lh/2);
+    });
+  }
+}
+
+// ═══════════════════════════════════════════
+//  HF stats
+// ═══════════════════════════════════════════
+function renderHFStats(){
+  if(!INTERP)return;
+  const{peakP,t0up}=INTERP;
+  const pi=INTERP.peakIdx;
+  let aMin=Infinity,aMax=-Infinity,dMin=Infinity,dMax=-Infinity;
+  for(let i=0;i<=pi;i++){if(RAW[i].hf<aMin)aMin=RAW[i].hf;if(RAW[i].hf>aMax)aMax=RAW[i].hf;}
+  for(let i=pi;i<RAW.length;i++){if(RAW[i].hf<dMin)dMin=RAW[i].hf;if(RAW[i].hf>dMax)dMax=RAW[i].hf;}
+  const items=[
+    ['Peak pressure',d4(peakP)+' '+META.pressureUnit,true],
+    ['Ads. HF range',d4(aMin)+' to '+d4(aMax)+' mW/g',false],
+    ['Des. HF range',d4(dMin)+' to '+d4(dMax)+' mW/g',false],
+    ['Ramp start t₀',t0up!==null?d1(t0up)+' s':'—',false],
+  ];
+  document.getElementById('hfStats').innerHTML=items.map(([l,v,hi])=>
+    `<div class="sc${hi?' hi':''}"><div class="sl">${l}</div><div class="sv">${v}</div></div>`
+  ).join('');
+}
+
+// ═══════════════════════════════════════════
+//  Save / copy plot
+// ═══════════════════════════════════════════
+function savePlot(){
+  const W=parseInt(document.getElementById('expW').value)||1200;
+  const H=parseInt(document.getElementById('expH').value)||900;
+  const fmt=gv('expFmt').toLowerCase();
+  const off=document.createElement('canvas');
+  off.width=W; off.height=H;
+  const ctx=off.getContext('2d');
+  ctx.fillStyle=gv('chartBg'); ctx.fillRect(0,0,W,H);
+  drawHFPlot(ctx,W,H,true);
+  const mime='image/'+fmt;
+  const defaultName=(META.fileName||'calorimetry').replace(/\.[^.]+$/,'')+'_hf_vs_p.'+fmt;
+  off.toBlob(blob=>{
+    if(window.showSaveFilePicker){
+      window.showSaveFilePicker({
+        suggestedName:defaultName,
+        types:[{description:fmt.toUpperCase()+' image',accept:{[mime]:['.'+fmt]}}]
+      }).then(fh=>fh.createWritable()).then(w=>w.write(blob).then(()=>w.close()))
+        .then(()=>st('Plot saved — '+defaultName,'ok'))
+        .catch(e=>{if(e.name!=='AbortError')st('Save failed: '+e.message,'err');});
+    } else {
+      const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=defaultName;a.click();
+      st('Plot downloaded — '+defaultName+'. (Use Chrome/Edge for a save dialog.)','ok');
+    }
+  },mime);
+}
+
+function copyPlot(){
+  const W=parseInt(document.getElementById('expW').value)||1200;
+  const H=parseInt(document.getElementById('expH').value)||900;
+  const off=document.createElement('canvas');
+  off.width=W; off.height=H;
+  const ctx=off.getContext('2d');
+  ctx.fillStyle=gv('chartBg'); ctx.fillRect(0,0,W,H);
+  drawHFPlot(ctx,W,H,true);
+  off.toBlob(blob=>{
+    navigator.clipboard.write([new ClipboardItem({'image/png':blob})])
+      .then(()=>st('Plot copied to clipboard.','ok'))
+      .catch(e=>st('Copy failed: '+e.message,'err'));
+  },'image/png');
+}
+
+// ═══════════════════════════════════════════
+//  CSV EXPORT
+// ═══════════════════════════════════════════
+function exportCSV(){
+  if(!INTERP)return;
+
+  const WIN=400, VTHR=0.005, MINTHR=50;
+  const n=RAW.length;
+  const isFlat=new Uint8Array(n);
+  const vals=RAW.map(r=>r.p_raw);
+  let sum=0,sum2=0,wlen=0;
+  for(let j=0;j<Math.min(WIN,n);j++){sum+=vals[j];sum2+=vals[j]*vals[j];wlen++;}
+  for(let i=0;i<n;i++){
+    const addIdx=i+WIN, remIdx=i-WIN-1;
+    if(addIdx<n){sum+=vals[addIdx];sum2+=vals[addIdx]*vals[addIdx];wlen++;}
+    if(remIdx>=0){sum-=vals[remIdx];sum2-=vals[remIdx]*vals[remIdx];wlen--;}
+    const mean=sum/wlen, variance=sum2/wlen-mean*mean;
+    isFlat[i]=(variance<VTHR)?1:0;
+  }
+  let ri=0;
+  while(ri<n){
+    if(isFlat[ri]){
+      let rj=ri;
+      while(rj<n&&isFlat[rj])rj++;
+      if(rj-ri<MINTHR)for(let k=ri;k<rj;k++)isFlat[k]=0;
+      ri=rj;
+    } else ri++;
+  }
+  let firstActive=-1,lastActive=-1;
+  for(let i=0;i<n;i++)if(!isFlat[i]){if(firstActive<0)firstActive=i;lastActive=i;}
+  if(firstActive<0){st('No ramping data found.','err');return;}
+
+  const pi=INTERP.peakIdx;
+  const lines=[
+    '# Sorption Calorimetry — processed export',
+    '# Generated: '+new Date().toISOString().replace('T',' ').slice(0,19),
+  ];
+  if(META.fileName)lines.push('# File: '+META.fileName);
+  if(META.mass)lines.push('# Mass: '+META.mass+' mg');
+  if(META.molarMass)lines.push('# Molar_Mass: '+META.molarMass+' g/mol');
+  if(META.date)lines.push('# Date: '+META.date);
+  lines.push('# Pressure_Units: '+META.pressureUnit);
+  lines.push('# Flat segments removed (rolling variance < 0.005 bar²)');
+  lines.push('# Time is cumulative ramp time only (flat holds excluded)');
+  lines.push('');
+  lines.push('Time_adj (s),Pressure_corr ('+META.pressureUnit+'),HeatFlow (mW/g),Leg');
+
+  let tAdj=0, prevActiveT=null;
+  for(let i=firstActive;i<=lastActive;i++){
+    if(isFlat[i]){prevActiveT=null;continue;}
+    const r=RAW[i];
+    if(prevActiveT!==null)tAdj+=(r.t-prevActiveT);
+    prevActiveT=r.t;
+    const leg=(i<=pi)?'adsorption':'desorption';
+    lines.push(`${d4(tAdj)},${d4(r.p_corr??r.p_raw)},${d4(r.hf)},${leg}`);
+  }
+
+  const csvText=lines.join('\r\n');
+  const blob=new Blob([csvText],{type:'text/csv'});
+  const defaultName=(META.fileName||'calorimetry').replace(/\.[^.]+$/,'')+'_processed.csv';
+
+  if(window.showSaveFilePicker){
+    window.showSaveFilePicker({
+      suggestedName:defaultName,
+      types:[{description:'CSV file',accept:{'text/csv':['.csv']}}]
+    }).then(fh=>fh.createWritable()).then(w=>w.write(csvText).then(()=>w.close()))
+      .then(()=>st('Saved — '+defaultName,'ok'))
+      .catch(e=>{if(e.name!=='AbortError')st('Save failed: '+e.message,'err');});
+  } else {
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=defaultName;a.click();
+    st('CSV downloaded — '+defaultName+'. (Use Chrome/Edge for a save dialog.)','ok');
+  }
+}
+
+function exportRawCSV(){
+  const N=parseInt(document.getElementById('rawSubsample').value)||1;
+  const lines=['Time (s),Temperature (°C),HeatFlow (mW/g),Pressure_raw ('+META.pressureUnit+')'];
+  RAW.filter((_,i)=>i%N===0).forEach(r=>
+    lines.push(`${r.t},${d4(r.temp)},${d4(r.hf)},${d4(r.p_raw)}`)
+  );
+  const csvText=lines.join('\r\n');
+  const blob=new Blob([csvText],{type:'text/csv'});
+  const defaultName=(META.fileName||'calorimetry').replace(/\.[^.]+$/,'')+'_raw.csv';
+  if(window.showSaveFilePicker){
+    window.showSaveFilePicker({
+      suggestedName:defaultName,
+      types:[{description:'CSV file',accept:{'text/csv':['.csv']}}]
+    }).then(fh=>fh.createWritable()).then(w=>w.write(csvText).then(()=>w.close()))
+      .then(()=>st('Saved — '+defaultName,'ok'))
+      .catch(e=>{if(e.name!=='AbortError')st('Save failed: '+e.message,'err');});
+  } else {
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=defaultName;a.click();
+    st('Raw CSV downloaded — '+defaultName,'ok');
+  }
+}
+
+// ═══════════════════════════════════════════
+//  Math helpers
+// ═══════════════════════════════════════════
+function linearFit(xs,ys){
+  const n=xs.length; if(n<2)return null;
+  let sumX=0,sumY=0,sumXY=0,sumX2=0;
+  for(let i=0;i<n;i++){sumX+=xs[i];sumY+=ys[i];sumXY+=xs[i]*ys[i];sumX2+=xs[i]*xs[i];}
+  const m=(n*sumXY-sumX*sumY)/(n*sumX2-sumX*sumX);
+  const b=(sumY-m*sumX)/n;
+  const yMean=sumY/n;
+  let ssTot=0,ssRes=0;
+  for(let i=0;i<n;i++){ssTot+=(ys[i]-yMean)**2;ssRes+=(ys[i]-(m*xs[i]+b))**2;}
+  return{m,b,r2:1-ssRes/ssTot,n};
+}
+
+function smoothArray(arr,win){
+  if(win<=1)return arr.slice();
+  const half=Math.floor(win/2);
+  return arr.map((_,i)=>{
+    let s=0,c=0;
+    for(let j=Math.max(0,i-half);j<=Math.min(arr.length-1,i+half);j++){s+=arr[j];c++;}
+    return s/c;
+  });
+}
+
+function niceTicksFor(mn,mx,target){
+  const range=mx-mn; if(range===0)return[mn];
+  const rough=range/target;
+  const mag=Math.pow(10,Math.floor(Math.log10(rough)));
+  const nice=[1,2,2.5,5,10].map(f=>f*mag).find(f=>f>=rough)||mag*10;
+  const first=Math.ceil(mn/nice)*nice;
+  const ticks=[];
+  for(let t=first;t<=mx+1e-10;t+=nice)ticks.push(parseFloat(t.toPrecision(10)));
+  return ticks;
+}
+
+function fmtTick(v){
+  if(v===0)return'0';
+  const a=Math.abs(v);
+  if(a>=1e4||a<0.001)return v.toExponential(1);
+  return parseFloat(v.toPrecision(4)).toString();
+}
+
+// ═══════════════════════════════════════════
+//  Resize observer + zoom interaction
+// ═══════════════════════════════════════════
+new ResizeObserver(()=>{if(INTERP)redraw();}).observe(document.getElementById('hfChart'));
+
+(function initZoom(){
+  const cv=document.getElementById('hfChart');
+
+  // helpers to convert canvas pixel → data coords using last _plotBox
+  function px2data(px,py){
+    if(!_plotBox)return null;
+    const{ml,mt,pw,ph,xMin,xMax,yMin,yMax}=_plotBox;
+    return{
+      x:xMin+(px-ml)/(pw)*(xMax-xMin),
+      y:yMin+(mt+ph-py)/(ph)*(yMax-yMin)
+    };
+  }
+  function inPlot(px,py){
+    if(!_plotBox)return false;
+    const{ml,mt,pw,ph}=_plotBox;
+    return px>=ml&&px<=ml+pw&&py>=mt&&py<=mt+ph;
+  }
+  function canvasXY(e){
+    const r=cv.getBoundingClientRect();
+    // canvas logical px, accounting for devicePixelRatio via CSS vs canvas size
+    const scaleX=cv.width/r.width, scaleY=cv.height/r.height;
+    return[(e.clientX-r.left)*scaleX,(e.clientY-r.top)*scaleY];
+  }
+
+  // ── Mouse rubber-band zoom ──
+  cv.addEventListener('mousedown',e=>{
+    if(e.button!==0)return;
+    const[px,py]=canvasXY(e);
+    if(!inPlot(px,py))return;
+    e.preventDefault();
+    _drag={startX:px,startY:py,curX:px,curY:py,active:false};
+    cv.style.cursor='crosshair';
+  });
+
+  cv.addEventListener('mousemove',e=>{
+    if(!_drag)return;
+    const[px,py]=canvasXY(e);
+    _drag.curX=px; _drag.curY=py;
+    const dx=Math.abs(_drag.curX-_drag.startX), dy=Math.abs(_drag.curY-_drag.startY);
+    _drag.active=(dx>6||dy>6);
+    if(_drag.active)redraw();
+  });
+
+  cv.addEventListener('mouseup',e=>{
+    if(!_drag)return;
+    const[px,py]=canvasXY(e);
+    _drag.curX=px; _drag.curY=py;
+    const dx=Math.abs(_drag.curX-_drag.startX), dy=Math.abs(_drag.curY-_drag.startY);
+    cv.style.cursor=pickMode?'crosshair':'default';
+
+    // ── Pick mode: register a click point ──
+    if(pickMode&&dx<=4&&dy<=4){
+      const pd=px2data(px,py);
+      if(pd&&inPlot(px,py)){
+        pickPts.push(pd);
+        const leg=pickMode;
+        const capLeg=leg.charAt(0).toUpperCase()+leg.slice(1);
+        if(pickPts.length===1){
+          document.getElementById('pickStatus'+capLeg).textContent='First point set. Click second point...';
+          redraw();
+        } else if(pickPts.length>=2){
+          pickMode=null;
+          cv.style.cursor='default';
+          computePeakArea(leg,pickPts[0],pickPts[1]);
+          pickPts=[];
+        }
+      }
+      _drag=null;
+      return;
+    }
+
+    if(_drag.active&&dx>6&&dy>6&&!pickMode){
+      const p1=px2data(_drag.startX,_drag.startY);
+      const p2=px2data(_drag.curX,_drag.curY);
+      if(p1&&p2){
+        ZOOM.xMin=Math.min(p1.x,p2.x); ZOOM.xMax=Math.max(p1.x,p2.x);
+        ZOOM.yMin=Math.min(p1.y,p2.y); ZOOM.yMax=Math.max(p1.y,p2.y);
+      }
+    }
+    _drag=null;
+    redraw();
+  });
+
+  cv.addEventListener('mouseleave',e=>{
+    if(_drag){_drag=null;cv.style.cursor='default';redraw();}
+  });
+
+  // ── Double-click to reset zoom ──
+  cv.addEventListener('dblclick',e=>{
+    if(pickMode){return;} // don't reset zoom while picking
+    ZOOM={xMin:null,xMax:null,yMin:null,yMax:null};
+    redraw();
+    st('Zoom reset.','ok');
+  });
+
+  // ── Scroll-wheel zoom (centred on cursor) ──
+  cv.addEventListener('wheel',e=>{
+    if(!_plotBox)return;
+    const[px,py]=canvasXY(e);
+    if(!inPlot(px,py))return;
+    e.preventDefault();
+    const factor=e.deltaY>0?1.15:1/1.15;
+    const c=px2data(px,py);
+    if(!c)return;
+    const{xMin,xMax,yMin,yMax}=_plotBox;
+    ZOOM.xMin=c.x+(xMin-c.x)*factor; ZOOM.xMax=c.x+(xMax-c.x)*factor;
+    ZOOM.yMin=c.y+(yMin-c.y)*factor; ZOOM.yMax=c.y+(yMax-c.y)*factor;
+    redraw();
+  },{passive:false});
+
+  // ── Touch pinch zoom ──
+  let _touches=null;
+  cv.addEventListener('touchstart',e=>{
+    if(e.touches.length===2){
+      e.preventDefault();
+      _touches={
+        t1:{x:e.touches[0].clientX,y:e.touches[0].clientY},
+        t2:{x:e.touches[1].clientX,y:e.touches[1].clientY},
+        zoom:{...ZOOM}
+      };
+    }
+  },{passive:false});
+
+  cv.addEventListener('touchmove',e=>{
+    if(e.touches.length===2&&_touches){
+      e.preventDefault();
+      const r=cv.getBoundingClientRect();
+      const sx=cv.width/r.width, sy=cv.height/r.height;
+      const o1=(e.touches[0].clientX-r.left)*sx, o2=(e.touches[1].clientX-r.left)*sx;
+      const dist=Math.hypot(
+        e.touches[0].clientX-e.touches[1].clientX,
+        e.touches[0].clientY-e.touches[1].clientY
+      );
+      const orig=Math.hypot(
+        _touches.t1.x-_touches.t2.x,
+        _touches.t1.y-_touches.t2.y
+      );
+      if(orig<1)return;
+      const factor=orig/dist;
+      const midPx=((e.touches[0].clientX+e.touches[1].clientX)/2-r.left)*sx;
+      const midPy=((e.touches[0].clientY+e.touches[1].clientY)/2-r.top)*sy;
+      const c=px2data(midPx,midPy);
+      if(!c||!_plotBox)return;
+      const{xMin,xMax,yMin,yMax}=_plotBox;
+      ZOOM.xMin=c.x+(xMin-c.x)*factor; ZOOM.xMax=c.x+(xMax-c.x)*factor;
+      ZOOM.yMin=c.y+(yMin-c.y)*factor; ZOOM.yMax=c.y+(yMax-c.y)*factor;
+      redraw();
+    }
+  },{passive:false});
+
+  cv.addEventListener('touchend',()=>{_touches=null;});
+})();
+
+// initial tab display
+switchTab('raw');
+</script>
+</body>
+</html>
