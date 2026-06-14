@@ -1826,16 +1826,23 @@ function exportCSV(){
 
   const tStart=INTERP.t0up??-Infinity;
   const tEndExp=getTailEnd();
+  const{upWakeIdx:uwi,downSleepIdx:dsi,peakIdx:pk}=INTERP;
   let tAdj=0, prevActiveT=null;
-  for(let i=firstActive;i<=lastActive;i++){
-    if(RAW[i].t<tStart)continue;
-    if(RAW[i].t>tEndExp)break;
-    if(isFlat[i]){prevActiveT=null;continue;}
+  let expReachedZero=false;
+  for(let i=0;i<n;i++){
     const r=RAW[i];
+    if(r.t<tStart)continue;
+    if(r.t>tEndExp)break;
+    // Skip flat holds but NOT the interpolated pressure regions
+    const inInterp=(i<=pk&&i<uwi)||(i>pk&&i>dsi);
+    if(isFlat[i]&&!inInterp){prevActiveT=null;continue;}
+    const p=r.p_corr??r.p_raw;
+    // For desorption tail: include all P=0 points (real HF data at vacuum)
+    const pOut=Math.max(0,p);
     if(prevActiveT!==null)tAdj+=(r.t-prevActiveT);
     prevActiveT=r.t;
-    const leg=(i<=pi)?'adsorption':'desorption';
-    lines.push(`${d4(tAdj)},${d4(r.p_corr??r.p_raw)},${d4(r.hf)},${leg}`);
+    const leg=(i<=pk)?'adsorption':'desorption';
+    lines.push(`${d4(tAdj)},${d4(pOut)},${d4(r.hf)},${leg}`);
   }
 
   const csvText=lines.join('\r\n');
