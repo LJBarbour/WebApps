@@ -543,6 +543,53 @@ let annDrag={active:false,id:'',x0:0,y0:0,ox:0,oy:0};
 // ════════════════════════════════════════════════════════════════
 //  FILE PARSING
 // ════════════════════════════════════════════════════════════════
+
+// Detect and parse the newer TA Instruments TGA export format.
+// Signature: a header line that is exactly "Time\tTemperature\tWeight\tWeight"
+// Returns {data, sampleSize} or null if format not recognised.
+function parseTANewTGA(text){
+  const lines=text.split(/\r?\n/);
+  let headerIdx=-1;
+  for(let i=0;i<lines.length;i++){
+    const cols=lines[i].split('\t');
+    if(cols.length===4&&
+       cols[0].trim()==='Time'&&
+       cols[1].trim()==='Temperature'&&
+       cols[2].trim()==='Weight'&&
+       cols[3].trim()==='Weight'){
+      headerIdx=i;break;
+    }
+  }
+  if(headerIdx<0) return null;  // not this format
+
+  // Line after header is units row — skip it, then read data
+  const data=[];
+  let firstMg=null, firstPct=null;
+  for(let i=headerIdx+2;i<lines.length;i++){
+    const ln=lines[i].trim();
+    if(!ln) continue;
+    const cols=ln.split('\t');
+    if(cols.length<4) continue;
+    const time=parseFloat(cols[0]);
+    const t=parseFloat(cols[1]);
+    const mg=parseFloat(cols[2]);
+    const pct=parseFloat(cols[3]);
+    if(!isFinite(t)||!isFinite(pct)) continue;
+    if(firstMg===null&&isFinite(mg)&&mg>0&&isFinite(pct)&&pct>0){
+      firstMg=mg; firstPct=pct;
+    }
+    data.push({t, v:pct, time:isFinite(time)?time:null});
+  }
+
+  // Derive sample mass: mg_initial / (pct_initial / 100)
+  let sampleSize=null;
+  if(firstMg!==null&&firstPct!==null&&firstPct>0){
+    sampleSize=firstMg/(firstPct/100);
+  }
+
+  return{data, sampleSize};
+}
+
 function parseText(text){
   const lines=text.split(/\r?\n/);
   let dataStarted=false;
@@ -608,26 +655,47 @@ function metaFromData(data,filename){
 
 function loadFileTGA(file){
   readFile(file,text=>{
-    const {data:parsed,sampleSize,instrumentType}=parseText(text);
+    // Try new TA Instruments format first, fall back to legacy format
+    let parsed, sampleSize, instrumentType;
+    const newFmt=parseTANewTGA(text);
+    if(newFmt){
+      parsed=newFmt.data;
+      sampleSize=newFmt.sampleSize;
+      instrumentType='TGA';
+    } else {
+      const legacy=parseText(text);
+      parsed=legacy.data;
+      sampleSize=legacy.sampleSize;
+      instrumentType=legacy.instrumentType;
+    }
+
     if(instrumentType==='DSC'){
-      st('Error: this file appears to be a DSC file (Instrument header says DSC). Please drop it into the DSC zone.','err');
+      st('Error: this file appears to be a DSC file. Please drop it into the DSC zone.','err');
       return;
     }
-    if(!parsed.length){st('No data found after StartOfData in '+file.name,'err');return;}
-    // Remove spurious trailing zero(s) that can appear in TA Instruments TGA files
-    // (a footer/terminator line sometimes parses as a point with v=0)
+    if(!parsed.length){st('No data found in '+file.name,'err');return;}
+
+    // Remove spurious trailing zero(s) (legacy format artefact)
     while(parsed.length>1){
       const last=parsed[parsed.length-1];
       const avgV=parsed.slice(Math.max(0,parsed.length-10),parsed.length-1).reduce((s,d)=>s+Math.abs(d.v),0)/Math.min(10,parsed.length-1);
       if(last.v===0&&avgV>0.1){parsed.pop();}else break;
     }
-    if(sampleSize){
-      // Convert mg to % of initial mass
-      tgaData=parsed.map(d=>({t:d.t,v:d.v/sampleSize*100}));
+
+    if(newFmt){
+      // New format: data is already in %; sampleSize is derived mass in mg
+      tgaData=parsed;
+      tgaMeta=metaFromData(tgaData,file.name);
+      tgaMeta.sampleSize=sampleSize;
+      document.getElementById('tgaLabel').value='Weight / %';
+    } else if(sampleSize){
+      // Legacy format with Size header: convert mg → %
+      tgaData=parsed.map(d=>({t:d.t,v:d.v/sampleSize*100,time:d.time}));
       tgaMeta=metaFromData(tgaData,file.name);
       tgaMeta.sampleSize=sampleSize;
       document.getElementById('tgaLabel').value='Weight / %';
     } else {
+      // Legacy format, no size — leave in mg
       tgaData=parsed;
       tgaMeta=metaFromData(parsed,file.name);
     }
@@ -636,7 +704,7 @@ function loadFileTGA(file){
     computeDTG();
     updateFileInfo();
     redraw();
-    st('TGA loaded: '+file.name+' ('+parsed.length+' points)'+(sampleSize?' — Size: '+sampleSize+' mg':''),'ok');
+    st('TGA loaded: '+file.name+' ('+parsed.length+' points)'+(sampleSize?' — Sample: '+sampleSize.toFixed(4)+' mg':''),'ok');
   });
 }
 
