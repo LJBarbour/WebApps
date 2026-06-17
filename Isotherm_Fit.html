@@ -3,27 +3,6 @@
 <head>
 <meta charset="UTF-8">
 
-<!-- ── RESOURCE ACCESS CHECK ── -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script>
-(async function() {
-  const sb = supabase.createClient(
-    'https://mqpvnisphntdwhqoiqlt.supabase.co',
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xcHZuaXNwaG50ZHdocW9pcWx0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc1NzM5NjIsImV4cCI6MjA5MzE0OTk2Mn0.7eAeXAh0heqiaTLclqUzAeNY2gQDcbxNRe2LrLXvpHg'
-  );
-  const { data: { session } } = await sb.auth.getSession();
-  if (!session) { window.location.href = 'https://ljbarbour.github.io/WebApps/resources.html'; return; }
-  const email = session.user.email;
-  const { data: u } = await sb.from('users').select('can_access_resources').eq('email', email).maybeSingle();
-  const { data: r } = await sb.from('resource_users').select('can_access_resources').eq('email', email).maybeSingle();
-  if (!(u?.can_access_resources || r?.can_access_resources)) {
-    window.location.href = 'https://ljbarbour.github.io/WebApps/resources.html';
-  }
-})();
-</script>
-<!-- ── END RESOURCE ACCESS CHECK ── -->
-
-
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sorption Isotherm Fitter</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:wght@300;600&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
@@ -2340,71 +2319,3 @@ document.getElementById('btnExp').addEventListener('click',()=>{
 </body>
 </html>
 
-// =====================================================================
-//  EQUATION RENDERER
-// =====================================================================
-function drawEq(modelKey){
-  const canvas=document.getElementById('eqCanvas');
-  const W=canvas.offsetWidth||226;
-  canvas.width=W*2;canvas.height=192;
-  canvas.style.height='96px';
-  const ctx=canvas.getContext('2d');
-  ctx.scale(2,2);
-  const w=W,h=96;
-  ctx.fillStyle='#ede7d8';
-  ctx.fillRect(0,0,w,h);
-  // first pass to measure, then centered second pass
-  const fn=EQ_DRAW[modelKey]||EQ_DRAW['lf'];
-  const ofc=document.createElement('canvas');
-  ofc.width=canvas.width;ofc.height=canvas.height;
-  const octx=ofc.getContext('2d');
-  octx.scale(2,2);
-  octx.fillStyle='#fff';octx.fillRect(0,0,w,h);
-  fn(octx,w,h);
-  const id=octx.getImageData(0,0,ofc.width,ofc.height).data;
-  let minX=ofc.width,maxX=0;
-  for(let py=0;py<ofc.height;py++){
-    for(let px=0;px<ofc.width;px++){
-      const idx=(py*ofc.width+px)*4;
-      if(id[idx]<240||id[idx+1]<240||id[idx+2]<240){
-        if(px<minX)minX=px;if(px>maxX)maxX=px;
-      }
-    }
-  }
-  const drawnW=(maxX-minX)/2;
-  const offsetX=minX<ofc.width?(w-drawnW)/2-minX/2:0;
-  ctx.save();ctx.translate(offsetX,0);
-  fn(ctx,w,h);
-  ctx.restore();
-}
-
-function T(ctx,txt,x,y,sz,italic,bold,color){
-  ctx.fillStyle=color||'#0f0e0d';
-  let f='';
-  if(bold)f+='bold ';
-  if(italic)f+='italic ';
-  f+=sz+'px ';
-  f+="'Palatino Linotype',Palatino,'Book Antiqua',Georgia,serif";
-  ctx.font=f;
-  ctx.fillText(txt,x,y);
-  return ctx.measureText(txt).width;
-}
-function hline(ctx,x1,x2,y,w,color){
-  ctx.save();ctx.strokeStyle=color||'#0f0e0d';ctx.lineWidth=w||1;
-  ctx.beginPath();ctx.moveTo(x1,y);ctx.lineTo(x2,y);ctx.stroke();ctx.restore();
-}
-function textW(ctx,txt,sz,italic){
-  ctx.font=(italic?'italic ':'')+sz+"px 'Palatino Linotype',Palatino,'Book Antiqua',Georgia,serif";
-  return ctx.measureText(txt).width;
-}
-function frac(ctx,num,den,x,cy,sz){
-  const nW=textW(ctx,num,sz,true);
-  const dW=textW(ctx,den,sz,false);
-  const fw=Math.max(nW,dW)+8;
-  const lx=x+(fw-nW)/2,dx=x+(fw-dW)/2;
-  const gap=3;
-  T(ctx,num,lx,cy-gap,sz,true);
-  T(ctx,den,dx,cy+sz+gap-2,sz,false);
-  hline(ctx,x,x+fw,cy+1,1);
-  return fw;
-}
