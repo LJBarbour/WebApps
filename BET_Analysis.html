@@ -407,7 +407,7 @@ select:focus{border-color:var(--accent)}
           <tbody>
             <tr style="border-bottom:1px solid var(--pale)"><td style="padding:4px 8px">N₂ at 77 K</td><td style="padding:4px 8px;text-align:center">16.2</td><td style="padding:4px 8px;text-align:center">101.325</td><td style="padding:4px 8px;text-align:center">77</td></tr>
             <tr style="border-bottom:1px solid var(--pale);background:var(--cream)"><td style="padding:4px 8px">Ar at 87 K</td><td style="padding:4px 8px;text-align:center">14.2</td><td style="padding:4px 8px;text-align:center">101.325</td><td style="padding:4px 8px;text-align:center">87</td></tr>
-            <tr style="border-bottom:1px solid var(--pale)"><td style="padding:4px 8px">CO₂ at 273 K</td><td style="padding:4px 8px;text-align:center">21.4</td><td style="padding:4px 8px;text-align:center">3485.3</td><td style="padding:4px 8px;text-align:center">273</td></tr>
+            <tr style="border-bottom:1px solid var(--pale)"><td style="padding:4px 8px">CO₂ at 273.15 K</td><td style="padding:4px 8px;text-align:center">21.4</td><td style="padding:4px 8px;text-align:center">3485.3</td><td style="padding:4px 8px;text-align:center">273.15</td></tr>
             <tr style="border-bottom:1px solid var(--pale);background:var(--cream)"><td style="padding:4px 8px">Kr at 77 K</td><td style="padding:4px 8px;text-align:center">20.2</td><td style="padding:4px 8px;text-align:center">0.267</td><td style="padding:4px 8px;text-align:center">77</td></tr>
             <tr><td style="padding:4px 8px">H₂O at 298 K</td><td style="padding:4px 8px;text-align:center">12.5</td><td style="padding:4px 8px;text-align:center">3.169</td><td style="padding:4px 8px;text-align:center">298</td></tr>
           </tbody>
@@ -444,11 +444,8 @@ select:focus{border-color:var(--accent)}
       <div class="cr"><span class="cl">Height px</span><input type="number" id="expH" value="1000"></div>
       <div class="cr"><span class="cl">Format</span><select id="expFmt"><option>PNG</option><option>JPEG</option></select></div>
       <button class="btn out" style="margin-top:6px;width:100%" onclick="savePlot('rouq')">Save Rouquerol Plot</button>
-      <button class="btn out" style="margin-top:5px;width:100%" onclick="copyPlot('rouq')">Copy Rouquerol Plot</button>
       <button class="btn out" style="margin-top:5px;width:100%" onclick="savePlot('bet')">Save BET Linear Plot</button>
-      <button class="btn out" style="margin-top:5px;width:100%" onclick="copyPlot('bet')">Copy BET Linear Plot</button>
       <button class="btn out" style="margin-top:5px;width:100%" onclick="savePlot('iso')">Save Isotherm Plot</button>
-      <button class="btn out" style="margin-top:5px;width:100%" onclick="copyPlot('iso')">Copy Isotherm Plot</button>
     </div>
   </div>
 
@@ -1906,6 +1903,10 @@ function drawChart(canvasId, cfg){
 
   // Y ticks + labels
   const {ticks:yTicks, step:yStep, decimals:yDec}=niceTickVals(scY.lo,scY.hi,6);
+  let maxYTickW=0;  // widest tick-label, used to place the y-axis title clear of the numbers
+  ctx.font=`${tkSz}px ${font}`;
+  yTicks.forEach(v=>{ maxYTickW=Math.max(maxYTickW, ctx.measureText(fmtTick(v,yDec)).width); });
+  const yTickGap = (tickDir==='in'?4:tickLen+4); // gap between axis and tick numbers
   yTicks.forEach(v=>{
     const py=scY.toPixel(v);
     if(majTick){drawTick(ctx,pL,py,-1,0,tickLen);}
@@ -1917,7 +1918,7 @@ function drawChart(canvasId, cfg){
       }
     }
     ctx.font=`${tkSz}px ${font}`;ctx.textAlign='right';ctx.textBaseline='middle';
-    ctx.fillText(fmtTick(v,yDec),pL-(tickDir==='in'?4:tickLen+4),py);
+    ctx.fillText(fmtTick(v,yDec),pL-yTickGap,py);
   });
 
   // Axis lines — drawn as a single path so corners join cleanly
@@ -2013,9 +2014,13 @@ function drawChart(canvasId, cfg){
   const xUnitStr = cfg.xUnit || '';
   drawAxisLabel(xVarStr, xUnitStr, (pL+pR)/2, pB + (H - pB)/2, axSz);
 
-  // Y label — rotate canvas, then draw exactly as x-label
+  // Y label — rotate canvas, then draw exactly as x-label.
+  // Position the title just to the left of the widest tick number so they never overlap.
+  // The rotated text is vertically centred on its x-coordinate, so we offset by ~0.7×axSz
+  // (roughly half the glyph height) to keep the title clear of the numbers.
+  const yTitleX = Math.max(axSz*0.9, pL - yTickGap - maxYTickW - axSz*0.7);
   ctx.save();
-  ctx.translate(M.left/2, (pT+pB)/2);
+  ctx.translate(yTitleX, (pT+pB)/2);
   ctx.rotate(-Math.PI/2);
   const yVarStr  = cfg.yVar  || cfg.yLabel || '';
   const yUnitStr = cfg.yUnit || '';
@@ -2488,29 +2493,7 @@ function savePlot(which){
   }
 }
 
-async function copyPlot(which){
-  if(!rawData.length) return;
-  const expW=parseInt(gv('expW'))||1400;
-  const expH=parseInt(gv('expH'))||1000;
-  const canvasId={'rouq':'chartRouq','bet':'chartBet','iso':'chartIso'}[which];
-  if(which==='rouq') drawRouquerolChart(expW,expH);
-  if(which==='bet') drawBETChart(expW,expH);
-  if(which==='iso') drawIsoChart(expW,expH);
-  const canvas=document.getElementById(canvasId);
-  try{
-    const blob=await new Promise(res=>canvas.toBlob(res,'image/png'));
-    await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);
-    st('Plot copied to clipboard.','ok');
-  } catch(err){
-    st('Copy to clipboard not supported in this browser.','err');
-  } finally{
-    setTimeout(()=>{
-      if(which==='rouq') drawRouquerolChart();
-      if(which==='bet') drawBETChart();
-      if(which==='iso') drawIsoChart();
-    },100);
-  }
-}
+// ResizeObserver — redraw all charts when any panel resizes
 const resizeObs=new ResizeObserver(()=>{ if(rawData.length) drawAllCharts(); });
 ['cwRouq','cwBet','cwIso'].forEach(id=>{ const el=document.getElementById(id); if(el) resizeObs.observe(el); });
 // ResizeObserver for BETSI panel (canvases injected dynamically)
