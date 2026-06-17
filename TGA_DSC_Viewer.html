@@ -187,15 +187,6 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
   </div>
 
   <div class="sb">
-    <div class="lbl">Temperature Range</div>
-    <div class="range-row" style="margin-top:0">
-      <div class="range-field"><label>T min (°C)</label><input type="number" id="tMin" placeholder="auto" oninput="zs.xMin=null;zs.xMax=null;redraw()"></div>
-      <div class="range-field"><label>T max (°C)</label><input type="number" id="tMax" placeholder="auto" oninput="zs.xMin=null;zs.xMax=null;redraw()"></div>
-    </div>
-    <button class="btn out" style="margin-top:7px;font-size:9px" onclick="resetZoom()">&#8635; Reset Zoom</button>
-  </div>
-
-  <div class="sb">
     <div class="lbl">File Info</div>
     <div id="fileInfo"><div style="font-family:var(--mono);font-size:10px;color:#aaa;font-style:italic">No files loaded.</div></div>
   </div>
@@ -227,39 +218,51 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
     <div class="g-sec">Overview</div>
     <p>This app displays TGA (thermogravimetric analysis) and DSC (differential scanning calorimetry) data on a shared temperature axis. TGA has its own y-axis on the left; DSC on the right. Either or both files can be loaded independently. The first derivative of TGA (DTG) can be overlaid on the same plot.</p>
 
-    <div class="g-sec">File Format</div>
-    <p>The app accepts plain-text files in any common delimiter format (CSV, TXT, DAT). Files may use ASCII or UTF-16 encoding — TA Instruments files are handled automatically.</p>
-    <ul style="margin:8px 0 14px 24px;line-height:1.9">
-      <li>All header lines are ignored until the keyword <code style="font-family:var(--mono);background:var(--cream);padding:1px 5px;border-radius:2px">StartOfData</code> is found.</li>
-      <li>From the line after <code style="font-family:var(--mono);background:var(--cream);padding:1px 5px;border-radius:2px">StartOfData</code>, column 2 is read as temperature (°C) and column 3 as the signal. Column 1 (typically time) is ignored.</li>
-      <li>Columns may be separated by commas, semicolons, tabs, or whitespace.</li>
-      <li>A <code style="font-family:var(--mono);background:var(--cream);padding:1px 5px;border-radius:2px">Size</code> field in the TGA header (e.g. <code style="font-family:var(--mono);background:var(--cream);padding:1px 5px;border-radius:2px">Size    12.34    mg</code>) is read automatically and used to express TGA weight as % of initial mass.</li>
-    </ul>
+    <div class="g-sec">Recognised File Formats</div>
+    <p>The app auto-detects the file format on load. Files may be ASCII or UTF-16 LE encoded — TA Instruments files in either encoding are handled automatically. Three formats are currently supported.</p>
+
+    <p style="margin-top:12px;font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--tga)">TGA — TA Instruments legacy (ASCII / UTF-16)</p>
+    <p>Files exported from older TA Instruments software (Universal Analysis). The file is scanned for the keyword <code style="font-family:var(--mono);background:var(--cream);padding:1px 5px;border-radius:2px">StartOfData</code>; everything above is treated as a header. Data lines have at least three whitespace- or comma-delimited columns: column 2 is temperature (°C) and column 3 is the signal. A <code style="font-family:var(--mono);background:var(--cream);padding:1px 5px;border-radius:2px">Size</code> field in the header (e.g. <code style="font-family:var(--mono);background:var(--cream);padding:1px 5px;border-radius:2px">Size    12.34</code>) is used to convert raw weight in mg to % of initial mass. An <code style="font-family:var(--mono);background:var(--cream);padding:1px 5px;border-radius:2px">Instrument</code> header line containing <code style="font-family:var(--mono);background:var(--cream);padding:1px 5px;border-radius:2px">TGA</code> or <code style="font-family:var(--mono);background:var(--cream);padding:1px 5px;border-radius:2px">DSC</code> is used to distinguish the two file types when dropped into the wrong zone. A termination line where the time column is exactly &minus;1 is silently discarded.</p>
+
+    <p style="margin-top:12px;font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--tga)">TGA — TA Instruments TRIOS (tab-delimited)</p>
+    <p>Files exported from the current TRIOS software. Recognised by a tab-delimited column header line reading exactly <code style="font-family:var(--mono);background:var(--cream);padding:1px 5px;border-radius:2px">Time&nbsp;&nbsp;&nbsp;&nbsp;Temperature&nbsp;&nbsp;&nbsp;&nbsp;Weight&nbsp;&nbsp;&nbsp;&nbsp;Weight</code>. The line immediately after is the units row (<code style="font-family:var(--mono);background:var(--cream);padding:1px 5px;border-radius:2px">min&nbsp;&nbsp;&nbsp;&nbsp;°C&nbsp;&nbsp;&nbsp;&nbsp;mg&nbsp;&nbsp;&nbsp;&nbsp;%</code>) and is skipped. Column 2 (temperature) and column 4 (weight %) are read. The initial sample mass in mg is back-calculated from the first data row and stored in File Info.</p>
+
+    <p style="margin-top:12px;font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--dsc)">DSC — TA Instruments TRIOS (tab-delimited)</p>
+    <p>Files exported from the current TRIOS software for DSC experiments. Recognised by an <code style="font-family:var(--mono);background:var(--cream);padding:1px 5px;border-radius:2px">Instrument name</code> or <code style="font-family:var(--mono);background:var(--cream);padding:1px 5px;border-radius:2px">Instrument Type</code> header line containing <code style="font-family:var(--mono);background:var(--cream);padding:1px 5px;border-radius:2px">DSC</code>, together with a data header line reading <code style="font-family:var(--mono);background:var(--cream);padding:1px 5px;border-radius:2px">Time&nbsp;&nbsp;&nbsp;&nbsp;Temperature&nbsp;&nbsp;&nbsp;&nbsp;Heat Flow (Normalized)</code>. The units row (<code style="font-family:var(--mono);background:var(--cream);padding:1px 5px;border-radius:2px">min&nbsp;&nbsp;&nbsp;&nbsp;°C&nbsp;&nbsp;&nbsp;&nbsp;W/g</code>) is skipped. Heat flow values in W/g are multiplied by the sample mass (read from the <code style="font-family:var(--mono);background:var(--cream);padding:1px 5px;border-radius:2px">Sample Mass</code> header line) to give mW for plotting. The y-axis label is set to <em>Heat Flow / mW</em> automatically. Dropping a DSC file into the TGA zone, or vice versa, is detected and reported as an error.</p>
 
     <div class="g-sec">Loading and Clearing Data</div>
-    <p>Click or drag a file onto the TGA or DSC drop zone. The file name, point count, temperature range, and sample size (if present) are shown in the File Info panel. Click <strong>✕ Clear</strong> next to either channel header to remove that dataset without restarting the app.</p>
+    <p>Click or drag a file onto the TGA or DSC drop zone. The file name, point count, temperature range, and sample mass (if present) are shown in the File Info panel on the left. Loading a new file into a zone automatically clears any analysis results for that channel (onset temperatures, mass loss annotation, DSC peak). Click <strong>✕ Clear</strong> next to either channel header to remove that dataset entirely.</p>
 
     <div class="g-sec">Heating and Cooling Legs</div>
-    <p>For DSC files that contain multiple temperature ramps (e.g. a heat–cool cycle), the app automatically detects each leg using a sliding-window direction algorithm that is robust to noisy temperature data and spurious points. Each leg is labelled Heating or Cooling and given a distinct colour. Individual legs can be shown or hidden using the checkboxes that appear below the DSC drop zone. The <strong>Color by leg</strong> option in the right panel switches between per-leg colours and a single colour for all legs.</p>
+    <p>For DSC files that contain multiple temperature ramps (e.g. a heat–cool cycle), the app automatically detects each leg using a sliding-window direction algorithm that is robust to noisy temperature data. Each leg is labelled Heating or Cooling and given a distinct colour. Individual legs can be shown or hidden using the checkboxes below the DSC drop zone. The <strong>Color by leg</strong> option in the right panel switches between per-leg colours and a single colour for all legs.</p>
 
     <div class="g-sec">DTG — First Derivative</div>
     <p>Check <strong>Show DTG</strong> below the TGA drop zone to overlay the first derivative of the TGA signal. The derivative is computed by central differences and smoothed with a boxcar window whose width is set by the <strong>Smoothing window</strong> slider. The DTG curve shares the temperature axis but has no y-axis scale — it is displayed for qualitative shape reference only.</p>
 
     <div class="g-sec">Axis Ranges</div>
-    <p>The <strong>Temperature Range</strong> fields in the left sidebar set the x-axis limits exactly. The <strong>Axis Ranges</strong> panel on the right sets the y-axis limits for TGA and DSC independently. All four limits are applied as hard boundaries — the axis starts and ends at exactly the value you enter, with ticks computed within those limits. Leave a field blank to revert to automatic scaling.</p>
+    <p>The <strong>Temperature Range</strong> fields in the left sidebar set the x-axis limits exactly. The <strong>Axis Ranges</strong> panel on the right sets the y-axis limits for TGA and DSC independently. All limits are hard boundaries with ticks computed within them. Leave a field blank to revert to automatic scaling.</p>
 
     <div class="g-sec">Zooming and Panning</div>
-    <p><strong>Left-drag</strong> on the chart to draw a zoom rectangle (x-axis only; y-axis auto-scales to the zoomed range). <strong>Right-drag</strong> to pan. The Temperature Range fields update to show the current zoom. Click <strong>⟲ Reset</strong> or clear the Temperature Range fields to restore the full range.</p>
+    <p><strong>Left-drag</strong> on the chart to draw a zoom rectangle (x-axis only; y-axis auto-scales to the zoomed range). <strong>Right-drag</strong> to pan. The Temperature Range fields update to reflect the current view. Click <strong>⟲ Reset</strong> or clear the Temperature Range fields to restore the full range.</p>
 
     <div class="g-sec">Tooltip</div>
     <p>Hover over the chart to see the temperature and the nearest TGA, DTG, and DSC values at the cursor position.</p>
 
+    <div class="g-sec">Analysis</div>
+    <p>The <strong>Analysis</strong> panel on the right provides three tools. For all three, click the <strong>Pick two points</strong> button and then click two locations on the plot — a circle marks each selected point as you click.</p>
+    <ul style="margin:8px 0 14px 24px;line-height:1.9">
+      <li><strong>DSC Onset:</strong> click one point on each side of a peak. The app draws the baseline and leading-edge tangent, finds their intersection, identifies the peak maximum, integrates the peak area with respect to time, and reports <em>T</em><sub>o</sub>, <em>T</em><sub>p</sub>, peak area in mJ, and enthalpy in J g<sup>−1</sup> (when sample mass is available in the file).</li>
+      <li><strong>TGA Onset:</strong> click one point on the flat plateau before a mass-loss step, then one point in the falling region. The app fits the baseline and inflection tangent and reports <em>T</em><sub>o</sub> and the inflection temperature.</li>
+      <li><strong>TGA Mass Loss:</strong> click any two temperatures on the TGA curve. The app finds the nearest data points and annotates the weight difference Δ<em>m</em> on the right side of the plot, with dotted horizontal lines and a bracket.</li>
+    </ul>
+    <p>Annotation colours for DSC and TGA are set independently using the colour pickers at the bottom of the Analysis panel. Click <strong>Clear Analysis</strong> to remove all annotations.</p>
+
     <div class="g-sec">Export</div>
     <p><strong>Export Combined CSV</strong> saves temperature, TGA, and DSC in three columns. If both datasets are loaded, the DSC signal is interpolated onto the TGA temperature grid. The DTG column is included when active.</p>
-    <p><strong>Save Plot Image</strong> renders the chart at the resolution set in the Width/Height fields and saves as PNG or JPEG.</p>
-    <p><strong>Save Settings JSON</strong> saves all current control values (colours, line widths, axis ranges, font, grid style, etc.) to a JSON file. <strong>Load Settings JSON</strong> restores a previously saved set of settings instantly.</p>
+    <p><strong>Save Plot Image</strong> and <strong>Copy Plot to Clipboard</strong> render the chart at the resolution set in the Width/Height fields, including all annotations.</p>
+    <p><strong>Save Settings JSON</strong> saves all current control values (colours, line widths, axis ranges, font, grid style, etc.). <strong>Load Settings JSON</strong> restores a previously saved set of settings instantly.</p>
 
-    <p style="margin-top:28px;font-family:var(--mono);font-size:9px;color:#bbb;letter-spacing:.08em">Version 1.0</p>
+    <p style="margin-top:28px;font-family:var(--mono);font-size:9px;color:#bbb;letter-spacing:.08em">Version 2.0</p>
   </div>
 
   <div id="status">Ready &mdash; drop a TGA or DSC file to begin.</div>
@@ -271,10 +274,13 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
   <div class="cp-group">
     <div class="cp-head" onclick="tog(this)"><span class="cp-title">Axis Ranges</span><span class="cp-arr">&#9660;</span></div>
     <div class="cp-body">
+      <div class="cr"><span class="cl">T min (°C)</span><input type="number" id="tMin" placeholder="auto" oninput="zs.xMin=null;zs.xMax=null;redraw()"></div>
+      <div class="cr"><span class="cl">T max (°C)</span><input type="number" id="tMax" placeholder="auto" oninput="zs.xMin=null;zs.xMax=null;redraw()"></div>
       <div class="cr"><span class="cl">Y TGA min</span><input type="number" id="yTGAmin" placeholder="auto" oninput="redraw()"></div>
       <div class="cr"><span class="cl">Y TGA max</span><input type="number" id="yTGAmax" placeholder="auto" oninput="redraw()"></div>
       <div class="cr"><span class="cl">Y DSC min</span><input type="number" id="yDSCmin" placeholder="auto" oninput="redraw()"></div>
       <div class="cr"><span class="cl">Y DSC max</span><input type="number" id="yDSCmax" placeholder="auto" oninput="redraw()"></div>
+      <button class="btn out" style="margin-top:8px;width:100%;font-size:9px" onclick="resetZoom()">&#8635; Reset Zoom</button>
     </div>
   </div>
 
@@ -345,8 +351,8 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
     </div>
   </div>
 
-  <div class="cp-group" id="analysisGroup">
-    <div class="cp-head" onclick="tog(this)"><span class="cp-title">Analysis</span><span class="cp-arr">&#9660;</span></div>
+  <div class="cp-group" id="analysisDSC" style="display:none">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title" style="color:var(--dsc)">DSC Analysis</span><span class="cp-arr">&#9660;</span></div>
     <div class="cp-body">
 
       <!-- DSC onset -->
@@ -356,13 +362,25 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
           <option value="0">Leg 1</option>
         </select>
       </div>
-      <div style="font-family:var(--mono);font-size:9px;color:#888;margin:6px 0 4px;line-height:1.6">Click <b>Pick points</b>, then click two points on the plot — one on each side of the peak. The app draws the baseline, finds the peak, fits the leading-edge tangent, and reports the onset.</div>
+      <div style="font-family:var(--mono);font-size:9px;color:#888;margin:6px 0 4px;line-height:1.6">Click <b>Pick points</b>, then click two points on the plot — one on each side of the peak. The app draws the baseline, finds the peak, fits the leading-edge tangent, and reports the onset and enthalpy.</div>
       <button id="btnPickDSC" class="btn out" style="width:100%;font-size:9px;margin-bottom:5px" onclick="startPickDSC()">&#9654; Pick two points on plot</button>
       <div id="dscPickStatus" style="font-family:var(--mono);font-size:9px;color:#888;min-height:1.2em;margin-bottom:4px"></div>
       <div id="dscOnsetResult" style="font-family:var(--mono);font-size:10px;line-height:1.9;color:#555"></div>
 
+      <button class="btn out" style="margin-top:10px;width:100%;font-size:9px" onclick="clearDSCAnalysis();redraw()">Clear DSC Analysis</button>
+      <div class="cr" style="margin-top:8px"><span class="cl">Show vertical lines</span><input type="checkbox" id="onsetVLinesDSC" oninput="redraw()"></div>
+      <div class="cr" style="margin-top:4px"><span class="cl">Annotation color</span>
+        <input type="color" id="onsetDSCColor" value="#b84a2e" oninput="redraw()">
+      </div>
+    </div>
+  </div>
+
+  <div class="cp-group" id="analysisTGA" style="display:none">
+    <div class="cp-head" onclick="tog(this)"><span class="cp-title" style="color:var(--tga)">TGA Analysis</span><span class="cp-arr">&#9660;</span></div>
+    <div class="cp-body">
+
       <!-- TGA onset -->
-      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--tga);margin-top:12px;margin-bottom:5px;padding-bottom:3px;border-bottom:1px solid var(--pale)">TGA Onset</div>
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--tga);margin-bottom:5px;padding-bottom:3px;border-bottom:1px solid var(--pale)">TGA Onset</div>
       <div style="font-family:var(--mono);font-size:9px;color:#888;margin:6px 0 4px;line-height:1.6">Click <b>Pick points</b>, then click two points — first on the flat plateau before the step, then on the steeply falling region. The app fits the baseline and inflection tangent, and reports the onset.</div>
       <button id="btnPickTGA" class="btn out" style="width:100%;font-size:9px;margin-bottom:5px" onclick="startPickTGA()">&#9654; Pick two points on plot</button>
       <div id="tgaPickStatus" style="font-family:var(--mono);font-size:9px;color:#888;min-height:1.2em;margin-bottom:4px"></div>
@@ -375,11 +393,10 @@ header .sub{font-family:var(--mono);font-size:9px;color:var(--accent);letter-spa
       <div id="massLossPickStatus" style="font-family:var(--mono);font-size:9px;color:#888;min-height:1.2em;margin-bottom:4px"></div>
       <div id="massLossResult" style="font-family:var(--mono);font-size:10px;margin-top:5px;line-height:1.8;color:#555"></div>
 
-      <button class="btn out" style="margin-top:10px;width:100%;font-size:9px" onclick="clearOnsets()">Clear Analysis</button>
-      <div class="cr" style="margin-top:8px"><span class="cl">Show vertical lines</span><input type="checkbox" id="onsetVLines" checked oninput="redraw()"></div>
+      <button class="btn out" style="margin-top:10px;width:100%;font-size:9px" onclick="clearTGAAnalysis();redraw()">Clear TGA Analysis</button>
+      <div class="cr" style="margin-top:8px"><span class="cl">Show vertical lines</span><input type="checkbox" id="onsetVLinesTGA" oninput="redraw()"></div>
       <div class="cr" style="margin-top:4px"><span class="cl">Annotation color</span>
-        <label style="font-family:var(--mono);font-size:9px;color:#888;margin-right:4px">DSC</label><input type="color" id="onsetDSCColor" value="#b84a2e" oninput="redraw()">
-        <label style="font-family:var(--mono);font-size:9px;color:#888;margin-left:6px;margin-right:4px">TGA</label><input type="color" id="onsetTGAColor" value="#2a5caa" oninput="redraw()">
+        <input type="color" id="onsetTGAColor" value="#2a5caa" oninput="redraw()">
       </div>
     </div>
   </div>
@@ -590,6 +607,67 @@ function parseTANewTGA(text){
   return{data, sampleSize};
 }
 
+// Detect and parse the newer TA Instruments DSC export format.
+// Signature: header line "Time\tTemperature\tHeat Flow (Normalized)" with units "W/g".
+// Heat flow is in W/g — multiply by sample mass (mg) to get mW.
+// Returns {data, sampleSize, instrumentType:'DSC'} or null if not recognised.
+function parseTANewDSC(text){
+  const lines=text.split(/\r?\n/);
+
+  // Identify instrument type from "Instrument name" or "Instrument Type" header
+  let isDSC=false;
+  for(let i=0;i<Math.min(lines.length,80);i++){
+    const lc=lines[i].toLowerCase();
+    if((lc.startsWith('instrument name')||lc.startsWith('instrument type'))&&lc.includes('dsc')){
+      isDSC=true; break;
+    }
+  }
+  if(!isDSC) return null;
+
+  // Find data header line
+  let headerIdx=-1;
+  for(let i=0;i<lines.length;i++){
+    const cols=lines[i].split('\t');
+    if(cols.length>=3&&
+       cols[0].trim()==='Time'&&
+       cols[1].trim()==='Temperature'&&
+       cols[2].trim().startsWith('Heat Flow')){
+      headerIdx=i; break;
+    }
+  }
+  if(headerIdx<0) return null;
+
+  // Verify units row says W/g
+  const unitsRow=lines[headerIdx+1]||'';
+  const unitCols=unitsRow.split('\t');
+  const isNormalized=unitCols[2]&&unitCols[2].trim()==='W/g';
+
+  // Extract sample mass from "Sample Mass\t10.7 mg" style header line
+  let sampleSize=null;
+  for(let i=0;i<headerIdx;i++){
+    const m=lines[i].match(/^Sample\s+Mass\t([0-9]+\.?[0-9]*)\s*mg/i);
+    if(m){sampleSize=parseFloat(m[1]);break;}
+  }
+
+  // Parse data rows (skip units row after header)
+  const data=[];
+  for(let i=headerIdx+2;i<lines.length;i++){
+    const ln=lines[i].trim();
+    if(!ln) continue;
+    const cols=ln.split('\t');
+    if(cols.length<3) continue;
+    const time=parseFloat(cols[0]);
+    const t=parseFloat(cols[1]);
+    const hfRaw=parseFloat(cols[2]);
+    if(!isFinite(t)||!isFinite(hfRaw)) continue;
+    // Convert W/g → mW:  W/g × mass(mg) × (1000 mW/W) / (1000 mg/g) = W/g × mass(mg)
+    const v=isNormalized&&sampleSize?hfRaw*sampleSize:hfRaw;
+    data.push({t, v, time:isFinite(time)?time:null});
+  }
+
+  return{data, sampleSize, instrumentType:'DSC'};
+}
+
 function parseText(text){
   const lines=text.split(/\r?\n/);
   let dataStarted=false;
@@ -662,6 +740,9 @@ function loadFileTGA(file){
       parsed=newFmt.data;
       sampleSize=newFmt.sampleSize;
       instrumentType='TGA';
+    } else if(parseTANewDSC(text)){
+      st('Error: this file appears to be a DSC file. Please drop it into the DSC zone.','err');
+      return;
     } else {
       const legacy=parseText(text);
       parsed=legacy.data;
@@ -702,6 +783,7 @@ function loadFileTGA(file){
     document.getElementById('dzTGAName').textContent=file.name;
     zs={xMin:null,xMax:null};
     computeDTG();
+    clearTGAAnalysis();
     updateFileInfo();
     redraw();
     st('TGA loaded: '+file.name+' ('+parsed.length+' points)'+(sampleSize?' — Sample: '+sampleSize.toFixed(4)+' mg':''),'ok');
@@ -710,24 +792,39 @@ function loadFileTGA(file){
 
 function loadFileDSC(file){
   readFile(file,text=>{
-    const {data:parsed,instrumentType,sampleSize}=parseText(text);
+    // Try new TA Instruments DSC format first, fall back to legacy format
+    let parsed, sampleSize, instrumentType;
+    const newFmt=parseTANewDSC(text);
+    if(newFmt){
+      parsed=newFmt.data;
+      sampleSize=newFmt.sampleSize;
+      instrumentType='DSC';
+    } else {
+      const legacy=parseText(text);
+      parsed=legacy.data;
+      sampleSize=legacy.sampleSize;
+      instrumentType=legacy.instrumentType;
+    }
+
     if(instrumentType==='TGA'){
-      st('Error: this file appears to be a TGA file (Instrument header says TGA). Please drop it into the TGA zone.','err');
+      st('Error: this file appears to be a TGA file. Please drop it into the TGA zone.','err');
       return;
     }
-    if(!parsed.length){st('No data found after StartOfData in '+file.name,'err');return;}
+    if(!parsed.length){st('No data found in '+file.name,'err');return;}
     dscLegs=segmentLegs(parsed);
-    const allPts=parsed;
-    dscMeta=metaFromData(allPts,file.name);
+    dscMeta=metaFromData(parsed,file.name);
     dscMeta.legs=dscLegs.length;
-    dscMeta.sampleSize=sampleSize;  // mg — used for enthalpy calculation
+    dscMeta.sampleSize=sampleSize;
+    if(newFmt) dscMeta.normalized=true; // flag that heat flow was W/g, now converted to mW
     document.getElementById('dzDSCName').textContent=file.name;
+    if(newFmt) document.getElementById('dscLabel').value='Heat Flow / mW';
     zs={xMin:null,xMax:null};
+    clearDSCAnalysis();
     renderLegControls();
     updateOnsetLegSelector();
     updateFileInfo();
     redraw();
-    st('DSC loaded: '+file.name+' ('+parsed.length+' points, '+dscLegs.length+' leg'+(dscLegs.length!==1?'s':'')+')',  'ok');
+    st('DSC loaded: '+file.name+' ('+parsed.length+' points, '+dscLegs.length+' leg'+(dscLegs.length!==1?'s':'')+')'+(sampleSize?' — Sample: '+sampleSize.toFixed(4)+' mg':''),'ok');
   });
 }
 
@@ -786,6 +883,12 @@ function updateFileInfo(){
   html+=infoBox('DSC',dscMeta,'var(--dsc)');
   el.innerHTML=html||'<div style="font-family:var(--mono);font-size:10px;color:#aaa;font-style:italic">No files loaded.</div>';
   document.getElementById('btnExport').disabled=!(tgaData.length||dscLegs.length);
+  updateAnalysisPanels();
+}
+
+function updateAnalysisPanels(){
+  document.getElementById('analysisDSC').style.display=dscLegs.length?'':'none';
+  document.getElementById('analysisTGA').style.display=tgaData.length?'':'none';
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1441,6 +1544,30 @@ function copyPlotToClipboard(){
   },'image/png');
 }
 
+function clearTGAAnalysis(){
+  onsetTGA=null; massLossTGA=null;
+  if(pickTarget==='tga'||pickTarget==='massloss'){pickMode=false;pickTarget='';pickPts=[];}
+  document.getElementById('tgaOnsetResult').innerHTML='';
+  document.getElementById('massLossResult').innerHTML='';
+  document.getElementById('tgaPickStatus').textContent='';
+  document.getElementById('massLossPickStatus').textContent='';
+  document.getElementById('btnPickTGA').textContent='\u25b6 Pick two points on plot';
+  document.getElementById('btnPickTGA').onclick=startPickTGA;
+  document.getElementById('btnPickMassLoss').textContent='\u25b6 Pick two points on plot';
+  document.getElementById('btnPickMassLoss').onclick=startPickMassLoss;
+  document.getElementById('panel-plot').classList.remove('picking');
+}
+
+function clearDSCAnalysis(){
+  onsetDSC=null;
+  if(pickTarget==='dsc'){pickMode=false;pickTarget='';pickPts=[];}
+  document.getElementById('dscOnsetResult').innerHTML='';
+  document.getElementById('dscPickStatus').textContent='';
+  document.getElementById('btnPickDSC').textContent='\u25b6 Pick two points on plot';
+  document.getElementById('btnPickDSC').onclick=startPickDSC;
+  document.getElementById('panel-plot').classList.remove('picking');
+}
+
 function clearTGA(){
   tgaData=[];dtgData=[];
   tgaMeta={filename:'',npts:0,tMin:0,tMax:0,vMin:0,vMax:0};
@@ -1841,7 +1968,8 @@ function updateOnsetLegSelector(){
 }
 
 function drawOnsets(cx,ML,PW,MT,PH,xr,tgaR,dscR,style,labelBoxes,offsets){
-  const showVLines=gb('onsetVLines');
+  const showVLinesDSC=gb('onsetVLinesDSC');
+  const showVLinesTGA=gb('onsetVLinesTGA');
   function tX(T){return ML+(T-xr.min)/(xr.max-xr.min)*PW;}
   function tYtga(v){return tgaR?MT+PH-(v-tgaR.min)/(tgaR.max-tgaR.min)*PH:0;}
   function tYdsc(v){return dscR?MT+PH-(v-dscR.min)/(dscR.max-dscR.min)*PH:0;}
@@ -1925,12 +2053,12 @@ function drawOnsets(cx,ML,PW,MT,PH,xr,tgaR,dscR,style,labelBoxes,offsets){
     lineSeg(tangent,tExt,tangentRange[1]+span*0.05,tYdsc,color,[4,3]);
     // Onset marker
     if(onset&&onset.x>=xr.min&&onset.x<=xr.max){
-      if(showVLines)vDash(onset.x,color);
+      if(showVLinesDSC)vDash(onset.x,color);
       dot(onset.x,tYdsc(onset.y),color,'#fff');
       labelAbove(onset.x,[{text:'T',italic:true},{text:'o',sub:true},{text:' = '+onset.x.toFixed(1)+' \u00b0C',italic:false}],color,0,'dscOnset');
     }
     if(peak&&peak.t>=xr.min&&peak.t<=xr.max){
-      if(showVLines){
+      if(showVLinesDSC){
         cx.save();cx.strokeStyle=color;cx.lineWidth=1;cx.setLineDash([2,4]);
         cx.beginPath();cx.moveTo(tX(peak.t),MT);cx.lineTo(tX(peak.t),MT+PH);cx.stroke();cx.setLineDash([]);cx.restore();
       }
@@ -1951,7 +2079,7 @@ function drawOnsets(cx,ML,PW,MT,PH,xr,tgaR,dscR,style,labelBoxes,offsets){
     const tExt=onset?Math.min(tangentRange[0],onset.x)-span*0.05:tangentRange[0]-span*0.05;
     lineSeg(tangent,tExt,tangentRange[1]+span*0.05,tYtga,col,[4,3]);
     if(onset&&onset.x>=xr.min&&onset.x<=xr.max){
-      if(showVLines)vDash(onset.x,col);
+      if(showVLinesTGA)vDash(onset.x,col);
       dot(onset.x,tYtga(onset.y),col,'#fff');
       labelAbove(onset.x,[{text:'T',italic:true},{text:'o',sub:true},{text:' = '+onset.x.toFixed(1)+' \u00b0C',italic:false}],col,0,'tgaOnset');
     }
@@ -2035,7 +2163,7 @@ const SETTING_IDS=[
   // Legend
   'legShow','legPos','legSz',
   // Analysis — vertical lines checkbox + annotation colors only
-  'onsetVLines','onsetTGAColor','onsetDSCColor'
+  'onsetVLinesDSC','onsetVLinesTGA','onsetTGAColor','onsetDSCColor'
 ];
 
 function collectSettings(){
