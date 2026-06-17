@@ -258,14 +258,14 @@ select:focus{border-color:var(--accent)}
   <div id="guideContent" style="display:none;flex:1;overflow-y:auto;padding:24px 32px;font-size:13px;line-height:1.75;color:#333">
     <h2 style="font-family:var(--serif);font-size:22px;font-weight:600;margin-bottom:4px">Isotherm Fitter</h2>
     <p style="font-family:var(--mono);font-size:9px;letter-spacing:.15em;text-transform:uppercase;color:var(--accent);margin-bottom:20px">User Guide</p>
-    <p>This app fits sorption isotherm data to any of 25 standard isotherm models using nonlinear least-squares (Levenberg–Marquardt). Load a two-column CSV (pressure, uptake), select a model, optionally adjust initial guesses, and click <b>Fit Isotherm</b>. Use <b>Auto-Select Best Model</b> to rank all models by AICc.</p>
+    <p>This app fits sorption isotherm data to any of 26 standard isotherm models using nonlinear least-squares (Levenberg–Marquardt). Load a two-column CSV (pressure, uptake), select a model, optionally adjust initial guesses, and click <b>Fit Isotherm</b>. Use <b>Auto-Select Best Model</b> to rank all models by AICc.</p>
 
     <div class="g-sec">Loading data</div>
     <p>Click the drop zone or drag and drop a CSV file. Column 1 must be pressure, column 2 uptake. Delimiters: comma, tab, or semicolon. Lines that cannot be parsed as two numbers are treated as metadata or headers and skipped for fitting (but retained for export).</p>
 
     <div class="g-sec">Fitting</div>
     <p>Select a model from the left panel. The equation is shown graphically below the selector. Initial guesses are pre-filled with sensible defaults but can be adjusted. Click <b>Fit Isotherm</b> to run the optimisation. Fitted parameters, standard errors, R² and SSR appear in the <b>Summary</b> tab. The fit is drawn over the data in the <b>Plot</b> tab.</p>
-    <p><b>Auto-Select Best Model</b> fits all 25 models and ranks them by AICc (Akaike Information Criterion, corrected). Lower AICc is better; a difference &lt;2 is statistically indistinguishable. Click any row in the results table to select that model.</p>
+    <p><b>Auto-Select Best Model</b> fits all 26 models and ranks them by AICc (Akaike Information Criterion, corrected). Lower AICc is better; a difference &lt;2 is statistically indistinguishable. Click any row in the results table to select that model.</p>
 
     <div class="g-sec">Exporting results</div>
     <p>Click <b>Export Results CSV</b> to save the fitted parameters, goodness-of-fit statistics, fitted vs. raw data, and correlation matrix. All metadata from the input file (and any entered in the Summary panel) are written to the header, so the file is ready for use with the IAST and Sorption Enthalpy Calculators.</p>
@@ -1019,6 +1019,23 @@ const EQ_DRAW={
     x+=T(ctx,'/',x,cy+5,sz,false);
     x+=T(ctx,'p',x,cy+5,sz,true);T(ctx,'0',x,cy+10,sm,false);x+=textW(ctx,'0',sm,false)+1;
     T(ctx,')',x,cy+5,sz,false);
+  },
+  virial(ctx,w,h){
+    const cy=h/2,sz=17,sm=12,dot='\u00b7';let x=5;
+    x+=T(ctx,'ln ',x,cy+5,sz,false);
+    x+=T(ctx,'p',x,cy+5,sz,true);
+    x+=T(ctx,' = ln ',x,cy+5,sz,false);
+    x+=T(ctx,'q',x,cy+5,sz,true);
+    x+=T(ctx,' + ',x,cy+5,sz,false);
+    x+=T(ctx,'A',x,cy+5,sz,true);T(ctx,'0',x,cy+10,sm,false);x+=textW(ctx,'0',sm,false)+1;
+    x+=T(ctx,' + ',x,cy+5,sz,false);
+    x+=T(ctx,'A',x,cy+5,sz,true);T(ctx,'1',x,cy+10,sm,false);x+=textW(ctx,'1',sm,false)+1;
+    x+=T(ctx,' '+dot+' ',x,cy+5,sz,false);
+    x+=T(ctx,'q',x,cy+5,sz,true);
+    x+=T(ctx,' + ',x,cy+5,sz,false);
+    x+=T(ctx,'A',x,cy+5,sz,true);T(ctx,'2',x,cy+10,sm,false);x+=textW(ctx,'2',sm,false)+1;
+    x+=T(ctx,' '+dot+' ',x,cy+5,sz,false);
+    x+=T(ctx,'q',x,cy+5,sz,true);T(ctx,'2',x,cy-2,sm,false);
   }
 };
 
@@ -1319,6 +1336,45 @@ const MOD={
       {id:'p0',lbl:'p\u2080',csv:'p0',title:'SAT. PRESSURE',html:'<i>p</i><sub>0</sub>',hint:'sat. pressure',def:1}],
     fn:(p,[KH,c,p0])=>{if(p<=0)return 0;return KH*p*Math.exp(-c*p/p0)},
     jac:(p,[KH,c,p0])=>{if(p<=0)return[0,0,0];const e=Math.exp(-c*p/p0);return[p*e,-KH*p*p/p0*e,KH*c*p*p/(p0*p0)*e]}
+  },
+  virial:{name:'Virial',
+    desc:'A0=Henry term (KH=e^-A0), A1,A2=virial coeffs (adsorbate-adsorbate interactions): ln p = ln q + A0 + A1\u00b7q + A2\u00b7q\u00b2',
+    params:[
+      {id:'A0',lbl:'A\u2080',csv:'A0',title:'HENRY TERM',html:'<i>A</i><sub>0</sub>',hint:'Henry term (K\u029c=e\u207b\u1d2c\u2070)',def:0},
+      {id:'A1',lbl:'A\u2081',csv:'A1',title:'1ST VIRIAL COEFF.',html:'<i>A</i><sub>1</sub>',hint:'1st virial coeff.',def:0.1},
+      {id:'A2',lbl:'A\u2082',csv:'A2',title:'2ND VIRIAL COEFF.',html:'<i>A</i><sub>2</sub>',hint:'2nd virial coeff.',def:0}],
+    // q-explicit by numerical inversion of ln p = ln q + A0 + A1 q + A2 q^2.
+    // Physical branch = smallest positive root (g(q)->-inf as q->0+); guarded bracket + bisection.
+    fn:(p,[A0,A1,A2])=>{
+      if(p<=0)return 0;
+      const lnp=Math.log(p);
+      const g=q=>Math.log(q)+A0+A1*q+A2*q*q-lnp;
+      let lo=1e-12,glo=g(lo),t=0;
+      while(glo>=0&&lo>1e-30&&t<100){lo*=0.1;glo=g(lo);t++;}
+      let hi=lo,ghi=glo,found=false;
+      for(let it=0;it<400;it++){hi*=1.3;ghi=g(hi);if(ghi>=0){found=true;break;}if(hi>1e9)break;lo=hi;glo=ghi;}
+      if(!found)return hi;
+      for(let it=0;it<200;it++){const m=0.5*(lo+hi),gm=g(m);if(gm===0||(hi-lo)<1e-13*(1+m))return m;if(gm<0)lo=m;else hi=m;}
+      return 0.5*(lo+hi);
+    },
+    // Implicit differentiation: dq/dA_i = -(q^i)/g'(q), g'(q)=1/q + A1 + 2 A2 q
+    jac:(p,[A0,A1,A2])=>{
+      if(p<=0)return[0,0,0];
+      const q=MOD.virial.fn(p,[A0,A1,A2]);
+      if(q<=0)return[0,0,0];
+      const gp=1/q+A1+2*A2*q;
+      if(gp===0||!isFinite(gp))return[0,0,0];
+      return[-1/gp,-q/gp,-(q*q)/gp];
+    },
+    // Henry constant KH = exp(-A0)
+    post:([A0,A1,A2],se)=>{
+      const KH=Math.exp(-A0);
+      const seKH=(se&&isFinite(se[0]))?KH*se[0]:undefined;
+      return[{id:'KH',csv:'KH',title:'HENRY CONST.',html:'<i>K</i><sub>H</sub>',val:KH,se:seKH}];
+    },
+    // Virial coefficients are genuinely signed (negative => repulsive interactions),
+    // so override the default positivity clamp used by the optimiser.
+    bounds:[-Infinity,-Infinity,-Infinity]
   }
 };
 
@@ -1327,7 +1383,7 @@ const sel=document.getElementById('modelSel');
 const MODEL_ORDER=[
   'bet','henry','freundlich','langmuir','lang2','lf','langmuirfreu','lf2',
   'toth','temkin','dr','rp','hill','radke','unilan','obrien',
-  'jovanovic','jovafreun','fritz','khan','harkinjura','halsey','macmillan','polanyi','berthelot'
+  'jovanovic','jovafreun','fritz','khan','harkinjura','halsey','macmillan','polanyi','berthelot','virial'
 ];
 MODEL_ORDER.forEach(k=>{
   if(!MOD[k])return;
@@ -1585,8 +1641,12 @@ function solveN(Ain,bin,n){
   for(let i=n-1;i>=0;i--){let s=b[i];for(let j=i+1;j<n;j++)s-=A[i*n+j]*b[j];b[i]=s/A[i*n+i]}
   return b;
 }
-function levmar(par0,fn,jac){
+function levmar(par0,fn,jac,lb){
   const NP=par0.length,MAXI=6000;
+  // Optional per-parameter lower bounds. Omitted => 1e-12 for every parameter (legacy behaviour,
+  // identical to before). Models with genuinely signed parameters (e.g. virial coefficients) pass
+  // their own bounds, e.g. -Infinity, via mod.bounds.
+  const LB=(lb&&lb.length===NP)?lb:par0.map(()=>1e-12);
   let par=Float64Array.from(par0),lam=1e-3,ss=calcSSR(par,fn),conv=false,it=0;
   for(it=1;it<=MAXI;it++){
     const n=rawData.length,J=new Float64Array(n*NP);
@@ -1597,7 +1657,7 @@ function levmar(par0,fn,jac){
     for(let i=0;i<NP;i++)aug[i*NP+i]+=lam*(JtJ[i*NP+i]+1e-10);
     const step=solveN(aug,JtR,NP);
     if(!step){lam*=10;continue}
-    const np=Array.from(par).map((v,i)=>Math.max(v+step[i],1e-12));
+    const np=Array.from(par).map((v,i)=>Math.max(v+step[i],LB[i]));
     const ns=calcSSR(np,fn);
     if(ns<ss){const old=ss;par=Float64Array.from(np);ss=ns;lam=Math.max(lam/10,1e-16);if(old-ss<1e-12*(1+ss)){conv=true;break}}
     else{lam*=10;if(lam>1e16)break}
@@ -1627,12 +1687,13 @@ function computeSE(par,fn,jac,ssv){
 document.getElementById('btnFit').addEventListener('click',()=>{
   if(!rawData.length)return;
   const mod=MOD[sel.value];
-  const par0=mod.params.map(pr=>Math.max(parseFloat(document.getElementById('ig_'+pr.id).value)||pr.def,1e-12));
+  const lb=mod.bounds||mod.params.map(()=>1e-12);
+  const par0=mod.params.map((pr,i)=>{const v=parseFloat(document.getElementById('ig_'+pr.id).value);const x=isNaN(v)?pr.def:v;return Math.max(x,lb[i]);});
   st('<span class="sp"></span>Fitting\u2026','');
   document.getElementById('btnFit').disabled=true;
   setTimeout(()=>{
     try{
-      const res=levmar(par0,mod.fn,mod.jac);
+      const res=levmar(par0,mod.fn,mod.jac,lb);
       const seResult=computeSE(res.par,mod.fn,mod.jac,res.ss);
       const se=seResult.se;
       const corrMatrix=seResult.corr;
@@ -2133,10 +2194,11 @@ async function runAutoSelect(){
     const k=keys[ki];
     const mod=MOD[k];
     const NP=mod.params.length;
-    const par0=mod.params.map(pr=>Math.max(parseFloat(document.getElementById('ig_'+pr.id)?.value||pr.def)||pr.def,1e-12));
+    const lb=mod.bounds||mod.params.map(()=>1e-12);
+    const par0=mod.params.map((pr,i)=>{const raw=document.getElementById('ig_'+pr.id)?.value;const v=parseFloat(raw);const x=isNaN(v)?pr.def:v;return Math.max(x,lb[i]);});
     let res,ssr,rsq,aic,bic,conv;
     try{
-      res=levmar(par0,mod.fn,mod.jac);
+      res=levmar(par0,mod.fn,mod.jac,lb);
       ssr=res.ss;conv=res.conv;
       let qmv=0;rawData.forEach(d=>qmv+=d.q);qmv/=n;
       let sst=0;rawData.forEach(d=>sst+=(d.q-qmv)**2);
