@@ -1082,7 +1082,6 @@ function render(exportW,exportH){
   if(hasDSC)dscLegs.forEach(leg=>{if(leg.visible)drawCurve(leg.data,dscR,leg.color,dscLW);});
   cx.restore();
 
-  // Legend
   // Onset analysis annotations
   if(onsetTGA||onsetDSC||massLossTGA){
     if(!isExport)annotLabelBoxes=[];
@@ -1090,6 +1089,25 @@ function render(exportW,exportH){
       {font,tkSz,frameW,tgaCol,dscCol:gv('dscCol')||'#b84a2e',
        onsetTGAColor:gv('onsetTGAColor')||null,onsetDSCColor:gv('onsetDSCColor')||null,MR},
       isExport?null:annotLabelBoxes, annotOffsets);
+  }
+
+  // Pick dots — drawn whenever a point has been clicked, regardless of analysis state
+  if(pickMode&&pickPts.length){
+    const annoTGACol=gv('onsetTGAColor')||tgaCol;
+    const annoDSCCol=gv('onsetDSCColor')||(gv('dscCol')||'#b84a2e');
+    const dscOnLeft=hasDSC&&!hasTGA;
+    const tYtga=(v)=>hasTGA?MT+PH-(v-tgaR.min)/(tgaR.max-tgaR.min)*PH:0;
+    const tYdsc=(v)=>hasDSC?MT+PH-(v-dscR.min)/(dscR.max-dscR.min)*PH:0;
+    pickPts.forEach(p=>{
+      const col=(pickTarget==='dsc')?annoDSCCol:annoTGACol;
+      const yPx=(pickTarget==='dsc')?tYdsc(p.v):tYtga(p.v);
+      const xPx=ML+(p.t-xr.min)/(xr.max-xr.min)*PW;
+      cx.save();
+      cx.beginPath();cx.arc(xPx,yPx,5,0,2*Math.PI);
+      cx.fillStyle='#fff';cx.fill();
+      cx.strokeStyle=col;cx.lineWidth=2;cx.stroke();
+      cx.restore();
+    });
   }
 
   if(legShow&&(hasTGA||hasDSC)){
@@ -1585,8 +1603,8 @@ function computeMassLoss(){
   const unit=lbl.includes('%')?'%':'mg';
   const el=document.getElementById('massLossResult');
   el.innerHTML=`<span style="color:#555">${pLo.t.toFixed(1)} \u2192 ${pHi.t.toFixed(1)} \u00b0C</span><br>`+
-    `<span style="color:#555">Mass loss: </span><b>${sign}${Math.abs(loss).toFixed(2)} ${unit}</b>`;
-  st(`Mass loss: ${sign}${Math.abs(loss).toFixed(2)} ${unit} (${pLo.t.toFixed(1)}\u2013${pHi.t.toFixed(1)} \u00b0C)`,'ok');
+    `<span style="color:#555">Mass loss: </span><b>${sign}${Math.abs(loss).toFixed(2)}${unit==='%'?'':' '}${unit}</b>`;
+  st(`Mass loss: ${sign}${Math.abs(loss).toFixed(2)}${unit==='%'?'':' '}${unit} (${pLo.t.toFixed(1)}\u2013${pHi.t.toFixed(1)} \u00b0C)`,'ok');
   redraw();
 }
 
@@ -1780,7 +1798,8 @@ function computeTGAOnset(){
     baseline,tangent,onset,inflection:inflT,
     blRange:[tgaData[blLo].t,tgaData[blHi].t],
     evRange:[evData[0].t,evData[evData.length-1].t],
-    tangentRange:[tgaData[tLo].t,tgaData[tHi].t]
+    tangentRange:[tgaData[tLo].t,tgaData[tHi].t],
+    p1:tgaData[idx1], p2:tgaData[idx2]
   };
 
   let html='';
@@ -1881,19 +1900,13 @@ function drawOnsets(cx,ML,PW,MT,PH,xr,tgaR,dscR,style,labelBoxes,offsets){
     cx.restore();
   }
 
-  // ── Pick dots (while or after picking) ──────────────────────────
-  if(pickMode||onsetDSC||onsetTGA){
-    if((pickTarget==='dsc'||onsetDSC)&&pickPts.length&&dscR){
-      const col=annoDSCCol;
-      pickPts.forEach(p=>{dot(p.t,tYdsc(p.v),col,'#fff');});
+  // ── Pick dots (during picking: all clicked points; after: handled per-analysis below) ──
+  if(pickMode&&pickPts.length){
+    if(pickTarget==='dsc'&&dscR){
+      pickPts.forEach(p=>{dot(p.t,tYdsc(p.v),annoDSCCol,'#fff');});
     }
-    if((pickTarget==='tga'||onsetTGA)&&pickPts.length&&tgaR&&pickTarget==='tga'){
-      const col=annoTGACol;
-      pickPts.forEach(p=>{dot(p.t,tYtga(p.v),col,'#fff');});
-    }
-    if(pickTarget==='massloss'&&pickPts.length&&tgaR){
-      const col=annoTGACol;
-      pickPts.forEach(p=>{dot(p.t,tYtga(p.v),col,'#fff');});
+    if((pickTarget==='tga'||pickTarget==='massloss')&&tgaR){
+      pickPts.forEach(p=>{dot(p.t,tYtga(p.v),annoTGACol,'#fff');});
     }
   }
 
@@ -1901,6 +1914,9 @@ function drawOnsets(cx,ML,PW,MT,PH,xr,tgaR,dscR,style,labelBoxes,offsets){
   if(onsetDSC&&dscR){
     const{baseline,tangent,onset,peak,p1,p2,tangentRange}=onsetDSC;
     const color=annoDSCCol;
+    // Show the two picked points
+    dot(p1.t,tYdsc(p1.v),color,'#fff');
+    dot(p2.t,tYdsc(p2.v),color,'#fff');
     // Baseline line between the two picked points, extended slightly
     const span=p2.t-p1.t;
     lineSeg(baseline,p1.t-span*0.05,p2.t+span*0.05,tYdsc,color,[8,5]);
@@ -1925,7 +1941,10 @@ function drawOnsets(cx,ML,PW,MT,PH,xr,tgaR,dscR,style,labelBoxes,offsets){
   // ── TGA onset ───────────────────────────────────────────────────
   if(onsetTGA&&tgaR){
     const col=annoTGACol;
-    const{baseline,tangent,onset,inflection,blRange,evRange,tangentRange}=onsetTGA;
+    const{baseline,tangent,onset,inflection,blRange,evRange,tangentRange,p1,p2}=onsetTGA;
+    // Show the two picked points
+    if(p1) dot(p1.t,tYtga(p1.v),col,'#fff');
+    if(p2) dot(p2.t,tYtga(p2.v),col,'#fff');
     const span=evRange[1]-blRange[0];
     const blEnd=onset?Math.max(evRange[1],onset.x)+span*0.1:evRange[1]+span*0.1;
     lineSeg(baseline,blRange[0]-span*0.05,blEnd,tYtga,col,[8,5]);
@@ -1975,7 +1994,7 @@ function drawOnsets(cx,ML,PW,MT,PH,xr,tgaR,dscR,style,labelBoxes,offsets){
     const sign=loss<0?'\u2212':'+';
     const lbl=gv('tgaLabel')||'Weight / %';
     const unit=lbl.includes('%')?'%':'mg';
-    const valuePart=` = ${sign}${Math.abs(loss).toFixed(2)}\u2009${unit}`;
+    const valuePart=` = ${sign}${Math.abs(loss).toFixed(2)}${unit==='%'?'':'\u2009'}${unit}`;
     const segments=[
       {text:'\u0394',italic:false},
       {text:'m',italic:true},
