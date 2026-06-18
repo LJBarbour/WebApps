@@ -168,11 +168,17 @@ select:focus{border-color:var(--accent)}
   <div class="sb">
     <div class="lbl">Pressure interpolation</div>
     <div class="pg">
+      <label>Transmitter type<span>auto / gauge / abs</span></label>
+      <select id="txType" style="height:24px">
+        <option value="auto" selected>Auto</option>
+        <option value="gauge">Gauge</option>
+        <option value="absolute">Absolute</option>
+      </select>
       <label>Fit from<span>(bar)</span></label>
       <input type="number" id="fitFrom" value="1.5" step="0.1" min="0.1">
       <label>Fit to<span>(bar)</span></label>
       <input type="number" id="fitTo" value="8.5" step="0.1" min="1">
-      <label>Tx floor<span>(blank = auto)</span></label>
+      <label>Tx floor<span>(blank = auto, bar)</span></label>
       <input type="number" id="txFloor" step="0.01" placeholder="auto">
     </div>
     <button class="btn out" style="margin-top:8px" id="btnInterp" disabled onclick="runInterpolation()">Recalculate</button>
@@ -282,10 +288,14 @@ select:focus{border-color:var(--accent)}
     <p>This app processes heat flow and pressure data from Setaram/BV sorption calorimetry instruments. It handles the pressure signal reconstruction required when a gauge-type pressure transmitter is used, and produces publication-quality heat flow vs pressure plots with integrated peak areas.</p>
 
     <div class="g-sec">Instrument background</div>
-    <p>In a sorption calorimetry experiment, the sample cell pressure is controlled by a ProportionAir pressure valve (0–10 bar) and a syringe pump (10 bar upward). The calorimeter reads only the transmitter near the sample cell. Two types of transmitter are used:</p>
-    <p style="margin-top:8px"><b>Absolute transmitter</b> (experiments below ~40 bar): reads correctly from 0 bar upward. No pressure reconstruction is needed.</p>
-    <p style="margin-top:8px"><b>Gauge transmitter</b> (experiments above ~40 bar): has a lower floor, typically around 0.9–1.1 bar. Below this floor, the transmitter saturates and reports a constant value equal to the floor. It cannot read the 0–floor bar region, which must be reconstructed by extrapolation (see Pressure Interpolation below).</p>
-    <p style="margin-top:8px">The experiment proceeds as follows: the system equilibrates at vacuum (pressure ≈ 0 bar) while the calorimeter records data. Once a stable heat flow baseline is achieved, the user starts the pressure ramp using the pressure valve. When the valve reaches its limit (~10 bar), the user manually switches to the syringe pump to reach higher pressures. At the peak pressure, the syringe pump ramps back down to ~10 bar, then the user switches back to the pressure valve to return to vacuum. Any delay during the valve/pump changeovers results in a flat pressure hold that is detected and removed by the app.</p>
+    <p>In a sorption calorimetry experiment, the sample cell pressure is controlled by a ProportionAir pressure valve (0–10 bar) and optionally a syringe pump (10 bar upward, only used for experiments above 10 bar). The calorimeter reads only the transmitter near the sample cell. Two types of transmitter may be used:</p>
+    <p style="margin-top:8px"><b>Absolute transmitter</b>: reads correctly from 0 bar upward. No pressure reconstruction is needed. The pre-ramp baseline reads near 0 bar.</p>
+    <p style="margin-top:8px"><b>Gauge transmitter</b>: has a lower floor (typically around 0.9–1.1 bar for a 60-bar transmitter, but can vary depending on calibration). Below this floor the transmitter saturates and reports a constant value equal to the floor. The 0–floor bar region must be reconstructed by linear extrapolation (see Pressure Interpolation below).</p>
+    <p style="margin-top:8px"><b>Auto-detection:</b> the app detects the transmitter type by examining the median pressure in the segment just before the first ramp begins. If the baseline exceeds 0.1 bar, the gauge mode is assumed. You can override this with the <em>Transmitter type</em> dropdown in the sidebar.</p>
+    <p style="margin-top:8px"><b>Experiment start/end detection:</b> the app scans for the first sustained increase in pressure (dP/dt &gt; 0.5 bar/hr over a 30 s window) to locate t₀, and likewise for the last sustained decrease to locate t_end. Any data before t₀ — including transient pressure drops as the system is pulled to vacuum at the start, or slow drifts at the pre-ramp baseline — is excluded from the analysis. The <em>Desorption tail extension</em> slider can extend retention past t_end to capture slow post-desorption kinetics.</p>
+    <p style="margin-top:8px"><b>Experiment with syringe pump (high pressure):</b> the experiment proceeds as follows. The system equilibrates at vacuum (or at the gauge floor) while the calorimeter records data. The user starts the pressure ramp using the pressure valve. When the valve reaches its limit (~10 bar), the user manually switches to the syringe pump to reach higher pressures. At the peak pressure, the syringe pump ramps back down to ~10 bar, then the user switches back to the pressure valve to return to vacuum. Any delay during the valve/pump changeovers results in a flat pressure hold that is detected and removed by the app.</p>
+    <p style="margin-top:8px"><b>Experiment without syringe pump (≤10 bar):</b> the pressure valve handles the entire ramp up and back down. There are typically no mid-experiment holds. The app handles both cases automatically.</p>
+    <p style="margin-top:8px"><b>File format and units:</b> the parser accepts time in seconds or hours (read from the <code>Time(s)</code> or <code>Time(h)</code> column header), pressure in bar, mbar, kPa, Pa, or psi (read from the pressure column header), and heat flow in either mW/g or mW. If heat flow is reported as mW (without the per-mass), it is converted to mW/g internally using the sample mass from the file header.</p>
 
     <div class="g-sec">File format</div>
     <p>Drop a tab-delimited <code>.txt</code> file onto the drop zone, or click the drop zone to browse. The file must contain a short metadata header followed by a data table with the header row <code>Index&nbsp;&nbsp;Time (s)&nbsp;&nbsp;Temperature (°C)&nbsp;&nbsp;HeatFlow (mW/g)&nbsp;&nbsp;Analog signal (bar)</code>. The pressure unit is read from this header line. Metadata fields parsed from the header: <em>Creation Date</em>, <em>User</em>, <em>Initial Mass</em> (mg), and <em>Molar Mass</em> (g/mol).</p>
@@ -582,6 +592,12 @@ function parseFileBuffer(buffer,fileName){
   let pos=0;
   const len=fullText.length;
 
+  // Unit conversion factors detected from the header line
+  let timeScale=1;       // multiply time by this to get seconds
+  let pressureScale=1;   // multiply raw pressure by this to get bar (internal unit)
+  let pressureUnitOrig='bar';  // original unit as it appeared in the file
+  let hfPerMass=false;   // true if header says mW/g, false if just mW
+
   while(pos<len){
     let end=pos;
     while(end<len&&fullText[end]!=='\n'&&fullText[end]!=='\r')end++;
@@ -595,23 +611,54 @@ function parseFileBuffer(buffer,fileName){
       let m;
       if(!META.mass&&(m=line.match(/Initial Mass\s*:\s*([\d.]+)\s*mg/i)))META.mass=parseFloat(m[1]);
       if(!META.molarMass&&(m=line.match(/Molar Mass\s*:\s*([\d.]+)\s*g\/mol/i)))META.molarMass=parseFloat(m[1]);
-      if(!META.date&&(m=line.match(/Creation Date\s*:\s*(.+)/i)))META.date=m[1].trim();
-      if(!META.user&&(m=line.match(/^User\s*:\s*(.+)/i)))META.user=m[1].trim();
+      if(!META.date&&(m=line.match(/Creation Date\s*:?\s*(.+)/i)))META.date=m[1].trim();
+      if(!META.user&&(m=line.match(/^User\s*:?\s*(.+)/i)))META.user=m[1].trim();
+      // Detect data header: starts with Index, contains Time and Pressure-like columns
       if(/^Index\s*\t/i.test(line)){
-        const um=line.match(/Analog signal\s*\(([^)]+)\)/i);
-        if(um)pressureUnit=um[1].trim();
+        // Time unit: look for Time(h), Time (h), Time(s), Time (s)
+        const tm=line.match(/Time\s*\(([^)]+)\)/i);
+        if(tm){
+          const u=tm[1].trim().toLowerCase();
+          if(u==='h'||u==='hr'||u==='hour') timeScale=3600;
+          else if(u==='min') timeScale=60;
+          else timeScale=1;
+        }
+        // Pressure unit: look for "Pressure(unit)" or "Analog signal(unit)"
+        let um=line.match(/Pressure\s*\(([^)]+)\)/i);
+        if(!um) um=line.match(/Analog signal\s*\(([^)]+)\)/i);
+        if(um){
+          pressureUnitOrig=um[1].trim();
+          const pu=pressureUnitOrig.toLowerCase();
+          if(pu==='mbar') pressureScale=0.001;  // mbar → bar
+          else if(pu==='kpa') pressureScale=0.01;
+          else if(pu==='pa') pressureScale=0.00001;
+          else if(pu==='psi') pressureScale=0.0689476;
+          else pressureScale=1;
+        }
+        // Heat flow unit: detect /g
+        hfPerMass = /HeatFlow\s*\([^)]*\/\s*g/i.test(line);
+        pressureUnit='bar'; // internal storage is always bar
         dataStarted=true;
       }
       continue;
     }
     const parts=line.split('\t');
     if(parts.length<5)continue;
-    const t=parseFloat(parts[1]),hf=parseFloat(parts[3]),p=parseFloat(parts[4]);
-    if(isNaN(t)||isNaN(hf)||isNaN(p))continue;
+    const tRaw=parseFloat(parts[1]),hfRaw=parseFloat(parts[3]),pRaw=parseFloat(parts[4]);
+    if(isNaN(tRaw)||isNaN(hfRaw)||isNaN(pRaw))continue;
+    const t=tRaw*timeScale;       // always seconds
+    const p=pRaw*pressureScale;    // always bar
+    // Heat flow: if file gives mW (not mW/g) and sample mass available, divide by mass to get mW/g
+    let hf=hfRaw;
+    if(!hfPerMass && META.mass && META.mass>0) hf=hfRaw/META.mass; // mW / mg = mW/mg = uW/ug → numerically same as mW/g
     RAW.push({t,hf,p_raw:p,temp:parseFloat(parts[2])||0});
   }
 
-  META.pressureUnit=pressureUnit;
+  // Store the conversion info on META for later display
+  META.pressureUnit='bar';       // always bar internally
+  META.pressureUnitOrig=pressureUnitOrig;
+  META.timeScale=timeScale;
+  META.hfPerMass=hfPerMass;
   META.nPoints=RAW.length;
   if(RAW.length<10)throw new Error('No data rows found — check file format.');
 
@@ -649,14 +696,16 @@ function parseFileBuffer(buffer,fileName){
 // ═══════════════════════════════════════════
 function renderMetaStrip(){
   const M=META;
+  const txTypeStr=INTERP?.txType?(INTERP.txType.charAt(0).toUpperCase()+INTERP.txType.slice(1)):'—';
   const items=[
     ['File',M.fileName],['Date',M.date||'—'],
     ['Mass',M.mass?M.mass+' mg':'—'],
     ['Molar mass',M.molarMass?M.molarMass+' g mol⁻¹':'—'],
-    ['P unit',M.pressureUnit],
+    ['Tx type',txTypeStr],
+    ['P unit (file)',M.pressureUnitOrig||M.pressureUnit],
     ['Points',M.nPoints.toLocaleString()],
     ['Duration',formatTime(M.tMax-M.tMin)],
-    ['P range',d2(M.pMin)+'–'+d2(M.pMax)+' '+M.pressureUnit],
+    ['P range',d2(M.pMin)+'–'+d2(M.pMax)+' bar'],
   ];
   document.getElementById('metaStrip').innerHTML=items.map(([l,v])=>
     `<div class="mi"><div class="ml">${l}</div><div class="mv">${v}</div></div>`
@@ -696,15 +745,21 @@ function getTailEnd(){
 function rawRegion(i){
   // Returns 'active' | 'interp' | 'flat'
   if(!IS_FLAT||!INTERP) return 'active';
-  const{upWakeIdx,downSleepIdx,peakIdx,t0up,t0down}=INTERP;
+  const{upWakeIdx,downSleepIdx,peakIdx,t0up,t0down,txType,rampStartIdx}=INTERP;
   const t=RAW[i].t;
-  const tStart=t0up??Infinity;
+  // Reject anything before the detected ramp start — pre-experiment data
+  if(i<rampStartIdx) return 'flat';
   const tEnd=getTailEnd();
-  // Points between tStart and tEnd are always KEPT
-  if(t>=tStart && t<=tEnd){
-    if(i<=peakIdx && i<upWakeIdx) return 'interp'; // ads interpolated P region
-    if(i>peakIdx  && i>downSleepIdx) return 'interp'; // des interpolated P region
-    if(IS_FLAT[i]) return 'flat'; // mid-experiment hold
+  if(t<=tEnd){
+    // Within active window — interpolated regions take priority
+    if(txType==='gauge'){
+      if(i<=peakIdx && i<upWakeIdx) return 'interp';
+      if(i>peakIdx  && i>downSleepIdx) return 'interp';
+    }
+    // Inside the tail extension (after t0down but ≤ tEnd), keep flat points too —
+    // the whole point of the extension is to capture post-ramp baseline kinetics
+    const inTailExt = t0down!==null && t>t0down;
+    if(IS_FLAT[i] && !inTailExt) return 'flat';
     return 'active';
   }
   return 'flat';
@@ -805,33 +860,113 @@ function runInterpolation(){
   const fitFrom=parseFloat(document.getElementById('fitFrom').value)||1.5;
   const fitTo=parseFloat(document.getElementById('fitTo').value)||8.5;
   const floorInput=parseFloat(document.getElementById('txFloor').value);
+  const txTypeSel=document.getElementById('txType')?.value||'auto';
 
-  const earlyP=RAW.slice(0,Math.min(500,RAW.length)).map(r=>r.p_raw).sort((a,b)=>a-b);
-  const autoFloor=earlyP[Math.floor(earlyP.length/2)];
-  const txFloor=isNaN(floorInput)?autoFloor:floorInput;
-
+  // ── 1. Find the global peak pressure index ──
   let peakIdx=0,peakP=-Infinity;
   for(let i=0;i<RAW.length;i++)if(RAW[i].p_raw>peakP){peakP=RAW[i].p_raw;peakIdx=i;}
 
-  const upFitPts=RAW.slice(0,peakIdx+1).filter(r=>r.p_raw>=fitFrom&&r.p_raw<=fitTo);
-  const downFitPts=RAW.slice(peakIdx).filter(r=>r.p_raw>=fitFrom&&r.p_raw<=fitTo);
+  // ── 2. Detect first sustained ramp-up to identify experiment start ──
+  // Scan forward looking for a window where the average dP/dt exceeds a threshold
+  // for at least N consecutive points. This locates the start of the adsorption ramp
+  // regardless of what happened before (vacuum hold, slow drift, transient drop, etc.)
+  const dt=(RAW[1]?.t-RAW[0]?.t)||0.5;   // seconds per point
+  const WIN_S=30;                          // window length in seconds
+  const W=Math.max(2,Math.round(WIN_S/dt)); // window in points
+  const RAMP_THR=5/60;                     // 5 mbar/min = 5e-3 bar/min ≈ 8.3e-5 bar/s
+                                            // Use 0.5 bar/hr = ~1.4e-4 bar/s as threshold
+  const dpdt_thresh=0.5/3600;              // 0.5 bar/hr in bar/s
+
+  let rampStartIdx=0;
+  for(let i=W;i<peakIdx;i++){
+    const dp=RAW[i].p_raw-RAW[i-W].p_raw;
+    const rate=dp/(W*dt);
+    if(rate>dpdt_thresh){
+      // Walk back to find where the rise actually begins
+      // i.e. step back while dp/dt is still positive over a half-window
+      let j=i;
+      while(j>W && (RAW[j].p_raw-RAW[j-W].p_raw)/(W*dt) > dpdt_thresh*0.3) j--;
+      rampStartIdx=Math.max(0,j-Math.floor(W/2));
+      break;
+    }
+  }
+
+  // ── 3. Detect last sustained ramp-down to identify experiment end ──
+  let rampEndIdx=RAW.length-1;
+  for(let i=RAW.length-1-W;i>peakIdx;i--){
+    const dp=RAW[i+W].p_raw-RAW[i].p_raw;
+    const rate=-dp/(W*dt); // positive if decreasing
+    if(rate>dpdt_thresh){
+      let j=i;
+      while(j<RAW.length-W && -(RAW[j+W].p_raw-RAW[j].p_raw)/(W*dt) > dpdt_thresh*0.3) j++;
+      rampEndIdx=Math.min(RAW.length-1,j+Math.floor(W/2));
+      break;
+    }
+  }
+
+  // ── 4. Determine baseline pressure (median of points before rampStartIdx) ──
+  // This becomes the auto Tx floor for the gauge transmitter case
+  const baseStart=Math.max(0,rampStartIdx-500);
+  const baseEnd=Math.max(baseStart+10,rampStartIdx-10);
+  const baseSamples=[];
+  for(let i=baseStart;i<baseEnd;i++)baseSamples.push(RAW[i].p_raw);
+  baseSamples.sort((a,b)=>a-b);
+  const autoFloor=baseSamples.length?baseSamples[Math.floor(baseSamples.length/2)]:0;
+
+  // ── 5. Decide transmitter type ──
+  // Auto: if baseline > 0.3 bar → gauge; else absolute
+  let txType=txTypeSel;
+  // Detection threshold: if baseline median > 0.1 bar, treat as gauge transmitter
+  if(txType==='auto') txType=(autoFloor>0.1)?'gauge':'absolute';
+
+  // For absolute transmitter, the "floor" is effectively zero — no interpolation needed
+  const txFloor = txType==='absolute'
+    ? (isNaN(floorInput)?0:floorInput)
+    : (isNaN(floorInput)?autoFloor:floorInput);
+
+  // ── 6. Fit linear P vs t on each leg using user-selected range ──
+  const upFitPts=RAW.slice(rampStartIdx,peakIdx+1).filter(r=>r.p_raw>=fitFrom&&r.p_raw<=fitTo);
+  const downFitPts=RAW.slice(peakIdx,rampEndIdx+1).filter(r=>r.p_raw>=fitFrom&&r.p_raw<=fitTo);
   const upFit=linearFit(upFitPts.map(r=>r.t),upFitPts.map(r=>r.p_raw));
   const downFit=linearFit(downFitPts.map(r=>r.t),downFitPts.map(r=>r.p_raw));
-  const t0up=upFit?-upFit.b/upFit.m:null;
-  const t0down=downFit?-downFit.b/downFit.m:null;
 
-  const wakeThresh=txFloor+0.1;
-  let upWakeIdx=0;
-  for(let i=1;i<peakIdx;i++)if(RAW[i].p_raw>wakeThresh){upWakeIdx=i;break;}
-  let downSleepIdx=RAW.length-1;
-  for(let i=peakIdx;i<RAW.length;i++)if(RAW[i].p_raw<=wakeThresh){downSleepIdx=i;break;}
+  // t0up / t0down: time where extrapolated P=0 (only meaningful for gauge)
+  // For absolute transmitter, t0up = rampStartIdx time, t0down = rampEndIdx time
+  let t0up, t0down;
+  if(txType==='gauge'){
+    t0up   = upFit   ? -upFit.b   / upFit.m   : RAW[rampStartIdx].t;
+    t0down = downFit ? -downFit.b / downFit.m : RAW[rampEndIdx].t;
+  } else {
+    // Absolute transmitter: experiment really starts/ends where pressure starts moving
+    t0up   = RAW[rampStartIdx].t;
+    t0down = RAW[rampEndIdx].t;
+  }
 
-  INTERP={txFloor,autoFloor,peakIdx,peakP,peakT:RAW[peakIdx].t,
-          upFit,downFit,t0up,t0down,upWakeIdx,downSleepIdx,fitFrom,fitTo,wakeThresh};
+  // ── 7. Wake/sleep indices: where transmitter reads above the floor (gauge only) ──
+  const wakeThresh=txType==='gauge' ? txFloor+0.1 : 0;
+  let upWakeIdx=rampStartIdx;
+  if(txType==='gauge'){
+    upWakeIdx=peakIdx;
+    for(let i=rampStartIdx;i<peakIdx;i++){
+      if(RAW[i].p_raw>wakeThresh){upWakeIdx=i;break;}
+    }
+  }
+  let downSleepIdx=rampEndIdx;
+  if(txType==='gauge'){
+    downSleepIdx=rampEndIdx;
+    for(let i=peakIdx;i<=rampEndIdx;i++){
+      if(RAW[i].p_raw<=wakeThresh){downSleepIdx=i;break;}
+    }
+  }
+
+  INTERP={txFloor,autoFloor,txType,peakIdx,peakP,peakT:RAW[peakIdx].t,
+          upFit,downFit,t0up,t0down,upWakeIdx,downSleepIdx,fitFrom,fitTo,wakeThresh,
+          rampStartIdx,rampEndIdx};
 
   buildCorrectedPressure();
   buildFlatMask();
   P_SMOOTH=null;
+  renderMetaStrip();  // refresh to show detected tx type
   renderInterpChart();
   renderInterpStats();
   renderDetailCharts();
@@ -843,7 +978,12 @@ function runInterpolation(){
 function buildFlatMask(){
   const n=RAW.length;
   IS_FLAT=new Uint8Array(n);
-  const WIN=400, VTHR=0.005, MINTHR=200;
+  const WIN=400, MINTHR=200;
+  // Variance threshold scales with the experiment's pressure range so it works for
+  // both low-pressure experiments (max P ~1 bar) and high-pressure ones (max P ~50 bar).
+  // A region is flat if its local stddev is less than 0.3% of the full pressure span.
+  const pRange = (META.pMax - META.pMin) || 1;
+  const VTHR = Math.pow(pRange * 0.003, 2);
   const vals=RAW.map(r=>r.p_raw);
   let sum=0,sum2=0,wlen=0;
   for(let j=0;j<Math.min(WIN,n);j++){sum+=vals[j];sum2+=vals[j]*vals[j];wlen++;}
@@ -867,14 +1007,19 @@ function buildFlatMask(){
 
 function buildCorrectedPressure(){
   if(!INTERP)return;
-  const{upFit,downFit,t0up,t0down,peakIdx,upWakeIdx,downSleepIdx}=INTERP;
+  const{upFit,downFit,t0up,t0down,peakIdx,upWakeIdx,downSleepIdx,txType,rampStartIdx,rampEndIdx}=INTERP;
   for(let i=0;i<RAW.length;i++){
     const r=RAW[i];
-    if(i<=peakIdx){
+    if(txType==='absolute'){
+      // Absolute transmitter — trust the raw reading
+      RAW[i].p_corr=Math.max(0,r.p_raw);
+    } else if(i<=peakIdx){
+      // Gauge transmitter, adsorption leg
       if(upFit&&r.t>=(t0up??0)&&i<upWakeIdx)RAW[i].p_corr=Math.max(0,upFit.m*r.t+upFit.b);
       else if(i<upWakeIdx)RAW[i].p_corr=0;
       else RAW[i].p_corr=r.p_raw;
     } else {
+      // Gauge transmitter, desorption leg
       if(downFit&&i>downSleepIdx)RAW[i].p_corr=Math.max(0,downFit.m*r.t+downFit.b);
       else RAW[i].p_corr=r.p_raw;
     }
@@ -1363,10 +1508,12 @@ function drawHFPlot(ctx,W,H,forExport){
     }
   }
   if(showDes){
+    const t0d=INTERP.t0down;
     for(let i=pi;i<RAW.length;i+=N){
       if(RAW[i].t>tEnd)break;
-      // skip flat only if NOT in the interpolated region
-      if(removeFlat&&IS_FLAT&&IS_FLAT[i]&&i<=downSleepIdx)continue;
+      // skip flat only if NOT in interpolated region AND NOT in tail extension
+      const inTailExt = t0d!==null && RAW[i].t>t0d;
+      if(removeFlat&&IS_FLAT&&IS_FLAT[i]&&i<=downSleepIdx&&!inTailExt)continue;
       const x=p_smooth[i],y=RAW[i].hf;
       if(!isFinite(x)||!isFinite(y))continue;
       desData.push({x:Math.max(0,x),y});
@@ -1417,7 +1564,8 @@ function drawHFPlot(ctx,W,H,forExport){
   // measure widest tick label using the actual y range already resolved above
   const _yT=niceTicksFor(yMin,yMax,6);
   ctx.font=`${tkSz}px ${font}`;
-  const tickLblW=Math.max(..._yT.map(v=>ctx.measureText(fmtTick(v)).width),20);
+  const _yLbls=fmtTicksConsistent(_yT);
+  const tickLblW=Math.max(..._yLbls.map(s=>ctx.measureText(s).width),20);
   const tickOutset=(gv('tickDir')==='in')?0:parseInt(gv('tickLen'));
   const ml=axSz+14+tickLblW+tickOutset+10, pw=W-ml-mr, ph=H-mt-mb;
 
@@ -1621,14 +1769,15 @@ function drawHFPlot(ctx,W,H,forExport){
     ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();ctx.restore();
   }
 
-  // major X ticks
-  if(majTick) xTicks.forEach(x=>{
+  // major X ticks (consistent decimal formatting across all labels)
+  const xTickLabels=fmtTicksConsistent(xTicks);
+  if(majTick) xTicks.forEach((x,k)=>{
     const px=cx(x); if(px<ml||px>ml+pw)return;
     const by=mt+ph;
     if(tickDir==='out'||tickDir==='both')drawTick(px,by,px,by+tickLen,majTickW);
     if(tickDir==='in' ||tickDir==='both')drawTick(px,by,px,by-tickLen,majTickW);
     ctx.fillStyle=axCol;ctx.font=`${tkSz}px ${font}`;ctx.textAlign='center';ctx.textBaseline='top';
-    ctx.fillText(fmtTick(x),px,by+tickLen+(tickDir==='in'?-tickLen-2:2)+3);
+    ctx.fillText(xTickLabels[k],px,by+tickLen+(tickDir==='in'?-tickLen-2:2)+3);
   });
 
   // minor X ticks
@@ -1642,14 +1791,15 @@ function drawHFPlot(ctx,W,H,forExport){
     }
   }
 
-  // major Y ticks
+  // major Y ticks (consistent decimal formatting across all labels)
+  const yTickLabels=fmtTicksConsistent(yTicks);
   ctx.textAlign='right'; ctx.textBaseline='middle';
-  if(majTick) yTicks.forEach(y=>{
+  if(majTick) yTicks.forEach((y,k)=>{
     const py=cy(y); if(py<mt||py>mt+ph)return;
     if(tickDir==='out'||tickDir==='both')drawTick(ml,py,ml-tickLen,py,majTickW);
     if(tickDir==='in' ||tickDir==='both')drawTick(ml,py,ml+tickLen,py,majTickW);
     ctx.fillStyle=axCol;ctx.font=`${tkSz}px ${font}`;ctx.textAlign='right';ctx.textBaseline='middle';
-    ctx.fillText(fmtTick(y),ml-tickLen-(tickDir==='in'?-tickLen-2:2)-3,py);
+    ctx.fillText(yTickLabels[k],ml-tickLen-(tickDir==='in'?-tickLen-2:2)-3,py);
   });
 
   // minor Y ticks
@@ -1783,7 +1933,9 @@ function copyPlot(){
 function exportCSV(){
   if(!INTERP)return;
 
-  const WIN=400, VTHR=0.005, MINTHR=200;
+  const WIN=400, MINTHR=200;
+  const pRange = (META.pMax - META.pMin) || 1;
+  const VTHR = Math.pow(pRange * 0.003, 2);
   const n=RAW.length;
   const isFlat=new Uint8Array(n);
   const vals=RAW.map(r=>r.p_raw);
@@ -1829,15 +1981,16 @@ function exportCSV(){
   const{upWakeIdx:uwi,downSleepIdx:dsi,peakIdx:pk}=INTERP;
   let tAdj=0, prevActiveT=null;
   let expReachedZero=false;
+  const t0d=INTERP.t0down;
   for(let i=0;i<n;i++){
     const r=RAW[i];
     if(r.t<tStart)continue;
     if(r.t>tEndExp)break;
-    // Skip flat holds but NOT the interpolated pressure regions
+    // Skip flat holds — but NOT in the interpolated region, NOR in the tail extension
     const inInterp=(i<=pk&&i<uwi)||(i>pk&&i>dsi);
-    if(isFlat[i]&&!inInterp){prevActiveT=null;continue;}
+    const inTailExt=t0d!==null&&r.t>t0d;
+    if(isFlat[i]&&!inInterp&&!inTailExt){prevActiveT=null;continue;}
     const p=r.p_corr??r.p_raw;
-    // For desorption tail: include all P=0 points (real HF data at vacuum)
     const pOut=Math.max(0,p);
     if(prevActiveT!==null)tAdj+=(r.t-prevActiveT);
     prevActiveT=r.t;
@@ -1925,6 +2078,29 @@ function fmtTick(v){
   const a=Math.abs(v);
   if(a>=1e4||a<0.001)return v.toExponential(1);
   return parseFloat(v.toPrecision(4)).toString();
+}
+
+// Format an array of tick values consistently — all values get the same
+// number of decimal places, determined by the smallest spacing between ticks.
+// e.g. ticks [0, 0.2, 0.4, 0.6, 0.8, 1] all rendered as "0.0", "0.2", ..., "1.0".
+function fmtTicksConsistent(ticks){
+  if(!ticks.length) return [];
+  if(ticks.length===1) return [fmtTick(ticks[0])];
+  // Find smallest non-zero spacing
+  let minStep=Infinity;
+  for(let i=1;i<ticks.length;i++){
+    const d=Math.abs(ticks[i]-ticks[i-1]);
+    if(d>0&&d<minStep) minStep=d;
+  }
+  if(!isFinite(minStep)) return ticks.map(fmtTick);
+  // Determine decimal places needed: enough to distinguish adjacent ticks
+  const decimals=Math.max(0, -Math.floor(Math.log10(minStep))+0);
+  // Also use exponential for very large/small values
+  const maxAbs=Math.max(...ticks.map(Math.abs));
+  if(maxAbs>=1e4||(maxAbs>0&&maxAbs<0.001)){
+    return ticks.map(v=>v===0?'0':v.toExponential(1));
+  }
+  return ticks.map(v=>v.toFixed(decimals));
 }
 
 // ═══════════════════════════════════════════
