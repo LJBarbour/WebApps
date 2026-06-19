@@ -5,587 +5,400 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Vx-PXRD Viewer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300;1,400&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300;1,9..40,400&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,600;1,9..144,300;1,9..144,400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:wght@300;600&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
+*,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
 :root {
-  --cream:        #f5f0e8;
-  --card:         #faf7f2;
-  --ink:          #2c2c2c;
-  --ink-mid:      #5a5a5a;
-  --ink-faint:    #9a9490;
-  --accent:       #8b6b47;
-  --accent-lt:    #c4a882;
-  --border:       #d4c9b8;
-  --border-lt:    #e8e2d8;
-  --ok:           #5a8a5a;
-  --err:          #a05050;
+  --ink:#0f0e0d;
+  --paper:#f6f1ea;
+  --cream:#ede7d8;
+  --pale:#e0d9cc;
+  --rule:#c5bba9;
+  --accent:#b84a2e;
+  --ok:#2a7a3b;
+  --err:#b84a2e;
+  --mono:'DM Mono',monospace;
+  --serif:'Fraunces',Georgia,serif;
+  --sans:'DM Sans',sans-serif;
 }
-
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-body {
-  font-family: 'DM Sans', sans-serif;
-  background: var(--cream);
-  color: var(--ink);
-  min-height: 100vh;
-  font-size: 15px;
-  line-height: 1.5;
-}
+html,body { height:100%; background:var(--paper); color:var(--ink); font-family:var(--sans); font-size:13px; }
+::-webkit-scrollbar { width:5px; height:5px; }
+::-webkit-scrollbar-track { background:var(--pale); }
+::-webkit-scrollbar-thumb { background:var(--rule); border-radius:2px; }
+body { display:grid; grid-template-rows:auto auto 1fr; min-height:100vh; }
 
 /* ── Header ── */
-header {
-  background: var(--ink);
-  color: var(--cream);
-  padding: 1.5rem 2rem 1.4rem;
-  display: flex;
-  align-items: baseline;
-  gap: 1.25rem;
-  flex-wrap: wrap;
-}
-header h1 {
-  font-family: 'Fraunces', serif;
-  font-weight: 300;
-  font-size: 1.75rem;
-  letter-spacing: 0.01em;
-  line-height: 1.2;
-}
-header p {
-  font-size: 0.82rem;
-  color: var(--accent-lt);
-  font-family: 'DM Mono', monospace;
-  letter-spacing: 0.03em;
-}
+header { border-bottom:2px solid var(--ink); padding:12px 22px; display:flex; align-items:baseline; gap:16px; }
+header h1 { font-family:var(--serif); font-size:23px; font-weight:600; letter-spacing:-.4px; }
+header .sub { font-family:var(--mono); font-size:9px; color:var(--accent); letter-spacing:.15em; text-transform:uppercase; }
 
-/* ── Layout ── */
-.app-layout {
-  max-width: 1440px;
-  margin: 0 auto;
-  padding: 1.25rem 1.5rem 3rem;
-  display: flex;
-  gap: 1.25rem;
-  align-items: flex-start;
-}
-.left-col {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
-.settings-sidebar {
-  width: 340px;
-  flex-shrink: 0;
-  position: sticky;
-  top: 1rem;
-  max-height: calc(100vh - 2rem);
-  overflow-x: hidden;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
-}
-.settings-sidebar .card {
-  padding: 1.2rem 1.3rem;
-  min-width: 0;
-  overflow: hidden;
-}
-.settings-sidebar .card-title { font-size: 0.95rem; margin-bottom: 0.9rem; }
-.settings-sidebar .settings-grid {
-  grid-template-columns: 1fr;
-  gap: 0.75rem;
-  min-width: 0;
-}
-.settings-sidebar select,
-.settings-sidebar input[type=text],
-.settings-sidebar input[type=number],
-.settings-sidebar input[type=color] {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-}
-.settings-sidebar .field.wide { grid-column: 1; }
-.settings-sidebar .settings-divider { margin: 0.9rem 0 0.8rem; }
-.settings-sidebar .group-label { margin-bottom: 0.6rem; }
+/* ── Tab bar ── */
+.tabs { border-bottom:2px solid var(--ink); display:flex; background:var(--paper); padding:0 22px; }
+.tab { padding:10px 22px; font-family:var(--mono); font-size:10px; letter-spacing:.18em; text-transform:uppercase; cursor:pointer; border:none; background:none; color:#888; border-right:1px solid var(--rule); transition:background .15s, color .15s; }
+.tab:first-child { border-left:1px solid var(--rule); }
+.tab:hover { background:var(--cream); color:var(--ink); }
+.tab.active { background:var(--cream); color:var(--accent); border-bottom:2px solid var(--accent); margin-bottom:-2px; font-weight:500; }
 
-/* ── Paired fields (two side-by-side in one row) ── */
-.field-pair {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.6rem;
-  min-width: 0;
-}
+/* ── Page container ── */
+.page { display:none; padding:22px; min-height:0; }
+.page.active { display:block; }
+.page-grid { display:grid; gap:22px; align-items:start; }
+.page-grid.split { grid-template-columns:1fr 320px; }
+@media (max-width:1100px) { .page-grid.split { grid-template-columns:1fr; } }
 
-@media (max-width: 900px) {
-  .app-layout { flex-direction: column; }
-  .settings-sidebar { width: 100%; position: static; max-height: none; }
-}
-.collapsible-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.collapse-btn {
-  font-family: 'DM Mono', monospace;
-  font-size: 0.73rem;
-  color: var(--ink-faint);
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 0.2rem 0.55rem;
-  cursor: pointer;
-  transition: all 0.14s;
-  line-height: 1.4;
-  white-space: nowrap;
-}
-.collapse-btn:hover { background: var(--border-lt); color: var(--ink); }
-
-@media (max-width: 860px) {
-  .app-layout { flex-direction: column; }
-  .settings-sidebar { width: 100%; position: static; max-height: none; }
-}
-
-/* ── Cards ── */
-.card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1.5rem;
-}
-.card-title {
-  font-family: 'Fraunces', serif;
-  font-weight: 300;
-  font-size: 1.05rem;
-  margin-bottom: 1.1rem;
-  color: var(--ink);
-  letter-spacing: 0.01em;
-}
+/* ── Card ── */
+.card { background:var(--paper); border:1.5px solid var(--ink); padding:18px 20px; }
+.card-title { font-family:var(--mono); font-size:10px; letter-spacing:.18em; text-transform:uppercase; color:var(--accent); margin-bottom:14px; padding-bottom:8px; border-bottom:1px solid var(--rule); }
 
 /* ── Drop zone ── */
-.drop-zone {
-  border: 2px dashed var(--border);
-  border-radius: 6px;
-  padding: 2rem 1rem;
-  text-align: center;
-  cursor: pointer;
-  transition: border-color 0.18s, background 0.18s;
-  color: var(--ink-mid);
-  user-select: none;
-}
-.drop-zone:hover,
-.drop-zone.dragover {
-  border-color: var(--accent);
-  background: #f0e8da55;
-}
-.drop-icon { font-size: 2rem; margin-bottom: 0.4rem; }
-.drop-zone p { font-size: 0.9rem; }
-.drop-zone .hint {
-  font-family: 'DM Mono', monospace;
-  font-size: 0.76rem;
-  color: var(--accent);
-  margin-top: 0.35rem;
-}
+.dz { border:2px dashed var(--rule); padding:32px 20px; text-align:center; cursor:pointer; transition:border-color .2s, background .2s; user-select:none; }
+.dz.over, .dz:hover { border-color:var(--accent); background:var(--cream); }
+.dz-ico { font-size:28px; margin-bottom:6px; }
+.dz-txt { font-size:13px; color:#444; line-height:1.6; }
+.dz-hint { font-family:var(--mono); font-size:10px; color:#888; margin-top:4px; letter-spacing:.05em; }
+.dz > * { pointer-events:none; }
 
 /* ── File table ── */
-.file-table-wrap { margin-top: 1.1rem; overflow-x: auto; }
-.file-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.83rem;
-}
-.file-table th {
-  text-align: left;
-  padding: 0.4rem 0.8rem;
-  border-bottom: 1px solid var(--border);
-  font-family: 'DM Mono', monospace;
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--ink-faint);
-  font-weight: 400;
-  white-space: nowrap;
-}
-.file-table td {
-  padding: 0.38rem 0.8rem;
-  border-bottom: 1px solid var(--border-lt);
-  font-family: 'DM Mono', monospace;
-  vertical-align: middle;
-}
-.file-table tr:last-child td { border-bottom: none; }
-.file-table td.fname { color: var(--ink); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-table td.num { color: var(--ink-mid); text-align: right; }
-.file-table td.range { color: var(--ink-mid); }
-
-.y-input {
-  width: 110px;
-  padding: 0.28rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--cream);
-  font-family: 'DM Mono', monospace;
-  font-size: 0.82rem;
-  color: var(--ink);
-  transition: border-color 0.15s;
-}
-.y-input:focus { outline: none; border-color: var(--accent); }
-.y-input.missing { border-color: var(--err); }
-
-.del-btn {
-  background: none;
-  border: 1px solid transparent;
-  border-radius: 3px;
-  cursor: pointer;
-  color: var(--ink-faint);
-  font-size: 0.85rem;
-  padding: 0.2rem 0.45rem;
-  transition: all 0.12s;
-  font-family: 'DM Mono', monospace;
-}
-.del-btn:hover { border-color: var(--border); color: var(--err); background: #f8eded; }
-
-/* ── Settings grid ── */
-.settings-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 1rem 1.25rem;
-}
-.field { display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; }
-.field.wide { grid-column: span 2; }
-.field label {
-  font-family: 'DM Mono', monospace;
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--ink-faint);
-}
-.field input[type=text],
-.field input[type=number],
-.field input[type=color],
-.field select {
-  width: 100%;
-  min-width: 0;
-  padding: 0.38rem 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--cream);
-  font-family: 'DM Sans', sans-serif;
-  font-size: 0.88rem;
-  color: var(--ink);
-  transition: border-color 0.15s;
-}
-.field input[type=color] { height: 2.2rem; padding: 0.15rem 0.2rem; cursor: pointer; }
-.field input:focus,
-.field select:focus { outline: none; border-color: var(--accent); }
-
-.slider-wrap {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  margin-top: 0.1rem;
-}
-.slider-wrap span {
-  font-family: 'DM Mono', monospace;
-  font-size: 0.74rem;
-  color: var(--ink-faint);
-  min-width: 2.8ch;
-}
-input[type=range] {
-  flex: 1;
-  accent-color: var(--accent);
-  cursor: pointer;
-}
-#gammaVal, #lwVal {
-  font-family: 'DM Mono', monospace;
-  font-size: 0.85rem;
-  min-width: 3.5ch;
-  text-align: right;
-  color: var(--ink);
-}
+.ftbl-wrap { margin-top:18px; overflow-x:auto; }
+.ftbl { width:100%; border-collapse:collapse; font-size:12px; }
+.ftbl th { text-align:left; padding:6px 10px; border-bottom:1.5px solid var(--ink); font-family:var(--mono); font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:#888; font-weight:500; white-space:nowrap; }
+.ftbl td { padding:6px 10px; border-bottom:1px solid var(--pale); font-family:var(--mono); font-size:11px; vertical-align:middle; }
+.ftbl tr:last-child td { border-bottom:none; }
+.ftbl td.fname { color:var(--ink); max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ftbl td.num { color:#666; text-align:right; }
+.ftbl td.range { color:#666; }
+.ftbl input[type=number], .ftbl input[type=text] { background:var(--cream); border:1.5px solid var(--rule); padding:3px 6px; font-family:var(--mono); font-size:11px; color:var(--ink); outline:none; width:110px; }
+.ftbl input.legend-input { width:170px; }
+.ftbl input:focus { border-color:var(--accent); }
+.ftbl input.missing { border-color:var(--accent); }
+.del-btn { background:none; border:1px solid var(--rule); border-radius:0; cursor:pointer; color:#888; font-size:11px; padding:2px 7px; font-family:var(--mono); transition:all .12s; }
+.del-btn:hover { border-color:var(--accent); color:var(--accent); background:var(--cream); }
+.ord-btns { display:inline-flex; gap:2px; }
+.ord-btn { background:none; border:1px solid var(--rule); cursor:pointer; color:#888; font-size:10px; padding:1px 5px; font-family:var(--mono); transition:all .12s; line-height:1; }
+.ord-btn:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); background:var(--cream); }
+.ord-btn:disabled { opacity:.25; cursor:not-allowed; }
 
 /* ── Buttons ── */
-.btn-row {
-  display: flex;
-  gap: 0.7rem;
-  flex-wrap: wrap;
-  align-items: center;
-  margin-bottom: 1rem;
-}
-.btn {
-  padding: 0.55rem 1.2rem;
-  border-radius: 5px;
-  font-family: 'DM Sans', sans-serif;
-  font-size: 0.88rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.14s;
-  border: 1px solid transparent;
-  line-height: 1.3;
-}
-.btn-primary {
-  background: var(--ink);
-  color: var(--cream);
-  border-color: var(--ink);
-}
-.btn-primary:hover { background: #444; border-color: #444; }
-.btn-secondary {
-  background: transparent;
-  color: var(--ink);
-  border-color: var(--border);
-}
-.btn-secondary:hover { background: var(--border-lt); }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn { display:inline-block; padding:8px 16px; font-family:var(--mono); font-size:10px; font-weight:500; letter-spacing:.12em; text-transform:uppercase; cursor:pointer; border:1.5px solid var(--ink); background:var(--ink); color:var(--paper); transition:background .15s, border-color .15s; }
+.btn:hover:not(:disabled) { background:var(--accent); border-color:var(--accent); }
+.btn:disabled { opacity:.3; cursor:not-allowed; }
+.btn.out { background:transparent; color:var(--ink); }
+.btn.out:hover:not(:disabled) { background:var(--ink); color:var(--paper); }
 
-/* ── Status ── */
-.status {
-  font-family: 'DM Mono', monospace;
-  font-size: 0.78rem;
-  color: var(--ink-faint);
-  min-height: 1.2em;
-  margin-bottom: 0.75rem;
-}
-.status.ok  { color: var(--ok); }
-.status.err { color: var(--err); }
+/* ── Control panel (right side) ── */
+.cp-group { border-bottom:1px solid var(--rule); }
+.cp-group:last-child { border-bottom:none; }
+.cp-head { display:flex; justify-content:space-between; align-items:center; padding:10px 0; cursor:pointer; user-select:none; }
+.cp-head:hover .cp-title { color:var(--ink); }
+.cp-title { font-family:var(--mono); font-size:10px; letter-spacing:.18em; text-transform:uppercase; color:var(--accent); transition:color .15s; }
+.cp-arr { font-size:10px; color:#888; transition:transform .2s; }
+.cp-group.open .cp-arr { transform:rotate(180deg); }
+.cp-body { display:none; padding:4px 0 12px; }
+.cp-group.open .cp-body { display:block; }
+.cr { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
+.cr:last-child { margin-bottom:0; }
+.cl { font-size:11px; color:#555; flex:1; white-space:nowrap; line-height:1.4; }
+.cr input[type=text], .cr input[type=number], .cr select { background:var(--cream); border:1.5px solid var(--rule); padding:4px 6px; font-family:var(--mono); font-size:11px; color:var(--ink); outline:none; min-width:0; max-width:100%; }
+.cr input[type=text]:focus, .cr input[type=number]:focus, .cr select:focus { border-color:var(--accent); }
+.cr input[type=text], .cr select { flex:1; }
+.cr input[type=number] { width:72px; }
+.cr input[type=color] { width:32px; height:22px; border:1.5px solid var(--rule); background:none; cursor:pointer; padding:1px; }
+.cr input[type=checkbox] { width:14px; height:14px; cursor:pointer; accent-color:var(--accent); }
+.cr input[type=range] { flex:1; min-width:55px; accent-color:var(--accent); }
+.rv { font-family:var(--mono); font-size:11px; min-width:32px; text-align:right; color:var(--ink); }
+.cr select { appearance:none; -webkit-appearance:none; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 8px center; padding-right:24px; }
 
-/* ── Canvas ── */
-.canvas-wrap { width: 100%; position: relative; }
-#plotCanvas {
-  display: block;
-  width: 100%;
-  height: auto;
-  border-radius: 3px;
-  cursor: crosshair;
-}
-#cursorInfo {
-  position: absolute;
-  bottom: 8px;
-  right: 10px;
-  font-family: 'DM Mono', monospace;
-  font-size: 0.74rem;
-  color: var(--ink-faint);
-  pointer-events: none;
-  background: rgba(245,240,232,0.8);
-  padding: 0.15rem 0.4rem;
-  border-radius: 3px;
-}
+/* ── Plot area ── */
+.plot-wrap { width:100%; position:relative; background:#fff; }
+canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
+.cursor-info { position:absolute; bottom:8px; right:10px; font-family:var(--mono); font-size:10px; color:#666; pointer-events:none; background:rgba(246,241,234,0.85); padding:3px 7px; letter-spacing:.05em; }
+.action-row { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+.status { font-family:var(--mono); font-size:10px; color:#888; letter-spacing:.05em; padding:6px 0 0; min-height:1.4em; }
+.status.ok { color:var(--ok); }
+.status.err { color:var(--err); }
 
-/* ── Settings groups ── */
-.group-label {
-  font-family: 'DM Mono', monospace;
-  font-size: 0.68rem;
-  text-transform: uppercase;
-  letter-spacing: 0.09em;
-  color: var(--ink-faint);
-  margin-bottom: 0.8rem;
-}
-.settings-divider {
-  border: none;
-  border-top: 1px solid var(--border-lt);
-  margin: 1.1rem 0 1rem;
-}
+/* ── Stacked plot legend handles ── */
+.stack-wrap { position:relative; user-select:none; }
+.legend-handle { position:absolute; font-family:var(--mono); font-size:11px; padding:2px 7px; background:transparent; border:1px dashed transparent; cursor:move; pointer-events:auto; white-space:nowrap; line-height:1.4; }
+.legend-handle:hover { border-color:var(--accent); }
+.legend-handle.dragging { border-color:var(--accent); border-style:solid; background:rgba(237,231,216,0.6); }
 
-/* ── Divider ── */
-.divider {
-  border: none;
-  border-top: 1px solid var(--border-lt);
-  margin: 1rem 0 0.9rem;
-}
+/* ── Guide ── */
+.guide { max-width:780px; margin:0 auto; line-height:1.75; font-size:14px; color:#222; }
+.guide h2 { font-family:var(--serif); font-weight:600; font-size:20px; margin:24px 0 10px; color:var(--ink); }
+.guide h2:first-child { margin-top:0; }
+.guide h3 { font-family:var(--mono); font-size:10px; letter-spacing:.18em; text-transform:uppercase; color:var(--accent); margin:18px 0 8px; padding-bottom:5px; border-bottom:1px solid var(--rule); }
+.guide p { margin-bottom:10px; }
+.guide ul { margin:8px 0 12px 20px; }
+.guide li { margin-bottom:6px; }
+.guide strong { color:var(--ink); font-weight:500; }
+.guide code { font-family:var(--mono); font-size:12px; background:var(--cream); padding:1px 5px; }
+
+/* ── Misc ── */
+.empty-state { padding:60px 20px; text-align:center; color:#888; font-family:var(--mono); font-size:11px; letter-spacing:.05em; }
+.row-actions { display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; align-items:center; }
+.row-actions .lbl { font-family:var(--mono); font-size:10px; color:#888; letter-spacing:.1em; text-transform:uppercase; margin-right:auto; }
 </style>
 </head>
 <body>
 
 <header>
   <h1>Vx-PXRD Viewer</h1>
-  <p>variable-condition powder diffraction series · 2θ intensity map</p>
+  <span class="sub">Variable-Condition Powder Diffraction</span>
 </header>
 
-<div class="app-layout">
+<div class="tabs">
+  <button class="tab active" data-tab="files">Files</button>
+  <button class="tab" data-tab="map">Intensity Map</button>
+  <button class="tab" data-tab="stack">Stacked Plots</button>
+  <button class="tab" data-tab="guide">Guide</button>
+</div>
 
-  <!-- ══ Left column: files + plot ══ -->
-  <div class="left-col">
-
-  <!-- ── Files (collapsible) ── -->
+<!-- ══════════════ PAGE 1: FILES ══════════════ -->
+<div class="page active" id="page-files">
   <div class="card">
-    <div class="collapsible-header" id="filesToggle">
-      <span class="card-title" style="margin:0">Diffractogram files</span>
-      <button class="collapse-btn" id="filesCollapseBtn" title="Collapse panel">Hide ▲</button>
-    </div>
-    <div id="filesBody" style="margin-top:1.1rem">
+    <div class="card-title">Diffractogram files</div>
 
-    <div class="drop-zone" id="dropZone">
-      <div class="drop-icon">📂</div>
-      <p>Drop <strong>.xy</strong> files or a <strong>.zip</strong> archive here, or click to browse</p>
-      <p class="hint">2θ &nbsp; intensity &nbsp;·&nbsp; space-separated &nbsp;·&nbsp; no header required</p>
+    <div class="dz" id="dropZone">
+      <div class="dz-ico">⇪</div>
+      <div class="dz-txt">Drop <strong>.xy</strong> files or a <strong>.zip</strong> archive here, or click to browse</div>
+      <div class="dz-hint">2θ &nbsp; intensity &nbsp;·&nbsp; space-separated &nbsp;·&nbsp; no header required</div>
     </div>
     <input type="file" id="fileInput" accept=".xy,.dat,.txt,.zip" multiple style="display:none">
 
-    <div class="file-table-wrap" id="fileTableWrap" style="display:none">
-      <table class="file-table">
+    <div class="row-actions" id="rowActions" style="margin-top:18px;display:none">
+      <span class="lbl" id="fileCount"></span>
+      <button class="btn out" id="sortByYBtn">Auto-sort</button>
+      <button class="btn out" id="clearAllBtn">Clear all</button>
+    </div>
+
+    <div class="ftbl-wrap" id="fileTableWrap" style="display:none">
+      <table class="ftbl">
         <thead>
           <tr>
+            <th>Order</th>
             <th>Filename</th>
             <th style="text-align:right">Points</th>
             <th>2θ range</th>
             <th id="yColHead">Y value</th>
+            <th>Legend label</th>
             <th></th>
           </tr>
         </thead>
         <tbody id="fileTableBody"></tbody>
       </table>
     </div>
-    </div><!-- #filesBody -->
-  </div><!-- files card -->
+  </div>
+</div>
 
-  <!-- ── Plot ── -->
-  <div class="card">
-    <div class="card-title" style="margin-bottom:0.8rem">Intensity map</div>
-    <div class="btn-row">
-      <button class="btn btn-primary" id="renderBtn">Render now</button>
-      <button class="btn btn-secondary" id="copyBtn">Copy to clipboard</button>
+<!-- ══════════════ PAGE 2: INTENSITY MAP ══════════════ -->
+<div class="page" id="page-map">
+  <div class="page-grid split">
+    <div class="card">
+      <div class="card-title">Intensity map</div>
+      <div class="action-row">
+        <button class="btn" id="renderBtn">Render now</button>
+        <button class="btn out" id="copyBtn">Copy to clipboard</button>
+      </div>
+      <div class="plot-wrap">
+        <canvas id="plotCanvas" class="plot"></canvas>
+        <div id="cursorInfo" class="cursor-info"></div>
+      </div>
+      <div class="status" id="statusMsg">Load at least two diffractograms to begin.</div>
     </div>
-    <div class="status" id="statusMsg">Load at least two diffractograms to begin.</div>
-    <div class="canvas-wrap">
-      <canvas id="plotCanvas"></canvas>
-      <div id="cursorInfo"></div>
+
+    <div class="card">
+      <div class="card-title">Settings</div>
+
+      <div class="cp-group open">
+        <div class="cp-head"><span class="cp-title">Data &amp; scale</span><span class="cp-arr">▼</span></div>
+        <div class="cp-body">
+          <div class="cr"><span class="cl">Y-axis label</span><input type="text" id="yLabel" value="Temperature (°C)"></div>
+          <div class="cr"><span class="cl">2θ min (°)</span><input type="number" id="ttMin" step="0.1" placeholder="auto"></div>
+          <div class="cr"><span class="cl">2θ max (°)</span><input type="number" id="ttMax" step="0.1" placeholder="auto"></div>
+          <div class="cr"><span class="cl">Normalisation</span>
+            <select id="normMode">
+              <option value="per_bl" selected>Per-pattern &amp; baseline</option>
+              <option value="per">Per-pattern (no baseline)</option>
+              <option value="global">Global</option>
+            </select>
+          </div>
+          <div class="cr"><span class="cl">Grid resolution</span>
+            <select id="gridRes">
+              <option value="1000">1000 pts (fast)</option>
+              <option value="2000" selected>2000 pts</option>
+              <option value="4000">4000 pts (fine)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="cp-group open">
+        <div class="cp-head"><span class="cp-title">Colours &amp; contrast</span><span class="cp-arr">▼</span></div>
+        <div class="cp-body">
+          <div class="cr"><span class="cl">Peak colour</span><input type="color" id="peakColor" value="#000000"></div>
+          <div class="cr"><span class="cl">Background</span><input type="color" id="bgColor" value="#ffffff"></div>
+          <div class="cr"><span class="cl">Plot height (px)</span><input type="number" id="plotHeightPx" min="200" max="4000" step="50" placeholder="auto"></div>
+          <div class="cr"><span class="cl">Gamma</span><input type="range" id="gammaSlider" min="0.10" max="3.00" step="0.05" value="0.40"><span class="rv" id="gammaVal">0.40</span></div>
+        </div>
+      </div>
+
+      <div class="cp-group open">
+        <div class="cp-head"><span class="cp-title">Typography &amp; lines</span><span class="cp-arr">▼</span></div>
+        <div class="cp-body">
+          <div class="cr"><span class="cl">Font</span>
+            <select id="axisFont">
+              <option value="'DM Sans', sans-serif">DM Sans</option>
+              <option value="'DM Mono', monospace">DM Mono</option>
+              <option value="'Fraunces', serif">Fraunces</option>
+              <option value="Arial, sans-serif" selected>Arial</option>
+              <option value="Helvetica, sans-serif">Helvetica</option>
+              <option value="'Times New Roman', serif">Times New Roman</option>
+              <option value="Georgia, serif">Georgia</option>
+              <option value="'Courier New', monospace">Courier New</option>
+            </select>
+          </div>
+          <div class="cr"><span class="cl">Tick labels (px)</span><input type="number" id="tickSize" value="25" min="10" max="40" step="1"></div>
+          <div class="cr"><span class="cl">Axis labels (px)</span><input type="number" id="labelSize" value="30" min="10" max="48" step="1"></div>
+          <div class="cr"><span class="cl">Line weight</span><input type="range" id="lwSlider" min="1" max="4" step="0.5" value="3"><span class="rv" id="lwVal">3.0</span></div>
+        </div>
+      </div>
+
+      <div class="cp-group">
+        <div class="cp-head"><span class="cp-title">Gridlines</span><span class="cp-arr">▼</span></div>
+        <div class="cp-body">
+          <div class="cr"><span class="cl">Show gridlines</span><input type="checkbox" id="showGridlines"></div>
+          <div class="cr"><span class="cl">Colour</span><input type="color" id="gridlineColor" value="#000000"></div>
+          <div class="cr"><span class="cl">Weight</span><input type="range" id="gridlineWeight" min="0.5" max="4" step="0.5" value="1"><span class="rv" id="glwVal">1.0</span></div>
+        </div>
+      </div>
     </div>
   </div>
+</div>
 
-  </div><!-- .left-col -->
-
-  <!-- ══ Right: settings sidebar ══ -->
-  <aside class="settings-sidebar">
-  <div class="card">
-    <div class="card-title">Settings</div>
-
-    <!-- Data & scale -->
-    <div class="group-label">Data &amp; scale</div>
-    <div class="settings-grid">
-      <div class="field">
-        <label>Y-axis label</label>
-        <input type="text" id="yLabel" value="Temperature (°C)" placeholder="e.g. Temperature (°C)">
+<!-- ══════════════ PAGE 3: STACKED PLOTS ══════════════ -->
+<div class="page" id="page-stack">
+  <div class="page-grid split">
+    <div class="card">
+      <div class="card-title">Stacked diffractograms</div>
+      <div class="action-row">
+        <button class="btn" id="stackRenderBtn">Render now</button>
+        <button class="btn out" id="stackCopyBtn">Copy to clipboard</button>
       </div>
-      <div class="field-pair">
-        <div class="field">
-          <label>2θ min (°)</label>
-          <input type="number" id="ttMin" step="0.1" placeholder="auto">
-        </div>
-        <div class="field">
-          <label>2θ max (°)</label>
-          <input type="number" id="ttMax" step="0.1" placeholder="auto">
-        </div>
+      <div class="stack-wrap" id="stackWrap">
+        <canvas id="stackCanvas" class="plot"></canvas>
+        <!-- legend handles injected dynamically -->
       </div>
-      <div class="field">
-        <label>Normalisation</label>
-        <select id="normMode">
-          <option value="per_bl" selected>Per-pattern &amp; baseline</option>
-          <option value="per">Per-pattern (no baseline)</option>
-          <option value="global">Global</option>
-        </select>
-      </div>
-      <div class="field">
-        <label>Grid resolution</label>
-        <select id="gridRes">
-          <option value="1000">1000 pts (fast)</option>
-          <option value="2000" selected>2000 pts</option>
-          <option value="4000">4000 pts (fine)</option>
-        </select>
-      </div>
+      <div class="status" id="stackStatus">Load at least one diffractogram to begin.</div>
     </div>
 
-    <div class="settings-divider"></div>
+    <div class="card">
+      <div class="card-title">Settings</div>
 
-    <!-- Colours & contrast -->
-    <div class="group-label">Colours &amp; contrast</div>
-    <div class="settings-grid">
-      <div class="field-pair">
-        <div class="field">
-          <label>Peak colour</label>
-          <input type="color" id="peakColor" value="#000000">
-        </div>
-        <div class="field">
-          <label>Background</label>
-          <input type="color" id="bgColor" value="#ffffff">
+      <div class="cp-group open">
+        <div class="cp-head"><span class="cp-title">Range &amp; layout</span><span class="cp-arr">▼</span></div>
+        <div class="cp-body">
+          <div class="cr"><span class="cl">2θ min (°)</span><input type="number" id="stkTtMin" step="0.1" placeholder="auto"></div>
+          <div class="cr"><span class="cl">2θ max (°)</span><input type="number" id="stkTtMax" step="0.1" placeholder="auto"></div>
+          <div class="cr"><span class="cl">Reverse order</span><input type="checkbox" id="stkReverse"></div>
+          <div class="cr"><span class="cl">Band height (px)</span><input type="number" id="stkBandHeight" value="80" min="30" max="400" step="5"></div>
+          <div class="cr"><span class="cl">Plot width gap</span><input type="range" id="stkXPad" min="0" max="40" step="2" value="14"><span class="rv" id="stkXPadVal">14</span></div>
         </div>
       </div>
-      <div class="field">
-        <label>Plot height (px)</label>
-        <input type="number" id="plotHeightPx" value="" min="200" max="4000" step="50" placeholder="auto">
-      </div>
-      <div class="field">
-        <label>Contrast — gamma <span id="gammaVal">0.40</span></label>
-        <div class="slider-wrap">
-          <span>0.1</span>
-          <input type="range" id="gammaSlider" min="0.10" max="3.00" step="0.05" value="0.40">
-          <span>3.0</span>
-        </div>
-      </div>
-    </div>
 
-    <div class="settings-divider"></div>
+      <div class="cp-group open">
+        <div class="cp-head"><span class="cp-title">Colour &amp; lines</span><span class="cp-arr">▼</span></div>
+        <div class="cp-body">
+          <div class="cr"><span class="cl">All black</span><input type="checkbox" id="stkAllBlack" checked></div>
+          <div class="cr"><span class="cl">Colour scheme</span>
+            <select id="stkColorScheme">
+              <option value="viridis">Viridis</option>
+              <option value="plasma">Plasma</option>
+              <option value="inferno">Inferno</option>
+              <option value="cool">Cool</option>
+              <option value="warm">Warm</option>
+              <option value="rainbow">Rainbow</option>
+            </select>
+          </div>
+          <div class="cr"><span class="cl">Diffractogram weight</span><input type="range" id="stkLineWt" min="0.5" max="4" step="0.25" value="1.25"><span class="rv" id="stkLineWtVal">1.25</span></div>
+          <div class="cr"><span class="cl">Axis/box weight</span><input type="range" id="stkAxisWt" min="0.5" max="4" step="0.25" value="1.5"><span class="rv" id="stkAxisWtVal">1.5</span></div>
+          <div class="cr"><span class="cl">Show plot box</span><input type="checkbox" id="stkShowBox"></div>
+        </div>
+      </div>
 
-    <!-- Typography & lines -->
-    <div class="group-label">Typography &amp; lines</div>
-    <div class="settings-grid">
-      <div class="field">
-        <label>Font</label>
-        <select id="axisFont">
-          <option value="'DM Sans', sans-serif">DM Sans</option>
-          <option value="'DM Mono', monospace">DM Mono</option>
-          <option value="'Fraunces', serif">Fraunces</option>
-          <option value="Arial, sans-serif" selected>Arial</option>
-          <option value="Helvetica, sans-serif">Helvetica</option>
-          <option value="'Times New Roman', serif">Times New Roman</option>
-          <option value="Georgia, serif">Georgia</option>
-          <option value="'Courier New', monospace">Courier New</option>
-        </select>
-      </div>
-      <div class="field-pair">
-        <div class="field">
-          <label>Tick labels (px)</label>
-          <input type="number" id="tickSize" value="25" min="15" max="30" step="1">
-        </div>
-        <div class="field">
-          <label>Axis labels (px)</label>
-          <input type="number" id="labelSize" value="30" min="15" max="35" step="1">
+      <div class="cp-group open">
+        <div class="cp-head"><span class="cp-title">Typography</span><span class="cp-arr">▼</span></div>
+        <div class="cp-body">
+          <div class="cr"><span class="cl">Font</span>
+            <select id="stkFont">
+              <option value="'DM Sans', sans-serif">DM Sans</option>
+              <option value="'DM Mono', monospace">DM Mono</option>
+              <option value="'Fraunces', serif">Fraunces</option>
+              <option value="Arial, sans-serif" selected>Arial</option>
+              <option value="Helvetica, sans-serif">Helvetica</option>
+              <option value="'Times New Roman', serif">Times New Roman</option>
+              <option value="Georgia, serif">Georgia</option>
+              <option value="'Courier New', monospace">Courier New</option>
+            </select>
+          </div>
+          <div class="cr"><span class="cl">Tick label size</span><input type="number" id="stkTickSize" value="25" min="8" max="40"></div>
+          <div class="cr"><span class="cl">Axis label size</span><input type="number" id="stkLabelSize" value="30" min="10" max="48"></div>
+          <div class="cr"><span class="cl">Legend size</span><input type="number" id="stkLegendSize" value="25" min="8" max="40"></div>
         </div>
       </div>
-      <div class="field">
-        <label>Line weight — <span id="lwVal">3.0</span> px</label>
-        <div class="slider-wrap">
-          <span>1</span>
-          <input type="range" id="lwSlider" min="1" max="4" step="0.5" value="3">
-          <span>4</span>
+
+      <div class="cp-group open">
+        <div class="cp-head"><span class="cp-title">Legends</span><span class="cp-arr">▼</span></div>
+        <div class="cp-body">
+          <div class="cr"><span class="cl">Show legends</span><input type="checkbox" id="stkShowLegends" checked></div>
+          <div class="cr"><span class="cl">Snap to left edge</span><input type="checkbox" id="stkSnapLeft"></div>
+          <div class="cr"><span class="cl">Reset positions</span><button class="btn out" style="padding:4px 12px;font-size:9px" id="stkResetLegends">Reset</button></div>
         </div>
       </div>
     </div>
+  </div>
+</div>
 
-    <div class="settings-divider"></div>
+<!-- ══════════════ PAGE 4: GUIDE ══════════════ -->
+<div class="page" id="page-guide">
+  <div class="guide">
+    <h2>About Vx-PXRD Viewer</h2>
+    <p>This app visualises a series of powder X-ray diffractograms collected under a variable condition — temperature, pressure, time, relative humidity, or any other parameter — by stacking them into a single combined plot.</p>
+    <p>Two complementary views are provided: a greyscale (or coloured) <strong>intensity map</strong> and a more conventional <strong>stacked line plot</strong>. The same data underlies both views; switch between them with the tabs above.</p>
 
-    <!-- Gridlines -->
-    <div class="group-label">Gridlines</div>
-    <div class="settings-grid">
-      <div class="field-pair" style="align-items:end;">
-        <label style="font-family:'DM Mono',monospace; font-size:0.8rem; color:var(--ink); display:flex; align-items:center; gap:0.45rem; cursor:pointer; padding-bottom:0.4rem;">
-          <input type="checkbox" id="showGridlines" style="accent-color:var(--accent); width:1rem; height:1rem;">
-          Show gridlines
-        </label>
-        <div class="field">
-          <label>Colour</label>
-          <input type="color" id="gridlineColor" value="#000000">
-        </div>
-      </div>
-      <div class="field">
-        <label>Weight — <span id="glwVal">1.0</span> px</label>
-        <div class="slider-wrap">
-          <span>0.5</span>
-          <input type="range" id="gridlineWeight" min="0.5" max="4" step="0.5" value="1" style="accent-color:var(--accent);">
-          <span>4</span>
-        </div>
-      </div>
-    </div>
+    <h3>Workflow</h3>
+    <ul>
+      <li>On the <strong>Files</strong> tab, drop your <code>.xy</code> files (two columns: 2θ and intensity) or a <code>.zip</code> archive of them. The app will try to extract the variable value from each filename automatically.</li>
+      <li>Check the auto-detected values in the file table and edit any that are missing or wrong. Each row also has a <em>Legend label</em> field for the stacked plot — the Y-value is used as the default.</li>
+      <li>Switch to <strong>Intensity Map</strong> or <strong>Stacked Plots</strong>, adjust the settings on the right, and the plot updates automatically.</li>
+    </ul>
 
-  </div><!-- .card settings -->
-  </aside><!-- .settings-sidebar -->
+    <h3>The intensity map</h3>
+    <p>The intensity map is a 2D image of the entire dataset. The horizontal axis is 2θ, the vertical axis is the variable condition, and the brightness of each pixel encodes the peak intensity at that (2θ, condition) coordinate.</p>
+    <p><strong>How it is built:</strong> each diffractogram is resampled onto a uniform 2θ grid and normalised (by default with a per-pattern baseline subtraction). For every row of pixels in the output image, the app finds the two patterns that bracket the row's condition value, and linearly interpolates the normalised intensities between them. The result is a smoothly shaded map where peaks appear as continuous bands and any shift, broadening, or appearance of new reflections with changing condition is immediately visible.</p>
+    <p><strong>Reading the map:</strong> a vertical streak means a peak that holds its position over the range of conditions. A diagonal streak indicates a peak that shifts with the condition (typical of thermal expansion, lattice swelling, or pressure-induced compression). A streak that fades and another that appears nearby usually indicates a phase transition. Discrete jumps suggest abrupt structural changes.</p>
+    <p><strong>Contrast and colour:</strong> the gamma slider stretches or compresses the intensity scale — values below 1 boost weak features (recommended for highlighting minor peaks), values above 1 emphasise only the strongest peaks. The peak and background colours can be set independently, so the conventional black-on-white can be flipped to white-on-black, or replaced with any duotone scheme.</p>
+    <p><strong>Normalisation:</strong> <em>Per-pattern &amp; baseline</em> subtracts each pattern's minimum (its baseline) and scales to the maximum — best when patterns have varying backgrounds. <em>Per-pattern (no baseline)</em> scales to the maximum only, preserving relative background levels. <em>Global</em> uses the same scale across all patterns, which preserves absolute intensity changes but can wash out weaker patterns.</p>
 
-</div><!-- .app-layout -->
+    <h3>The stacked plot</h3>
+    <p>The stacked plot shows each diffractogram as a conventional intensity-vs-2θ line, with the patterns offset vertically so they don't overlap. The Y axis has no ticks (the absolute intensity is not generally meaningful between patterns) but is labelled "Intensity" by convention.</p>
+    <p>Each pattern has a <strong>legend label</strong> that can be dragged with the mouse to any position on the plot, allowing fine control for publication-quality figures. Tick the <em>Snap to left edge</em> option to lock all legends to a common left-hand x-coordinate; drag any one legend horizontally to set that coordinate for all of them.</p>
+    <p>Use <em>Reverse order</em> when you want the lowest-condition pattern at the top of the stack (the default puts the lowest at the bottom, matching the intensity map's orientation).</p>
+
+    <h3>File format</h3>
+    <p>Input files are plain text with two whitespace- or comma-separated columns. The first column is 2θ in degrees; the second is intensity. Lines starting with <code>#</code>, <code>!</code>, or <code>;</code> are treated as comments and skipped. Extensions <code>.xy</code>, <code>.dat</code>, and <code>.txt</code> are all accepted.</p>
+    <p>The variable value is extracted from the last numeric segment of the filename, preceded by an underscore or hyphen. For example, <code>sample_KD66_150.xy</code> gives 150. Always check the auto-extracted values and override any that are wrong.</p>
+
+    <h3>Tips</h3>
+    <ul>
+      <li>Both plots auto-update on any settings change. Use the <em>Render now</em> button only if you want an immediate refresh.</li>
+      <li>The Y-axis label on the intensity map and the legend label on each pattern are independent: the former describes the variable being plotted, the latter is just the per-pattern annotation.</li>
+      <li>For variable-temperature data, a typical legend label might be "30 °C" or "150 °C"; for variable-pressure, "5 bar"; for time-resolved, "10 min", etc.</li>
+      <li>The Copy to clipboard buttons place a PNG of the current plot onto the clipboard at full canvas resolution.</li>
+    </ul>
+  </div>
+</div>
 
 <script>
 'use strict';
@@ -593,44 +406,68 @@ input[type=range] {
 // ═══════════════════════════════════════════════════
 //  State
 // ═══════════════════════════════════════════════════
-const patterns = [];   // { filename, twoTheta[], intensity[], y, nPts }
-let plotMeta = null;   // stored after render for cursor readout
+const patterns = [];      // { filename, twoTheta[], intensity[], y, legend, nPts }
+let plotMeta = null;
+let stackMeta = null;
+const legendPositions = {};   // keyed by filename → { x, y } in canvas coords
+let snapLeftX = null;          // common left x for snap mode
 
 // ═══════════════════════════════════════════════════
-//  Files panel collapse/expand
+//  Tab switching
 // ═══════════════════════════════════════════════════
-document.getElementById('filesToggle').addEventListener('click', e => {
-  // Don't trigger when clicking inside the body (e.g. inputs)
-  if (e.target.closest('#filesBody')) return;
-  const body = document.getElementById('filesBody');
-  const btn  = document.getElementById('filesCollapseBtn');
-  const open = body.style.display !== 'none';
-  body.style.display = open ? 'none' : '';
-  btn.textContent    = open ? 'Show ▼' : 'Hide ▲';
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    document.getElementById('page-' + t.dataset.tab).classList.add('active');
+    // Trigger re-render when switching to a plot tab so canvas sizes itself
+    if (t.dataset.tab === 'map')   setTimeout(scheduleRender, 30);
+    if (t.dataset.tab === 'stack') setTimeout(scheduleStackRender, 30);
+  });
+});
+
+// ═══════════════════════════════════════════════════
+//  Collapsible groups
+// ═══════════════════════════════════════════════════
+document.querySelectorAll('.cp-head').forEach(h => {
+  h.addEventListener('click', () => h.parentElement.classList.toggle('open'));
 });
 
 // ═══════════════════════════════════════════════════
 //  File drop / input
 // ═══════════════════════════════════════════════════
-const dropZone   = document.getElementById('dropZone');
-const fileInput  = document.getElementById('fileInput');
-
+const dropZone  = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
 dropZone.addEventListener('click', () => fileInput.click());
-dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.classList.add('over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('over'));
 dropZone.addEventListener('drop', e => {
   e.preventDefault();
-  dropZone.classList.remove('dragover');
+  dropZone.classList.remove('over');
   loadFiles([...e.dataTransfer.files]);
 });
 fileInput.addEventListener('change', () => { loadFiles([...fileInput.files]); fileInput.value = ''; });
 
+document.getElementById('clearAllBtn').addEventListener('click', () => {
+  patterns.length = 0;
+  Object.keys(legendPositions).forEach(k => delete legendPositions[k]);
+  refreshTable();
+  setStatus('Load at least two diffractograms to begin.', '');
+  setStackStatus('Load at least one diffractogram to begin.', '');
+});
+
+document.getElementById('sortByYBtn').addEventListener('click', () => {
+  if (!patterns.length) return;
+  sortPatterns();
+  refreshTable();
+  scheduleRender(); scheduleStackRender();
+});
+
 function extractYFromFilename(name) {
-  // Match last _NUMBER or -NUMBER before the extension
   const stem = name.replace(/\.[^.]+$/, '');
   const m = stem.match(/(?:_|-)(\d+(?:\.\d+)?)(?=[^0-9]|$)/g);
   if (m && m.length) return parseFloat(m[m.length - 1].replace(/^[_-]/, ''));
-  // Fallback: any trailing number
   const m2 = stem.match(/(\d+(?:\.\d+)?)$/);
   if (m2) return parseFloat(m2[1]);
   return null;
@@ -651,46 +488,51 @@ function parseXY(text) {
 
 async function loadFiles(files) {
   let added = 0;
-
-  // Collect {name, getText()} entries from both plain files and zip archives
   const entries = [];
   for (const f of files) {
     if (/\.zip$/i.test(f.name)) {
-      // Expand zip — requires JSZip
-      if (typeof JSZip === 'undefined') {
-        setStatus('JSZip not loaded — cannot open zip file.', 'err'); continue;
-      }
+      if (typeof JSZip === 'undefined') { setStatus('JSZip not loaded.', 'err'); continue; }
       try {
         const zip = await JSZip.loadAsync(f);
-        zip.forEach((relPath, zipEntry) => {
-          if (!zipEntry.dir && /\.(xy|dat|txt)$/i.test(relPath)) {
-            // Use only the basename so filename-based Y extraction works as expected
-            const basename = relPath.split('/').pop();
-            entries.push({ name: basename, getText: () => zipEntry.async('string') });
+        zip.forEach((rel, ze) => {
+          if (!ze.dir && /\.(xy|dat|txt)$/i.test(rel)) {
+            const basename = rel.split('/').pop();
+            entries.push({ name: basename, getText: () => ze.async('string') });
           }
         });
-      } catch (e) {
-        setStatus(`Could not open ${f.name}: ${e.message}`, 'err');
-      }
+      } catch (e) { setStatus(`Could not open ${f.name}: ${e.message}`, 'err'); }
     } else if (/\.(xy|dat|txt)$/i.test(f.name)) {
       entries.push({ name: f.name, getText: () => f.text() });
     }
   }
-
   for (const entry of entries) {
     if (patterns.find(p => p.filename === entry.name)) continue;
     const text = await entry.getText();
     const { twoTheta, intensity } = parseXY(text);
     if (twoTheta.length < 10) continue;
     const y = extractYFromFilename(entry.name);
-    patterns.push({ filename: entry.name, twoTheta, intensity, y, nPts: twoTheta.length });
+    const yUnit = (document.getElementById('yLabel').value.match(/\(([^)]+)\)/) || [, ''])[1].trim();
+    const legend = y != null && isFinite(y) ? (yUnit ? `${y} ${yUnit}` : `${y}`) : entry.name.replace(/\.[^.]+$/, '');
+    patterns.push({ filename: entry.name, twoTheta, intensity, y, legend, nPts: twoTheta.length });
     added++;
   }
   if (added) {
-    patterns.sort((a, b) => (a.y ?? 0) - (b.y ?? 0));
+    sortPatterns();
     refreshTable();
     autoFillRange();
     setStatus(`${patterns.length} pattern${patterns.length > 1 ? 's' : ''} loaded.`, '');
+    setStackStatus(`${patterns.length} pattern${patterns.length > 1 ? 's' : ''} loaded.`, '');
+  }
+}
+
+// Sort by Y when every pattern has a value, otherwise by filename (so phase-name
+// series like "phaseA.xy", "phaseB.xy" land in a sensible order too).
+function sortPatterns() {
+  const allHaveY = patterns.every(p => p.y != null && isFinite(p.y));
+  if (allHaveY) {
+    patterns.sort((a, b) => a.y - b.y);
+  } else {
+    patterns.sort((a, b) => a.filename.localeCompare(b.filename, undefined, { numeric: true, sensitivity: 'base' }));
   }
 }
 
@@ -698,12 +540,19 @@ async function loadFiles(files) {
 //  File table
 // ═══════════════════════════════════════════════════
 function refreshTable() {
-  const wrap = document.getElementById('fileTableWrap');
-  const tbody = document.getElementById('fileTableBody');
-  if (!patterns.length) { wrap.style.display = 'none'; return; }
+  const wrap   = document.getElementById('fileTableWrap');
+  const tbody  = document.getElementById('fileTableBody');
+  const rowAct = document.getElementById('rowActions');
+  const count  = document.getElementById('fileCount');
+  if (!patterns.length) {
+    wrap.style.display = 'none';
+    rowAct.style.display = 'none';
+    return;
+  }
   wrap.style.display = 'block';
+  rowAct.style.display = 'flex';
+  count.textContent = `${patterns.length} pattern${patterns.length > 1 ? 's' : ''} loaded`;
 
-  // Update Y-column header
   document.getElementById('yColHead').textContent =
     document.getElementById('yLabel').value || 'Y value';
 
@@ -714,11 +563,16 @@ function refreshTable() {
     const yVal  = p.y != null && isFinite(p.y) ? p.y : '';
     const tr = document.createElement('tr');
     tr.innerHTML =
-      `<td class="fname" title="${p.filename}">${p.filename}</td>
+      `<td><span class="ord-btns">
+          <button class="ord-btn up"   data-i="${i}" ${i === 0 ? 'disabled' : ''} title="Move up">▲</button>
+          <button class="ord-btn down" data-i="${i}" ${i === patterns.length - 1 ? 'disabled' : ''} title="Move down">▼</button>
+        </span></td>
+       <td class="fname" title="${p.filename}">${p.filename}</td>
        <td class="num">${p.nPts}</td>
        <td class="range">${ttMin} – ${ttMax}</td>
        <td><input class="y-input${yVal === '' ? ' missing' : ''}" type="number"
            value="${yVal}" placeholder="required" data-i="${i}"></td>
+       <td><input class="legend-input" type="text" value="${escAttr(p.legend || '')}" data-i="${i}"></td>
        <td><button class="del-btn" data-i="${i}" title="Remove">✕</button></td>`;
     tbody.appendChild(tr);
   });
@@ -729,65 +583,108 @@ function refreshTable() {
       const v = parseFloat(e.target.value);
       patterns[i].y = isFinite(v) ? v : null;
       e.target.classList.toggle('missing', !isFinite(v));
+      scheduleRender(); scheduleStackRender();
     });
     el.addEventListener('change', () => {
-      patterns.sort((a, b) => (a.y ?? 0) - (b.y ?? 0));
-      refreshTable();
+      // Y-value changed but don't auto-sort — the user owns the order.
+      // Use "Sort by Y" button to re-sort.
+      scheduleRender(); scheduleStackRender();
     });
   });
-
+  tbody.querySelectorAll('.legend-input').forEach(el => {
+    el.addEventListener('input', e => {
+      const i = +e.target.dataset.i;
+      patterns[i].legend = e.target.value;
+      scheduleStackRender();
+    });
+  });
+  tbody.querySelectorAll('.ord-btn.up').forEach(el => {
+    el.addEventListener('click', e => {
+      const i = +e.currentTarget.dataset.i;
+      if (i <= 0) return;
+      [patterns[i - 1], patterns[i]] = [patterns[i], patterns[i - 1]];
+      refreshTable();
+      scheduleRender(); scheduleStackRender();
+    });
+  });
+  tbody.querySelectorAll('.ord-btn.down').forEach(el => {
+    el.addEventListener('click', e => {
+      const i = +e.currentTarget.dataset.i;
+      if (i >= patterns.length - 1) return;
+      [patterns[i + 1], patterns[i]] = [patterns[i], patterns[i + 1]];
+      refreshTable();
+      scheduleRender(); scheduleStackRender();
+    });
+  });
   tbody.querySelectorAll('.del-btn').forEach(el => {
     el.addEventListener('click', e => {
-      patterns.splice(+e.target.dataset.i, 1);
+      const i = +e.target.dataset.i;
+      const f = patterns[i].filename;
+      delete legendPositions[f];
+      patterns.splice(i, 1);
       refreshTable();
-      if (!patterns.length) setStatus('Load at least two diffractograms to begin.', '');
+      if (!patterns.length) {
+        setStatus('Load at least two diffractograms to begin.', '');
+        setStackStatus('Load at least one diffractogram to begin.', '');
+      } else {
+        scheduleRender(); scheduleStackRender();
+      }
     });
   });
 }
 
+function escAttr(s) { return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+
 document.getElementById('yLabel').addEventListener('input', () => {
-  document.getElementById('yColHead').textContent =
-    document.getElementById('yLabel').value || 'Y value';
+  const head = document.getElementById('yColHead');
+  if (head) head.textContent = document.getElementById('yLabel').value || 'Y value';
 });
 
 function autoFillRange() {
-  const minEl = document.getElementById('ttMin');
-  const maxEl = document.getElementById('ttMax');
+  const ranges = [
+    ['ttMin', 'ttMax'],
+    ['stkTtMin', 'stkTtMax']
+  ];
   const gMin = Math.min(...patterns.map(p => p.twoTheta[0]));
   const gMax = Math.max(...patterns.map(p => p.twoTheta[p.twoTheta.length - 1]));
-  if (!minEl.value) minEl.value = gMin.toFixed(3);
-  if (!maxEl.value) maxEl.value = gMax.toFixed(3);
+  ranges.forEach(([minId, maxId]) => {
+    const minEl = document.getElementById(minId);
+    const maxEl = document.getElementById(maxId);
+    if (minEl && !minEl.value) minEl.value = gMin.toFixed(3);
+    if (maxEl && !maxEl.value) maxEl.value = gMax.toFixed(3);
+  });
 }
 
 // ═══════════════════════════════════════════════════
-//  Gamma slider
+//  Slider value displays
 // ═══════════════════════════════════════════════════
-document.getElementById('gammaSlider').addEventListener('input', e => {
-  document.getElementById('gammaVal').textContent = parseFloat(e.target.value).toFixed(2);
-});
-document.getElementById('lwSlider').addEventListener('input', e => {
-  document.getElementById('lwVal').textContent = parseFloat(e.target.value).toFixed(1);
-});
-document.getElementById('gridlineWeight').addEventListener('input', e => {
-  document.getElementById('glwVal').textContent = parseFloat(e.target.value).toFixed(1);
-});
+function bindSlider(sliderId, valId, digits) {
+  const el = document.getElementById(sliderId);
+  const v  = document.getElementById(valId);
+  if (!el || !v) return;
+  const upd = () => { v.textContent = parseFloat(el.value).toFixed(digits); };
+  el.addEventListener('input', upd); upd();
+}
+bindSlider('gammaSlider',     'gammaVal',     2);
+bindSlider('lwSlider',        'lwVal',        1);
+bindSlider('gridlineWeight',  'glwVal',       1);
+bindSlider('stkXPad',         'stkXPadVal',   0);
+bindSlider('stkLineWt',       'stkLineWtVal', 2);
+bindSlider('stkAxisWt',       'stkAxisWtVal', 2);
 
 // ═══════════════════════════════════════════════════
 //  Resampling & normalisation
 // ═══════════════════════════════════════════════════
 function resample(twoTheta, intensity, gMin, gMax, N) {
-  // Returns Float32Array of length N on a uniform grid [gMin, gMax]
   const out = new Float32Array(N);
   const step = (gMax - gMin) / (N - 1);
   const n = twoTheta.length;
-  let j = 0; // index into source (assume sorted ascending)
+  let j = 0;
   for (let i = 0; i < N; i++) {
     const tt = gMin + i * step;
-    // advance j until twoTheta[j+1] >= tt
     while (j < n - 2 && twoTheta[j + 1] < tt) j++;
     if (j >= n - 1) { out[i] = intensity[n - 1]; continue; }
-    const t = (twoTheta[j] === twoTheta[j + 1])
-      ? 0
+    const t = (twoTheta[j] === twoTheta[j + 1]) ? 0
       : (tt - twoTheta[j]) / (twoTheta[j + 1] - twoTheta[j]);
     out[i] = intensity[j] * (1 - t) + intensity[j + 1] * t;
   }
@@ -797,15 +694,14 @@ function resample(twoTheta, intensity, gMin, gMax, N) {
 function normalize(arr, mode, gMin, gMax) {
   const N = arr.length;
   let lo, hi;
-  if (mode === 'global') {
-    lo = gMin; hi = gMax;
-  } else {
+  if (mode === 'global') { lo = gMin; hi = gMax; }
+  else {
     lo = Infinity; hi = -Infinity;
     for (let i = 0; i < N; i++) {
       if (arr[i] < lo) lo = arr[i];
       if (arr[i] > hi) hi = arr[i];
     }
-    if (mode === 'per') lo = 0;   // don't subtract baseline
+    if (mode === 'per') lo = 0;
   }
   const range = hi - lo;
   const out = new Float32Array(N);
@@ -815,88 +711,117 @@ function normalize(arr, mode, gMin, gMax) {
 }
 
 // ═══════════════════════════════════════════════════
-//  Colour helper
+//  Helpers
 // ═══════════════════════════════════════════════════
 function hexToRgb(hex) {
   const n = parseInt((hex || '#000000').replace('#', ''), 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
+function setStatus(msg, cls) {
+  const el = document.getElementById('statusMsg');
+  el.textContent = msg; el.className = 'status' + (cls ? ' ' + cls : '');
+}
+function setStackStatus(msg, cls) {
+  const el = document.getElementById('stackStatus');
+  el.textContent = msg; el.className = 'status' + (cls ? ' ' + cls : '');
+}
+function niceStep(rough) {
+  if (rough <= 0) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(rough)));
+  const f = rough / p;
+  return f < 1.5 ? p : f < 3.5 ? 2 * p : f < 7.5 ? 5 * p : 10 * p;
+}
+function decimalsForStep(step) {
+  const s = Math.abs(step);
+  if (s >= 1 || s === 0) return 0;
+  return Math.max(0, -Math.floor(Math.log10(s)));
+}
+function fmtTick(v, decimals) {
+  if (!isFinite(v)) return '';
+  // Guard against -0 display
+  if (Object.is(v, -0)) v = 0;
+  return v.toFixed(decimals);
+}
 
 // ═══════════════════════════════════════════════════
-//  Margin layout — uses canvas measureText for accuracy
+//  Colour ramps for stacked plot
+// ═══════════════════════════════════════════════════
+const COLOR_STOPS = {
+  viridis: ['#440154','#3b528b','#21918c','#5ec962','#fde725'],
+  plasma:  ['#0d0887','#7e03a8','#cb4778','#f89540','#f0f921'],
+  inferno: ['#000004','#420a68','#932667','#dd513a','#fcffa4'],
+  cool:    ['#0066cc','#3399ff','#66ccff','#99ffff','#ccffee'],
+  warm:    ['#660000','#cc3300','#ff6600','#ffcc00','#ffff66'],
+  rainbow: ['#ff0000','#ffff00','#00ff00','#00ffff','#0000ff','#ff00ff']
+};
+function rampColor(scheme, t) {
+  const stops = COLOR_STOPS[scheme] || COLOR_STOPS.viridis;
+  if (t <= 0) return stops[0];
+  if (t >= 1) return stops[stops.length - 1];
+  const s = t * (stops.length - 1);
+  const i = Math.floor(s);
+  const f = s - i;
+  const [r1,g1,b1] = hexToRgb(stops[i]);
+  const [r2,g2,b2] = hexToRgb(stops[i + 1]);
+  return `rgb(${Math.round(r1+f*(r2-r1))},${Math.round(g1+f*(g2-g1))},${Math.round(b1+f*(b2-b1))})`;
+}
+
+// ═══════════════════════════════════════════════════
+//  Margin layout — INTENSITY MAP
 // ═══════════════════════════════════════════════════
 function computeMargins(ttMin, ttMax, yMin, yMax, tickSize, labelSize, axisFont, tickLen) {
-  // Measure actual text widths with a throw-away canvas
   const tmp = document.createElement('canvas');
   const tc  = tmp.getContext('2d');
   tc.font   = `${tickSize}px ${axisFont}`;
-
-  // Widest Y-axis tick label
   const yRange = yMax - yMin;
   const yStep  = niceStep(yRange / 6);
   const yStart = Math.ceil(yMin / yStep) * yStep;
+  const yDec   = decimalsForStep(yStep);
   let maxYTickW = 0;
   for (let yv = yStart; yv <= yMax + 1e-9; yv = +(yv + yStep).toFixed(9)) {
-    const w = tc.measureText(formatTick(yv)).width;
+    const w = tc.measureText(fmtTick(yv, yDec)).width;
     if (w > maxYTickW) maxYTickW = w;
   }
   maxYTickW = Math.ceil(maxYTickW);
-
-  // ── Left margin ──────────────────────────────────
-  // [ leftPad | rotated-Y-label | afterLabelGap | tick-labels | tickLen | innerGap ]
   const leftPad        = 4;
-  const rotLabelExtent = Math.ceil(labelSize * 1.4);  // label height → x footprint when rotated
+  const rotLabelExtent = Math.ceil(labelSize * 1.4);
   const afterLabelGap  = Math.max(5, Math.ceil(labelSize * 0.4));
-  const innerGap       = 3;   // gap between end of tick text and start of tick mark
+  const innerGap       = 3;
   const left = leftPad + rotLabelExtent + afterLabelGap + maxYTickW + tickLen + innerGap;
-
-  // Y-label is drawn centred within its own band [leftPad … leftPad+rotLabelExtent]
   const yLabelCenterX = leftPad + Math.ceil(rotLabelExtent / 2);
-
-  // ── Bottom margin ─────────────────────────────────
-  // [ tickLen | innerGap | tick-label-height | afterTickGap | axis-label-height | bottomPad ]
-  const tickTextH    = Math.ceil(tickSize  * 1.35);  // cap + descent
+  const tickTextH    = Math.ceil(tickSize  * 1.35);
   const axisLabelH   = Math.ceil(labelSize * 1.35);
   const afterTickGap = Math.max(5, Math.ceil(tickSize * 0.45));
   const bottomPad    = 4;
   const bottom = tickLen + innerGap + tickTextH + afterTickGap + axisLabelH + bottomPad;
-
   return { top: 18, right: 22, bottom, left, yLabelCenterX };
 }
 
 // ═══════════════════════════════════════════════════
-//  Render
+//  INTENSITY MAP render
 // ═══════════════════════════════════════════════════
 document.getElementById('renderBtn').addEventListener('click', () => {
   if (patterns.length < 2) { setStatus('Need at least two patterns.', 'err'); return; }
   const bad = patterns.filter(p => p.y == null || !isFinite(p.y));
-  if (bad.length) {
-    setStatus(`Missing Y value: ${bad.map(p => p.filename).join(', ')}`, 'err');
-    return;
-  }
+  if (bad.length) { setStatus(`Missing Y value: ${bad.map(p => p.filename).join(', ')}`, 'err'); return; }
   setStatus('Rendering…', '');
   setTimeout(doRender, 25);
 });
-
-function doRender() {
-  try {
-    _render();
-  } catch (e) {
-    setStatus('Error: ' + e.message, 'err');
-    console.error(e);
-  }
-}
+function doRender() { try { _render(); } catch (e) { setStatus('Error: ' + e.message, 'err'); console.error(e); } }
 
 function _render() {
-  const canvas     = document.getElementById('plotCanvas');
-  const ctx        = canvas.getContext('2d');
-  const yLabelTxt  = document.getElementById('yLabel').value || 'Condition';
-  const normMode   = document.getElementById('normMode').value;
-  const gamma      = parseFloat(document.getElementById('gammaSlider').value);
-  const GRID_N     = parseInt(document.getElementById('gridRes').value);
-  const axisFont   = document.getElementById('axisFont').value;
-  const tickSize   = Math.max(7, parseInt(document.getElementById('tickSize').value)  || 11);
-  const labelSize  = Math.max(8, parseInt(document.getElementById('labelSize').value) || 13);
+  if (patterns.length < 2) return;
+  if (patterns.some(p => p.y == null || !isFinite(p.y))) return;
+
+  const canvas    = document.getElementById('plotCanvas');
+  const ctx       = canvas.getContext('2d');
+  const yLabelTxt = document.getElementById('yLabel').value || 'Condition';
+  const normMode  = document.getElementById('normMode').value;
+  const gamma     = parseFloat(document.getElementById('gammaSlider').value);
+  const GRID_N    = parseInt(document.getElementById('gridRes').value);
+  const axisFont  = document.getElementById('axisFont').value;
+  const tickSize  = Math.max(7, parseInt(document.getElementById('tickSize').value)  || 25);
+  const labelSize = Math.max(8, parseInt(document.getElementById('labelSize').value) || 30);
   const lineWeight    = parseFloat(document.getElementById('lwSlider').value) || 3.0;
   const tickLen       = Math.round(3 + lineWeight * 1.5);
   const showGridlines = document.getElementById('showGridlines').checked;
@@ -904,47 +829,36 @@ function _render() {
   const gridlineColor = document.getElementById('gridlineColor').value || '#000000';
   const [pkR, pkG, pkB] = hexToRgb(document.getElementById('peakColor').value);
   const [bgR, bgG, bgB] = hexToRgb(document.getElementById('bgColor').value);
-  const plotHeightInput = parseInt(document.getElementById('plotHeightPx').value);
-  const userHeight      = isFinite(plotHeightInput) && plotHeightInput >= 200 ? plotHeightInput : null;
+  const hIn = parseInt(document.getElementById('plotHeightPx').value);
+  const userHeight = isFinite(hIn) && hIn >= 200 ? hIn : null;
 
   let ttMin = parseFloat(document.getElementById('ttMin').value);
   let ttMax = parseFloat(document.getElementById('ttMax').value);
   if (!isFinite(ttMin)) ttMin = Math.min(...patterns.map(p => p.twoTheta[0]));
   if (!isFinite(ttMax)) ttMax = Math.max(...patterns.map(p => p.twoTheta[p.twoTheta.length - 1]));
 
-  // Sort by y
   const sorted = [...patterns].sort((a, b) => a.y - b.y);
   const yVals  = sorted.map(p => p.y);
-  const yMin   = yVals[0];
-  const yMax   = yVals[yVals.length - 1];
+  const yMin = yVals[0], yMax = yVals[yVals.length - 1];
   const yRange = yMax - yMin;
 
-  // Compute margins using actual text measurements
   const MARGIN = computeMargins(ttMin, ttMax, yMin, yMax, tickSize, labelSize, axisFont, tickLen);
 
-  // Resample all onto common grid
   const rawArrays = sorted.map(p => resample(p.twoTheta, p.intensity, ttMin, ttMax, GRID_N));
-
-  // Global stats (for global normalisation)
   let gMin = Infinity, gMax = -Infinity;
-  for (const arr of rawArrays) {
-    for (let i = 0; i < arr.length; i++) {
-      if (arr[i] < gMin) gMin = arr[i];
-      if (arr[i] > gMax) gMax = arr[i];
-    }
+  for (const arr of rawArrays) for (let i = 0; i < arr.length; i++) {
+    if (arr[i] < gMin) gMin = arr[i];
+    if (arr[i] > gMax) gMax = arr[i];
   }
-
   const normArrays = rawArrays.map(arr => normalize(arr, normMode, gMin, gMax));
 
-  // ── Canvas sizing ──
-  const totalW  = Math.max(canvas.parentElement.clientWidth, 520);
-  const totalH  = userHeight ?? Math.round(totalW * 0.58);
-  canvas.width  = totalW;
-  canvas.height = totalH;
-  const plotW   = totalW - MARGIN.left - MARGIN.right;
-  const plotH   = totalH - MARGIN.top  - MARGIN.bottom;
+  const totalW = Math.max(canvas.parentElement.clientWidth, 400);
+  const totalH = userHeight ?? Math.round(totalW * 0.58);
+  canvas.width = totalW; canvas.height = totalH;
+  const plotW = totalW - MARGIN.left - MARGIN.right;
+  const plotH = totalH - MARGIN.top  - MARGIN.bottom;
 
-  // ── Background: margins white, plot area gets background colour ──
+  // Background
   ctx.fillStyle = `rgb(${bgR},${bgG},${bgB})`;
   ctx.fillRect(MARGIN.left, MARGIN.top, plotW, plotH);
   ctx.fillStyle = '#ffffff';
@@ -953,49 +867,30 @@ function _render() {
   ctx.fillRect(MARGIN.left, MARGIN.top + plotH, plotW, MARGIN.bottom);
   ctx.fillRect(MARGIN.left + plotW, 0, MARGIN.right, totalH);
 
-  // ── Build pixel data for plot area ──
+  // Image data
   const imgData = ctx.createImageData(plotW, plotH);
-  const px4     = imgData.data;
-
+  const px4 = imgData.data;
   const nPat = sorted.length;
-
   for (let iy = 0; iy < plotH; iy++) {
-    // py=0 → top of plot → yMax;  py=plotH-1 → bottom → yMin
     const yVal = yMax - (iy / (plotH - 1)) * yRange;
-
-    // Find bracketing patterns
     let loI = 0, hiI = nPat - 1, t = 0;
-    if (yVal <= yVals[0]) {
-      loI = hiI = 0;
-    } else if (yVal >= yVals[nPat - 1]) {
-      loI = hiI = nPat - 1;
-    } else {
-      for (let k = 0; k < nPat - 1; k++) {
-        if (yVal >= yVals[k] && yVal <= yVals[k + 1]) {
-          loI = k; hiI = k + 1;
-          t   = (yVal - yVals[k]) / (yVals[k + 1] - yVals[k]);
-          break;
-        }
+    if (yVal <= yVals[0]) loI = hiI = 0;
+    else if (yVal >= yVals[nPat - 1]) loI = hiI = nPat - 1;
+    else for (let k = 0; k < nPat - 1; k++) {
+      if (yVal >= yVals[k] && yVal <= yVals[k + 1]) {
+        loI = k; hiI = k + 1;
+        t = (yVal - yVals[k]) / (yVals[k + 1] - yVals[k]);
+        break;
       }
     }
-
-    const arrLo = normArrays[loI];
-    const arrHi = normArrays[hiI];
-
+    const arrLo = normArrays[loI], arrHi = normArrays[hiI];
     for (let ix = 0; ix < plotW; ix++) {
-      // Linear index into GRID_N for this x pixel
-      const frac  = ix / (plotW - 1);
-      const fIdx  = frac * (GRID_N - 1);
-      const g0    = Math.floor(fIdx);
-      const g1    = Math.min(g0 + 1, GRID_N - 1);
-      const gf    = fIdx - g0;
-
+      const fIdx = (ix / (plotW - 1)) * (GRID_N - 1);
+      const g0 = Math.floor(fIdx), g1 = Math.min(g0 + 1, GRID_N - 1), gf = fIdx - g0;
       const iLo = arrLo[g0] * (1 - gf) + arrLo[g1] * gf;
       const iHi = arrHi[g0] * (1 - gf) + arrHi[g1] * gf;
-      let   intv = iLo * (1 - t) + iHi * t;
-
+      let intv = iLo * (1 - t) + iHi * t;
       intv = Math.min(1, Math.max(0, Math.pow(intv, gamma)));
-
       const base = (iy * plotW + ix) * 4;
       px4[base]     = Math.round(bgR + intv * (pkR - bgR));
       px4[base + 1] = Math.round(bgG + intv * (pkG - bgG));
@@ -1003,47 +898,32 @@ function _render() {
       px4[base + 3] = 255;
     }
   }
-
   ctx.putImageData(imgData, MARGIN.left, MARGIN.top);
 
-  // ── Axes ──
-  const INK    = '#2c2c2c';
-
-  // X axis — 2θ
-  ctx.fillStyle   = INK;
-  ctx.strokeStyle = INK;
-  ctx.lineWidth   = lineWeight;
+  // Axes
+  const INK = '#0f0e0d';
+  // X axis
   const xStep  = niceStep((ttMax - ttMin) / 8);
   const xStart = Math.ceil(ttMin / xStep) * xStep;
-  ctx.textAlign    = 'center';
-  ctx.textBaseline = 'top';
+  const xDec   = decimalsForStep(xStep);
+  ctx.fillStyle = INK; ctx.strokeStyle = INK; ctx.lineWidth = lineWeight;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
   ctx.font = `${tickSize}px ${axisFont}`;
-
   for (let tt = xStart; tt <= ttMax + 1e-9; tt = +(tt + xStep).toFixed(9)) {
     const px = MARGIN.left + ((tt - ttMin) / (ttMax - ttMin)) * plotW;
-    // tick
-    ctx.strokeStyle = INK;
-    ctx.lineWidth   = lineWeight;
+    ctx.strokeStyle = INK; ctx.lineWidth = lineWeight;
     ctx.beginPath(); ctx.moveTo(px, MARGIN.top + plotH); ctx.lineTo(px, MARGIN.top + plotH + tickLen); ctx.stroke();
-    // gridline (optional)
     if (showGridlines) {
-      ctx.strokeStyle = gridlineColor;
-      ctx.lineWidth   = gridlineWt;
+      ctx.strokeStyle = gridlineColor; ctx.lineWidth = gridlineWt;
       ctx.setLineDash([3, 5]);
       ctx.beginPath(); ctx.moveTo(px, MARGIN.top); ctx.lineTo(px, MARGIN.top + plotH); ctx.stroke();
       ctx.setLineDash([]);
     }
-    // label
     ctx.fillStyle = INK;
-    ctx.font = `${tickSize}px ${axisFont}`;
-    ctx.fillText(formatTick(tt), px, MARGIN.top + plotH + tickLen + 2);
+    ctx.fillText(fmtTick(tt, xDec), px, MARGIN.top + plotH + tickLen + 2);
   }
-  // Box
-  ctx.strokeStyle = INK;
-  ctx.lineWidth   = lineWeight;
+  ctx.strokeStyle = INK; ctx.lineWidth = lineWeight;
   ctx.strokeRect(MARGIN.left, MARGIN.top, plotW, plotH);
-
-  // X axis label — centred in the space between tick labels and canvas bottom
   {
     const tickLabelBottom = MARGIN.top + plotH + tickLen + 2 + Math.ceil(tickSize * 1.35);
     const xLabelY = Math.round(tickLabelBottom + (totalH - tickLabelBottom) / 2);
@@ -1052,32 +932,26 @@ function _render() {
     ctx.fillStyle = INK;
     ctx.fillText('2\u03b8 (\u00b0)', MARGIN.left + plotW / 2, xLabelY);
   }
-
-  // Y axis — condition
+  // Y axis
   const yStep  = niceStep(yRange / 6);
   const yStart = Math.ceil(yMin / yStep) * yStep;
+  const yDec   = decimalsForStep(yStep);
   ctx.font = `${tickSize}px ${axisFont}`;
   ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-
   for (let yv = yStart; yv <= yMax + 1e-9; yv = +(yv + yStep).toFixed(9)) {
     const py = MARGIN.top + (1 - (yv - yMin) / yRange) * plotH;
-    ctx.strokeStyle = INK;
-    ctx.lineWidth   = lineWeight;
+    ctx.strokeStyle = INK; ctx.lineWidth = lineWeight;
     ctx.beginPath(); ctx.moveTo(MARGIN.left - tickLen, py); ctx.lineTo(MARGIN.left, py); ctx.stroke();
-    // gridline (optional)
     if (showGridlines) {
-      ctx.strokeStyle = gridlineColor;
-      ctx.lineWidth   = gridlineWt;
+      ctx.strokeStyle = gridlineColor; ctx.lineWidth = gridlineWt;
       ctx.setLineDash([3, 5]);
       ctx.beginPath(); ctx.moveTo(MARGIN.left, py); ctx.lineTo(MARGIN.left + plotW, py); ctx.stroke();
       ctx.setLineDash([]);
     }
     ctx.fillStyle = INK;
     ctx.font = `${tickSize}px ${axisFont}`;
-    ctx.fillText(formatTick(yv), MARGIN.left - tickLen - 3, py);
+    ctx.fillText(fmtTick(yv, yDec), MARGIN.left - tickLen - 3, py);
   }
-
-  // Y axis rotated label
   ctx.save();
   ctx.translate(MARGIN.yLabelCenterX, MARGIN.top + plotH / 2);
   ctx.rotate(-Math.PI / 2);
@@ -1087,109 +961,367 @@ function _render() {
   ctx.fillText(yLabelTxt, 0, 0);
   ctx.restore();
 
-  // ── Store meta for cursor readout ──
   plotMeta = { ttMin, ttMax, yMin, yMax, MARGIN, plotW, plotH };
-
-  setStatus(`Rendered ${sorted.length} patterns · 2\u03b8 ${ttMin.toFixed(2)}\u2013${ttMax.toFixed(2)}\u00b0 · \u03b3 = ${gamma.toFixed(2)}`, 'ok');
+  setStatus(`Rendered ${sorted.length} patterns · 2\u03b8 ${ttMin.toFixed(2)}–${ttMax.toFixed(2)}° · γ = ${gamma.toFixed(2)}`, 'ok');
 }
 
 // ═══════════════════════════════════════════════════
-//  Auto-render on settings change (debounced)
+//  STACKED PLOT render
 // ═══════════════════════════════════════════════════
-let autoRenderTimer = null;
+document.getElementById('stackRenderBtn').addEventListener('click', () => {
+  if (!patterns.length) { setStackStatus('Need at least one pattern.', 'err'); return; }
+  setStackStatus('Rendering…', '');
+  setTimeout(doStackRender, 25);
+});
+function doStackRender() { try { _stackRender(); } catch (e) { setStackStatus('Error: ' + e.message, 'err'); console.error(e); } }
+
+function _stackRender() {
+  if (!patterns.length) return;
+  const canvas   = document.getElementById('stackCanvas');
+  const ctx      = canvas.getContext('2d');
+  const reverse  = document.getElementById('stkReverse').checked;
+  const allBlack = document.getElementById('stkAllBlack').checked;
+  const scheme   = document.getElementById('stkColorScheme').value;
+  const lineWt   = parseFloat(document.getElementById('stkLineWt').value) || 1.25;
+  const axisWt   = parseFloat(document.getElementById('stkAxisWt').value) || 1.5;
+  const font     = document.getElementById('stkFont').value;
+  const tickSize = Math.max(8, parseInt(document.getElementById('stkTickSize').value)  || 14);
+  const labelSz  = Math.max(10, parseInt(document.getElementById('stkLabelSize').value) || 18);
+  const legSz    = Math.max(8, parseInt(document.getElementById('stkLegendSize').value) || 13);
+  const showLeg  = document.getElementById('stkShowLegends').checked;
+  const showBox  = document.getElementById('stkShowBox').checked;
+  const bandH    = Math.max(30, parseInt(document.getElementById('stkBandHeight').value) || 80);
+  const xPad     = parseInt(document.getElementById('stkXPad').value) || 0;
+
+  let ttMin = parseFloat(document.getElementById('stkTtMin').value);
+  let ttMax = parseFloat(document.getElementById('stkTtMax').value);
+  if (!isFinite(ttMin)) ttMin = Math.min(...patterns.map(p => p.twoTheta[0]));
+  if (!isFinite(ttMax)) ttMax = Math.max(...patterns.map(p => p.twoTheta[p.twoTheta.length - 1]));
+
+  // Respect user's manual file order. Default: last in array at top of plot
+  // (so a Y-sorted list reads with highest Y at top, matching the intensity map).
+  // Reverse flips it: first in array at top.
+  const order = reverse ? [...patterns] : [...patterns].reverse();
+
+  // Layout
+  const N = order.length;
+  // X-axis step and decimals used everywhere below
+  const xStep = niceStep((ttMax - ttMin) / 8);
+  const xDec  = decimalsForStep(xStep);
+
+  // Compute margins
+  const tmp = document.createElement('canvas').getContext('2d');
+  tmp.font = `${tickSize}px ${font}`;
+  const xTickRoughMax = tmp.measureText(fmtTick(ttMax, xDec)).width;
+  const yLabelW = Math.ceil(labelSz * 1.6);
+  const M = {
+    top: 14,
+    right: 18 + xPad,
+    bottom: Math.ceil(tickSize * 1.35) + Math.ceil(labelSz * 1.35) + 18,
+    left: yLabelW + 10 + xPad
+  };
+
+  const totalW = Math.max(canvas.parentElement.clientWidth, 400);
+  const plotW  = totalW - M.left - M.right;
+  const plotH  = N * bandH;
+  const totalH = M.top + plotH + M.bottom;
+  canvas.width = totalW; canvas.height = totalH;
+
+  // Background
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, totalW, totalH);
+  const INK = '#0f0e0d';
+
+  // Per-pattern intensity normalisation (per-pattern with baseline) for visual fit
+  const lines = order.map(p => {
+    // resample to plotW points for speed and consistency
+    const arr = resample(p.twoTheta, p.intensity, ttMin, ttMax, plotW);
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < arr.length; i++) {
+      if (arr[i] < lo) lo = arr[i];
+      if (arr[i] > hi) hi = arr[i];
+    }
+    const range = hi - lo || 1;
+    return { p, arr, lo, hi, range };
+  });
+
+  // Draw each band
+  lines.forEach((L, idx) => {
+    const bandTop    = M.top + idx * bandH;
+    const bandBottom = bandTop + bandH;
+    const drawTop    = bandTop + 4;        // small visual padding
+    const drawBottom = bandBottom - 4;
+    const usableH    = drawBottom - drawTop;
+
+    // Stroke colour
+    let stroke = '#000';
+    if (!allBlack && N > 1) stroke = rampColor(scheme, idx / (N - 1));
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = lineWt;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+
+    ctx.beginPath();
+    for (let i = 0; i < L.arr.length; i++) {
+      const x = M.left + (i / (L.arr.length - 1)) * plotW;
+      const norm = (L.arr[i] - L.lo) / L.range;     // 0..1
+      const y = drawBottom - norm * usableH;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  });
+
+  // X axis (bottom always); full box optional. Uses its own weight (independent of line weight)
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = Math.max(0.5, axisWt);
+  if (showBox) {
+    ctx.strokeRect(M.left, M.top, plotW, plotH);
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(M.left, M.top + plotH);
+    ctx.lineTo(M.left + plotW, M.top + plotH);
+    ctx.stroke();
+  }
+
+  // X ticks — share axis weight
+  const xStart = Math.ceil(ttMin / xStep) * xStep;
+  ctx.fillStyle = INK;
+  ctx.font = `${tickSize}px ${font}`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  const tkLen = Math.round(4 + axisWt * 1.5);
+  ctx.lineWidth = Math.max(0.5, axisWt);
+  for (let tt = xStart; tt <= ttMax + 1e-9; tt = +(tt + xStep).toFixed(9)) {
+    const px = M.left + ((tt - ttMin) / (ttMax - ttMin)) * plotW;
+    ctx.beginPath();
+    ctx.moveTo(px, M.top + plotH);
+    ctx.lineTo(px, M.top + plotH + tkLen);
+    ctx.stroke();
+    ctx.fillText(fmtTick(tt, xDec), px, M.top + plotH + tkLen + 3);
+  }
+
+  // X axis label
+  ctx.font = `${labelSz}px ${font}`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+  ctx.fillText('2\u03b8 (\u00b0)', M.left + plotW / 2, totalH - 4);
+
+  // Y axis label (no ticks, no scale)
+  ctx.save();
+  ctx.translate(Math.ceil(labelSz * 0.7), M.top + plotH / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = `${labelSz}px ${font}`;
+  ctx.fillStyle = INK;
+  ctx.fillText('Intensity', 0, 0);
+  ctx.restore();
+
+  stackMeta = { M, plotW, plotH, bandH, order, font, legSz, totalW, totalH };
+
+  // Render legend handles (DOM)
+  renderLegendHandles(showLeg);
+
+  setStackStatus(`Rendered ${N} pattern${N>1?'s':''} · 2\u03b8 ${ttMin.toFixed(2)}–${ttMax.toFixed(2)}°`, 'ok');
+}
+
+// ═══════════════════════════════════════════════════
+//  Stacked plot — DOM legend handles
+// ═══════════════════════════════════════════════════
+function renderLegendHandles(visible) {
+  const wrap = document.getElementById('stackWrap');
+  // Remove old handles
+  wrap.querySelectorAll('.legend-handle').forEach(el => el.remove());
+  if (!visible || !stackMeta) return;
+
+  const canvas = document.getElementById('stackCanvas');
+  const cssScale = canvas.getBoundingClientRect().width / canvas.width;
+  const { M, plotW, bandH, order, font, legSz } = stackMeta;
+  const snap = document.getElementById('stkSnapLeft').checked;
+
+  // Measure widest legend label in current font/size, in canvas pixels
+  const meas = document.createElement('canvas').getContext('2d');
+  meas.font = `${legSz}px ${font}`;
+  let widestW = 0;
+  order.forEach(p => {
+    const txt = p.legend || (p.y != null ? p.y : p.filename);
+    const w = meas.measureText(String(txt)).width;
+    if (w > widestW) widestW = w;
+  });
+  const RIGHT_BUFFER = 30;
+  // Default X: leftmost edge of label such that the widest label finishes
+  // RIGHT_BUFFER pixels in from the plot's right edge.
+  const defaultX = M.left + plotW - widestW - RIGHT_BUFFER;
+
+  order.forEach((p, idx) => {
+    const key = p.filename;
+    const bandTop = M.top + idx * bandH;
+
+    // Position model: { x in canvas px, yFrac 0..1 within the band }
+    // Default: shared right-aligned column with buffer; 35% down from band top
+    const defYFrac = 0.35;
+    if (!legendPositions[key]) legendPositions[key] = { x: defaultX, yFrac: defYFrac };
+    let pos = legendPositions[key];
+
+    // If snapping, x is shared across all legends
+    if (snap && snapLeftX != null) pos.x = snapLeftX;
+
+    const yAbs = bandTop + pos.yFrac * bandH;
+
+    const h = document.createElement('div');
+    h.className = 'legend-handle';
+    h.style.font = `${legSz}px ${font}`;
+    h.style.color = '#0f0e0d';
+    h.textContent = p.legend || (p.y != null ? p.y : p.filename);
+    h.dataset.key = key;
+    h.style.left = (pos.x * cssScale) + 'px';
+    h.style.top  = (yAbs * cssScale) + 'px';
+    h.dataset.bandTop = bandTop;
+    h.dataset.bandH   = bandH;
+
+    wrap.appendChild(h);
+
+    // Drag
+    let dragging = false, dx = 0, dy = 0;
+    h.addEventListener('mousedown', e => {
+      dragging = true;
+      h.classList.add('dragging');
+      const r = h.getBoundingClientRect();
+      dx = e.clientX - r.left;
+      dy = e.clientY - r.top;
+      e.preventDefault();
+    });
+    window.addEventListener('mousemove', e => {
+      if (!dragging) return;
+      const wr = wrap.getBoundingClientRect();
+      const scale = canvas.getBoundingClientRect().width / canvas.width;
+      const newCssX = e.clientX - wr.left - dx;
+      const newCssY = e.clientY - wr.top  - dy;
+      let cx = newCssX / scale;
+      let cy = newCssY / scale;
+
+      const bt = +h.dataset.bandTop;
+      const bh = +h.dataset.bandH;
+      // Clamp Y inside band (allow legend's own height room at the bottom)
+      cy = Math.max(bt, Math.min(bt + bh - legSz, cy));
+      cx = Math.max(M.left, Math.min(M.left + plotW - 20, cx));
+      const newYFrac = (cy - bt) / bh;
+
+      if (snap) {
+        snapLeftX = cx;
+        // Move all legends' x; vertical position unchanged
+        wrap.querySelectorAll('.legend-handle').forEach(el => {
+          const k = el.dataset.key;
+          legendPositions[k].x = cx;
+          el.style.left = (cx * scale) + 'px';
+        });
+        legendPositions[key].yFrac = newYFrac;
+        h.style.top = (cy * scale) + 'px';
+      } else {
+        legendPositions[key].x = cx;
+        legendPositions[key].yFrac = newYFrac;
+        h.style.left = (cx * scale) + 'px';
+        h.style.top  = (cy * scale) + 'px';
+      }
+    });
+    window.addEventListener('mouseup', () => {
+      if (dragging) { dragging = false; h.classList.remove('dragging'); }
+    });
+  });
+}
+
+document.getElementById('stkResetLegends').addEventListener('click', () => {
+  Object.keys(legendPositions).forEach(k => delete legendPositions[k]);
+  snapLeftX = null;
+  scheduleStackRender();
+});
+document.getElementById('stkSnapLeft').addEventListener('change', e => {
+  if (e.target.checked) {
+    // Establish snap x as the leftmost of current positions
+    const xs = Object.values(legendPositions).map(p => p.x);
+    if (xs.length) snapLeftX = Math.min(...xs);
+  }
+  scheduleStackRender();
+});
+
+// ═══════════════════════════════════════════════════
+//  Auto-render (debounced)
+// ═══════════════════════════════════════════════════
+let mapTimer = null, stackTimer = null;
 function scheduleRender() {
   if (patterns.length < 2) return;
   if (patterns.some(p => p.y == null || !isFinite(p.y))) return;
-  clearTimeout(autoRenderTimer);
-  autoRenderTimer = setTimeout(doRender, 320);
+  clearTimeout(mapTimer); mapTimer = setTimeout(doRender, 300);
+}
+function scheduleStackRender() {
+  if (!patterns.length) return;
+  clearTimeout(stackTimer); stackTimer = setTimeout(doStackRender, 300);
 }
 
-// Wire every settings control
-[
-  'yLabel','ttMin','ttMax','normMode','gridRes',
-  'peakColor','bgColor','plotHeightPx',
-  'gammaSlider','axisFont','tickSize','labelSize','lwSlider',
-  'showGridlines','gridlineWeight','gridlineColor'
-].forEach(id => {
+// Map controls
+['yLabel','ttMin','ttMax','normMode','gridRes','peakColor','bgColor','plotHeightPx',
+ 'gammaSlider','axisFont','tickSize','labelSize','lwSlider',
+ 'showGridlines','gridlineWeight','gridlineColor'].forEach(id => {
   const el = document.getElementById(id);
   if (!el) return;
-  el.addEventListener('input',  scheduleRender);
+  el.addEventListener('input', scheduleRender);
   el.addEventListener('change', scheduleRender);
 });
 
-// ═══════════════════════════════════════════════════
-//  Cursor readout
-// ═══════════════════════════════════════════════════
-const canvas     = document.getElementById('plotCanvas');
-const cursorInfo = document.getElementById('cursorInfo');
-
-canvas.addEventListener('mousemove', e => {
-  if (!plotMeta) { cursorInfo.textContent = ''; return; }
-  const rect  = canvas.getBoundingClientRect();
-  const scaleX = canvas.width  / rect.width;
-  const scaleY = canvas.height / rect.height;
-  const cx = (e.clientX - rect.left)  * scaleX;
-  const cy = (e.clientY - rect.top)   * scaleY;
-  const { ttMin, ttMax, yMin, yMax, MARGIN, plotW, plotH } = plotMeta;
-  const fx = (cx - MARGIN.left) / plotW;
-  const fy = (cy - MARGIN.top)  / plotH;
-  if (fx < 0 || fx > 1 || fy < 0 || fy > 1) { cursorInfo.textContent = ''; return; }
-  const tt  = ttMin + fx * (ttMax - ttMin);
-  const yv  = yMax  - fy * (yMax - yMin);
-  const yLbl = document.getElementById('yLabel').value || 'Y';
-  cursorInfo.textContent = `2\u03b8 ${tt.toFixed(3)}\u00b0  \u2022  ${yLbl.replace(/\s*\(.*\)/, '')} ${yv.toFixed(1)}`;
+// Stack controls
+['stkTtMin','stkTtMax','stkReverse','stkBandHeight','stkXPad',
+ 'stkAllBlack','stkColorScheme','stkLineWt','stkAxisWt','stkShowBox',
+ 'stkFont','stkTickSize','stkLabelSize','stkLegendSize',
+ 'stkShowLegends'].forEach(id => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('input', scheduleStackRender);
+  el.addEventListener('change', scheduleStackRender);
 });
-canvas.addEventListener('mouseleave', () => { cursorInfo.textContent = ''; });
+
+// ═══════════════════════════════════════════════════
+//  Cursor readout — intensity map
+// ═══════════════════════════════════════════════════
+const mapCanvas = document.getElementById('plotCanvas');
+const cursorInfo = document.getElementById('cursorInfo');
+mapCanvas.addEventListener('mousemove', e => {
+  if (!plotMeta) { cursorInfo.textContent = ''; return; }
+  const rect = mapCanvas.getBoundingClientRect();
+  const sx = mapCanvas.width / rect.width, sy = mapCanvas.height / rect.height;
+  const cx = (e.clientX - rect.left) * sx, cy = (e.clientY - rect.top) * sy;
+  const { ttMin, ttMax, yMin, yMax, MARGIN, plotW, plotH } = plotMeta;
+  const fx = (cx - MARGIN.left) / plotW, fy = (cy - MARGIN.top) / plotH;
+  if (fx < 0 || fx > 1 || fy < 0 || fy > 1) { cursorInfo.textContent = ''; return; }
+  const tt = ttMin + fx * (ttMax - ttMin);
+  const yv = yMax - fy * (yMax - yMin);
+  const lbl = document.getElementById('yLabel').value || 'Y';
+  cursorInfo.textContent = `2θ ${tt.toFixed(3)}°  •  ${lbl.replace(/\s*\(.*\)/, '')} ${yv.toFixed(1)}`;
+});
+mapCanvas.addEventListener('mouseleave', () => { cursorInfo.textContent = ''; });
 
 // ═══════════════════════════════════════════════════
 //  Copy to clipboard
 // ═══════════════════════════════════════════════════
-document.getElementById('copyBtn').addEventListener('click', async () => {
-  if (!plotMeta) { setStatus('Render the map first.', 'err'); return; }
+async function copyCanvasToClipboard(canvas, statusFn) {
+  if (!canvas.width) { statusFn('Render first.', 'err'); return; }
   try {
     const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
     await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-    setStatus('Copied to clipboard.', 'ok');
-  } catch (e) {
-    setStatus('Copy failed: ' + e.message, 'err');
-  }
-});
+    statusFn('Copied to clipboard.', 'ok');
+  } catch (e) { statusFn('Copy failed: ' + e.message, 'err'); }
+}
+document.getElementById('copyBtn').addEventListener('click', () =>
+  copyCanvasToClipboard(document.getElementById('plotCanvas'), setStatus));
+document.getElementById('stackCopyBtn').addEventListener('click', () =>
+  copyCanvasToClipboard(document.getElementById('stackCanvas'), setStackStatus));
 
 // ═══════════════════════════════════════════════════
-//  Resize → re-render
+//  Resize
 // ═══════════════════════════════════════════════════
 let resizeTimer;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
-  if (!plotMeta || patterns.length < 2) return;
-  resizeTimer = setTimeout(doRender, 150);
+  resizeTimer = setTimeout(() => {
+    if (document.getElementById('page-map').classList.contains('active')) scheduleRender();
+    if (document.getElementById('page-stack').classList.contains('active')) scheduleStackRender();
+  }, 200);
 });
-
-// ═══════════════════════════════════════════════════
-//  Helpers
-// ═══════════════════════════════════════════════════
-function setStatus(msg, cls) {
-  const el = document.getElementById('statusMsg');
-  el.textContent = msg;
-  el.className   = 'status' + (cls ? ' ' + cls : '');
-}
-
-function niceStep(rough) {
-  if (rough <= 0) return 1;
-  const p = Math.pow(10, Math.floor(Math.log10(rough)));
-  const f = rough / p;
-  return f < 1.5 ? p : f < 3.5 ? 2 * p : f < 7.5 ? 5 * p : 10 * p;
-}
-
-function formatTick(v) {
-  if (!isFinite(v)) return '';
-  const av = Math.abs(v);
-  if (av === 0) return '0';
-  if (av >= 100) return v.toFixed(0);
-  if (av >= 10)  return v.toFixed(Number.isInteger(v) ? 0 : 1);
-  if (av >= 1)   return v.toFixed(Number.isInteger(v) ? 0 : 2);
-  return v.toFixed(2);
-}
 </script>
 </body>
 </html>
