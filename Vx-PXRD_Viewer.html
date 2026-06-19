@@ -1,0 +1,1208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vx-PXRD Viewer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300;1,400&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300;1,9..40,400&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,600;1,9..144,300;1,9..144,400&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+:root {
+  --cream:        #f5f0e8;
+  --card:         #faf7f2;
+  --ink:          #2c2c2c;
+  --ink-mid:      #5a5a5a;
+  --ink-faint:    #9a9490;
+  --accent:       #8b6b47;
+  --accent-lt:    #c4a882;
+  --border:       #d4c9b8;
+  --border-lt:    #e8e2d8;
+  --ok:           #5a8a5a;
+  --err:          #a05050;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: var(--cream);
+  color: var(--ink);
+  min-height: 100vh;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+/* ── Header ── */
+header {
+  background: var(--ink);
+  color: var(--cream);
+  padding: 1.5rem 2rem 1.4rem;
+  display: flex;
+  align-items: baseline;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+}
+header h1 {
+  font-family: 'Fraunces', serif;
+  font-weight: 300;
+  font-size: 1.75rem;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+}
+header p {
+  font-size: 0.82rem;
+  color: var(--accent-lt);
+  font-family: 'DM Mono', monospace;
+  letter-spacing: 0.03em;
+}
+
+/* ── Layout ── */
+.app-layout {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 1.25rem 1.5rem 3rem;
+  display: flex;
+  gap: 1.25rem;
+  align-items: flex-start;
+}
+.left-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.settings-sidebar {
+  width: 340px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 1rem;
+  max-height: calc(100vh - 2rem);
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.settings-sidebar .card {
+  padding: 1.2rem 1.3rem;
+  min-width: 0;
+  overflow: hidden;
+}
+.settings-sidebar .card-title { font-size: 0.95rem; margin-bottom: 0.9rem; }
+.settings-sidebar .settings-grid {
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+  min-width: 0;
+}
+.settings-sidebar select,
+.settings-sidebar input[type=text],
+.settings-sidebar input[type=number],
+.settings-sidebar input[type=color] {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+.settings-sidebar .field.wide { grid-column: 1; }
+.settings-sidebar .settings-divider { margin: 0.9rem 0 0.8rem; }
+.settings-sidebar .group-label { margin-bottom: 0.6rem; }
+
+/* ── Paired fields (two side-by-side in one row) ── */
+.field-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .app-layout { flex-direction: column; }
+  .settings-sidebar { width: 100%; position: static; max-height: none; }
+}
+.collapsible-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.collapse-btn {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.73rem;
+  color: var(--ink-faint);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.2rem 0.55rem;
+  cursor: pointer;
+  transition: all 0.14s;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.collapse-btn:hover { background: var(--border-lt); color: var(--ink); }
+
+@media (max-width: 860px) {
+  .app-layout { flex-direction: column; }
+  .settings-sidebar { width: 100%; position: static; max-height: none; }
+}
+
+/* ── Cards ── */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
+}
+.card-title {
+  font-family: 'Fraunces', serif;
+  font-weight: 300;
+  font-size: 1.05rem;
+  margin-bottom: 1.1rem;
+  color: var(--ink);
+  letter-spacing: 0.01em;
+}
+
+/* ── Drop zone ── */
+.drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: 6px;
+  padding: 2rem 1rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.18s, background 0.18s;
+  color: var(--ink-mid);
+  user-select: none;
+}
+.drop-zone:hover,
+.drop-zone.dragover {
+  border-color: var(--accent);
+  background: #f0e8da55;
+}
+.drop-icon { font-size: 2rem; margin-bottom: 0.4rem; }
+.drop-zone p { font-size: 0.9rem; }
+.drop-zone .hint {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.76rem;
+  color: var(--accent);
+  margin-top: 0.35rem;
+}
+
+/* ── File table ── */
+.file-table-wrap { margin-top: 1.1rem; overflow-x: auto; }
+.file-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.83rem;
+}
+.file-table th {
+  text-align: left;
+  padding: 0.4rem 0.8rem;
+  border-bottom: 1px solid var(--border);
+  font-family: 'DM Mono', monospace;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+  font-weight: 400;
+  white-space: nowrap;
+}
+.file-table td {
+  padding: 0.38rem 0.8rem;
+  border-bottom: 1px solid var(--border-lt);
+  font-family: 'DM Mono', monospace;
+  vertical-align: middle;
+}
+.file-table tr:last-child td { border-bottom: none; }
+.file-table td.fname { color: var(--ink); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-table td.num { color: var(--ink-mid); text-align: right; }
+.file-table td.range { color: var(--ink-mid); }
+
+.y-input {
+  width: 110px;
+  padding: 0.28rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--cream);
+  font-family: 'DM Mono', monospace;
+  font-size: 0.82rem;
+  color: var(--ink);
+  transition: border-color 0.15s;
+}
+.y-input:focus { outline: none; border-color: var(--accent); }
+.y-input.missing { border-color: var(--err); }
+
+.del-btn {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--ink-faint);
+  font-size: 0.85rem;
+  padding: 0.2rem 0.45rem;
+  transition: all 0.12s;
+  font-family: 'DM Mono', monospace;
+}
+.del-btn:hover { border-color: var(--border); color: var(--err); background: #f8eded; }
+
+/* ── Settings grid ── */
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 1rem 1.25rem;
+}
+.field { display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; }
+.field.wide { grid-column: span 2; }
+.field label {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+}
+.field input[type=text],
+.field input[type=number],
+.field input[type=color],
+.field select {
+  width: 100%;
+  min-width: 0;
+  padding: 0.38rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--cream);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.88rem;
+  color: var(--ink);
+  transition: border-color 0.15s;
+}
+.field input[type=color] { height: 2.2rem; padding: 0.15rem 0.2rem; cursor: pointer; }
+.field input:focus,
+.field select:focus { outline: none; border-color: var(--accent); }
+
+.slider-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.1rem;
+}
+.slider-wrap span {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.74rem;
+  color: var(--ink-faint);
+  min-width: 2.8ch;
+}
+input[type=range] {
+  flex: 1;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+#gammaVal, #lwVal {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.85rem;
+  min-width: 3.5ch;
+  text-align: right;
+  color: var(--ink);
+}
+
+/* ── Buttons ── */
+.btn-row {
+  display: flex;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+.btn {
+  padding: 0.55rem 1.2rem;
+  border-radius: 5px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.88rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.14s;
+  border: 1px solid transparent;
+  line-height: 1.3;
+}
+.btn-primary {
+  background: var(--ink);
+  color: var(--cream);
+  border-color: var(--ink);
+}
+.btn-primary:hover { background: #444; border-color: #444; }
+.btn-secondary {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--border);
+}
+.btn-secondary:hover { background: var(--border-lt); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ── Status ── */
+.status {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.78rem;
+  color: var(--ink-faint);
+  min-height: 1.2em;
+  margin-bottom: 0.75rem;
+}
+.status.ok  { color: var(--ok); }
+.status.err { color: var(--err); }
+
+/* ── Canvas ── */
+.canvas-wrap { width: 100%; position: relative; }
+#plotCanvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 3px;
+  cursor: crosshair;
+}
+#cursorInfo {
+  position: absolute;
+  bottom: 8px;
+  right: 10px;
+  font-family: 'DM Mono', monospace;
+  font-size: 0.74rem;
+  color: var(--ink-faint);
+  pointer-events: none;
+  background: rgba(245,240,232,0.8);
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+}
+
+/* ── Settings groups ── */
+.group-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--ink-faint);
+  margin-bottom: 0.8rem;
+}
+.settings-divider {
+  border: none;
+  border-top: 1px solid var(--border-lt);
+  margin: 1.1rem 0 1rem;
+}
+
+/* ── Divider ── */
+.divider {
+  border: none;
+  border-top: 1px solid var(--border-lt);
+  margin: 1rem 0 0.9rem;
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Vx-PXRD Viewer</h1>
+  <p>variable-condition powder diffraction series · 2θ intensity map</p>
+</header>
+
+<div class="app-layout">
+
+  <!-- ══ Left column: files + plot ══ -->
+  <div class="left-col">
+
+  <!-- ── Files (collapsible) ── -->
+  <div class="card">
+    <div class="collapsible-header" id="filesToggle">
+      <span class="card-title" style="margin:0">Diffractogram files</span>
+      <button class="collapse-btn" id="filesCollapseBtn" title="Collapse panel">Hide ▲</button>
+    </div>
+    <div id="filesBody" style="margin-top:1.1rem">
+
+    <div class="drop-zone" id="dropZone">
+      <div class="drop-icon">📂</div>
+      <p>Drop <strong>.xy</strong> files or a <strong>.zip</strong> archive here, or click to browse</p>
+      <p class="hint">2θ &nbsp; intensity &nbsp;·&nbsp; space-separated &nbsp;·&nbsp; no header required</p>
+    </div>
+    <input type="file" id="fileInput" accept=".xy,.dat,.txt,.zip" multiple style="display:none">
+
+    <div class="file-table-wrap" id="fileTableWrap" style="display:none">
+      <table class="file-table">
+        <thead>
+          <tr>
+            <th>Filename</th>
+            <th style="text-align:right">Points</th>
+            <th>2θ range</th>
+            <th id="yColHead">Y value</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="fileTableBody"></tbody>
+      </table>
+    </div>
+    </div><!-- #filesBody -->
+  </div><!-- files card -->
+
+  <!-- ── Plot ── -->
+  <div class="card">
+    <div class="card-title" style="margin-bottom:0.8rem">Intensity map</div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="renderBtn">Render now</button>
+      <button class="btn btn-secondary" id="copyBtn">Copy to clipboard</button>
+    </div>
+    <div class="status" id="statusMsg">Load at least two diffractograms to begin.</div>
+    <div class="canvas-wrap">
+      <canvas id="plotCanvas"></canvas>
+      <div id="cursorInfo"></div>
+    </div>
+  </div>
+
+  </div><!-- .left-col -->
+
+  <!-- ══ Right: settings sidebar ══ -->
+  <aside class="settings-sidebar">
+  <div class="card">
+    <div class="card-title">Settings</div>
+
+    <!-- Data & scale -->
+    <div class="group-label">Data &amp; scale</div>
+    <div class="settings-grid">
+      <div class="field">
+        <label>Y-axis label</label>
+        <input type="text" id="yLabel" value="Temperature (°C)" placeholder="e.g. Temperature (°C)">
+      </div>
+      <div class="field-pair">
+        <div class="field">
+          <label>2θ min (°)</label>
+          <input type="number" id="ttMin" step="0.1" placeholder="auto">
+        </div>
+        <div class="field">
+          <label>2θ max (°)</label>
+          <input type="number" id="ttMax" step="0.1" placeholder="auto">
+        </div>
+      </div>
+      <div class="field">
+        <label>Normalisation</label>
+        <select id="normMode">
+          <option value="per_bl" selected>Per-pattern &amp; baseline</option>
+          <option value="per">Per-pattern (no baseline)</option>
+          <option value="global">Global</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Grid resolution</label>
+        <select id="gridRes">
+          <option value="1000">1000 pts (fast)</option>
+          <option value="2000" selected>2000 pts</option>
+          <option value="4000">4000 pts (fine)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="settings-divider"></div>
+
+    <!-- Colours & contrast -->
+    <div class="group-label">Colours &amp; contrast</div>
+    <div class="settings-grid">
+      <div class="field-pair">
+        <div class="field">
+          <label>Peak colour</label>
+          <input type="color" id="peakColor" value="#000000">
+        </div>
+        <div class="field">
+          <label>Background</label>
+          <input type="color" id="bgColor" value="#ffffff">
+        </div>
+      </div>
+      <div class="field">
+        <label>Plot height (px)</label>
+        <input type="number" id="plotHeightPx" value="" min="200" max="4000" step="50" placeholder="auto">
+      </div>
+      <div class="field">
+        <label>Contrast — gamma <span id="gammaVal">0.40</span></label>
+        <div class="slider-wrap">
+          <span>0.1</span>
+          <input type="range" id="gammaSlider" min="0.10" max="3.00" step="0.05" value="0.40">
+          <span>3.0</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-divider"></div>
+
+    <!-- Typography & lines -->
+    <div class="group-label">Typography &amp; lines</div>
+    <div class="settings-grid">
+      <div class="field">
+        <label>Font</label>
+        <select id="axisFont">
+          <option value="'DM Sans', sans-serif">DM Sans</option>
+          <option value="'DM Mono', monospace">DM Mono</option>
+          <option value="'Fraunces', serif">Fraunces</option>
+          <option value="Arial, sans-serif" selected>Arial</option>
+          <option value="Helvetica, sans-serif">Helvetica</option>
+          <option value="'Times New Roman', serif">Times New Roman</option>
+          <option value="Georgia, serif">Georgia</option>
+          <option value="'Courier New', monospace">Courier New</option>
+        </select>
+      </div>
+      <div class="field-pair">
+        <div class="field">
+          <label>Tick labels (px)</label>
+          <input type="number" id="tickSize" value="25" min="15" max="30" step="1">
+        </div>
+        <div class="field">
+          <label>Axis labels (px)</label>
+          <input type="number" id="labelSize" value="30" min="15" max="35" step="1">
+        </div>
+      </div>
+      <div class="field">
+        <label>Line weight — <span id="lwVal">3.0</span> px</label>
+        <div class="slider-wrap">
+          <span>1</span>
+          <input type="range" id="lwSlider" min="1" max="4" step="0.5" value="3">
+          <span>4</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-divider"></div>
+
+    <!-- Gridlines -->
+    <div class="group-label">Gridlines</div>
+    <div class="settings-grid">
+      <div class="field-pair" style="align-items:end;">
+        <label style="font-family:'DM Mono',monospace; font-size:0.8rem; color:var(--ink); display:flex; align-items:center; gap:0.45rem; cursor:pointer; padding-bottom:0.4rem;">
+          <input type="checkbox" id="showGridlines" style="accent-color:var(--accent); width:1rem; height:1rem;">
+          Show gridlines
+        </label>
+        <div class="field">
+          <label>Colour</label>
+          <input type="color" id="gridlineColor" value="#000000">
+        </div>
+      </div>
+      <div class="field">
+        <label>Weight — <span id="glwVal">1.0</span> px</label>
+        <div class="slider-wrap">
+          <span>0.5</span>
+          <input type="range" id="gridlineWeight" min="0.5" max="4" step="0.5" value="1" style="accent-color:var(--accent);">
+          <span>4</span>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- .card settings -->
+  </aside><!-- .settings-sidebar -->
+
+</div><!-- .app-layout -->
+
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════════
+//  State
+// ═══════════════════════════════════════════════════
+const patterns = [];   // { filename, twoTheta[], intensity[], y, nPts }
+let plotMeta = null;   // stored after render for cursor readout
+
+// ═══════════════════════════════════════════════════
+//  Files panel collapse/expand
+// ═══════════════════════════════════════════════════
+document.getElementById('filesToggle').addEventListener('click', e => {
+  // Don't trigger when clicking inside the body (e.g. inputs)
+  if (e.target.closest('#filesBody')) return;
+  const body = document.getElementById('filesBody');
+  const btn  = document.getElementById('filesCollapseBtn');
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : '';
+  btn.textContent    = open ? 'Show ▼' : 'Hide ▲';
+});
+
+// ═══════════════════════════════════════════════════
+//  File drop / input
+// ═══════════════════════════════════════════════════
+const dropZone   = document.getElementById('dropZone');
+const fileInput  = document.getElementById('fileInput');
+
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('dragover');
+  loadFiles([...e.dataTransfer.files]);
+});
+fileInput.addEventListener('change', () => { loadFiles([...fileInput.files]); fileInput.value = ''; });
+
+function extractYFromFilename(name) {
+  // Match last _NUMBER or -NUMBER before the extension
+  const stem = name.replace(/\.[^.]+$/, '');
+  const m = stem.match(/(?:_|-)(\d+(?:\.\d+)?)(?=[^0-9]|$)/g);
+  if (m && m.length) return parseFloat(m[m.length - 1].replace(/^[_-]/, ''));
+  // Fallback: any trailing number
+  const m2 = stem.match(/(\d+(?:\.\d+)?)$/);
+  if (m2) return parseFloat(m2[1]);
+  return null;
+}
+
+function parseXY(text) {
+  const twoTheta = [], intensity = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line[0] === '#' || line[0] === '!' || line[0] === ';') continue;
+    const parts = line.split(/[\s,;]+/);
+    if (parts.length < 2) continue;
+    const a = parseFloat(parts[0]), b = parseFloat(parts[1]);
+    if (isFinite(a) && isFinite(b)) { twoTheta.push(a); intensity.push(b); }
+  }
+  return { twoTheta, intensity };
+}
+
+async function loadFiles(files) {
+  let added = 0;
+
+  // Collect {name, getText()} entries from both plain files and zip archives
+  const entries = [];
+  for (const f of files) {
+    if (/\.zip$/i.test(f.name)) {
+      // Expand zip — requires JSZip
+      if (typeof JSZip === 'undefined') {
+        setStatus('JSZip not loaded — cannot open zip file.', 'err'); continue;
+      }
+      try {
+        const zip = await JSZip.loadAsync(f);
+        zip.forEach((relPath, zipEntry) => {
+          if (!zipEntry.dir && /\.(xy|dat|txt)$/i.test(relPath)) {
+            // Use only the basename so filename-based Y extraction works as expected
+            const basename = relPath.split('/').pop();
+            entries.push({ name: basename, getText: () => zipEntry.async('string') });
+          }
+        });
+      } catch (e) {
+        setStatus(`Could not open ${f.name}: ${e.message}`, 'err');
+      }
+    } else if (/\.(xy|dat|txt)$/i.test(f.name)) {
+      entries.push({ name: f.name, getText: () => f.text() });
+    }
+  }
+
+  for (const entry of entries) {
+    if (patterns.find(p => p.filename === entry.name)) continue;
+    const text = await entry.getText();
+    const { twoTheta, intensity } = parseXY(text);
+    if (twoTheta.length < 10) continue;
+    const y = extractYFromFilename(entry.name);
+    patterns.push({ filename: entry.name, twoTheta, intensity, y, nPts: twoTheta.length });
+    added++;
+  }
+  if (added) {
+    patterns.sort((a, b) => (a.y ?? 0) - (b.y ?? 0));
+    refreshTable();
+    autoFillRange();
+    setStatus(`${patterns.length} pattern${patterns.length > 1 ? 's' : ''} loaded.`, '');
+  }
+}
+
+// ═══════════════════════════════════════════════════
+//  File table
+// ═══════════════════════════════════════════════════
+function refreshTable() {
+  const wrap = document.getElementById('fileTableWrap');
+  const tbody = document.getElementById('fileTableBody');
+  if (!patterns.length) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+
+  // Update Y-column header
+  document.getElementById('yColHead').textContent =
+    document.getElementById('yLabel').value || 'Y value';
+
+  tbody.innerHTML = '';
+  patterns.forEach((p, i) => {
+    const ttMin = p.twoTheta[0].toFixed(3);
+    const ttMax = p.twoTheta[p.twoTheta.length - 1].toFixed(3);
+    const yVal  = p.y != null && isFinite(p.y) ? p.y : '';
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      `<td class="fname" title="${p.filename}">${p.filename}</td>
+       <td class="num">${p.nPts}</td>
+       <td class="range">${ttMin} – ${ttMax}</td>
+       <td><input class="y-input${yVal === '' ? ' missing' : ''}" type="number"
+           value="${yVal}" placeholder="required" data-i="${i}"></td>
+       <td><button class="del-btn" data-i="${i}" title="Remove">✕</button></td>`;
+    tbody.appendChild(tr);
+  });
+
+  tbody.querySelectorAll('.y-input').forEach(el => {
+    el.addEventListener('input', e => {
+      const i = +e.target.dataset.i;
+      const v = parseFloat(e.target.value);
+      patterns[i].y = isFinite(v) ? v : null;
+      e.target.classList.toggle('missing', !isFinite(v));
+    });
+    el.addEventListener('change', () => {
+      patterns.sort((a, b) => (a.y ?? 0) - (b.y ?? 0));
+      refreshTable();
+    });
+  });
+
+  tbody.querySelectorAll('.del-btn').forEach(el => {
+    el.addEventListener('click', e => {
+      patterns.splice(+e.target.dataset.i, 1);
+      refreshTable();
+      if (!patterns.length) setStatus('Load at least two diffractograms to begin.', '');
+    });
+  });
+}
+
+document.getElementById('yLabel').addEventListener('input', () => {
+  document.getElementById('yColHead').textContent =
+    document.getElementById('yLabel').value || 'Y value';
+});
+
+function autoFillRange() {
+  const minEl = document.getElementById('ttMin');
+  const maxEl = document.getElementById('ttMax');
+  const gMin = Math.min(...patterns.map(p => p.twoTheta[0]));
+  const gMax = Math.max(...patterns.map(p => p.twoTheta[p.twoTheta.length - 1]));
+  if (!minEl.value) minEl.value = gMin.toFixed(3);
+  if (!maxEl.value) maxEl.value = gMax.toFixed(3);
+}
+
+// ═══════════════════════════════════════════════════
+//  Gamma slider
+// ═══════════════════════════════════════════════════
+document.getElementById('gammaSlider').addEventListener('input', e => {
+  document.getElementById('gammaVal').textContent = parseFloat(e.target.value).toFixed(2);
+});
+document.getElementById('lwSlider').addEventListener('input', e => {
+  document.getElementById('lwVal').textContent = parseFloat(e.target.value).toFixed(1);
+});
+document.getElementById('gridlineWeight').addEventListener('input', e => {
+  document.getElementById('glwVal').textContent = parseFloat(e.target.value).toFixed(1);
+});
+
+// ═══════════════════════════════════════════════════
+//  Resampling & normalisation
+// ═══════════════════════════════════════════════════
+function resample(twoTheta, intensity, gMin, gMax, N) {
+  // Returns Float32Array of length N on a uniform grid [gMin, gMax]
+  const out = new Float32Array(N);
+  const step = (gMax - gMin) / (N - 1);
+  const n = twoTheta.length;
+  let j = 0; // index into source (assume sorted ascending)
+  for (let i = 0; i < N; i++) {
+    const tt = gMin + i * step;
+    // advance j until twoTheta[j+1] >= tt
+    while (j < n - 2 && twoTheta[j + 1] < tt) j++;
+    if (j >= n - 1) { out[i] = intensity[n - 1]; continue; }
+    const t = (twoTheta[j] === twoTheta[j + 1])
+      ? 0
+      : (tt - twoTheta[j]) / (twoTheta[j + 1] - twoTheta[j]);
+    out[i] = intensity[j] * (1 - t) + intensity[j + 1] * t;
+  }
+  return out;
+}
+
+function normalize(arr, mode, gMin, gMax) {
+  const N = arr.length;
+  let lo, hi;
+  if (mode === 'global') {
+    lo = gMin; hi = gMax;
+  } else {
+    lo = Infinity; hi = -Infinity;
+    for (let i = 0; i < N; i++) {
+      if (arr[i] < lo) lo = arr[i];
+      if (arr[i] > hi) hi = arr[i];
+    }
+    if (mode === 'per') lo = 0;   // don't subtract baseline
+  }
+  const range = hi - lo;
+  const out = new Float32Array(N);
+  if (range === 0) return out;
+  for (let i = 0; i < N; i++) out[i] = Math.max(0, Math.min(1, (arr[i] - lo) / range));
+  return out;
+}
+
+// ═══════════════════════════════════════════════════
+//  Colour helper
+// ═══════════════════════════════════════════════════
+function hexToRgb(hex) {
+  const n = parseInt((hex || '#000000').replace('#', ''), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+// ═══════════════════════════════════════════════════
+//  Margin layout — uses canvas measureText for accuracy
+// ═══════════════════════════════════════════════════
+function computeMargins(ttMin, ttMax, yMin, yMax, tickSize, labelSize, axisFont, tickLen) {
+  // Measure actual text widths with a throw-away canvas
+  const tmp = document.createElement('canvas');
+  const tc  = tmp.getContext('2d');
+  tc.font   = `${tickSize}px ${axisFont}`;
+
+  // Widest Y-axis tick label
+  const yRange = yMax - yMin;
+  const yStep  = niceStep(yRange / 6);
+  const yStart = Math.ceil(yMin / yStep) * yStep;
+  let maxYTickW = 0;
+  for (let yv = yStart; yv <= yMax + 1e-9; yv = +(yv + yStep).toFixed(9)) {
+    const w = tc.measureText(formatTick(yv)).width;
+    if (w > maxYTickW) maxYTickW = w;
+  }
+  maxYTickW = Math.ceil(maxYTickW);
+
+  // ── Left margin ──────────────────────────────────
+  // [ leftPad | rotated-Y-label | afterLabelGap | tick-labels | tickLen | innerGap ]
+  const leftPad        = 4;
+  const rotLabelExtent = Math.ceil(labelSize * 1.4);  // label height → x footprint when rotated
+  const afterLabelGap  = Math.max(5, Math.ceil(labelSize * 0.4));
+  const innerGap       = 3;   // gap between end of tick text and start of tick mark
+  const left = leftPad + rotLabelExtent + afterLabelGap + maxYTickW + tickLen + innerGap;
+
+  // Y-label is drawn centred within its own band [leftPad … leftPad+rotLabelExtent]
+  const yLabelCenterX = leftPad + Math.ceil(rotLabelExtent / 2);
+
+  // ── Bottom margin ─────────────────────────────────
+  // [ tickLen | innerGap | tick-label-height | afterTickGap | axis-label-height | bottomPad ]
+  const tickTextH    = Math.ceil(tickSize  * 1.35);  // cap + descent
+  const axisLabelH   = Math.ceil(labelSize * 1.35);
+  const afterTickGap = Math.max(5, Math.ceil(tickSize * 0.45));
+  const bottomPad    = 4;
+  const bottom = tickLen + innerGap + tickTextH + afterTickGap + axisLabelH + bottomPad;
+
+  return { top: 18, right: 22, bottom, left, yLabelCenterX };
+}
+
+// ═══════════════════════════════════════════════════
+//  Render
+// ═══════════════════════════════════════════════════
+document.getElementById('renderBtn').addEventListener('click', () => {
+  if (patterns.length < 2) { setStatus('Need at least two patterns.', 'err'); return; }
+  const bad = patterns.filter(p => p.y == null || !isFinite(p.y));
+  if (bad.length) {
+    setStatus(`Missing Y value: ${bad.map(p => p.filename).join(', ')}`, 'err');
+    return;
+  }
+  setStatus('Rendering…', '');
+  setTimeout(doRender, 25);
+});
+
+function doRender() {
+  try {
+    _render();
+  } catch (e) {
+    setStatus('Error: ' + e.message, 'err');
+    console.error(e);
+  }
+}
+
+function _render() {
+  const canvas     = document.getElementById('plotCanvas');
+  const ctx        = canvas.getContext('2d');
+  const yLabelTxt  = document.getElementById('yLabel').value || 'Condition';
+  const normMode   = document.getElementById('normMode').value;
+  const gamma      = parseFloat(document.getElementById('gammaSlider').value);
+  const GRID_N     = parseInt(document.getElementById('gridRes').value);
+  const axisFont   = document.getElementById('axisFont').value;
+  const tickSize   = Math.max(7, parseInt(document.getElementById('tickSize').value)  || 11);
+  const labelSize  = Math.max(8, parseInt(document.getElementById('labelSize').value) || 13);
+  const lineWeight    = parseFloat(document.getElementById('lwSlider').value) || 3.0;
+  const tickLen       = Math.round(3 + lineWeight * 1.5);
+  const showGridlines = document.getElementById('showGridlines').checked;
+  const gridlineWt    = parseFloat(document.getElementById('gridlineWeight').value) || 1.0;
+  const gridlineColor = document.getElementById('gridlineColor').value || '#000000';
+  const [pkR, pkG, pkB] = hexToRgb(document.getElementById('peakColor').value);
+  const [bgR, bgG, bgB] = hexToRgb(document.getElementById('bgColor').value);
+  const plotHeightInput = parseInt(document.getElementById('plotHeightPx').value);
+  const userHeight      = isFinite(plotHeightInput) && plotHeightInput >= 200 ? plotHeightInput : null;
+
+  let ttMin = parseFloat(document.getElementById('ttMin').value);
+  let ttMax = parseFloat(document.getElementById('ttMax').value);
+  if (!isFinite(ttMin)) ttMin = Math.min(...patterns.map(p => p.twoTheta[0]));
+  if (!isFinite(ttMax)) ttMax = Math.max(...patterns.map(p => p.twoTheta[p.twoTheta.length - 1]));
+
+  // Sort by y
+  const sorted = [...patterns].sort((a, b) => a.y - b.y);
+  const yVals  = sorted.map(p => p.y);
+  const yMin   = yVals[0];
+  const yMax   = yVals[yVals.length - 1];
+  const yRange = yMax - yMin;
+
+  // Compute margins using actual text measurements
+  const MARGIN = computeMargins(ttMin, ttMax, yMin, yMax, tickSize, labelSize, axisFont, tickLen);
+
+  // Resample all onto common grid
+  const rawArrays = sorted.map(p => resample(p.twoTheta, p.intensity, ttMin, ttMax, GRID_N));
+
+  // Global stats (for global normalisation)
+  let gMin = Infinity, gMax = -Infinity;
+  for (const arr of rawArrays) {
+    for (let i = 0; i < arr.length; i++) {
+      if (arr[i] < gMin) gMin = arr[i];
+      if (arr[i] > gMax) gMax = arr[i];
+    }
+  }
+
+  const normArrays = rawArrays.map(arr => normalize(arr, normMode, gMin, gMax));
+
+  // ── Canvas sizing ──
+  const totalW  = Math.max(canvas.parentElement.clientWidth, 520);
+  const totalH  = userHeight ?? Math.round(totalW * 0.58);
+  canvas.width  = totalW;
+  canvas.height = totalH;
+  const plotW   = totalW - MARGIN.left - MARGIN.right;
+  const plotH   = totalH - MARGIN.top  - MARGIN.bottom;
+
+  // ── Background: margins white, plot area gets background colour ──
+  ctx.fillStyle = `rgb(${bgR},${bgG},${bgB})`;
+  ctx.fillRect(MARGIN.left, MARGIN.top, plotW, plotH);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, MARGIN.left, totalH);
+  ctx.fillRect(MARGIN.left, 0, plotW, MARGIN.top);
+  ctx.fillRect(MARGIN.left, MARGIN.top + plotH, plotW, MARGIN.bottom);
+  ctx.fillRect(MARGIN.left + plotW, 0, MARGIN.right, totalH);
+
+  // ── Build pixel data for plot area ──
+  const imgData = ctx.createImageData(plotW, plotH);
+  const px4     = imgData.data;
+
+  const nPat = sorted.length;
+
+  for (let iy = 0; iy < plotH; iy++) {
+    // py=0 → top of plot → yMax;  py=plotH-1 → bottom → yMin
+    const yVal = yMax - (iy / (plotH - 1)) * yRange;
+
+    // Find bracketing patterns
+    let loI = 0, hiI = nPat - 1, t = 0;
+    if (yVal <= yVals[0]) {
+      loI = hiI = 0;
+    } else if (yVal >= yVals[nPat - 1]) {
+      loI = hiI = nPat - 1;
+    } else {
+      for (let k = 0; k < nPat - 1; k++) {
+        if (yVal >= yVals[k] && yVal <= yVals[k + 1]) {
+          loI = k; hiI = k + 1;
+          t   = (yVal - yVals[k]) / (yVals[k + 1] - yVals[k]);
+          break;
+        }
+      }
+    }
+
+    const arrLo = normArrays[loI];
+    const arrHi = normArrays[hiI];
+
+    for (let ix = 0; ix < plotW; ix++) {
+      // Linear index into GRID_N for this x pixel
+      const frac  = ix / (plotW - 1);
+      const fIdx  = frac * (GRID_N - 1);
+      const g0    = Math.floor(fIdx);
+      const g1    = Math.min(g0 + 1, GRID_N - 1);
+      const gf    = fIdx - g0;
+
+      const iLo = arrLo[g0] * (1 - gf) + arrLo[g1] * gf;
+      const iHi = arrHi[g0] * (1 - gf) + arrHi[g1] * gf;
+      let   intv = iLo * (1 - t) + iHi * t;
+
+      intv = Math.min(1, Math.max(0, Math.pow(intv, gamma)));
+
+      const base = (iy * plotW + ix) * 4;
+      px4[base]     = Math.round(bgR + intv * (pkR - bgR));
+      px4[base + 1] = Math.round(bgG + intv * (pkG - bgG));
+      px4[base + 2] = Math.round(bgB + intv * (pkB - bgB));
+      px4[base + 3] = 255;
+    }
+  }
+
+  ctx.putImageData(imgData, MARGIN.left, MARGIN.top);
+
+  // ── Axes ──
+  const INK    = '#2c2c2c';
+  const ACCENT = '#8b6b47';
+
+  // X axis — 2θ
+  ctx.fillStyle   = INK;
+  ctx.strokeStyle = INK;
+  ctx.lineWidth   = lineWeight;
+  const xStep  = niceStep((ttMax - ttMin) / 8);
+  const xStart = Math.ceil(ttMin / xStep) * xStep;
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'top';
+  ctx.font = `${tickSize}px ${axisFont}`;
+
+  for (let tt = xStart; tt <= ttMax + 1e-9; tt = +(tt + xStep).toFixed(9)) {
+    const px = MARGIN.left + ((tt - ttMin) / (ttMax - ttMin)) * plotW;
+    // tick
+    ctx.strokeStyle = INK;
+    ctx.lineWidth   = lineWeight;
+    ctx.beginPath(); ctx.moveTo(px, MARGIN.top + plotH); ctx.lineTo(px, MARGIN.top + plotH + tickLen); ctx.stroke();
+    // gridline (optional)
+    if (showGridlines) {
+      ctx.strokeStyle = gridlineColor;
+      ctx.lineWidth   = gridlineWt;
+      ctx.setLineDash([3, 5]);
+      ctx.beginPath(); ctx.moveTo(px, MARGIN.top); ctx.lineTo(px, MARGIN.top + plotH); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    // label
+    ctx.fillStyle = INK;
+    ctx.font = `${tickSize}px ${axisFont}`;
+    ctx.fillText(formatTick(tt), px, MARGIN.top + plotH + tickLen + 2);
+  }
+  // Box
+  ctx.strokeStyle = INK;
+  ctx.lineWidth   = lineWeight;
+  ctx.strokeRect(MARGIN.left, MARGIN.top, plotW, plotH);
+
+  // X axis label — centred in the space between tick labels and canvas bottom
+  {
+    const tickLabelBottom = MARGIN.top + plotH + tickLen + 2 + Math.ceil(tickSize * 1.35);
+    const xLabelY = Math.round(tickLabelBottom + (totalH - tickLabelBottom) / 2);
+    ctx.font = `${labelSize}px ${axisFont}`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = INK;
+    ctx.fillText('2\u03b8 (\u00b0)', MARGIN.left + plotW / 2, xLabelY);
+  }
+
+  // Y axis — condition
+  const yStep  = niceStep(yRange / 6);
+  const yStart = Math.ceil(yMin / yStep) * yStep;
+  ctx.font = `${tickSize}px ${axisFont}`;
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+
+  for (let yv = yStart; yv <= yMax + 1e-9; yv = +(yv + yStep).toFixed(9)) {
+    const py = MARGIN.top + (1 - (yv - yMin) / yRange) * plotH;
+    ctx.strokeStyle = INK;
+    ctx.lineWidth   = lineWeight;
+    ctx.beginPath(); ctx.moveTo(MARGIN.left - tickLen, py); ctx.lineTo(MARGIN.left, py); ctx.stroke();
+    // gridline (optional)
+    if (showGridlines) {
+      ctx.strokeStyle = gridlineColor;
+      ctx.lineWidth   = gridlineWt;
+      ctx.setLineDash([3, 5]);
+      ctx.beginPath(); ctx.moveTo(MARGIN.left, py); ctx.lineTo(MARGIN.left + plotW, py); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.fillStyle = INK;
+    ctx.font = `${tickSize}px ${axisFont}`;
+    ctx.fillText(formatTick(yv), MARGIN.left - tickLen - 3, py);
+  }
+
+  // Pattern position markers (small ticks on right edge)
+  sorted.forEach(p => {
+    const py = MARGIN.top + (1 - (p.y - yMin) / yRange) * plotH;
+    ctx.strokeStyle = ACCENT;
+    ctx.lineWidth = lineWeight + 0.5;
+    ctx.beginPath();
+    ctx.moveTo(MARGIN.left + plotW, py);
+    ctx.lineTo(MARGIN.left + plotW + tickLen, py);
+    ctx.stroke();
+  });
+  ctx.lineWidth = lineWeight;
+
+  // Y axis rotated label
+  ctx.save();
+  ctx.translate(MARGIN.yLabelCenterX, MARGIN.top + plotH / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = `${labelSize}px ${axisFont}`;
+  ctx.fillStyle = INK;
+  ctx.fillText(yLabelTxt, 0, 0);
+  ctx.restore();
+
+  // ── Store meta for cursor readout ──
+  plotMeta = { ttMin, ttMax, yMin, yMax, MARGIN, plotW, plotH };
+
+  setStatus(`Rendered ${sorted.length} patterns · 2\u03b8 ${ttMin.toFixed(2)}\u2013${ttMax.toFixed(2)}\u00b0 · \u03b3 = ${gamma.toFixed(2)}`, 'ok');
+}
+
+// ═══════════════════════════════════════════════════
+//  Auto-render on settings change (debounced)
+// ═══════════════════════════════════════════════════
+let autoRenderTimer = null;
+function scheduleRender() {
+  if (patterns.length < 2) return;
+  if (patterns.some(p => p.y == null || !isFinite(p.y))) return;
+  clearTimeout(autoRenderTimer);
+  autoRenderTimer = setTimeout(doRender, 320);
+}
+
+// Wire every settings control
+[
+  'yLabel','ttMin','ttMax','normMode','gridRes',
+  'peakColor','bgColor','plotHeightPx',
+  'gammaSlider','axisFont','tickSize','labelSize','lwSlider',
+  'showGridlines','gridlineWeight','gridlineColor'
+].forEach(id => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('input',  scheduleRender);
+  el.addEventListener('change', scheduleRender);
+});
+
+// ═══════════════════════════════════════════════════
+//  Cursor readout
+// ═══════════════════════════════════════════════════
+const canvas     = document.getElementById('plotCanvas');
+const cursorInfo = document.getElementById('cursorInfo');
+
+canvas.addEventListener('mousemove', e => {
+  if (!plotMeta) { cursorInfo.textContent = ''; return; }
+  const rect  = canvas.getBoundingClientRect();
+  const scaleX = canvas.width  / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const cx = (e.clientX - rect.left)  * scaleX;
+  const cy = (e.clientY - rect.top)   * scaleY;
+  const { ttMin, ttMax, yMin, yMax, MARGIN, plotW, plotH } = plotMeta;
+  const fx = (cx - MARGIN.left) / plotW;
+  const fy = (cy - MARGIN.top)  / plotH;
+  if (fx < 0 || fx > 1 || fy < 0 || fy > 1) { cursorInfo.textContent = ''; return; }
+  const tt  = ttMin + fx * (ttMax - ttMin);
+  const yv  = yMax  - fy * (yMax - yMin);
+  const yLbl = document.getElementById('yLabel').value || 'Y';
+  cursorInfo.textContent = `2\u03b8 ${tt.toFixed(3)}\u00b0  \u2022  ${yLbl.replace(/\s*\(.*\)/, '')} ${yv.toFixed(1)}`;
+});
+canvas.addEventListener('mouseleave', () => { cursorInfo.textContent = ''; });
+
+// ═══════════════════════════════════════════════════
+//  Copy to clipboard
+// ═══════════════════════════════════════════════════
+document.getElementById('copyBtn').addEventListener('click', async () => {
+  if (!plotMeta) { setStatus('Render the map first.', 'err'); return; }
+  try {
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    setStatus('Copied to clipboard.', 'ok');
+  } catch (e) {
+    setStatus('Copy failed: ' + e.message, 'err');
+  }
+});
+
+// ═══════════════════════════════════════════════════
+//  Resize → re-render
+// ═══════════════════════════════════════════════════
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  if (!plotMeta || patterns.length < 2) return;
+  resizeTimer = setTimeout(doRender, 150);
+});
+
+// ═══════════════════════════════════════════════════
+//  Helpers
+// ═══════════════════════════════════════════════════
+function setStatus(msg, cls) {
+  const el = document.getElementById('statusMsg');
+  el.textContent = msg;
+  el.className   = 'status' + (cls ? ' ' + cls : '');
+}
+
+function niceStep(rough) {
+  if (rough <= 0) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(rough)));
+  const f = rough / p;
+  return f < 1.5 ? p : f < 3.5 ? 2 * p : f < 7.5 ? 5 * p : 10 * p;
+}
+
+function formatTick(v) {
+  if (!isFinite(v)) return '';
+  const av = Math.abs(v);
+  if (av === 0) return '0';
+  if (av >= 100) return v.toFixed(0);
+  if (av >= 10)  return v.toFixed(Number.isInteger(v) ? 0 : 1);
+  if (av >= 1)   return v.toFixed(Number.isInteger(v) ? 0 : 2);
+  return v.toFixed(2);
+}
+</script>
+</body>
+</html>
