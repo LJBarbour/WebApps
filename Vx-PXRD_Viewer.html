@@ -118,11 +118,8 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
 .status.ok { color:var(--ok); }
 .status.err { color:var(--err); }
 
-/* ── Stacked plot legend handles ── */
+/* ── Stacked plot wrapper ── */
 .stack-wrap { position:relative; user-select:none; }
-.legend-handle { position:absolute; font-family:var(--mono); font-size:11px; padding:2px 7px; background:transparent; border:1px dashed transparent; cursor:move; pointer-events:auto; white-space:nowrap; line-height:1.4; }
-.legend-handle:hover { border-color:var(--accent); }
-.legend-handle.dragging { border-color:var(--accent); border-style:solid; background:rgba(237,231,216,0.6); }
 
 /* ── Guide ── */
 .guide { max-width:780px; margin:0 auto; line-height:1.75; font-size:14px; color:#222; }
@@ -167,7 +164,14 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
     </div>
     <input type="file" id="fileInput" accept=".xy,.dat,.txt,.zip" multiple style="display:none">
 
-    <div class="row-actions" id="rowActions" style="margin-top:18px;display:none">
+    <div class="row-actions" id="settingsActions" style="margin-top:14px">
+      <span class="lbl">App settings</span>
+      <button class="btn out" id="saveSettingsBtn">Save settings…</button>
+      <button class="btn out" id="loadSettingsBtn">Load settings…</button>
+    </div>
+    <input type="file" id="settingsFileInput" accept=".json,application/json" style="display:none">
+
+    <div class="row-actions" id="rowActions" style="margin-top:14px;display:none">
       <span class="lbl" id="fileCount"></span>
       <button class="btn out" id="sortByYBtn">Auto-sort</button>
       <button class="btn out" id="clearAllBtn">Clear all</button>
@@ -231,6 +235,7 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
               <option value="4000">4000 pts (fine)</option>
             </select>
           </div>
+          <div class="cr"><span class="cl">Pattern markers (right edge)</span><input type="checkbox" id="showPatternMarkers"></div>
         </div>
       </div>
 
@@ -241,6 +246,7 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
           <div class="cr"><span class="cl">Background</span><input type="color" id="bgColor" value="#ffffff"></div>
           <div class="cr"><span class="cl">Plot height (px)</span><input type="number" id="plotHeightPx" min="200" max="4000" step="50" placeholder="auto"></div>
           <div class="cr"><span class="cl">Gamma</span><input type="range" id="gammaSlider" min="0.10" max="3.00" step="0.05" value="0.40"><span class="rv" id="gammaVal">0.40</span></div>
+          <div class="cr"><span class="cl">Noise floor</span><input type="range" id="noiseFloor" min="0" max="0.5" step="0.01" value="0"><span class="rv" id="noiseFloorVal">0.00</span></div>
         </div>
       </div>
 
@@ -259,18 +265,27 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
               <option value="'Courier New', monospace">Courier New</option>
             </select>
           </div>
-          <div class="cr"><span class="cl">Tick labels (px)</span><input type="number" id="tickSize" value="25" min="10" max="40" step="1"></div>
-          <div class="cr"><span class="cl">Axis labels (px)</span><input type="number" id="labelSize" value="30" min="10" max="48" step="1"></div>
-          <div class="cr"><span class="cl">Line weight</span><input type="range" id="lwSlider" min="1" max="4" step="0.5" value="3"><span class="rv" id="lwVal">3.0</span></div>
+          <div class="cr"><span class="cl">Tick labels (px)</span><input type="number" id="tickSize" value="25" min="10" max="60" step="1"></div>
+          <div class="cr"><span class="cl">Axis labels (px)</span><input type="number" id="labelSize" value="30" min="10" max="75" step="1"></div>
+          <div class="cr"><span class="cl">Line weight</span><input type="range" id="lwSlider" min="1" max="6" step="0.5" value="3"><span class="rv" id="lwVal">3.0</span></div>
         </div>
       </div>
 
-      <div class="cp-group">
+      <div class="cp-group open">
         <div class="cp-head"><span class="cp-title">Gridlines</span><span class="cp-arr">▼</span></div>
         <div class="cp-body">
           <div class="cr"><span class="cl">Show gridlines</span><input type="checkbox" id="showGridlines"></div>
           <div class="cr"><span class="cl">Colour</span><input type="color" id="gridlineColor" value="#000000"></div>
           <div class="cr"><span class="cl">Weight</span><input type="range" id="gridlineWeight" min="0.5" max="4" step="0.5" value="1"><span class="rv" id="glwVal">1.0</span></div>
+        </div>
+      </div>
+
+      <div class="cp-group open">
+        <div class="cp-head"><span class="cp-title">Output size</span><span class="cp-arr">▼</span></div>
+        <div class="cp-body">
+          <div class="cr"><span class="cl">Lock plot size</span><input type="checkbox" id="lockSize"></div>
+          <div class="cr"><span class="cl">Width (px)</span><input type="number" id="lockWidth" value="1200" min="300" max="6000" step="50"></div>
+          <div class="cr"><span class="cl">Height (px)</span><input type="number" id="lockHeight" value="700" min="200" max="6000" step="50"></div>
         </div>
       </div>
     </div>
@@ -321,8 +336,8 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
               <option value="rainbow">Rainbow</option>
             </select>
           </div>
-          <div class="cr"><span class="cl">Diffractogram weight</span><input type="range" id="stkLineWt" min="0.5" max="4" step="0.25" value="1.25"><span class="rv" id="stkLineWtVal">1.25</span></div>
-          <div class="cr"><span class="cl">Axis/box weight</span><input type="range" id="stkAxisWt" min="0.5" max="4" step="0.25" value="1.5"><span class="rv" id="stkAxisWtVal">1.5</span></div>
+          <div class="cr"><span class="cl">Diffractogram weight</span><input type="range" id="stkLineWt" min="0.5" max="6" step="0.25" value="1.25"><span class="rv" id="stkLineWtVal">1.25</span></div>
+          <div class="cr"><span class="cl">Axis/box weight</span><input type="range" id="stkAxisWt" min="0.5" max="6" step="0.25" value="1.5"><span class="rv" id="stkAxisWtVal">1.5</span></div>
           <div class="cr"><span class="cl">Show plot box</span><input type="checkbox" id="stkShowBox"></div>
         </div>
       </div>
@@ -342,9 +357,9 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
               <option value="'Courier New', monospace">Courier New</option>
             </select>
           </div>
-          <div class="cr"><span class="cl">Tick label size</span><input type="number" id="stkTickSize" value="25" min="8" max="40"></div>
-          <div class="cr"><span class="cl">Axis label size</span><input type="number" id="stkLabelSize" value="30" min="10" max="48"></div>
-          <div class="cr"><span class="cl">Legend size</span><input type="number" id="stkLegendSize" value="25" min="8" max="40"></div>
+          <div class="cr"><span class="cl">Tick label size</span><input type="number" id="stkTickSize" value="25" min="8" max="60"></div>
+          <div class="cr"><span class="cl">Axis label size</span><input type="number" id="stkLabelSize" value="30" min="10" max="75"></div>
+          <div class="cr"><span class="cl">Legend size</span><input type="number" id="stkLegendSize" value="25" min="8" max="60"></div>
         </div>
       </div>
 
@@ -352,8 +367,16 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
         <div class="cp-head"><span class="cp-title">Legends</span><span class="cp-arr">▼</span></div>
         <div class="cp-body">
           <div class="cr"><span class="cl">Show legends</span><input type="checkbox" id="stkShowLegends" checked></div>
-          <div class="cr"><span class="cl">Snap to left edge</span><input type="checkbox" id="stkSnapLeft"></div>
+          <div class="cr"><span class="cl">Snap to left edge</span><input type="checkbox" id="stkSnapLeft" checked></div>
           <div class="cr"><span class="cl">Reset positions</span><button class="btn out" style="padding:4px 12px;font-size:9px" id="stkResetLegends">Reset</button></div>
+        </div>
+      </div>
+
+      <div class="cp-group open">
+        <div class="cp-head"><span class="cp-title">Output size</span><span class="cp-arr">▼</span></div>
+        <div class="cp-body">
+          <div class="cr"><span class="cl">Lock plot width</span><input type="checkbox" id="stkLockWidth"></div>
+          <div class="cr"><span class="cl">Width (px)</span><input type="number" id="stkLockWidthVal" value="1200" min="300" max="6000" step="50"></div>
         </div>
       </div>
     </div>
@@ -364,14 +387,15 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
 <div class="page" id="page-guide">
   <div class="guide">
     <h2>About Vx-PXRD Viewer</h2>
-    <p>This app visualises a series of powder X-ray diffractograms collected under a variable condition — temperature, pressure, time, relative humidity, or any other parameter — by stacking them into a single combined plot.</p>
+    <p>This app visualises a series of powder X-ray diffractograms collected under a variable condition — temperature, pressure, time, relative humidity, or any other parameter — by combining them into a single figure. It also handles series where the patterns are simply different phases or materials rather than a parametric scan.</p>
     <p>Two complementary views are provided: a greyscale (or coloured) <strong>intensity map</strong> and a more conventional <strong>stacked line plot</strong>. The same data underlies both views; switch between them with the tabs above.</p>
 
     <h3>Workflow</h3>
     <ul>
       <li>On the <strong>Files</strong> tab, drop your <code>.xy</code> files (two columns: 2θ and intensity) or a <code>.zip</code> archive of them. The app will try to extract the variable value from each filename automatically.</li>
-      <li>Check the auto-detected values in the file table and edit any that are missing or wrong. Each row also has a <em>Legend label</em> field for the stacked plot — the Y-value is used as the default.</li>
-      <li>Switch to <strong>Intensity Map</strong> or <strong>Stacked Plots</strong>, adjust the settings on the right, and the plot updates automatically.</li>
+      <li>Check the auto-detected values in the file table and edit any that are missing or wrong. Each row also has a <em>Legend label</em> field for the stacked plot — the Y-value plus unit is used as the default.</li>
+      <li>Reorder rows using the up/down arrows in the Order column, or click <em>Auto-sort</em> to restore the canonical order. Use the ✕ button to remove individual files.</li>
+      <li>Switch to <strong>Intensity Map</strong> or <strong>Stacked Plots</strong>, adjust the settings on the right, and the plot updates automatically as you change controls.</li>
     </ul>
 
     <h3>The intensity map</h3>
@@ -380,22 +404,36 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
     <p><strong>Reading the map:</strong> a vertical streak means a peak that holds its position over the range of conditions. A diagonal streak indicates a peak that shifts with the condition (typical of thermal expansion, lattice swelling, or pressure-induced compression). A streak that fades and another that appears nearby usually indicates a phase transition. Discrete jumps suggest abrupt structural changes.</p>
     <p><strong>Contrast and colour:</strong> the gamma slider stretches or compresses the intensity scale — values below 1 boost weak features (recommended for highlighting minor peaks), values above 1 emphasise only the strongest peaks. The peak and background colours can be set independently, so the conventional black-on-white can be flipped to white-on-black, or replaced with any duotone scheme.</p>
     <p><strong>Normalisation:</strong> <em>Per-pattern &amp; baseline</em> subtracts each pattern's minimum (its baseline) and scales to the maximum — best when patterns have varying backgrounds. <em>Per-pattern (no baseline)</em> scales to the maximum only, preserving relative background levels. <em>Global</em> uses the same scale across all patterns, which preserves absolute intensity changes but can wash out weaker patterns.</p>
+    <p><strong>Noise floor:</strong> after gamma is applied, any pixel intensity at or below the chosen threshold is set to background; remaining values are linearly rescaled so the full dynamic range is preserved. Disabled at 0 (default). A small value (around 0.05–0.15) often cleans up faint streaks from background noise or aerial peaks without affecting real reflections. Use sparingly — too high a threshold will erase weak but genuine peaks.</p>
+    <p><strong>Pattern markers:</strong> the intensity map's Y axis is continuous, so the actual measurement positions can be hidden between interpolated rows. Tick the <em>Pattern markers (right edge)</em> option in the Data &amp; scale group to draw a small tick on the right side of the plot at each pattern's exact Y value — useful when you want to be transparent about where the data was actually measured versus where it was interpolated.</p>
+    <p><strong>Gridlines:</strong> off by default. When enabled, dashed lines are drawn at every tick position in the chosen colour and weight.</p>
 
     <h3>The stacked plot</h3>
-    <p>The stacked plot shows each diffractogram as a conventional intensity-vs-2θ line, with the patterns offset vertically so they don't overlap. The Y axis has no ticks (the absolute intensity is not generally meaningful between patterns) but is labelled "Intensity" by convention.</p>
-    <p>Each pattern has a <strong>legend label</strong> that can be dragged with the mouse to any position on the plot, allowing fine control for publication-quality figures. Tick the <em>Snap to left edge</em> option to lock all legends to a common left-hand x-coordinate; drag any one legend horizontally to set that coordinate for all of them.</p>
-    <p>Use <em>Reverse order</em> when you want the lowest-condition pattern at the top of the stack (the default puts the lowest at the bottom, matching the intensity map's orientation).</p>
+    <p>The stacked plot shows each diffractogram as a conventional intensity-vs-2θ line, with the patterns offset vertically into bands so they don't overlap. The Y axis has no ticks (the absolute intensity is not generally meaningful between patterns) but is labelled "Intensity" by convention.</p>
+    <p><strong>Order:</strong> the patterns appear from bottom to top in the file order shown on the Files tab. With Y-sorted data this means the lowest-condition pattern is at the bottom, matching the intensity map's orientation. Tick <em>Reverse order</em> to flip this. Manual reordering on the Files tab is respected directly.</p>
+    <p><strong>Per-pattern normalisation:</strong> each diffractogram is independently scaled to fill its band, so subtle peaks in low-intensity patterns are visible alongside strong peaks in high-intensity patterns.</p>
+    <p><strong>Colour:</strong> the default is all-black diffractograms. Untick <em>All black</em> to use one of six colour ramps (Viridis, Plasma, Inferno, Cool, Warm, Rainbow); the ramp is applied from the first to the last pattern in the file order.</p>
+    <p><strong>Plot box:</strong> by default only the bottom (X) axis is drawn. Tick <em>Show plot box</em> for a full rectangle. The axis/box weight is independent of the diffractogram line weight.</p>
+    <p><strong>Legends:</strong> each pattern's legend label is drawn directly on the plot and can be repositioned with the mouse. Hover over a legend to see the cursor become a grab handle, then drag it anywhere within its band. Tick <em>Snap to left edge</em> (on by default) to lock all legends to a common left-hand x-coordinate — dragging any one legend horizontally then moves them all. The <em>Reset</em> button restores the default positions, which are calculated so the widest legend ends 30 px in from the plot's right edge. Because legends are drawn on the canvas itself (not as a separate overlay), right-clicking the plot and choosing <em>Copy image</em> or <em>Save image as…</em> in the browser produces a complete figure with the legends in place.</p>
 
-    <h3>File format</h3>
+    <h3>Output size and reproducibility</h3>
+    <p>By default both plots scale horizontally to fill the available browser width, which is convenient for exploration but means the same data can produce figures of different absolute dimensions on different days. For consistent figure preparation, tick <em>Lock plot size</em> (in the Output size group on each settings panel) and enter explicit pixel dimensions. The intensity map locks both width and height; the stacked plot locks the width — its height naturally follows from the number of patterns multiplied by the band height. Save the settings file once the layout is right, and the same dimensions are restored on every future session.</p>
+
+    <h3>File-naming and order</h3>
     <p>Input files are plain text with two whitespace- or comma-separated columns. The first column is 2θ in degrees; the second is intensity. Lines starting with <code>#</code>, <code>!</code>, or <code>;</code> are treated as comments and skipped. Extensions <code>.xy</code>, <code>.dat</code>, and <code>.txt</code> are all accepted.</p>
-    <p>The variable value is extracted from the last numeric segment of the filename, preceded by an underscore or hyphen. For example, <code>sample_KD66_150.xy</code> gives 150. Always check the auto-extracted values and override any that are wrong.</p>
+    <p>The variable value is extracted from the last numeric segment of the filename, preceded by an underscore or hyphen. For example, <code>sample_KD66_150.xy</code> gives 150. The legend label is auto-built from the value plus any unit detected in the Y-axis label string (e.g. <code>150 °C</code>). Always check the auto-extracted values and override any that are wrong.</p>
+    <p><strong>Non-numeric series:</strong> if your filenames don't contain numbers (e.g. <code>α-phase.xy</code>, <code>β-phase.xy</code>, <code>sample_A.xy</code>), the Y value is left blank and the legend defaults to the filename stem. Patterns are sorted in natural alphabetical order. The stacked plot works normally; the intensity map cannot be drawn without Y values (it would be physically meaningless) but is simply not used in this workflow.</p>
+
+    <h3>Save and load settings</h3>
+    <p>The <em>Save settings…</em> and <em>Load settings…</em> buttons on the Files tab let you preserve your control choices for both plots in a small JSON file. This is useful when you want consistent appearance across figures prepared over several sessions, or when sharing a publication style with a colleague. Save creates a file you can place anywhere on your computer; Load reads it back and applies every setting (settings only — the file table and any pattern data are unaffected).</p>
 
     <h3>Tips</h3>
     <ul>
-      <li>Both plots auto-update on any settings change. Use the <em>Render now</em> button only if you want an immediate refresh.</li>
+      <li>Both plots auto-update on any settings change after a short delay. Use the <em>Render now</em> button only if you want an immediate refresh.</li>
       <li>The Y-axis label on the intensity map and the legend label on each pattern are independent: the former describes the variable being plotted, the latter is just the per-pattern annotation.</li>
       <li>For variable-temperature data, a typical legend label might be "30 °C" or "150 °C"; for variable-pressure, "5 bar"; for time-resolved, "10 min", etc.</li>
-      <li>The Copy to clipboard buttons place a PNG of the current plot onto the clipboard at full canvas resolution.</li>
+      <li>Two ways to export the plots: the <em>Copy to clipboard</em> button places a PNG at full canvas resolution; right-clicking the plot offers the browser's standard <em>Copy image</em> and <em>Save image as…</em> options, which save the same content directly to file or clipboard. Both methods include the legends on the stacked plot.</li>
+      <li>The plot box and X axis on the stacked plot share the same "Axis/box weight" — keep it modest (1.5–2 px) for screen viewing, increase to 3–4 px for high-resolution publication exports.</li>
     </ul>
   </div>
 </div>
@@ -409,8 +447,11 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
 const patterns = [];      // { filename, twoTheta[], intensity[], y, legend, nPts }
 let plotMeta = null;
 let stackMeta = null;
-const legendPositions = {};   // keyed by filename → { x, y } in canvas coords
-let snapLeftX = null;          // common left x for snap mode
+let baseStackImage = null;     // ImageData snapshot of stack canvas before legends drawn
+let stackLegendBounds = [];    // [{ key, x, y, w, h, idx }] hit-test boxes for canvas legends
+let draggingLegend = null;     // { key, idx, offsetX, offsetY } while dragging
+const legendPositions = {};   // keyed by filename → { xFrac, yFrac }
+let snapLeftXFrac = null;      // common left x (as fraction of plotW) for snap mode
 
 // ═══════════════════════════════════════════════════
 //  Tab switching
@@ -666,6 +707,7 @@ function bindSlider(sliderId, valId, digits) {
   el.addEventListener('input', upd); upd();
 }
 bindSlider('gammaSlider',     'gammaVal',     2);
+bindSlider('noiseFloor',      'noiseFloorVal', 2);
 bindSlider('lwSlider',        'lwVal',        1);
 bindSlider('gridlineWeight',  'glwVal',       1);
 bindSlider('stkXPad',         'stkXPadVal',   0);
@@ -818,6 +860,8 @@ function _render() {
   const yLabelTxt = document.getElementById('yLabel').value || 'Condition';
   const normMode  = document.getElementById('normMode').value;
   const gamma     = parseFloat(document.getElementById('gammaSlider').value);
+  const noiseFloor = parseFloat(document.getElementById('noiseFloor').value) || 0;
+  const noiseScale = noiseFloor > 0 ? 1 / (1 - noiseFloor) : 1;
   const GRID_N    = parseInt(document.getElementById('gridRes').value);
   const axisFont  = document.getElementById('axisFont').value;
   const tickSize  = Math.max(7, parseInt(document.getElementById('tickSize').value)  || 25);
@@ -831,6 +875,9 @@ function _render() {
   const [bgR, bgG, bgB] = hexToRgb(document.getElementById('bgColor').value);
   const hIn = parseInt(document.getElementById('plotHeightPx').value);
   const userHeight = isFinite(hIn) && hIn >= 200 ? hIn : null;
+  const lockSize = document.getElementById('lockSize').checked;
+  const lockW = parseInt(document.getElementById('lockWidth').value)  || 1200;
+  const lockH = parseInt(document.getElementById('lockHeight').value) || 700;
 
   let ttMin = parseFloat(document.getElementById('ttMin').value);
   let ttMax = parseFloat(document.getElementById('ttMax').value);
@@ -852,8 +899,8 @@ function _render() {
   }
   const normArrays = rawArrays.map(arr => normalize(arr, normMode, gMin, gMax));
 
-  const totalW = Math.max(canvas.parentElement.clientWidth, 400);
-  const totalH = userHeight ?? Math.round(totalW * 0.58);
+  const totalW = lockSize ? lockW : Math.max(canvas.parentElement.clientWidth, 400);
+  const totalH = lockSize ? lockH : (userHeight ?? Math.round(totalW * 0.58));
   canvas.width = totalW; canvas.height = totalH;
   const plotW = totalW - MARGIN.left - MARGIN.right;
   const plotH = totalH - MARGIN.top  - MARGIN.bottom;
@@ -890,7 +937,13 @@ function _render() {
       const iLo = arrLo[g0] * (1 - gf) + arrLo[g1] * gf;
       const iHi = arrHi[g0] * (1 - gf) + arrHi[g1] * gf;
       let intv = iLo * (1 - t) + iHi * t;
-      intv = Math.min(1, Math.max(0, Math.pow(intv, gamma)));
+      intv = Math.pow(intv, gamma);
+      // Optional noise floor: anything at or below threshold → background;
+      // remaining values linearly rescaled so full dynamic range is preserved.
+      if (noiseFloor > 0) {
+        intv = intv <= noiseFloor ? 0 : (intv - noiseFloor) * noiseScale;
+      }
+      intv = Math.min(1, Math.max(0, intv));
       const base = (iy * plotW + ix) * 4;
       px4[base]     = Math.round(bgR + intv * (pkR - bgR));
       px4[base + 1] = Math.round(bgG + intv * (pkG - bgG));
@@ -952,6 +1005,19 @@ function _render() {
     ctx.font = `${tickSize}px ${axisFont}`;
     ctx.fillText(fmtTick(yv, yDec), MARGIN.left - tickLen - 3, py);
   }
+
+  // Optional pattern-position markers on the right edge — one per measured pattern
+  if (document.getElementById('showPatternMarkers').checked) {
+    ctx.strokeStyle = INK; ctx.lineWidth = lineWeight;
+    sorted.forEach(p => {
+      const py = MARGIN.top + (1 - (p.y - yMin) / yRange) * plotH;
+      ctx.beginPath();
+      ctx.moveTo(MARGIN.left + plotW, py);
+      ctx.lineTo(MARGIN.left + plotW + tickLen, py);
+      ctx.stroke();
+    });
+  }
+
   ctx.save();
   ctx.translate(MARGIN.yLabelCenterX, MARGIN.top + plotH / 2);
   ctx.rotate(-Math.PI / 2);
@@ -1021,9 +1087,14 @@ function _stackRender() {
     left: yLabelW + 10 + xPad
   };
 
-  const totalW = Math.max(canvas.parentElement.clientWidth, 400);
+  const totalW = (document.getElementById('stkLockWidth').checked)
+    ? (parseInt(document.getElementById('stkLockWidthVal').value) || 1200)
+    : Math.max(canvas.parentElement.clientWidth, 400);
   const plotW  = totalW - M.left - M.right;
-  const plotH  = N * bandH;
+  // Extra breathing space between the bottom diffractogram and the X axis line.
+  // Scales gently with axis weight so heavier axes don't look cramped.
+  const bottomPad = Math.round(14 + axisWt * 1.5);
+  const plotH  = N * bandH + bottomPad;
   const totalH = M.top + plotH + M.bottom;
   canvas.width = totalW; canvas.height = totalH;
 
@@ -1115,129 +1186,165 @@ function _stackRender() {
 
   stackMeta = { M, plotW, plotH, bandH, order, font, legSz, totalW, totalH };
 
-  // Render legend handles (DOM)
-  renderLegendHandles(showLeg);
+  // Take a snapshot of the canvas WITHOUT legends drawn.
+  // We use this to quickly re-draw legends during drag (no expensive chart redraw).
+  baseStackImage = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+  // Now draw legends on top of the chart
+  drawStackLegends(null);
 
   setStackStatus(`Rendered ${N} pattern${N>1?'s':''} · 2\u03b8 ${ttMin.toFixed(2)}–${ttMax.toFixed(2)}°`, 'ok');
 }
 
 // ═══════════════════════════════════════════════════
-//  Stacked plot — DOM legend handles
+//  Stacked plot — canvas-drawn legends with drag support
+//
+//  Legends are baked directly into the canvas so that right-click "Save image"
+//  and "Copy image" in the browser produce a complete figure. We snapshot the
+//  chart without legends in baseStackImage so dragging stays fast (no costly
+//  diffractogram redraw on every mousemove).
 // ═══════════════════════════════════════════════════
-function renderLegendHandles(visible) {
-  const wrap = document.getElementById('stackWrap');
-  // Remove old handles
-  wrap.querySelectorAll('.legend-handle').forEach(el => el.remove());
-  if (!visible || !stackMeta) return;
-
+function drawStackLegends(skipSet) {
+  if (!stackMeta || !baseStackImage) return;
   const canvas = document.getElementById('stackCanvas');
-  const cssScale = canvas.getBoundingClientRect().width / canvas.width;
+  const ctx    = canvas.getContext('2d');
+
+  // Restore chart-only state
+  ctx.putImageData(baseStackImage, 0, 0);
+  stackLegendBounds = [];
+
+  if (!document.getElementById('stkShowLegends').checked) return;
+
   const { M, plotW, bandH, order, font, legSz } = stackMeta;
   const snap = document.getElementById('stkSnapLeft').checked;
 
-  // Measure widest legend label in current font/size, in canvas pixels
-  const meas = document.createElement('canvas').getContext('2d');
-  meas.font = `${legSz}px ${font}`;
+  // Measure widest legend in current font for default-position computation
+  ctx.font = `${legSz}px ${font}`;
   let widestW = 0;
   order.forEach(p => {
-    const txt = p.legend || (p.y != null ? p.y : p.filename);
-    const w = meas.measureText(String(txt)).width;
+    const txt = String(p.legend || (p.y != null ? p.y : p.filename));
+    const w = ctx.measureText(txt).width;
     if (w > widestW) widestW = w;
   });
   const RIGHT_BUFFER = 30;
-  // Default X: leftmost edge of label such that the widest label finishes
-  // RIGHT_BUFFER pixels in from the plot's right edge.
-  const defaultX = M.left + plotW - widestW - RIGHT_BUFFER;
+  const defaultXFrac = Math.max(0, (plotW - widestW - RIGHT_BUFFER) / plotW);
+
+  ctx.fillStyle    = '#0f0e0d';
+  ctx.textBaseline = 'top';
+  ctx.textAlign    = 'left';
 
   order.forEach((p, idx) => {
     const key = p.filename;
-    const bandTop = M.top + idx * bandH;
 
-    // Position model: { x in canvas px, yFrac 0..1 within the band }
-    // Default: shared right-aligned column with buffer; 35% down from band top
-    const defYFrac = 0.35;
-    if (!legendPositions[key]) legendPositions[key] = { x: defaultX, yFrac: defYFrac };
-    let pos = legendPositions[key];
+    // Ensure a position exists (initialise on first encounter)
+    if (!legendPositions[key]) legendPositions[key] = { xFrac: defaultXFrac, yFrac: 0.35 };
+    // Legacy migration from earlier x-px storage
+    if (legendPositions[key].xFrac == null && legendPositions[key].x != null) {
+      legendPositions[key].xFrac = Math.max(0, Math.min(1, (legendPositions[key].x - M.left) / plotW));
+      delete legendPositions[key].x;
+    }
+    const pos = legendPositions[key];
+    const xFrac = (snap && snapLeftXFrac != null) ? snapLeftXFrac : pos.xFrac;
+    const x = M.left + xFrac * plotW;
+    const y = M.top + idx * bandH + pos.yFrac * bandH;
 
-    // If snapping, x is shared across all legends
-    if (snap && snapLeftX != null) pos.x = snapLeftX;
+    // Always record bounds for hit-testing — even if we're skipping the draw,
+    // so the user can grab a "phantom" legend while dragging another in snap mode.
+    const txt = String(p.legend || (p.y != null ? p.y : p.filename));
+    const w = ctx.measureText(txt).width;
+    stackLegendBounds.push({ key, idx, x, y, w, h: legSz });
 
-    const yAbs = bandTop + pos.yFrac * bandH;
-
-    const h = document.createElement('div');
-    h.className = 'legend-handle';
-    h.style.font = `${legSz}px ${font}`;
-    h.style.color = '#0f0e0d';
-    h.textContent = p.legend || (p.y != null ? p.y : p.filename);
-    h.dataset.key = key;
-    h.style.left = (pos.x * cssScale) + 'px';
-    h.style.top  = (yAbs * cssScale) + 'px';
-    h.dataset.bandTop = bandTop;
-    h.dataset.bandH   = bandH;
-
-    wrap.appendChild(h);
-
-    // Drag
-    let dragging = false, dx = 0, dy = 0;
-    h.addEventListener('mousedown', e => {
-      dragging = true;
-      h.classList.add('dragging');
-      const r = h.getBoundingClientRect();
-      dx = e.clientX - r.left;
-      dy = e.clientY - r.top;
-      e.preventDefault();
-    });
-    window.addEventListener('mousemove', e => {
-      if (!dragging) return;
-      const wr = wrap.getBoundingClientRect();
-      const scale = canvas.getBoundingClientRect().width / canvas.width;
-      const newCssX = e.clientX - wr.left - dx;
-      const newCssY = e.clientY - wr.top  - dy;
-      let cx = newCssX / scale;
-      let cy = newCssY / scale;
-
-      const bt = +h.dataset.bandTop;
-      const bh = +h.dataset.bandH;
-      // Clamp Y inside band (allow legend's own height room at the bottom)
-      cy = Math.max(bt, Math.min(bt + bh - legSz, cy));
-      cx = Math.max(M.left, Math.min(M.left + plotW - 20, cx));
-      const newYFrac = (cy - bt) / bh;
-
-      if (snap) {
-        snapLeftX = cx;
-        // Move all legends' x; vertical position unchanged
-        wrap.querySelectorAll('.legend-handle').forEach(el => {
-          const k = el.dataset.key;
-          legendPositions[k].x = cx;
-          el.style.left = (cx * scale) + 'px';
-        });
-        legendPositions[key].yFrac = newYFrac;
-        h.style.top = (cy * scale) + 'px';
-      } else {
-        legendPositions[key].x = cx;
-        legendPositions[key].yFrac = newYFrac;
-        h.style.left = (cx * scale) + 'px';
-        h.style.top  = (cy * scale) + 'px';
-      }
-    });
-    window.addEventListener('mouseup', () => {
-      if (dragging) { dragging = false; h.classList.remove('dragging'); }
-    });
+    if (skipSet && skipSet.has(key)) return;
+    ctx.fillText(txt, x, y);
   });
 }
 
+// ───── Mouse handling on the stack canvas for legend drag ─────
+(function attachStackInteractions() {
+  const canvas = document.getElementById('stackCanvas');
+
+  function getCanvasCoords(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width  / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+      cx: (e.clientX - rect.left) * scaleX,
+      cy: (e.clientY - rect.top)  * scaleY
+    };
+  }
+  function hitTest(cx, cy) {
+    // Iterate in reverse so the visually topmost (last drawn) wins
+    for (let i = stackLegendBounds.length - 1; i >= 0; i--) {
+      const b = stackLegendBounds[i];
+      if (cx >= b.x - 4 && cx <= b.x + b.w + 4 &&
+          cy >= b.y - 2 && cy <= b.y + b.h + 2) return b;
+    }
+    return null;
+  }
+
+  canvas.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;            // left-click only; right-click stays for context menu
+    if (!stackMeta) return;
+    const { cx, cy } = getCanvasCoords(e);
+    const hit = hitTest(cx, cy);
+    if (!hit) return;
+    e.preventDefault();
+    draggingLegend = { key: hit.key, idx: hit.idx, offsetX: cx - hit.x, offsetY: cy - hit.y };
+    canvas.style.cursor = 'grabbing';
+  });
+
+  canvas.addEventListener('mousemove', e => {
+    if (!stackMeta) return;
+    const { cx, cy } = getCanvasCoords(e);
+    if (draggingLegend) {
+      const { key, idx, offsetX, offsetY } = draggingLegend;
+      const { M, plotW, bandH, legSz } = stackMeta;
+      const bandTop = M.top + idx * bandH;
+      let newX = cx - offsetX;
+      let newY = cy - offsetY;
+      newY = Math.max(bandTop, Math.min(bandTop + bandH - legSz, newY));
+      newX = Math.max(M.left, Math.min(M.left + plotW - 20, newX));
+      const newXFrac = (newX - M.left) / plotW;
+      const newYFrac = (newY - bandTop) / bandH;
+
+      if (document.getElementById('stkSnapLeft').checked) {
+        snapLeftXFrac = newXFrac;
+        Object.keys(legendPositions).forEach(k => { legendPositions[k].xFrac = newXFrac; });
+        legendPositions[key].yFrac = newYFrac;
+      } else {
+        legendPositions[key].xFrac = newXFrac;
+        legendPositions[key].yFrac = newYFrac;
+      }
+      drawStackLegends(null);    // fast redraw — chart pixels come from baseStackImage
+    } else {
+      // Hover: change cursor when over a draggable legend
+      canvas.style.cursor = hitTest(cx, cy) ? 'grab' : 'crosshair';
+    }
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (draggingLegend) {
+      draggingLegend = null;
+      canvas.style.cursor = 'crosshair';
+    }
+  });
+  canvas.addEventListener('mouseleave', () => {
+    if (!draggingLegend) canvas.style.cursor = 'crosshair';
+  });
+})();
+
 document.getElementById('stkResetLegends').addEventListener('click', () => {
   Object.keys(legendPositions).forEach(k => delete legendPositions[k]);
-  snapLeftX = null;
-  scheduleStackRender();
+  snapLeftXFrac = null;
+  // Re-draw at default positions (fast — chart pixels reused via baseStackImage)
+  drawStackLegends(null);
 });
 document.getElementById('stkSnapLeft').addEventListener('change', e => {
   if (e.target.checked) {
-    // Establish snap x as the leftmost of current positions
-    const xs = Object.values(legendPositions).map(p => p.x);
-    if (xs.length) snapLeftX = Math.min(...xs);
+    const xFracs = Object.values(legendPositions).map(p => p.xFrac).filter(v => v != null);
+    if (xFracs.length) snapLeftXFrac = Math.min(...xFracs);
   }
-  scheduleStackRender();
+  drawStackLegends(null);
 });
 
 // ═══════════════════════════════════════════════════
@@ -1255,9 +1362,13 @@ function scheduleStackRender() {
 }
 
 // Map controls
-['yLabel','ttMin','ttMax','normMode','gridRes','peakColor','bgColor','plotHeightPx',
- 'gammaSlider','axisFont','tickSize','labelSize','lwSlider',
- 'showGridlines','gridlineWeight','gridlineColor'].forEach(id => {
+const MAP_CONTROLS = [
+  'yLabel','ttMin','ttMax','normMode','gridRes','peakColor','bgColor','plotHeightPx',
+  'gammaSlider','noiseFloor','axisFont','tickSize','labelSize','lwSlider',
+  'showGridlines','gridlineWeight','gridlineColor','showPatternMarkers',
+  'lockSize','lockWidth','lockHeight'
+];
+MAP_CONTROLS.forEach(id => {
   const el = document.getElementById(id);
   if (!el) return;
   el.addEventListener('input', scheduleRender);
@@ -1265,14 +1376,105 @@ function scheduleStackRender() {
 });
 
 // Stack controls
-['stkTtMin','stkTtMax','stkReverse','stkBandHeight','stkXPad',
- 'stkAllBlack','stkColorScheme','stkLineWt','stkAxisWt','stkShowBox',
- 'stkFont','stkTickSize','stkLabelSize','stkLegendSize',
- 'stkShowLegends'].forEach(id => {
+const STACK_CONTROLS = [
+  'stkTtMin','stkTtMax','stkReverse','stkBandHeight','stkXPad',
+  'stkAllBlack','stkColorScheme','stkLineWt','stkAxisWt','stkShowBox',
+  'stkFont','stkTickSize','stkLabelSize','stkLegendSize',
+  'stkShowLegends','stkSnapLeft',
+  'stkLockWidth','stkLockWidthVal'
+];
+STACK_CONTROLS.forEach(id => {
   const el = document.getElementById(id);
   if (!el) return;
   el.addEventListener('input', scheduleStackRender);
   el.addEventListener('change', scheduleStackRender);
+});
+
+// ═══════════════════════════════════════════════════
+//  Save / Load settings as JSON
+// ═══════════════════════════════════════════════════
+function gatherControlValue(id) {
+  const el = document.getElementById(id);
+  if (!el) return undefined;
+  if (el.type === 'checkbox') return el.checked;
+  return el.value;
+}
+function applyControlValue(id, val) {
+  const el = document.getElementById(id);
+  if (!el || val == null) return;
+  if (el.type === 'checkbox') el.checked = !!val;
+  else el.value = val;
+  // Update slider value displays
+  if (el.type === 'range') el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function collectSettings() {
+  const settings = { map: {}, stack: {}, _meta: { app: 'Vx-PXRD_Viewer', version: 1 } };
+  MAP_CONTROLS.forEach(id => { settings.map[id] = gatherControlValue(id); });
+  STACK_CONTROLS.forEach(id => { settings.stack[id] = gatherControlValue(id); });
+  return settings;
+}
+
+function applySettings(settings) {
+  if (!settings || typeof settings !== 'object') throw new Error('Invalid file');
+  if (settings.map)   MAP_CONTROLS.forEach(id => applyControlValue(id, settings.map[id]));
+  if (settings.stack) STACK_CONTROLS.forEach(id => applyControlValue(id, settings.stack[id]));
+}
+
+document.getElementById('saveSettingsBtn').addEventListener('click', async () => {
+  const data = JSON.stringify(collectSettings(), null, 2);
+  const defaultName = 'Vx-PXRD_settings.json';
+  // Prefer the modern Save File picker where supported (Chrome/Edge); fall back to
+  // a download link otherwise (Firefox/Safari).
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: defaultName,
+        types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }]
+      });
+      const writable = await handle.createWritable();
+      await writable.write(data);
+      await writable.close();
+      setStatus('Settings saved.', 'ok');
+      setStackStatus('Settings saved.', 'ok');
+      return;
+    } catch (e) {
+      if (e && e.name === 'AbortError') return; // user cancelled
+      // fall through to download
+    }
+  }
+  const blob = new Blob([data], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = defaultName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  setStatus('Settings downloaded.', 'ok');
+  setStackStatus('Settings downloaded.', 'ok');
+});
+
+document.getElementById('loadSettingsBtn').addEventListener('click', () => {
+  document.getElementById('settingsFileInput').click();
+});
+document.getElementById('settingsFileInput').addEventListener('change', async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  try {
+    const text = await f.text();
+    const obj  = JSON.parse(text);
+    applySettings(obj);
+    scheduleRender();
+    scheduleStackRender();
+    setStatus('Settings loaded.', 'ok');
+    setStackStatus('Settings loaded.', 'ok');
+  } catch (err) {
+    setStatus('Could not load settings: ' + err.message, 'err');
+    setStackStatus('Could not load settings: ' + err.message, 'err');
+  }
+  e.target.value = '';
 });
 
 // ═══════════════════════════════════════════════════
@@ -1308,6 +1510,10 @@ async function copyCanvasToClipboard(canvas, statusFn) {
 }
 document.getElementById('copyBtn').addEventListener('click', () =>
   copyCanvasToClipboard(document.getElementById('plotCanvas'), setStatus));
+// For the stacked plot we no longer need a special-case copy function:
+// legends are now drawn directly on the canvas, so the standard
+// copyCanvasToClipboard captures them automatically. Right-click "Copy image"
+// and "Save image as" in the browser also produce the complete figure.
 document.getElementById('stackCopyBtn').addEventListener('click', () =>
   copyCanvasToClipboard(document.getElementById('stackCanvas'), setStackStatus));
 
