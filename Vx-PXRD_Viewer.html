@@ -267,8 +267,9 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
           <div class="cr"><span class="cl">Peak colour</span><input type="color" id="peakColor" value="#000000"></div>
           <div class="cr"><span class="cl">Background</span><input type="color" id="bgColor" value="#ffffff"></div>
           <div class="cr"><span class="cl">Plot height (px)</span><input type="number" id="plotHeightPx" min="200" max="4000" step="50" placeholder="auto"></div>
+          <div class="cr"><span class="cl">Peak emphasis</span><input type="range" id="peakEmphasis" min="1" max="4" step="0.1" value="1"><span class="rv" id="peakEmphasisVal">1.0</span></div>
           <div class="cr"><span class="cl">Gamma</span><input type="range" id="gammaSlider" min="0.10" max="3.00" step="0.05" value="0.40"><span class="rv" id="gammaVal">0.40</span></div>
-          <div class="cr"><span class="cl">Noise floor</span><input type="range" id="noiseFloor" min="0" max="0.5" step="0.01" value="0"><span class="rv" id="noiseFloorVal">0.00</span></div>
+          <div class="cr"><span class="cl">Noise floor</span><input type="range" id="noiseFloor" min="0" max="5" step="0.1" value="0"><span class="rv" id="noiseFloorVal">0.0%</span></div>
         </div>
       </div>
 
@@ -426,7 +427,8 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
     <p><strong>Reading the map:</strong> a vertical streak means a peak that holds its position over the range of conditions. A diagonal streak indicates a peak that shifts with the condition (typical of thermal expansion, lattice swelling, or pressure-induced compression). A streak that fades and another that appears nearby usually indicates a phase transition. Discrete jumps suggest abrupt structural changes.</p>
     <p><strong>Contrast and colour:</strong> the gamma slider stretches or compresses the intensity scale — values below 1 boost weak features (recommended for highlighting minor peaks), values above 1 emphasise only the strongest peaks. The peak and background colours can be set independently, so the conventional black-on-white can be flipped to white-on-black, or replaced with any duotone scheme.</p>
     <p><strong>Normalisation:</strong> <em>Per-pattern &amp; baseline</em> subtracts each pattern's minimum (its baseline) and scales to the maximum — best when patterns have varying backgrounds. <em>Per-pattern (no baseline)</em> scales to the maximum only, preserving relative background levels. <em>Global</em> uses the same scale across all patterns, which preserves absolute intensity changes but can wash out weaker patterns.</p>
-    <p><strong>Noise floor:</strong> after gamma is applied, any pixel intensity at or below the chosen threshold is set to background; remaining values are linearly rescaled so the full dynamic range is preserved. Disabled at 0 (default). A small value (around 0.05–0.15) often cleans up faint streaks from background noise or aerial peaks without affecting real reflections. Use sparingly — too high a threshold will erase weak but genuine peaks.</p>
+    <p><strong>Peak emphasis:</strong> a pre-normalisation power transform applied to each pattern individually. The pattern's baseline is subtracted (so noise is centred near zero), then the result is raised to the power <em>p</em>. At <em>p</em>=1 (default) this is a no-op. At <em>p</em>=2 the intensities are squared, which improves signal-to-noise ratio because peaks of amplitude <em>A</em> grow to <em>A²</em> while noise of amplitude <em>N</em> shrinks relatively to <em>N²/A²</em> — a quadratic gain in contrast. Higher powers (3–4) further suppress noise but make the brightest peaks dominate the visual scale. Especially helpful when some patterns are much noisier than others (e.g. high-temperature data) and per-pattern normalisation would otherwise bring their noise up to the same brightness as real peaks in cleaner patterns.</p>
+    <p><strong>Noise floor:</strong> a percentage of the maximum peak height (0–5%). Applied to each pattern's normalised intensity array before the map is built — any value at or below the threshold becomes a hard zero, and remaining values are linearly rescaled so peak contrast is preserved. The interpolation between patterns then operates on clean data rather than on noise, so faint streaks vanish completely rather than just being dimmed. Set to 0% by default; 1–2% is usually enough to clear background noise from typical PXRD data. Higher values will start to erase weak but genuine peaks.</p>
     <p><strong>Pattern markers:</strong> the intensity map's Y axis is continuous, so the actual measurement positions can be hidden between interpolated rows. Tick the <em>Pattern markers (right edge)</em> option in the Data &amp; scale group to draw a small tick on the right side of the plot at each pattern's exact Y value — useful when you want to be transparent about where the data was actually measured versus where it was interpolated.</p>
     <p><strong>Gridlines:</strong> off by default. When enabled, dashed lines are drawn at every tick position in the chosen colour and weight.</p>
 
@@ -729,7 +731,14 @@ function bindSlider(sliderId, valId, digits) {
   el.addEventListener('input', upd); upd();
 }
 bindSlider('gammaSlider',     'gammaVal',     2);
-bindSlider('noiseFloor',      'noiseFloorVal', 2);
+bindSlider('peakEmphasis',    'peakEmphasisVal', 1);
+// Noise floor: show "X.X%" rather than a unitless fraction
+(function(){
+  const el = document.getElementById('noiseFloor');
+  const v  = document.getElementById('noiseFloorVal');
+  const upd = () => { v.textContent = parseFloat(el.value).toFixed(1) + '%'; };
+  el.addEventListener('input', upd); upd();
+})();
 bindSlider('lwSlider',        'lwVal',        1);
 bindSlider('gridlineWeight',  'glwVal',       1);
 bindSlider('stkXPad',         'stkXPadVal',   0);
@@ -882,7 +891,9 @@ function _render() {
   const yLabelTxt = document.getElementById('yLabel').value || 'Condition';
   const normMode  = document.getElementById('normMode').value;
   const gamma     = parseFloat(document.getElementById('gammaSlider').value);
-  const noiseFloor = parseFloat(document.getElementById('noiseFloor').value) || 0;
+  const peakEmphasis = parseFloat(document.getElementById('peakEmphasis').value) || 1;
+  // Noise floor: slider is in percent (0-5), convert to a fraction of the per-pattern max
+  const noiseFloor = (parseFloat(document.getElementById('noiseFloor').value) || 0) / 100;
   const noiseScale = noiseFloor > 0 ? 1 / (1 - noiseFloor) : 1;
   const GRID_N    = parseInt(document.getElementById('gridRes').value);
   const axisFont  = document.getElementById('axisFont').value;
@@ -914,12 +925,41 @@ function _render() {
   const MARGIN = computeMargins(ttMin, ttMax, yMin, yMax, tickSize, labelSize, axisFont, tickLen);
 
   const rawArrays = sorted.map(p => resample(p.twoTheta, p.intensity, ttMin, ttMax, GRID_N));
+
+  // Optional peak emphasis: pre-normalisation power transform.
+  // For each pattern, subtract its own baseline (so noise is centred near zero)
+  // then raise to the power `peakEmphasis`. Peaks (large amplitudes above
+  // baseline) grow faster than noise (small amplitudes), boosting the
+  // signal-to-noise ratio before per-pattern normalisation. p=1 is a no-op.
+  if (peakEmphasis > 1) {
+    for (const arr of rawArrays) {
+      let lo = Infinity;
+      for (let i = 0; i < arr.length; i++) if (arr[i] < lo) lo = arr[i];
+      for (let i = 0; i < arr.length; i++) {
+        const v = arr[i] - lo;
+        arr[i] = v > 0 ? Math.pow(v, peakEmphasis) : 0;
+      }
+    }
+  }
+
   let gMin = Infinity, gMax = -Infinity;
   for (const arr of rawArrays) for (let i = 0; i < arr.length; i++) {
     if (arr[i] < gMin) gMin = arr[i];
     if (arr[i] > gMax) gMax = arr[i];
   }
   const normArrays = rawArrays.map(arr => normalize(arr, normMode, gMin, gMax));
+
+  // Apply noise floor at the source: anything ≤ threshold in the normalised
+  // intensity arrays is set to 0 BEFORE interpolation, so noise streaks can't
+  // sneak in between bracketing patterns. Remaining values are linearly
+  // rescaled so the full 0-1 range is preserved.
+  if (noiseFloor > 0) {
+    for (const arr of normArrays) {
+      for (let i = 0; i < arr.length; i++) {
+        arr[i] = arr[i] <= noiseFloor ? 0 : (arr[i] - noiseFloor) * noiseScale;
+      }
+    }
+  }
 
   const totalW = lockSize ? lockW : Math.max(canvas.parentElement.clientWidth, 400);
   const totalH = lockSize ? lockH : (userHeight ?? Math.round(totalW * 0.58));
@@ -959,13 +999,7 @@ function _render() {
       const iLo = arrLo[g0] * (1 - gf) + arrLo[g1] * gf;
       const iHi = arrHi[g0] * (1 - gf) + arrHi[g1] * gf;
       let intv = iLo * (1 - t) + iHi * t;
-      intv = Math.pow(intv, gamma);
-      // Optional noise floor: anything at or below threshold → background;
-      // remaining values linearly rescaled so full dynamic range is preserved.
-      if (noiseFloor > 0) {
-        intv = intv <= noiseFloor ? 0 : (intv - noiseFloor) * noiseScale;
-      }
-      intv = Math.min(1, Math.max(0, intv));
+      intv = Math.min(1, Math.max(0, Math.pow(intv, gamma)));
       const base = (iy * plotW + ix) * 4;
       px4[base]     = Math.round(bgR + intv * (pkR - bgR));
       px4[base + 1] = Math.round(bgG + intv * (pkG - bgG));
@@ -1386,7 +1420,7 @@ function scheduleStackRender() {
 // Map controls
 const MAP_CONTROLS = [
   'yLabel','ttMin','ttMax','normMode','gridRes','peakColor','bgColor','plotHeightPx',
-  'gammaSlider','noiseFloor','axisFont','tickSize','labelSize','lwSlider',
+  'peakEmphasis','gammaSlider','noiseFloor','axisFont','tickSize','labelSize','lwSlider',
   'showGridlines','gridlineWeight','gridlineColor','showPatternMarkers',
   'lockSize','lockWidth','lockHeight'
 ];
