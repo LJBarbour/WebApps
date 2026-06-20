@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ewald Sphere Construction</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0a0e1a;
+  --surface:#111827;
+  --surface2:#1a2035;
+  --border:rgba(255,255,255,0.08);
+  --accent:#4FC3F7;
+  --constructive:#FFD54F;
+  --destructive:#EF5350;
+  --text:#E8EAF6;
+  --muted:#78909C;
+  --lattice:#9FA8DA;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;}
+body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;
+  display:flex;flex-direction:column;overflow:hidden;}
+header{padding:11px 22px;border-bottom:1px solid var(--border);display:flex;
+  align-items:baseline;gap:14px;flex-shrink:0;}
+header h1{font-family:'Space Mono',monospace;font-size:13px;font-weight:700;
+  color:var(--accent);letter-spacing:.05em;}
+header span{font-size:11px;color:var(--muted);font-weight:300;}
+.layout{flex:1;display:grid;grid-template-columns:1fr 300px;min-height:0;overflow:hidden;}
+.canvas-area{display:flex;flex-direction:column;padding:10px 14px;gap:4px;min-height:0;}
+canvas{border-radius:7px;border:1px solid var(--border);background:var(--surface);
+  width:100%;display:block;flex:1;cursor:grab;touch-action:none;}
+canvas.dragging{cursor:grabbing;}
+.slbl{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--muted);margin-bottom:2px;flex-shrink:0;}
+.hint{font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);opacity:.55;
+  text-align:center;flex-shrink:0;margin-top:2px;}
+.panel{border-left:1px solid var(--border);background:var(--surface);padding:12px 13px;
+  display:flex;flex-direction:column;overflow-y:auto;}
+.cg{margin-bottom:11px;}
+.cg label{display:flex;justify-content:space-between;align-items:center;
+  font-size:11px;color:var(--muted);margin-bottom:4px;}
+.cg label span.val{font-family:'Space Mono',monospace;font-size:10px;color:var(--accent);
+  background:rgba(79,195,247,0.1);padding:2px 6px;border-radius:3px;}
+input[type=range]{width:100%;-webkit-appearance:none;appearance:none;height:3px;border-radius:2px;
+  background:var(--border);outline:none;cursor:pointer;}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:13px;height:13px;
+  border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid var(--surface);}
+input[type=range]::-moz-range-thumb{width:13px;height:13px;border-radius:50%;background:var(--accent);
+  cursor:pointer;border:2px solid var(--surface);}
+.presets{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px;}
+.pbtn{padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:transparent;
+  color:var(--muted);font-family:'Space Mono',monospace;font-size:9px;cursor:pointer;
+  transition:all .15s;line-height:1.5;}
+.pbtn:hover,.pbtn.active{border-color:var(--accent);color:var(--accent);background:rgba(79,195,247,0.08);}
+.pbtn.on{border-color:var(--constructive);color:var(--constructive);background:rgba(255,213,79,0.08);}
+.div{height:1px;background:var(--border);margin:9px 0;flex-shrink:0;}
+.bd{background:var(--surface2);border:1px solid var(--border);border-radius:7px;
+  padding:9px 11px;margin-bottom:9px;}
+.bf{font-family:'Space Mono',monospace;font-size:12px;color:var(--text);text-align:center;margin-bottom:6px;}
+.bvg{display:grid;grid-template-columns:1fr 1fr;gap:4px;}
+.bv{background:rgba(255,255,255,0.03);border-radius:4px;padding:5px 7px;}
+.bv .bn{font-size:9px;color:var(--muted);display:block;margin-bottom:1px;}
+.bv .bv2{font-family:'Space Mono',monospace;font-size:11px;color:var(--accent);}
+.ind{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:6px;
+  margin-bottom:7px;border-left:3px solid transparent;background:rgba(255,255,255,0.02);
+  transition:border-color .2s;}
+.idot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--muted);transition:all .2s;}
+.itxt{font-size:11px;line-height:1.4;}
+.itxt strong{display:block;font-weight:600;font-size:12px;}
+.actions{display:flex;gap:5px;margin-top:3px;}
+.actions .pbtn{flex:1;text-align:center;}
+.reflist{display:flex;flex-direction:column;gap:3px;max-height:170px;overflow-y:auto;
+  padding-right:3px;}
+.refrow{display:grid;grid-template-columns:48px 1fr 1fr auto;gap:4px;align-items:center;
+  padding:4px 7px;background:rgba(255,213,79,0.05);border:1px solid rgba(255,213,79,0.18);
+  border-radius:4px;font-family:'Space Mono',monospace;font-size:10px;}
+.refrow .hk{color:var(--constructive);font-weight:700;}
+.refrow .lbl{color:var(--muted);font-size:9px;display:flex;gap:3px;align-items:baseline;}
+.refrow .num{color:var(--text);font-size:10px;}
+.refrow.empty{display:block;background:rgba(255,255,255,0.02);border-color:var(--border);
+  color:var(--muted);text-align:center;padding:9px;}
+.fnote{display:block;font-size:9px;color:var(--muted);line-height:1.55;margin-top:8px;opacity:.65;}
+.fnote em{color:var(--constructive);font-style:normal;}
+.fnote b{color:var(--accent);font-weight:normal;}
+@media (max-width: 880px){
+  .layout{grid-template-columns:1fr;grid-template-rows:1fr auto;}
+  .panel{border-left:none;border-top:1px solid var(--border);max-height:55vh;}
+  canvas{min-height:340px;}
+}
+::-webkit-scrollbar{width:8px;height:8px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.07);border-radius:4px;}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.13);}
+</style>
+</head>
+<body>
+<header>
+  <h1>EWALD SPHERE CONSTRUCTION</h1>
+  <span>2D · |k| = 1/λ &nbsp;|&nbsp; reciprocal lattice meets the diffraction condition</span>
+</header>
+<div class="layout">
+  <div class="canvas-area">
+    <div class="slbl">Real and reciprocal space, common scale</div>
+    <canvas id="cv"></canvas>
+    <div class="hint">drag the canvas to rotate the crystal · auto-rotate to scan continuously</div>
+  </div>
+  <div class="panel">
+    <div class="bd">
+      <div class="bf">|k<sub>in</sub>| = |k<sub>out</sub>| = 1/λ</div>
+      <div class="bvg">
+        <div class="bv"><span class="bn">λ (wavelength)</span><span class="bv2" id="ld">0.7107 Å</span></div>
+        <div class="bv"><span class="bn">R = 1/λ</span><span class="bv2" id="rd">1.408 Å⁻¹</span></div>
+        <div class="bv"><span class="bn">crystal rotation φ</span><span class="bv2" id="phid">0.0°</span></div>
+        <div class="bv"><span class="bn">active reflections</span><span class="bv2" id="nrd">0</span></div>
+      </div>
+    </div>
+    <div id="ind" class="ind">
+      <div class="idot" id="idot"></div>
+      <div class="itxt"><strong id="itit">No reflection</strong><span id="idsc">rotate the crystal to bring a lattice point onto the sphere</span></div>
+    </div>
+    <div class="cg">
+      <label>X-ray source</label>
+      <div class="presets">
+        <button class="pbtn" data-lam="0.5594" onclick="setPreset(this,0.5594)">Ag Kα<br>0.559 Å</button>
+        <button class="pbtn active" data-lam="0.7107" onclick="setPreset(this,0.7107)">Mo Kα<br>0.711 Å</button>
+        <button class="pbtn" data-lam="1.5418" onclick="setPreset(this,1.5418)">Cu Kα<br>1.542 Å</button>
+        <button class="pbtn" data-lam="2.2909" onclick="setPreset(this,2.2909)">Cr Kα<br>2.291 Å</button>
+      </div>
+    </div>
+    <div class="cg">
+      <label>Wavelength λ <span class="val" id="llbl">0.711 Å</span></label>
+      <input type="range" id="lsl" min="0.4" max="2.5" step="0.001" value="0.7107">
+    </div>
+    <div class="div"></div>
+    <div class="slbl">Direct lattice (real-space cell)</div>
+    <div class="cg">
+      <label>a <span class="val" id="albl">5.00 Å</span></label>
+      <input type="range" id="asl" min="3" max="15" step="0.05" value="5.0">
+    </div>
+    <div class="cg">
+      <label>b <span class="val" id="blbl">5.00 Å</span></label>
+      <input type="range" id="bsl" min="3" max="15" step="0.05" value="5.0">
+    </div>
+    <div class="cg">
+      <label>γ (angle a∧b) <span class="val" id="glbl">90.0°</span></label>
+      <input type="range" id="gsl" min="40" max="140" step="0.5" value="90">
+    </div>
+    <div class="div"></div>
+    <div class="cg">
+      <label>Crystal rotation φ <span class="val" id="phislabel">0.0°</span></label>
+      <input type="range" id="phisl" min="-180" max="180" step="0.1" value="0">
+    </div>
+    <div class="actions">
+      <button class="pbtn" id="autobtn" onclick="toggleAuto()">▶&nbsp;auto-rotate</button>
+      <button class="pbtn" onclick="resetRotation()">reset φ</button>
+    </div>
+    <div class="div"></div>
+    <div class="slbl">Active reflections</div>
+    <div class="reflist" id="reflist"></div>
+    <span class="fnote">
+      <b>Cyan</b> = Ewald sphere (radius 1/λ) and incident wave k<sub>in</sub>. The 000 reciprocal-lattice origin sits where k<sub>in</sub> exits the sphere.<br>
+      <em>Yellow</em> = reflections that satisfy 2d·sinθ = nλ. The diffracted beam k<sub>out</sub> radiates from the crystal through the active lattice point, and G = k<sub>out</sub> − k<sub>in</sub>.
+    </span>
+  </div>
+</div>
+<script>
+// ── state ─────────────────────────────────────────────────────────────────────
+const state = {
+  lambda: 0.7107,    // Å
+  a_real: 5.0,       // Å
+  b_real: 5.0,       // Å
+  gamma_deg: 90,     // angle between a and b (degrees)
+  phi: 0,            // crystal rotation (radians), CCW positive in math coords
+  autoRotate: false,
+};
+
+// Gaussian sphere "thickness" (Å⁻¹). Reflections within ±~3σ light up.
+const TOL = 0.018;
+const INTENSITY_THRESHOLD = 0.04;
+const NMAX = 18;   // h,k indices from -NMAX..NMAX (≈37²≈1370 candidates)
+
+// ── canvas / scale ────────────────────────────────────────────────────────────
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+let W = 0, H = 0, dpr = 1;
+let CENTER_X = 0, CENTER_Y = 0;
+let PX_PER_INVA = 100;
+
+function sizeCanvas(){
+  const parent = cv.parentElement;
+  const labels = parent.querySelectorAll('.slbl, .hint');
+  let used = 0;
+  labels.forEach(el => used += el.offsetHeight + 4);
+  const cssW = parent.clientWidth - 28;
+  const cssH = Math.max(340, parent.clientHeight - used - 14);
+  dpr = window.devicePixelRatio || 1;
+  cv.style.width = cssW + 'px';
+  cv.style.height = cssH + 'px';
+  cv.width  = Math.floor(cssW * dpr);
+  cv.height = Math.floor(cssH * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  W = cssW; H = cssH;
+  CENTER_X = W * 0.38;   // crystal sits left-of-centre so beam has room to enter
+  CENTER_Y = H * 0.5;
+  // Fixed scale chosen so the largest plausible sphere (λ=0.4 → R=2.5 Å⁻¹)
+  // and the rightward 000-origin both fit comfortably.
+  const minLambda = 0.4;
+  const maxR = 1 / minLambda;
+  const xRoom = Math.min(CENTER_X - 12, W - CENTER_X - 12);   // symmetric
+  const yRoom = Math.min(CENTER_Y - 12, H - CENTER_Y - 12);
+  PX_PER_INVA = Math.min(xRoom / maxR, yRoom / maxR);
+  PX_PER_INVA = Math.max(40, Math.min(PX_PER_INVA, 160));
+}
+
+// ── geometry ──────────────────────────────────────────────────────────────────
+// Math convention (y up). Project to canvas with y flipped.
+function reciprocalBasis(){
+  const a = state.a_real, b = state.b_real;
+  const gamma = state.gamma_deg * Math.PI / 180;
+  const phi = state.phi;
+  const sg = Math.sin(gamma), cg = Math.cos(gamma);
+  // unrotated reciprocal basis (a*·a = 1, a*·b = 0 etc.)
+  // a is along +x ; b at angle gamma from a.
+  // a* = (1/a, -cos(g)/(a·sin(g))) ; b* = (0, 1/(b·sin(g)))
+  const ax0 = 1 / a;
+  const ay0 = -cg / (a * sg);
+  const bx0 = 0;
+  const by0 = 1 / (b * sg);
+  const cp = Math.cos(phi), sp = Math.sin(phi);
+  return {
+    ax: ax0 * cp - ay0 * sp,
+    ay: ax0 * sp + ay0 * cp,
+    bx: bx0 * cp - by0 * sp,
+    by: bx0 * sp + by0 * cp,
+  };
+}
+
+function project(x_rec, y_rec){
+  // (x_rec, y_rec) in Å⁻¹ measured from the crystal centre (math coords, y up)
+  return [CENTER_X + x_rec * PX_PER_INVA, CENTER_Y - y_rec * PX_PER_INVA];
+}
+
+function enumerateReflections(){
+  const R = 1 / state.lambda;
+  const basis = reciprocalBasis();
+  // Bounding box in reciprocal coords for "visible" — must reach the Ewald sphere
+  // at all. Anything with |G| > 2R can never reflect at this λ.
+  const Glim = 2 * R + 0.2;
+  const out = [];
+  for (let h = -NMAX; h <= NMAX; h++){
+    for (let k = -NMAX; k <= NMAX; k++){
+      if (h === 0 && k === 0) continue;
+      const gx = h * basis.ax + k * basis.bx;
+      const gy = h * basis.ay + k * basis.by;
+      const gMag = Math.hypot(gx, gy);
+      if (gMag > Glim) continue;
+      const px = R + gx;    // from crystal centre
+      const py = gy;
+      const dist = Math.hypot(px, py);
+      const delta = dist - R;
+      const intensity = Math.exp(-(delta * delta) / (TOL * TOL));
+      const d = 1 / gMag;
+      const twoTheta = Math.atan2(py, px);
+      out.push({h, k, gx, gy, px, py, dist, delta, intensity, d, twoTheta, gMag});
+    }
+  }
+  return out;
+}
+
+// ── drawing ───────────────────────────────────────────────────────────────────
+function clear(){
+  ctx.fillStyle = '#0a0e1a';
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawSubtleGrid(){
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,0.025)';
+  ctx.lineWidth = 1;
+  const step = PX_PER_INVA * 0.5;   // gridline every 0.5 Å⁻¹
+  for (let x = CENTER_X % step; x < W; x += step){
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+  for (let y = CENTER_Y % step; y < H; y += step){
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawLimitingSphere(){
+  const R = 1 / state.lambda;
+  const Rpx = R * PX_PER_INVA;
+  const [zx, zy] = project(R, 0);
+  ctx.save();
+  ctx.strokeStyle = 'rgba(79,195,247,0.13)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 5]);
+  ctx.beginPath(); ctx.arc(zx, zy, 2 * Rpx, 0, Math.PI * 2); ctx.stroke();
+  ctx.restore();
+  // tiny annotation
+  ctx.fillStyle = 'rgba(79,195,247,0.30)';
+  ctx.font = '9px Space Mono, monospace';
+  ctx.textAlign = 'right';
+  ctx.fillText('limiting sphere (2/λ)', zx + 2 * Rpx - 6, zy - 2 * Rpx + 12);
+}
+
+function drawEwald(){
+  const R = 1 / state.lambda;
+  const Rpx = R * PX_PER_INVA;
+  ctx.save();
+  // soft outer glow
+  ctx.shadowBlur = 6;
+  ctx.shadowColor = 'rgba(79,195,247,0.55)';
+  ctx.strokeStyle = 'rgba(79,195,247,0.72)';
+  ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.arc(CENTER_X, CENTER_Y, Rpx, 0, Math.PI * 2); ctx.stroke();
+  ctx.restore();
+}
+
+function drawIncidentBeam(){
+  const R = 1 / state.lambda;
+  const Rpx = R * PX_PER_INVA;
+  const startX = 6;
+  // beam from edge to crystal
+  ctx.save();
+  const grad = ctx.createLinearGradient(startX, CENTER_Y, CENTER_X, CENTER_Y);
+  grad.addColorStop(0, 'rgba(79,195,247,0.05)');
+  grad.addColorStop(1, 'rgba(79,195,247,0.95)');
+  ctx.strokeStyle = grad;
+  ctx.lineWidth = 2.2;
+  ctx.shadowBlur = 7;
+  ctx.shadowColor = 'rgba(79,195,247,0.6)';
+  ctx.beginPath();
+  ctx.moveTo(startX, CENTER_Y);
+  ctx.lineTo(CENTER_X, CENTER_Y);
+  ctx.stroke();
+  ctx.restore();
+
+  // arrowhead just before the crystal
+  drawArrowhead(CENTER_X - 14, CENTER_Y, 0, 'rgba(79,195,247,0.95)', 7);
+
+  // extension k_in through the crystal to 000 (dashed)
+  ctx.save();
+  ctx.strokeStyle = 'rgba(79,195,247,0.35)';
+  ctx.lineWidth = 1.1;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(CENTER_X, CENTER_Y);
+  ctx.lineTo(CENTER_X + Rpx, CENTER_Y);
+  ctx.stroke();
+  ctx.restore();
+
+  // label k_in
+  ctx.fillStyle = 'rgba(79,195,247,0.85)';
+  ctx.font = 'bold 11px Space Mono, monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('k\u2080', (startX + CENTER_X - 24)/2 - 8, CENTER_Y - 8);
+  // "X-ray source"
+  ctx.fillStyle = 'rgba(79,195,247,0.45)';
+  ctx.font = '9px Space Mono, monospace';
+  ctx.fillText('X-ray', startX + 4, CENTER_Y + 12);
+}
+
+function drawArrowhead(x, y, angle, color, size){
+  const s = size || 6;
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(-s, -s * 0.55);
+  ctx.lineTo(-s, s * 0.55);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawLatticePoints(reflections){
+  // Draw all unrotated lattice points as small dim dots (background).
+  // Skip points off-canvas.
+  ctx.fillStyle = 'rgba(159,168,218,0.55)';
+  reflections.forEach(r => {
+    if (r.intensity > 0.15) return;   // bright ones drawn later
+    const [sx, sy] = project(r.px, r.py);
+    if (sx < -4 || sx > W + 4 || sy < -4 || sy > H + 4) return;
+    ctx.beginPath();
+    ctx.arc(sx, sy, 1.7, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+function drawDiffractedBeam(sx, sy, alpha){
+  // from crystal centre through (sx,sy) extended to canvas edge
+  const dx = sx - CENTER_X, dy = sy - CENTER_Y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1) return;
+  const ux = dx / len, uy = dy / len;
+  // distance from crystal to canvas edge in this direction
+  const tx = ux > 0 ? (W - 2 - CENTER_X) / ux : ux < 0 ? (2 - CENTER_X) / ux : Infinity;
+  const ty = uy > 0 ? (H - 2 - CENTER_Y) / uy : uy < 0 ? (2 - CENTER_Y) / uy : Infinity;
+  const t = Math.min(tx, ty);
+  const ex = CENTER_X + ux * t, ey = CENTER_Y + uy * t;
+
+  ctx.save();
+  // beam gradient: from bright at crystal to fading at edge
+  const grad = ctx.createLinearGradient(CENTER_X, CENTER_Y, ex, ey);
+  grad.addColorStop(0, `rgba(255,213,79,${(alpha * 0.95).toFixed(3)})`);
+  grad.addColorStop(1, `rgba(255,213,79,${(alpha * 0.15).toFixed(3)})`);
+  ctx.strokeStyle = grad;
+  ctx.lineWidth = 1.6;
+  ctx.shadowBlur = 6 * alpha;
+  ctx.shadowColor = '#FFD54F';
+  ctx.beginPath();
+  ctx.moveTo(CENTER_X, CENTER_Y);
+  ctx.lineTo(ex, ey);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawActive(reflections){
+  const active = reflections
+    .filter(r => r.intensity > INTENSITY_THRESHOLD)
+    .sort((a, b) => a.intensity - b.intensity);   // brightest last
+
+  // diffracted beams first (so spots draw over them)
+  active.forEach(r => {
+    if (r.intensity < 0.25) return;
+    const [sx, sy] = project(r.px, r.py);
+    drawDiffractedBeam(sx, sy, r.intensity);
+  });
+
+  // G-vectors from 000 to active points (dashed, faint)
+  const R = 1 / state.lambda;
+  const [zx, zy] = project(R, 0);
+  active.forEach(r => {
+    if (r.intensity < 0.3) return;
+    const [sx, sy] = project(r.px, r.py);
+    ctx.save();
+    ctx.strokeStyle = `rgba(255,213,79,${(r.intensity * 0.45).toFixed(3)})`;
+    ctx.lineWidth = 1.1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(zx, zy); ctx.lineTo(sx, sy); ctx.stroke();
+    ctx.restore();
+  });
+
+  // active spots (glow + core)
+  active.forEach(r => {
+    const [sx, sy] = project(r.px, r.py);
+    const a = r.intensity;
+
+    const rad = 14 + 4 * a;
+    const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, rad);
+    g.addColorStop(0, `rgba(255,213,79,${(a * 0.6).toFixed(3)})`);
+    g.addColorStop(0.5, `rgba(255,213,79,${(a * 0.25).toFixed(3)})`);
+    g.addColorStop(1, 'rgba(255,213,79,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(sx, sy, rad, 0, Math.PI * 2); ctx.fill();
+
+    ctx.fillStyle = `rgba(255,213,79,${(a * 0.95 + 0.05).toFixed(3)})`;
+    ctx.beginPath(); ctx.arc(sx, sy, 2.6 + 0.8 * a, 0, Math.PI * 2); ctx.fill();
+
+    if (a > 0.45){
+      ctx.fillStyle = `rgba(255,213,79,${(a * 0.9 + 0.1).toFixed(3)})`;
+      ctx.font = 'bold 10px Space Mono, monospace';
+      ctx.textAlign = 'left';
+      const lab = `${r.h} ${r.k}`;
+      // place label outward from sphere centre to keep it readable
+      const dx = sx - CENTER_X, dy = sy - CENTER_Y;
+      const len = Math.hypot(dx, dy) || 1;
+      const lx = sx + 8 * (dx / len);
+      const ly = sy + 8 * (dy / len);
+      ctx.fillText(lab, lx, ly);
+    }
+  });
+}
+
+function drawCrystalMarker(){
+  ctx.save();
+  // outer ring
+  ctx.strokeStyle = 'rgba(232,234,246,0.32)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(CENTER_X, CENTER_Y, 8, 0, Math.PI * 2); ctx.stroke();
+  // tiny cross-hatch suggesting a lattice
+  ctx.fillStyle = '#E8EAF6';
+  ctx.beginPath(); ctx.arc(CENTER_X, CENTER_Y, 3.2, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  // label
+  ctx.fillStyle = 'rgba(232,234,246,0.6)';
+  ctx.font = '10px Space Mono, monospace';
+  ctx.textAlign = 'right';
+  ctx.fillText('crystal', CENTER_X - 12, CENTER_Y - 10);
+}
+
+function draw000Marker(){
+  const R = 1 / state.lambda;
+  const Rpx = R * PX_PER_INVA;
+  const x = CENTER_X + Rpx, y = CENTER_Y;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(79,195,247,0.45)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.stroke();
+  ctx.fillStyle = 'rgba(79,195,247,0.92)';
+  ctx.beginPath(); ctx.arc(x, y, 2.6, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  ctx.fillStyle = 'rgba(79,195,247,0.85)';
+  ctx.font = 'bold 10px Space Mono, monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('000', x + 10, y - 8);
+  ctx.fillStyle = 'rgba(79,195,247,0.45)';
+  ctx.font = '9px Space Mono, monospace';
+  ctx.fillText('reciprocal origin', x + 10, y + 12);
+}
+
+function drawScaleBar(){
+  // small scale bar showing 1 Å⁻¹
+  const len = PX_PER_INVA;
+  const x0 = 14, y0 = H - 18;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(232,234,246,0.45)';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(x0, y0);
+  ctx.lineTo(x0 + len, y0);
+  ctx.moveTo(x0, y0 - 3); ctx.lineTo(x0, y0 + 3);
+  ctx.moveTo(x0 + len, y0 - 3); ctx.lineTo(x0 + len, y0 + 3);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(232,234,246,0.55)';
+  ctx.font = '9px Space Mono, monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('1 Å⁻¹', x0 + len + 6, y0 + 3);
+  ctx.restore();
+}
+
+function drawTwoThetaIndicator(brightest){
+  if (!brightest) return;
+  const [sx, sy] = project(brightest.px, brightest.py);
+  const angle = Math.atan2(sy - CENTER_Y, sx - CENTER_X);   // canvas-space (y down)
+  const arcR = Math.min(36, Math.hypot(sx - CENTER_X, sy - CENTER_Y) * 0.4);
+  if (arcR < 8) return;
+  ctx.save();
+  ctx.strokeStyle = `rgba(255,213,79,${(brightest.intensity * 0.7).toFixed(3)})`;
+  ctx.lineWidth = 1.2;
+  // angle from +x to the diffracted-beam direction; angle may be negative
+  if (angle >= 0){
+    ctx.beginPath(); ctx.arc(CENTER_X, CENTER_Y, arcR, 0, angle); ctx.stroke();
+  } else {
+    ctx.beginPath(); ctx.arc(CENTER_X, CENTER_Y, arcR, angle, 0); ctx.stroke();
+  }
+  ctx.fillStyle = `rgba(255,213,79,${(brightest.intensity * 0.85 + 0.1).toFixed(3)})`;
+  ctx.font = '10px Space Mono, monospace';
+  ctx.textAlign = 'left';
+  const labelAngle = angle * 0.55;
+  const lx = CENTER_X + Math.cos(labelAngle) * (arcR + 8);
+  const ly = CENTER_Y + Math.sin(labelAngle) * (arcR + 8);
+  ctx.fillText(`2θ=${(Math.abs(angle) * 180 / Math.PI).toFixed(1)}°`, lx, ly);
+  ctx.restore();
+}
+
+function draw(){
+  clear();
+  drawSubtleGrid();
+  drawLimitingSphere();
+
+  const refls = enumerateReflections();
+
+  // dim lattice points first
+  drawLatticePoints(refls);
+
+  // beam, sphere, active reflections, markers
+  drawEwald();
+  drawIncidentBeam();
+  drawActive(refls);
+  drawCrystalMarker();
+  draw000Marker();
+
+  const active = refls.filter(r => r.intensity > INTENSITY_THRESHOLD)
+                       .sort((a, b) => b.intensity - a.intensity);
+  drawTwoThetaIndicator(active[0]);
+  drawScaleBar();
+
+  updateUI(refls, active);
+}
+
+// ── UI sync ───────────────────────────────────────────────────────────────────
+function fmtPhi(rad){
+  let d = rad * 180 / Math.PI;
+  d = ((d + 180) % 360 + 360) % 360 - 180;
+  return d;
+}
+
+function updateUI(reflections, activeSorted){
+  document.getElementById('ld').textContent = state.lambda.toFixed(4) + ' Å';
+  document.getElementById('rd').textContent = (1 / state.lambda).toFixed(3) + ' Å⁻¹';
+  document.getElementById('phid').textContent = fmtPhi(state.phi).toFixed(1) + '°';
+  document.getElementById('nrd').textContent = String(activeSorted.length);
+
+  // indicator
+  const ind = document.getElementById('ind');
+  const idot = document.getElementById('idot');
+  const itit = document.getElementById('itit');
+  const idsc = document.getElementById('idsc');
+  if (activeSorted.length > 0){
+    ind.style.borderLeftColor = '#FFD54F';
+    idot.style.background = '#FFD54F';
+    idot.style.boxShadow = '0 0 8px rgba(255,213,79,0.7)';
+    itit.textContent = `Diffracting · ${activeSorted.length} reflection${activeSorted.length > 1 ? 's' : ''}`;
+    itit.style.color = '#FFD54F';
+    const r0 = activeSorted[0];
+    idsc.textContent =
+      `brightest (${r0.h},${r0.k})  d=${r0.d.toFixed(2)} Å  2θ=${(Math.abs(r0.twoTheta) * 180 / Math.PI).toFixed(1)}°`;
+    idsc.style.color = 'var(--muted)';
+  } else {
+    ind.style.borderLeftColor = 'transparent';
+    idot.style.background = 'var(--muted)';
+    idot.style.boxShadow = 'none';
+    itit.textContent = 'No reflection';
+    itit.style.color = 'var(--text)';
+    idsc.textContent = 'rotate the crystal to bring a lattice point onto the sphere';
+    idsc.style.color = 'var(--muted)';
+  }
+
+  // reflist
+  const list = document.getElementById('reflist');
+  if (activeSorted.length === 0){
+    list.innerHTML = '<div class="refrow empty">— none —</div>';
+  } else {
+    list.innerHTML = activeSorted.slice(0, 12).map(r => {
+      const tt = Math.abs(r.twoTheta) * 180 / Math.PI;
+      const ip = Math.round(r.intensity * 100);
+      return (
+        '<div class="refrow">' +
+          `<span class="hk">${r.h}\u00A0${r.k}</span>` +
+          `<span class="lbl">d <span class="num">${r.d.toFixed(2)}</span>Å</span>` +
+          `<span class="lbl">2θ <span class="num">${tt.toFixed(1)}</span>°</span>` +
+          `<span class="num">${ip}%</span>` +
+        '</div>'
+      );
+    }).join('');
+  }
+}
+
+function syncSliderLabels(){
+  document.getElementById('llbl').textContent = state.lambda.toFixed(3) + ' Å';
+  document.getElementById('albl').textContent = state.a_real.toFixed(2) + ' Å';
+  document.getElementById('blbl').textContent = state.b_real.toFixed(2) + ' Å';
+  document.getElementById('glbl').textContent = state.gamma_deg.toFixed(1) + '°';
+  document.getElementById('phislabel').textContent = fmtPhi(state.phi).toFixed(1) + '°';
+}
+
+function syncPhiSlider(){
+  document.getElementById('phisl').value = fmtPhi(state.phi).toFixed(1);
+  document.getElementById('phislabel').textContent = fmtPhi(state.phi).toFixed(1) + '°';
+}
+
+// ── handlers ──────────────────────────────────────────────────────────────────
+function setLambda(v){
+  state.lambda = +v;
+  document.getElementById('lsl').value = v;
+  // unset preset buttons if no exact match
+  document.querySelectorAll('.pbtn[data-lam]').forEach(b => {
+    b.classList.toggle('active', Math.abs(+b.dataset.lam - v) < 1e-4);
+  });
+  syncSliderLabels();
+}
+
+function setPreset(btn, v){
+  document.querySelectorAll('.pbtn[data-lam]').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  state.lambda = v;
+  document.getElementById('lsl').value = v;
+  syncSliderLabels();
+}
+
+function setA(v){ state.a_real = +v; syncSliderLabels(); }
+function setB(v){ state.b_real = +v; syncSliderLabels(); }
+function setGamma(v){ state.gamma_deg = +v; syncSliderLabels(); }
+function setPhi(v){ state.phi = (+v) * Math.PI / 180; syncSliderLabels(); }
+
+function resetRotation(){
+  state.phi = 0;
+  syncPhiSlider();
+}
+
+function toggleAuto(){
+  state.autoRotate = !state.autoRotate;
+  const b = document.getElementById('autobtn');
+  if (state.autoRotate){
+    b.classList.add('on');
+    b.innerHTML = '■&nbsp;stop';
+  } else {
+    b.classList.remove('on');
+    b.innerHTML = '▶&nbsp;auto-rotate';
+  }
+}
+
+// ── drag rotation ─────────────────────────────────────────────────────────────
+let dragging = false;
+let lastAngle = 0;
+
+function getAngleFromEvent(e){
+  const r = cv.getBoundingClientRect();
+  const isTouch = e.touches && e.touches.length;
+  const cx = isTouch ? e.touches[0].clientX : e.clientX;
+  const cy = isTouch ? e.touches[0].clientY : e.clientY;
+  // canvas-space angle (y down). We use it directly for delta.
+  return Math.atan2(cy - r.top - CENTER_Y, cx - r.left - CENTER_X);
+}
+
+function onDragStart(e){
+  dragging = true;
+  cv.classList.add('dragging');
+  lastAngle = getAngleFromEvent(e);
+  e.preventDefault();
+}
+function onDragMove(e){
+  if (!dragging) return;
+  const a = getAngleFromEvent(e);
+  let d = a - lastAngle;
+  if (d >  Math.PI) d -= 2 * Math.PI;
+  if (d < -Math.PI) d += 2 * Math.PI;
+  // canvas y is flipped: a clockwise drag in canvas = CCW in math space.
+  // Flipping sign here makes drag direction match the visible rotation.
+  state.phi -= d;
+  // keep phi in [-π, π]
+  state.phi = ((state.phi + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+  lastAngle = a;
+  syncPhiSlider();
+  e.preventDefault();
+}
+function onDragEnd(){
+  dragging = false;
+  cv.classList.remove('dragging');
+}
+
+cv.addEventListener('mousedown', onDragStart);
+window.addEventListener('mousemove', onDragMove);
+window.addEventListener('mouseup', onDragEnd);
+cv.addEventListener('touchstart', onDragStart, {passive: false});
+window.addEventListener('touchmove', onDragMove, {passive: false});
+window.addEventListener('touchend', onDragEnd);
+
+// ── slider wiring ─────────────────────────────────────────────────────────────
+document.getElementById('lsl').addEventListener('input', e => setLambda(+e.target.value));
+document.getElementById('asl').addEventListener('input', e => setA(+e.target.value));
+document.getElementById('bsl').addEventListener('input', e => setB(+e.target.value));
+document.getElementById('gsl').addEventListener('input', e => setGamma(+e.target.value));
+document.getElementById('phisl').addEventListener('input', e => setPhi(+e.target.value));
+
+// ── animation loop ────────────────────────────────────────────────────────────
+let lastTime = performance.now();
+function frame(now){
+  const dt = (now - lastTime) / 1000;
+  lastTime = now;
+  if (state.autoRotate){
+    state.phi += 0.45 * dt;   // ~26 deg/s
+    state.phi = ((state.phi + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+    syncPhiSlider();
+  }
+  try { draw(); } catch(err) { console.error(err); }
+  requestAnimationFrame(frame);
+}
+
+window.addEventListener('resize', () => { sizeCanvas(); });
+sizeCanvas();
+syncSliderLabels();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
