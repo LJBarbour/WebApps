@@ -1053,13 +1053,26 @@ function calculate() {
   // Compute outputs
   const res = {};
   for (const op of OUTPUT_PROPS) {
+    if (op.isPhase) continue;          // handled separately below
     const cpKey = PROPSSI_KEYS[op.key];
     if (!cpKey) continue;
     const val = safePropsSI(cpKey, in1prop, v1si, in2prop, v2si, fluid);
     res[op.key] = val;
   }
-  // Molar density
-  res['Dmolar'] = safePropsSI('Dmolar', in1prop, v1si, in2prop, v2si, fluid);
+  // Molar density + other molar quantities
+  res['Dmolar']  = safePropsSI('Dmolar',  in1prop, v1si, in2prop, v2si, fluid);
+  res['Hmolar']  = safePropsSI('Hmolar',  in1prop, v1si, in2prop, v2si, fluid);
+  res['Smolar']  = safePropsSI('Smolar',  in1prop, v1si, in2prop, v2si, fluid);
+  res['Umolar']  = safePropsSI('Umolar',  in1prop, v1si, in2prop, v2si, fluid);
+  res['Cvmolar'] = safePropsSI('Cvmolar', in1prop, v1si, in2prop, v2si, fluid);
+  res['Cpmolar'] = safePropsSI('Cpmolar', in1prop, v1si, in2prop, v2si, fluid);
+  // Molar mass for unit labelling
+  try { res['_Mw'] = cp.Props1SI(fluid, 'molar_mass'); } catch(e) { res['_Mw'] = null; }
+  // Phase — CoolProp returns a string from Phase; PropsSI with string output needs
+  // a separate call that doesn't filter through isFinite()
+  try {
+    res['phase'] = cp.PropsSI('Phase', in1prop, v1si, in2prop, v2si, fluid);
+  } catch(e) { res['phase'] = null; }
 
   lastResults = { fluid, in1prop, in1val, in2prop, in2val, res, showMolar };
   renderResults(lastResults);
@@ -1075,25 +1088,35 @@ function renderResults({ fluid, in1prop, in1val, in2prop, in2val, res, showMolar
   document.getElementById('rh-pt').textContent =
     `${p1disp.label} = ${in1val} ${p1disp.unit_in}  ·  ${p2disp.label} = ${in2val} ${p2disp.unit_in}`;
 
-  // Phase — CoolProp JS returns a string like "gas", "liquid", "twophase", "supercritical"
+  // Phase — CoolProp returns a string: "gas", "liquid", "supercritical_gas",
+  //   "supercritical_liquid", "supercritical", "twophase", "not_imposed", or a number string
   const phaseRaw = res['phase'];
   const phaseEl  = document.getElementById('phase-indicator');
   const PHASE_DISPLAY = {
-    'gas':'Gas', 'supercritical_gas':'Supercrit. gas', 'supercriticalgas':'Supercrit. gas',
-    'liquid':'Liquid', 'supercritical_liquid':'Supercrit. liquid', 'supercriticalliquid':'Supercrit. liquid',
-    'supercritical':'Supercritical', 'twophase':'Two-phase', 'two_phase':'Two-phase',
-    '0':'Gas','1':'Liquid','2':'Supercrit. liquid','3':'Two-phase','4':'Supercritical','5':'—',
+    'gas':                 { label:'Gas',                cls:'gas'       },
+    'supercriticalgas':    { label:'Supercrit. gas',     cls:'supercrit' },
+    'liquid':              { label:'Liquid',             cls:'liquid'    },
+    'supercriticalliquid': { label:'Supercrit. liquid',  cls:'supercrit' },
+    'supercritical':       { label:'Supercritical',      cls:'supercrit' },
+    'twophase':            { label:'Two-phase',          cls:'twophase'  },
+    'notimposed':          { label:'—',                  cls:'gas'       },
+    '0':                   { label:'Gas',                cls:'gas'       },
+    '1':                   { label:'Liquid',             cls:'liquid'    },
+    '2':                   { label:'Supercrit. liquid',  cls:'supercrit' },
+    '3':                   { label:'Two-phase',          cls:'twophase'  },
+    '4':                   { label:'Supercritical',      cls:'supercrit' },
+    '5':                   { label:'—',                  cls:'gas'       },
   };
-  if (phaseRaw !== null && phaseRaw !== undefined) {
-    const ps = String(phaseRaw).toLowerCase().replace(/_/g,'');
-    const label = PHASE_DISPLAY[ps] || PHASE_DISPLAY[String(Math.round(Number(phaseRaw)))] || String(phaseRaw);
-    phaseEl.textContent = '⬤ ' + label;
-    phaseEl.className = 'visible';
-    if (ps.includes('two'))                              phaseEl.classList.add('twophase');
-    else if (ps.includes('super'))                       phaseEl.classList.add('supercrit');
-    else if (ps.includes('liquid'))                      phaseEl.classList.add('liquid');
-    else                                                 phaseEl.classList.add('gas');
-    phaseEl.style.display = 'block';
+  if (phaseRaw !== null && phaseRaw !== undefined && phaseRaw !== '') {
+    const ps = String(phaseRaw).toLowerCase().replace(/_/g,'').trim();
+    const match = PHASE_DISPLAY[ps] || PHASE_DISPLAY[String(Math.round(Number(ps)))];
+    if (match && match.label !== '—') {
+      phaseEl.textContent = '⬤ ' + match.label;
+      phaseEl.className   = 'visible ' + match.cls;
+      phaseEl.style.display = 'block';
+    } else {
+      phaseEl.style.display = 'none';
+    }
   } else {
     phaseEl.style.display = 'none';
   }
@@ -1151,24 +1174,47 @@ function renderResults({ fluid, in1prop, in1val, in2prop, in2val, res, showMolar
   // Cards
   const container = document.getElementById('results-container');
   const cards = [];
+  // Molar substitution map: when showMolar is true, swap these specific properties
+  const MOLAR_SUB = {
+    D: { molarKey:'Dmolar',  molarUnit:'mol/L',       molarSymbol:'ρₙ', molarName:'Molar density',     fromMolar: v => v/1000 },
+    H: { molarKey:'Hmolar',  molarUnit:'J/mol',        molarSymbol:'hₙ', molarName:'Molar enthalpy',    fromMolar: v => v      },
+    S: { molarKey:'Smolar',  molarUnit:'J/(mol·K)',    molarSymbol:'sₙ', molarName:'Molar entropy',     fromMolar: v => v      },
+    U: { molarKey:'Umolar',  molarUnit:'J/mol',        molarSymbol:'uₙ', molarName:'Molar int. energy', fromMolar: v => v      },
+    Cvmass: { molarKey:'Cvmolar', molarUnit:'J/(mol·K)', molarSymbol:'Cᵥₙ', molarName:'Molar Cᵥ',     fromMolar: v => v      },
+    Cpmass: { molarKey:'Cpmolar', molarUnit:'J/(mol·K)', molarSymbol:'Cₚₙ', molarName:'Molar Cₚ',     fromMolar: v => v      },
+  };
+
   for (const op of OUTPUT_PROPS) {
     if (op.isPhase) continue;
-    const val = res[op.key];
-    if (val === null || val === undefined) continue;
-    let dispVal = op.fromSI(val);
-    let altText = '';
+    const sub = showMolar ? MOLAR_SUB[op.key] : null;
+    let val, dispVal, unit, symbol, name, altText = '';
 
-    // Pressure: show bar and MPa
-    if (op.key === 'P') {
-      altText = (val/1e6).toFixed(4) + ' MPa';
-    }
-    // Molar density alternative
-    if (op.key === 'D' && res['Dmolar'] !== null) {
-      altText = (res['Dmolar']/1000).toFixed(5) + ' mol/L';
-    }
-    // Temperature: show °C
-    if (op.key === 'T') {
-      altText = (val - 273.15).toFixed(2) + ' °C';
+    if (sub && res[sub.molarKey] !== null && res[sub.molarKey] !== undefined) {
+      // Use molar quantity
+      val     = res[sub.molarKey];
+      dispVal = sub.fromMolar(val);
+      unit    = sub.molarUnit;
+      symbol  = sub.molarSymbol;
+      name    = sub.molarName;
+      // Show mass-specific as alt
+      const massVal = res[op.key];
+      if (massVal !== null && massVal !== undefined) {
+        const masDisp = op.fromSI(massVal);
+        const massFmt = Math.abs(masDisp) > 1e6 || (Math.abs(masDisp) < 1e-4 && masDisp !== 0)
+          ? masDisp.toExponential(3) : masDisp.toFixed(op.decimals || 4);
+        altText = `${massFmt} ${op.unit} (mass)`;
+      }
+    } else {
+      val = res[op.key];
+      if (val === null || val === undefined) continue;
+      dispVal = op.fromSI(val);
+      unit    = op.unit;
+      symbol  = op.symbol;
+      name    = op.name;
+      // Standard alt values
+      if (op.key === 'P') { altText = (val/1e6).toFixed(4) + ' MPa'; }
+      if (op.key === 'D' && res['Dmolar'] !== null) { altText = (res['Dmolar']/1000).toFixed(5) + ' mol/L'; }
+      if (op.key === 'T') { altText = (val - 273.15).toFixed(2) + ' °C'; }
     }
 
     const decimals = op.decimals || 4;
@@ -1178,9 +1224,9 @@ function renderResults({ fluid, in1prop, in1val, in2prop, in2val, res, showMolar
 
     cards.push(`
       <div class="result-card${op.highlight ? ' highlight' : ''}">
-        <div class="rc-label">${op.symbol}</div>
-        <div class="rc-name">${op.name}</div>
-        <div class="rc-value">${formatted}<span class="rc-unit">${op.unit}</span></div>
+        <div class="rc-label">${symbol}</div>
+        <div class="rc-name">${name}</div>
+        <div class="rc-value">${formatted}<span class="rc-unit">${unit}</span></div>
         ${altText ? `<div class="rc-altvalue">${altText}</div>` : ''}
       </div>`);
   }
