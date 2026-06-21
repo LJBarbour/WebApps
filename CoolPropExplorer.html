@@ -1068,11 +1068,16 @@ function calculate() {
   res['Cpmolar'] = safePropsSI('Cpmolar', in1prop, v1si, in2prop, v2si, fluid);
   // Molar mass for unit labelling
   try { res['_Mw'] = cp.Props1SI(fluid, 'molar_mass'); } catch(e) { res['_Mw'] = null; }
-  // Phase — CoolProp returns a string from Phase; PropsSI with string output needs
-  // a separate call that doesn't filter through isFinite()
+  // Phase — use PhaseSI which is the correct JS WASM call returning a string
+  // Falls back to null if unsupported; renderResults will derive it from the sat curve
   try {
-    res['phase'] = cp.PropsSI('Phase', in1prop, v1si, in2prop, v2si, fluid);
-  } catch(e) { res['phase'] = null; }
+    res['phase'] = cp.PhaseSI(in1prop, v1si, in2prop, v2si, fluid);
+  } catch(e) {
+    try {
+      // Some builds expose it differently
+      res['phase'] = cp.get_phase_from_string(cp.PropsSI('Phase', in1prop, v1si, in2prop, v2si, fluid));
+    } catch(e2) { res['phase'] = null; }
+  }
 
   lastResults = { fluid, in1prop, in1val, in2prop, in2val, res, showMolar };
   renderResults(lastResults);
@@ -1088,35 +1093,68 @@ function renderResults({ fluid, in1prop, in1val, in2prop, in2val, res, showMolar
   document.getElementById('rh-pt').textContent =
     `${p1disp.label} = ${in1val} ${p1disp.unit_in}  ·  ${p2disp.label} = ${in2val} ${p2disp.unit_in}`;
 
-  // Phase — CoolProp returns a string: "gas", "liquid", "supercritical_gas",
-  //   "supercritical_liquid", "supercritical", "twophase", "not_imposed", or a number string
-  const phaseRaw = res['phase'];
-  const phaseEl  = document.getElementById('phase-indicator');
-  const PHASE_DISPLAY = {
-    'gas':                 { label:'Gas',                cls:'gas'       },
-    'supercriticalgas':    { label:'Supercrit. gas',     cls:'supercrit' },
-    'liquid':              { label:'Liquid',             cls:'liquid'    },
-    'supercriticalliquid': { label:'Supercrit. liquid',  cls:'supercrit' },
-    'supercritical':       { label:'Supercritical',      cls:'supercrit' },
-    'twophase':            { label:'Two-phase',          cls:'twophase'  },
-    'notimposed':          { label:'—',                  cls:'gas'       },
-    '0':                   { label:'Gas',                cls:'gas'       },
-    '1':                   { label:'Liquid',             cls:'liquid'    },
-    '2':                   { label:'Supercrit. liquid',  cls:'supercrit' },
-    '3':                   { label:'Two-phase',          cls:'twophase'  },
-    '4':                   { label:'Supercritical',      cls:'supercrit' },
-    '5':                   { label:'—',                  cls:'gas'       },
-  };
-  if (phaseRaw !== null && phaseRaw !== undefined && phaseRaw !== '') {
-    const ps = String(phaseRaw).toLowerCase().replace(/_/g,'').trim();
-    const match = PHASE_DISPLAY[ps] || PHASE_DISPLAY[String(Math.round(Number(ps)))];
-    if (match && match.label !== '—') {
-      phaseEl.textContent = '⬤ ' + match.label;
-      phaseEl.className   = 'visible ' + match.cls;
-      phaseEl.style.display = 'block';
-    } else {
-      phaseEl.style.display = 'none';
+  // Phase — derive from saturation curve data (same source as the diagram).
+  // This is always consistent with the diagram and works regardless of whether
+  // PhaseSI is available in this WASM build.
+  const phaseEl = document.getElementById('phase-indicator');
+  const _T = res['T'], _P = res['P'];
+  let phaseLabel = null, phaseCls = null;
+
+  if (_T !== null && _P !== null) {
+    const satData = buildSatCurve(fluid);  // cached after first call
+    if (satData) {
+      if (_T >= satData.Tcrit && _P >= satData.Pcrit) {
+        phaseLabel = 'Supercritical';   phaseCls = 'supercrit';
+      } else if (_T >= satData.Tcrit) {
+        phaseLabel = 'Supercrit. gas';  phaseCls = 'supercrit';
+      } else if (_T < satData.curveT[0]) {
+        // Below triple-point temperature — solid or undefined in our curve
+        phaseLabel = null;
+      } else {
+        // Find Psat at _T by log-linear interpolation (far more accurate across orders of magnitude)
+        let Psat_at_T = null;
+        for (let i = 0; i < satData.curveT.length - 1; i++) {
+          if (_T >= satData.curveT[i] && _T <= satData.curveT[i+1]) {
+            const frac = (_T - satData.curveT[i]) / (satData.curveT[i+1] - satData.curveT[i]);
+            // Interpolate in log(P) space — correct for the exponential shape of sat curves
+            const logP = Math.log(satData.curveP[i]) + frac * (Math.log(satData.curveP[i+1]) - Math.log(satData.curveP[i]));
+            Psat_at_T = Math.exp(logP);
+            break;
+          }
+        }
+        if (Psat_at_T !== null) {
+          const relDiff = (_P - Psat_at_T) / Psat_at_T;
+          if (Math.abs(relDiff) < 0.005) {
+            phaseLabel = 'Two-phase boundary'; phaseCls = 'twophase';
+          } else if (_P > Psat_at_T) {
+            phaseLabel = 'Liquid';  phaseCls = 'liquid';
+          } else {
+            phaseLabel = 'Gas';     phaseCls = 'gas';
+          }
+        }
+      }
     }
+    // Override with PhaseSI string if it came back cleanly (some builds support it)
+    const phaseRaw = res['phase'];
+    if (phaseRaw !== null && phaseRaw !== undefined && phaseRaw !== '') {
+      const PHASE_DISPLAY = {
+        'gas':                 { label:'Gas',                cls:'gas'       },
+        'supercritical_gas':   { label:'Supercrit. gas',     cls:'supercrit' },
+        'liquid':              { label:'Liquid',             cls:'liquid'    },
+        'supercritical_liquid':{ label:'Supercrit. liquid',  cls:'supercrit' },
+        'supercritical':       { label:'Supercritical',      cls:'supercrit' },
+        'twophase':            { label:'Two-phase',          cls:'twophase'  },
+      };
+      const ps = String(phaseRaw).toLowerCase().trim();
+      const match = PHASE_DISPLAY[ps];
+      if (match) { phaseLabel = match.label; phaseCls = match.cls; }
+    }
+  }
+
+  if (phaseLabel) {
+    phaseEl.textContent   = '⬤ ' + phaseLabel;
+    phaseEl.className     = 'visible ' + phaseCls;
+    phaseEl.style.display = 'block';
   } else {
     phaseEl.style.display = 'none';
   }
@@ -1238,8 +1276,7 @@ function renderResults({ fluid, in1prop, in1val, in2prop, in2val, res, showMolar
   }
 
   // Draw P-T phase diagram
-  const _T = res['T'], _P = res['P'];
-  drawPhaseDiagram(fluid, _T, _P);
+  drawPhaseDiagram(fluid, res['T'], res['P']);
 }
 
 // ── P-T Phase diagram ────────────────────────────────────────────
@@ -1533,25 +1570,27 @@ function drawPhaseDiagram(fluid, stateT, stateP) {
     ctx.fillText(Pstr, PAD.left - 4, sy + 3);
   }
 
-  // ── Phase label ────────────────────────────────────────────────
-  // Determine phase from position relative to curve
+  // ── Phase label — use same log-linear interpolation as phase indicator ──
   let phaseClass = 'gas', phaseText = 'Gas';
-  if (stateT > data.Tcrit && stateP > data.Pcrit) {
+  if (stateT >= data.Tcrit && stateP >= data.Pcrit) {
     phaseClass = 'supercrit'; phaseText = 'Supercritical';
-  } else if (stateT > data.Tcrit) {
+  } else if (stateT >= data.Tcrit) {
     phaseClass = 'gas'; phaseText = 'Supercrit. gas';
+  } else if (stateT < data.curveT[0]) {
+    phaseText = '—';
   } else {
-    // Find interpolated Psat at stateT
     let Psat_at_T = null;
     for (let i = 0; i < data.curveT.length - 1; i++) {
       if (stateT >= data.curveT[i] && stateT <= data.curveT[i+1]) {
         const frac = (stateT - data.curveT[i]) / (data.curveT[i+1] - data.curveT[i]);
-        Psat_at_T = data.curveP[i] + frac * (data.curveP[i+1] - data.curveP[i]);
+        const logP  = Math.log(data.curveP[i]) + frac * (Math.log(data.curveP[i+1]) - Math.log(data.curveP[i]));
+        Psat_at_T   = Math.exp(logP);
         break;
       }
     }
     if (Psat_at_T !== null) {
-      if (Math.abs(stateP - Psat_at_T) / Psat_at_T < 0.002) {
+      const relDiff = (stateP - Psat_at_T) / Psat_at_T;
+      if (Math.abs(relDiff) < 0.005) {
         phaseClass = 'twophase'; phaseText = 'Two-phase boundary';
       } else if (stateP > Psat_at_T) {
         phaseClass = 'liquid'; phaseText = 'Liquid';
