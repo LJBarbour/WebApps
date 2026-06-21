@@ -499,6 +499,39 @@
   .info-table tr:last-child td { border-bottom: none; }
   .info-table tr:hover td { background: var(--paper); }
 
+  /* ── Character grid shared styles ── */
+  .char-grid {
+    display: flex; flex-wrap: wrap; gap: 4px;
+    max-width: 640px; margin-bottom: 4px;
+  }
+  .char-cell {
+    width: 38px; height: 46px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    cursor: pointer; border: 1px solid var(--border-light); border-radius: 5px;
+    background: var(--paper); transition: background .12s, border-color .12s;
+    user-select: none; gap: 2px;
+  }
+  .char-cell:hover { background: var(--cream); border-color: var(--accent); }
+  .char-cell.copied { background: var(--accent) !important; border-color: var(--accent) !important; }
+  .char-cell.copied .char-code  { color: rgba(255,255,255,0.7) !important; }
+  .char-cell.copied .char-glyph { color: #fff !important; }
+  .char-code  { font-size: 7.5px; color: var(--ink-mid); font-family: 'DM Mono', monospace; line-height: 1; }
+  .char-glyph { font-size: 1.25em; color: var(--ink); line-height: 1; }
+  .char-toast {
+    display: none; font-size: 11.5px; color: var(--accent);
+    font-family: 'DM Mono', monospace; min-height: 1.3em; margin-bottom: 0.5rem;
+  }
+  .char-block-label {
+    font-size: 11px; font-weight: 600; color: var(--accent);
+    letter-spacing: 0.04em; text-transform: uppercase;
+    font-family: 'DM Sans', sans-serif; margin: 1rem 0 0.4rem;
+  }
+  .char-block-label:first-of-type { margin-top: 0; }
+  .char-block-range {
+    font-weight: 400; color: var(--ink-mid);
+    text-transform: none; letter-spacing: 0; font-size: 10.5px;
+  }
+
   kbd {
     display: inline-block;
     font-family: 'DM Mono', monospace;
@@ -849,11 +882,18 @@
             </div>
           </div>
           <div class="row">
-            <span class="connector">└─</span>
+            <span class="connector">├─</span>
             <a class="btn" href="https://ljbarbour.github.io/WebApps/Vx-PXRD_Viewer.html" target="_blank">
               <i class="ti ti-chart-bar"></i>Vx-PXRD Viewer
             </a>
             <a class="btn-data" href="https://ljbarbour.github.io/WebApps/KD-66_50.zip" target="_blank">Test data</a>
+          </div>
+          <div class="row">
+            <span class="connector">└─</span>
+            <a class="btn" href="https://ljbarbour.github.io/WebApps/ftir_plotter.html" target="_blank">
+              <i class="ti ti-wave-square"></i>FT-IR Plotter
+            </a>
+            <a class="btn-data" href="https://ljbarbour.github.io/WebApps/FTIR_Test.dpt" target="_blank">Test data</a>
           </div>
         </div>
       </div>
@@ -1100,18 +1140,176 @@
             <i class="ti ti-chevron-right info-chevron"></i>
           </div>
           <div class="info-content">
-            <p style="margin-bottom:0.6rem; font-size:12px; color:var(--ink-mid);">Hold <kbd>Alt</kbd> and type the numeric code on the <strong>numpad</strong> (Num Lock must be on), then release Alt.</p>
+            <p style="margin-bottom:0.6rem; font-size:12px; color:var(--ink-mid);">Hold <kbd>Alt</kbd> and type the numeric code on the <strong>numpad</strong> (Num Lock must be on), then release Alt. Click a character to copy it.</p>
             <table class="info-table" style="max-width:280px;">
               <thead>
                 <tr><th>Alt + Code</th><th>Character</th><th>Description</th></tr>
               </thead>
               <tbody>
-                <tr><td><kbd>Alt</kbd> 0128</td><td style="font-size:1.1em; text-align:center;">€</td><td>Euro sign</td></tr>
-                <tr><td><kbd>Alt</kbd> 0163</td><td style="font-size:1.1em; text-align:center;">£</td><td>Pound sign</td></tr>
-                <tr><td><kbd>Alt</kbd> 0176</td><td style="font-size:1.1em; text-align:center;">°</td><td>Degree symbol</td></tr>
-                <tr><td><kbd>Alt</kbd> 0197</td><td style="font-size:1.1em; text-align:center;">Å</td><td>Angström (Å)</td></tr>
+                <tr><td><kbd>Alt</kbd> 0128</td><td class="cc-char" style="font-size:1.1em; text-align:center; cursor:pointer;">€</td><td>Euro sign</td></tr>
+                <tr><td><kbd>Alt</kbd> 0163</td><td class="cc-char" style="font-size:1.1em; text-align:center; cursor:pointer;">£</td><td>Pound sign</td></tr>
+                <tr><td><kbd>Alt</kbd> 0176</td><td class="cc-char" style="font-size:1.1em; text-align:center; cursor:pointer;">°</td><td>Degree symbol</td></tr>
+                <tr><td><kbd>Alt</kbd> 0197</td><td class="cc-char" style="font-size:1.1em; text-align:center; cursor:pointer;">Å</td><td>Angström (Å)</td></tr>
               </tbody>
             </table>
+            <div id="cc-toast" class="char-toast" style="margin-top:4px;"></div>
+          </div>
+        </div>
+
+
+        <div class="info-item" id="info-ascii">
+          <div class="info-header" onclick="toggleInfo('info-ascii')">
+            <i class="ti ti-grid-3x3" style="font-size:14px; color:var(--accent);"></i>
+            <span class="info-title">ASCII Characters</span>
+            <i class="ti ti-chevron-right info-chevron"></i>
+          </div>
+          <div class="info-content">
+            <p style="margin-bottom:0.6rem; font-size:12px; color:var(--ink-mid);">Click any character to copy it to the clipboard. Hover for the Unicode code point.</p>
+
+            <div class="info-item info-nested" id="info-ch-latin1">
+              <div class="info-header info-nested-header" onclick="toggleInfo('info-ch-latin1')">
+                <i class="ti ti-language" style="font-size:13px; color:var(--accent);"></i>
+                <span class="info-title" style="font-size:12.5px;">Latin-1 Supplement <span style="font-weight:400; color:var(--ink-mid); font-size:11px;">U+00A0–U+00FF</span></span>
+                <i class="ti ti-chevron-right info-chevron"></i>
+              </div>
+              <div class="info-nested-content" style="padding:10px 12px 14px;">
+                <div id="grid-latin1" class="char-grid"></div>
+                <div id="toast-latin1" class="char-toast"></div>
+              </div>
+            </div>
+
+            <div class="info-item info-nested" id="info-ch-lat-ext-a">
+              <div class="info-header info-nested-header" onclick="toggleInfo('info-ch-lat-ext-a')">
+                <i class="ti ti-language" style="font-size:13px; color:var(--accent);"></i>
+                <span class="info-title" style="font-size:12.5px;">Latin Extended-A <span style="font-weight:400; color:var(--ink-mid); font-size:11px;">U+0100–U+017F</span></span>
+                <i class="ti ti-chevron-right info-chevron"></i>
+              </div>
+              <div class="info-nested-content" style="padding:10px 12px 14px;">
+                <div id="grid-lat-ext-a" class="char-grid"></div>
+                <div id="toast-lat-ext-a" class="char-toast"></div>
+              </div>
+            </div>
+
+            <div class="info-item info-nested" id="info-ch-lat-ext-b">
+              <div class="info-header info-nested-header" onclick="toggleInfo('info-ch-lat-ext-b')">
+                <i class="ti ti-language" style="font-size:13px; color:var(--accent);"></i>
+                <span class="info-title" style="font-size:12.5px;">Latin Extended-B <span style="font-weight:400; color:var(--ink-mid); font-size:11px;">U+0180–U+024F</span></span>
+                <i class="ti ti-chevron-right info-chevron"></i>
+              </div>
+              <div class="info-nested-content" style="padding:10px 12px 14px;">
+                <div id="grid-lat-ext-b" class="char-grid"></div>
+                <div id="toast-lat-ext-b" class="char-toast"></div>
+              </div>
+            </div>
+
+            <div class="info-item info-nested" id="info-ch-greek">
+              <div class="info-header info-nested-header" onclick="toggleInfo('info-ch-greek')">
+                <i class="ti ti-letter-case" style="font-size:13px; color:var(--accent);"></i>
+                <span class="info-title" style="font-size:12.5px;">Greek and Coptic <span style="font-weight:400; color:var(--ink-mid); font-size:11px;">U+0370–U+03FF</span></span>
+                <i class="ti ti-chevron-right info-chevron"></i>
+              </div>
+              <div class="info-nested-content" style="padding:10px 12px 14px;">
+                <div id="grid-greek" class="char-grid"></div>
+                <div id="toast-greek" class="char-toast"></div>
+              </div>
+            </div>
+
+            <div class="info-item info-nested" id="info-ch-lat-add">
+              <div class="info-header info-nested-header" onclick="toggleInfo('info-ch-lat-add')">
+                <i class="ti ti-language" style="font-size:13px; color:var(--accent);"></i>
+                <span class="info-title" style="font-size:12.5px;">Latin Extended Additional <span style="font-weight:400; color:var(--ink-mid); font-size:11px;">U+1E00–U+1EFF</span></span>
+                <i class="ti ti-chevron-right info-chevron"></i>
+              </div>
+              <div class="info-nested-content" style="padding:10px 12px 14px;">
+                <div id="grid-lat-add" class="char-grid"></div>
+                <div id="toast-lat-add" class="char-toast"></div>
+              </div>
+            </div>
+
+            <div class="info-item info-nested" id="info-ch-punct">
+              <div class="info-header info-nested-header" onclick="toggleInfo('info-ch-punct')">
+                <i class="ti ti-quote" style="font-size:13px; color:var(--accent);"></i>
+                <span class="info-title" style="font-size:12.5px;">General Punctuation <span style="font-weight:400; color:var(--ink-mid); font-size:11px;">U+2000–U+206F</span></span>
+                <i class="ti ti-chevron-right info-chevron"></i>
+              </div>
+              <div class="info-nested-content" style="padding:10px 12px 14px;">
+                <div id="grid-punct" class="char-grid"></div>
+                <div id="toast-punct" class="char-toast"></div>
+              </div>
+            </div>
+
+            <div class="info-item info-nested" id="info-ch-subsup">
+              <div class="info-header info-nested-header" onclick="toggleInfo('info-ch-subsup')">
+                <i class="ti ti-superscript" style="font-size:13px; color:var(--accent);"></i>
+                <span class="info-title" style="font-size:12.5px;">Superscripts and Subscripts <span style="font-weight:400; color:var(--ink-mid); font-size:11px;">U+2070–U+209F</span></span>
+                <i class="ti ti-chevron-right info-chevron"></i>
+              </div>
+              <div class="info-nested-content" style="padding:10px 12px 14px;">
+                <div id="grid-subsup" class="char-grid"></div>
+                <div id="toast-subsup" class="char-toast"></div>
+              </div>
+            </div>
+
+            <div class="info-item info-nested" id="info-ch-currency">
+              <div class="info-header info-nested-header" onclick="toggleInfo('info-ch-currency')">
+                <i class="ti ti-currency-euro" style="font-size:13px; color:var(--accent);"></i>
+                <span class="info-title" style="font-size:12.5px;">Currency Symbols <span style="font-weight:400; color:var(--ink-mid); font-size:11px;">U+20A0–U+20CF</span></span>
+                <i class="ti ti-chevron-right info-chevron"></i>
+              </div>
+              <div class="info-nested-content" style="padding:10px 12px 14px;">
+                <div id="grid-currency" class="char-grid"></div>
+                <div id="toast-currency" class="char-toast"></div>
+              </div>
+            </div>
+
+            <div class="info-item info-nested" id="info-ch-numforms">
+              <div class="info-header info-nested-header" onclick="toggleInfo('info-ch-numforms')">
+                <i class="ti ti-123" style="font-size:13px; color:var(--accent);"></i>
+                <span class="info-title" style="font-size:12.5px;">Number Forms <span style="font-weight:400; color:var(--ink-mid); font-size:11px;">U+2150–U+218F</span></span>
+                <i class="ti ti-chevron-right info-chevron"></i>
+              </div>
+              <div class="info-nested-content" style="padding:10px 12px 14px;">
+                <div id="grid-numforms" class="char-grid"></div>
+                <div id="toast-numforms" class="char-toast"></div>
+              </div>
+            </div>
+
+            <div class="info-item info-nested" id="info-ch-arrows">
+              <div class="info-header info-nested-header" onclick="toggleInfo('info-ch-arrows')">
+                <i class="ti ti-arrows-right-left" style="font-size:13px; color:var(--accent);"></i>
+                <span class="info-title" style="font-size:12.5px;">Arrows <span style="font-weight:400; color:var(--ink-mid); font-size:11px;">U+2190–U+21FF</span></span>
+                <i class="ti ti-chevron-right info-chevron"></i>
+              </div>
+              <div class="info-nested-content" style="padding:10px 12px 14px;">
+                <div id="grid-arrows" class="char-grid"></div>
+                <div id="toast-arrows" class="char-toast"></div>
+              </div>
+            </div>
+
+            <div class="info-item info-nested" id="info-ch-mathops">
+              <div class="info-header info-nested-header" onclick="toggleInfo('info-ch-mathops')">
+                <i class="ti ti-math-function" style="font-size:13px; color:var(--accent);"></i>
+                <span class="info-title" style="font-size:12.5px;">Mathematical Operators <span style="font-weight:400; color:var(--ink-mid); font-size:11px;">U+2200–U+22FF</span></span>
+                <i class="ti ti-chevron-right info-chevron"></i>
+              </div>
+              <div class="info-nested-content" style="padding:10px 12px 14px;">
+                <div id="grid-mathops" class="char-grid"></div>
+                <div id="toast-mathops" class="char-toast"></div>
+              </div>
+            </div>
+
+            <div class="info-item info-nested" id="info-ch-dingbats">
+              <div class="info-header info-nested-header" onclick="toggleInfo('info-ch-dingbats')">
+                <i class="ti ti-sparkles" style="font-size:13px; color:var(--accent);"></i>
+                <span class="info-title" style="font-size:12.5px;">Dingbats &amp; Misc. Mathematical Symbols-A <span style="font-weight:400; color:var(--ink-mid); font-size:11px;">U+2700–U+27EF</span></span>
+                <i class="ti ti-chevron-right info-chevron"></i>
+              </div>
+              <div class="info-nested-content" style="padding:10px 12px 14px;">
+                <div id="grid-dingbats" class="char-grid"></div>
+                <div id="toast-dingbats" class="char-toast"></div>
+              </div>
+            </div>
+
           </div>
         </div>
 
@@ -1749,6 +1947,91 @@
   function toggleInfo(id) {
     document.getElementById(id).classList.toggle('open');
   }
+
+  // ── CHARACTER GRID BUILDER ──
+  function buildCharCell(grid, toastId, c) {
+    var ch  = String.fromCharCode(c);
+    var hex = c.toString(16).toUpperCase().padStart(4, '0');
+    var cell = document.createElement('div');
+    cell.className = 'char-cell';
+    cell.title = 'U+' + hex + ' \u00b7 ' + c;
+    var codeEl = document.createElement('span');
+    codeEl.className = 'char-code';
+    codeEl.textContent = c;
+    var glyphEl = document.createElement('span');
+    glyphEl.className = 'char-glyph';
+    glyphEl.textContent = ch;
+    cell.appendChild(codeEl);
+    cell.appendChild(glyphEl);
+    cell.addEventListener('click', function () {
+      navigator.clipboard.writeText(ch).then(function () {
+        cell.classList.add('copied');
+        var toast = document.getElementById(toastId);
+        if (toast) { toast.style.display = 'block'; toast.textContent = 'Copied \u201c' + ch + '\u201d\u2002U+' + hex; }
+        setTimeout(function () {
+          cell.classList.remove('copied');
+          if (toast) toast.style.display = 'none';
+        }, 1400);
+      });
+    });
+    grid.appendChild(cell);
+  }
+
+  function buildCharGrid(gridId, toastId, ranges, skip) {
+    var grid = document.getElementById(gridId);
+    if (!grid) return;
+    var skipSet = {};
+    (skip || []).forEach(function (c) { skipSet[c] = true; });
+    for (var ri = 0; ri < ranges.length; ri++) {
+      for (var c = ranges[ri][0]; c <= ranges[ri][1]; c++) {
+        if (!skipSet[c]) buildCharCell(grid, toastId, c);
+      }
+    }
+  }
+
+  // ── INIT: build all char grids + wire char-codes click-to-copy ──
+  document.addEventListener('DOMContentLoaded', function () {
+    // Latin-1 Supplement (skip U+00AD soft hyphen)
+    buildCharGrid('grid-latin1',   'toast-latin1',   [[0x00A0, 0x00FF]], [0x00AD]);
+    buildCharGrid('grid-lat-ext-a','toast-lat-ext-a',[[0x0100, 0x017F]]);
+    buildCharGrid('grid-lat-ext-b','toast-lat-ext-b',[[0x0180, 0x024F]]);
+    buildCharGrid('grid-greek',    'toast-greek',    [[0x0370, 0x03FF]]);
+    buildCharGrid('grid-lat-add',  'toast-lat-add',  [[0x1E00, 0x1EFF]]);
+    // General Punctuation — skip invisible format / bidi characters
+    buildCharGrid('grid-punct',    'toast-punct',    [[0x2000, 0x206F]],
+      [0x200B,0x200C,0x200D,0x200E,0x200F,0x202A,0x202B,0x202C,0x202D,0x202E,
+       0x2060,0x2061,0x2062,0x2063,0x2064,0x2066,0x2067,0x2068,0x2069,0x206A,
+       0x206B,0x206C,0x206D,0x206E,0x206F]);
+    buildCharGrid('grid-subsup',   'toast-subsup',   [[0x2070, 0x209F]]);
+    buildCharGrid('grid-currency', 'toast-currency', [[0x20A0, 0x20CF]]);
+    buildCharGrid('grid-numforms', 'toast-numforms', [[0x2150, 0x218F]]);
+    buildCharGrid('grid-arrows',   'toast-arrows',   [[0x2190, 0x21FF]]);
+    buildCharGrid('grid-mathops',  'toast-mathops',  [[0x2200, 0x22FF]]);
+    buildCharGrid('grid-dingbats', 'toast-dingbats', [[0x2700, 0x27EF]]);
+
+    // Character codes table — click-to-copy
+    var ccCells = document.querySelectorAll('#info-charcodes .cc-char');
+    ccCells.forEach(function (td) {
+      var ch = td.textContent.trim();
+      if (!ch) return;
+      td.title = 'Click to copy';
+      td.addEventListener('mouseenter', function () { td.style.background = 'var(--cream)'; });
+      td.addEventListener('mouseleave', function () { td.style.background = ''; });
+      td.addEventListener('click', function () {
+        navigator.clipboard.writeText(ch).then(function () {
+          td.style.background = 'var(--accent)';
+          td.style.color = '#fff';
+          var toast = document.getElementById('cc-toast');
+          if (toast) { toast.style.display = 'block'; toast.textContent = 'Copied \u201c' + ch + '\u201d'; }
+          setTimeout(function () {
+            td.style.background = '';
+            td.style.color = '';
+            if (toast) toast.style.display = 'none';
+          }, 1400);
+        });
+      });
+    });
+  });
 
   // ── INIT ──
   checkSession();
