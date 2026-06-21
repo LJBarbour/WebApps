@@ -586,6 +586,45 @@
     .sat-controls { grid-template-columns: 1fr 1fr; }
   }
 
+  /* ── P-T Phase diagram ──────────────────────────────────────── */
+  .pt-diagram-wrap {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    padding: 12px 14px 10px;
+    margin-bottom: 14px;
+    display: none;
+  }
+  .pt-diagram-wrap.visible { display: block; }
+  .pt-diagram-title {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .pt-diagram-title .pt-phase-label {
+    font-size: 0.70rem;
+    letter-spacing: 0.04em;
+    padding: 1px 8px;
+    border-radius: 8px;
+    text-transform: none;
+  }
+  .pt-diagram-title .pt-phase-label.gas       { background:#E8F4FF; color:#1A4A7A; }
+  .pt-diagram-title .pt-phase-label.liquid    { background:#E8F8EE; color:#1A4A2A; }
+  .pt-diagram-title .pt-phase-label.twophase  { background:#FFF8E0; color:#7A5000; }
+  .pt-diagram-title .pt-phase-label.supercrit { background:#F0E8FF; color:#4A1A7A; }
+  #pt-canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+    cursor: crosshair;
+  }
+
   /* ── Spinner ─────────────────────────────────────────────────── */
   .spinner {
     display: inline-block;
@@ -764,6 +803,15 @@
           <div class="z-value" id="z-value">—</div>
         </div>
         <div class="z-ideal-note" id="z-ideal-note">ideal gas: Z = 1</div>
+      </div>
+
+      <!-- P-T Phase diagram -->
+      <div class="pt-diagram-wrap" id="pt-diagram-wrap">
+        <div class="pt-diagram-title">
+          P – T Phase diagram
+          <span class="pt-phase-label" id="pt-phase-label"></span>
+        </div>
+        <canvas id="pt-canvas" width="600" height="280"></canvas>
       </div>
 
       <!-- MOF context highlights -->
@@ -1142,6 +1190,332 @@ function renderResults({ fluid, in1prop, in1val, in2prop, in2val, res, showMolar
   } else {
     container.innerHTML = `<div class="results-grid">${cards.join('')}</div>`;
   }
+
+  // Draw P-T phase diagram
+  const _T = res['T'], _P = res['P'];
+  drawPhaseDiagram(fluid, _T, _P);
+}
+
+// ── P-T Phase diagram ────────────────────────────────────────────
+// Cache: fluid -> { Tmin, Tcrit, Pcrit, Ptriple, curveT, curveP }
+const _ptCache = {};
+
+function buildSatCurve(fluid) {
+  if (_ptCache[fluid]) return _ptCache[fluid];
+  let Tmin, Tcrit, Pcrit, Ptriple, Ttriple;
+  try {
+    Tcrit   = cp.Props1SI(fluid, 'Tcrit');
+    Pcrit   = cp.Props1SI(fluid, 'pcrit');
+    Ttriple = cp.Props1SI(fluid, 'Ttriple');
+    Ptriple = cp.Props1SI(fluid, 'ptriple');
+    Tmin    = cp.Props1SI(fluid, 'Tmin');
+  } catch(e) { return null; }
+  if (!isFinite(Tcrit) || !isFinite(Pcrit)) return null;
+
+  // Use Ttriple (or Tmin) as lower bound, step up to Tcrit
+  const Tlo = (isFinite(Ttriple) && Ttriple > 0) ? Math.max(Ttriple, Tmin + 0.1) : (Tmin + 0.5);
+  const Thi = Tcrit - 0.05;
+  const N = 80;
+  const curveT = [], curveP = [];
+  for (let i = 0; i <= N; i++) {
+    const T = Tlo + (Thi - Tlo) * (i / N);
+    try {
+      const P = cp.PropsSI('P', 'T', T, 'Q', 0, fluid);
+      if (isFinite(P) && P > 0) { curveT.push(T); curveP.push(P); }
+    } catch(e) {}
+  }
+  if (curveT.length < 3) return null;
+  const result = { Tmin: Tlo, Tcrit, Pcrit, Ptriple: curveP[0] || Ptriple, curveT, curveP };
+  _ptCache[fluid] = result;
+  return result;
+}
+
+function drawPhaseDiagram(fluid, stateT, stateP) {
+  const wrap  = document.getElementById('pt-diagram-wrap');
+  const canvas = document.getElementById('pt-canvas');
+  const lbl   = document.getElementById('pt-phase-label');
+  const data  = buildSatCurve(fluid);
+
+  if (!data || stateT === null || stateP === null) {
+    wrap.classList.remove('visible');
+    return;
+  }
+  wrap.classList.add('visible');
+
+  // ── Canvas setup ──────────────────────────────────────────────
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.clientWidth || 600;
+  const H = Math.round(W * 0.46);
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.height = H + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const PAD = { top: 18, right: 20, bottom: 36, left: 58 };
+  const pw = W - PAD.left - PAD.right;
+  const ph = H - PAD.top  - PAD.bottom;
+
+  // ── Data ranges ───────────────────────────────────────────────
+  // X: temperature — show from slightly below Tmin to 1.25*Tcrit (or stateT+margin)
+  const Tlo_plot = data.Tmin * 0.95;
+  const Thi_plot = Math.max(data.Tcrit * 1.25, stateT * 1.05);
+
+  // Y: pressure (log scale gives best PT diagram) — from below triple to above critical or state
+  const Plo_raw  = Math.max(data.Ptriple * 0.15, 100);
+  const Phi_raw  = Math.max(data.Pcrit * 1.6, stateP * 1.2);
+  const logPlo   = Math.log10(Plo_raw);
+  const logPhi   = Math.log10(Phi_raw);
+
+  // Coordinate transforms
+  const tx = T => PAD.left + ((T - Tlo_plot) / (Thi_plot - Tlo_plot)) * pw;
+  const ty = P => PAD.top  + ph - ((Math.log10(Math.max(P, Plo_raw)) - logPlo) / (logPhi - logPlo)) * ph;
+
+  // ── Background regions ────────────────────────────────────────
+  // CSS vars aren't accessible from canvas — use literal colours matching the palette
+  const COL = {
+    cream:    '#F5F0E8',
+    paper:    '#FFFDF8',
+    ink:      '#1C1A16',
+    inkMid:   '#4A4640',
+    inkFaint: '#9A948A',
+    rule:     '#DDD8CE',
+    accent:   '#2E5F8A',
+    accent2:  '#7BA3C4',
+    good:     '#2A6B45',
+    warn:     '#B05020',
+  };
+
+  ctx.fillStyle = COL.paper;
+  ctx.fillRect(0, 0, W, H);
+
+  // Build saturation path for region fills
+  const satPath = new Path2D();
+  const firstVisible = data.curveT.findIndex(T => T >= Tlo_plot);
+  let started = false;
+  for (let i = 0; i < data.curveT.length; i++) {
+    const x = tx(data.curveT[i]);
+    const y = ty(data.curveP[i]);
+    if (!started) { satPath.moveTo(x, y); started = true; }
+    else          { satPath.lineTo(x, y); }
+  }
+  // Close: critical point -> top of plot -> left of plot -> bottom-left
+  const xcrit = tx(data.Tcrit), ycrit = ty(data.Pcrit);
+  satPath.lineTo(xcrit, ycrit);
+
+  // Gas region (below sat curve, right of triple): light blue tint
+  ctx.save();
+  ctx.beginPath();
+  const xlo = tx(Tlo_plot), xhi = tx(Thi_plot);
+  const ybot = PAD.top + ph, ytop = PAD.top;
+  ctx.moveTo(PAD.left, ybot);
+  // Walk sat curve
+  for (let i = 0; i < data.curveT.length; i++) {
+    ctx.lineTo(tx(data.curveT[i]), ty(data.curveP[i]));
+  }
+  // Across to right edge at critical height, then down and back
+  ctx.lineTo(tx(Thi_plot), ty(data.Pcrit));
+  ctx.lineTo(tx(Thi_plot), ybot);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(46,95,138,0.06)';
+  ctx.fill();
+
+  // Liquid region (above sat curve, below critical, left of Tcrit): green tint
+  ctx.beginPath();
+  ctx.moveTo(PAD.left, ytop);
+  for (let i = 0; i < data.curveT.length; i++) {
+    ctx.lineTo(tx(data.curveT[i]), ty(data.curveP[i]));
+  }
+  ctx.lineTo(xcrit, ycrit);
+  ctx.lineTo(xcrit, ytop);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(42,107,69,0.07)';
+  ctx.fill();
+
+  // Supercritical region (T > Tcrit, P > Pcrit): purple tint
+  ctx.beginPath();
+  ctx.moveTo(xcrit, ytop);
+  ctx.lineTo(tx(Thi_plot), ytop);
+  ctx.lineTo(tx(Thi_plot), ty(data.Pcrit));
+  ctx.lineTo(xcrit, ycrit);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(90,60,140,0.07)';
+  ctx.fill();
+  ctx.restore();
+
+  // ── Grid lines ────────────────────────────────────────────────
+  ctx.strokeStyle = COL.rule;
+  ctx.lineWidth = 0.5;
+  // Horizontal (pressure) grid — log decade lines
+  const pDecades = [];
+  for (let exp = Math.floor(logPlo); exp <= Math.ceil(logPhi); exp++) {
+    for (const m of [1, 2, 5]) {
+      const P = m * Math.pow(10, exp);
+      if (P >= Plo_raw && P <= Phi_raw) pDecades.push(P);
+    }
+  }
+  ctx.setLineDash([2, 3]);
+  pDecades.forEach(P => {
+    const y = ty(P);
+    ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(PAD.left + pw, y); ctx.stroke();
+  });
+  ctx.setLineDash([]);
+
+  // ── Saturation curve ──────────────────────────────────────────
+  ctx.beginPath();
+  ctx.strokeStyle = COL.accent;
+  ctx.lineWidth = 1.8;
+  for (let i = 0; i < data.curveT.length; i++) {
+    const x = tx(data.curveT[i]), y = ty(data.curveP[i]);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // ── Critical point ────────────────────────────────────────────
+  ctx.beginPath();
+  ctx.arc(xcrit, ycrit, 5, 0, 2*Math.PI);
+  ctx.fillStyle = COL.accent;
+  ctx.fill();
+  ctx.strokeStyle = COL.paper;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // label
+  ctx.fillStyle = COL.inkMid;
+  ctx.font = `500 9px DM Mono, monospace`;
+  ctx.textAlign = 'left';
+  ctx.fillText('Tc', xcrit + 6, ycrit - 4);
+
+  // ── Axes ──────────────────────────────────────────────────────
+  ctx.strokeStyle = COL.inkFaint;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(PAD.left, PAD.top);
+  ctx.lineTo(PAD.left, PAD.top + ph);
+  ctx.lineTo(PAD.left + pw, PAD.top + ph);
+  ctx.stroke();
+
+  // Y-axis labels (pressure in bar)
+  ctx.fillStyle = COL.inkFaint;
+  ctx.font = `300 9px DM Mono, monospace`;
+  ctx.textAlign = 'right';
+  pDecades.forEach(P => {
+    const y = ty(P);
+    if (y < PAD.top || y > PAD.top + ph) return;
+    const Pbar = P / 1e5;
+    const lbl  = Pbar >= 1000 ? (Pbar/1000).toFixed(0)+'k'
+               : Pbar >= 1    ? Pbar.toFixed(Pbar < 10 ? 1 : 0)
+               : Pbar.toExponential(0);
+    ctx.fillText(lbl, PAD.left - 4, y + 3);
+  });
+  // Y-axis title
+  ctx.save();
+  ctx.translate(11, PAD.top + ph/2);
+  ctx.rotate(-Math.PI/2);
+  ctx.textAlign = 'center';
+  ctx.font = `400 9px DM Sans, sans-serif`;
+  ctx.fillStyle = COL.inkFaint;
+  ctx.fillText('P / bar', 0, 0);
+  ctx.restore();
+
+  // X-axis labels (temperature in K)
+  ctx.textAlign = 'center';
+  ctx.font = `300 9px DM Mono, monospace`;
+  ctx.fillStyle = COL.inkFaint;
+  const Trange = Thi_plot - Tlo_plot;
+  const Tstep  = Trange < 100 ? 10 : Trange < 300 ? 50 : Trange < 600 ? 100 : 200;
+  const Tstart = Math.ceil(Tlo_plot / Tstep) * Tstep;
+  for (let T = Tstart; T <= Thi_plot; T += Tstep) {
+    const x = tx(T);
+    ctx.fillText(T.toFixed(0) + ' K', x, PAD.top + ph + 13);
+  }
+  // X-axis title
+  ctx.font = `400 9px DM Sans, sans-serif`;
+  ctx.fillText('T / K', PAD.left + pw/2, PAD.top + ph + 26);
+
+  // ── Region labels ─────────────────────────────────────────────
+  ctx.font = `400 10px DM Sans, sans-serif`;
+  ctx.fillStyle = 'rgba(46,95,138,0.55)';
+  ctx.textAlign = 'left';
+  ctx.fillText('gas', tx(data.Tcrit * 0.60), ty(data.Ptriple * 0.6) - 4);
+
+  ctx.fillStyle = 'rgba(42,107,69,0.55)';
+  ctx.textAlign = 'center';
+  ctx.fillText('liquid', tx(data.Tcrit * 0.55), ty(data.Pcrit * 0.3) + 4);
+
+  ctx.fillStyle = 'rgba(90,60,140,0.55)';
+  ctx.textAlign = 'left';
+  ctx.fillText('supercritical', tx(data.Tcrit * 1.03), ty(data.Pcrit * 1.4));
+
+  // ── State point crosshair ─────────────────────────────────────
+  const sx = tx(stateT), sy = ty(stateP);
+  const inBounds = sx >= PAD.left && sx <= PAD.left+pw && sy >= PAD.top && sy <= PAD.top+ph;
+
+  if (inBounds) {
+    // Faint crosshair lines
+    ctx.setLineDash([3,3]);
+    ctx.strokeStyle = 'rgba(176,80,32,0.45)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(sx, PAD.top); ctx.lineTo(sx, PAD.top+ph); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(PAD.left, sy); ctx.lineTo(PAD.left+pw, sy); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Point
+    ctx.beginPath();
+    ctx.arc(sx, sy, 6, 0, 2*Math.PI);
+    ctx.fillStyle = COL.warn;
+    ctx.fill();
+    ctx.strokeStyle = COL.paper;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // Inner dot
+    ctx.beginPath();
+    ctx.arc(sx, sy, 2, 0, 2*Math.PI);
+    ctx.fillStyle = COL.paper;
+    ctx.fill();
+
+    // T and P axis tick labels for the state point
+    ctx.setLineDash([]);
+    ctx.fillStyle = COL.warn;
+    ctx.font = `500 9px DM Mono, monospace`;
+    ctx.textAlign = 'center';
+    const Tstr = stateT.toFixed(1) + ' K';
+    const Pstr = (stateP/1e5).toFixed(2) + ' bar';
+    // Draw on bottom axis
+    ctx.fillText(Tstr, sx, PAD.top + ph + 13);
+    // Draw on left axis
+    ctx.textAlign = 'right';
+    ctx.fillText(Pstr, PAD.left - 4, sy + 3);
+  }
+
+  // ── Phase label ────────────────────────────────────────────────
+  // Determine phase from position relative to curve
+  let phaseClass = 'gas', phaseText = 'Gas';
+  if (stateT > data.Tcrit && stateP > data.Pcrit) {
+    phaseClass = 'supercrit'; phaseText = 'Supercritical';
+  } else if (stateT > data.Tcrit) {
+    phaseClass = 'gas'; phaseText = 'Supercrit. gas';
+  } else {
+    // Find interpolated Psat at stateT
+    let Psat_at_T = null;
+    for (let i = 0; i < data.curveT.length - 1; i++) {
+      if (stateT >= data.curveT[i] && stateT <= data.curveT[i+1]) {
+        const frac = (stateT - data.curveT[i]) / (data.curveT[i+1] - data.curveT[i]);
+        Psat_at_T = data.curveP[i] + frac * (data.curveP[i+1] - data.curveP[i]);
+        break;
+      }
+    }
+    if (Psat_at_T !== null) {
+      if (Math.abs(stateP - Psat_at_T) / Psat_at_T < 0.002) {
+        phaseClass = 'twophase'; phaseText = 'Two-phase boundary';
+      } else if (stateP > Psat_at_T) {
+        phaseClass = 'liquid'; phaseText = 'Liquid';
+      } else {
+        phaseClass = 'gas'; phaseText = 'Gas';
+      }
+    }
+  }
+  lbl.textContent = phaseText;
+  lbl.className   = 'pt-phase-label ' + phaseClass;
 }
 
 // ── Fluid info ────────────────────────────────────────────────────
@@ -1378,8 +1752,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (cp) updateFluidInfo();
   });
 
-  // Preset P for common gas storage conditions
-  // Auto-set Tmin/Tmax for saturation from critical point when fluid changes
+  // Redraw phase diagram on window resize
+  window.addEventListener('resize', () => {
+    if (lastResults) {
+      const { fluid, res } = lastResults;
+      drawPhaseDiagram(fluid, res['T'], res['P']);
+    }
+  });
 });
 
 </script>
