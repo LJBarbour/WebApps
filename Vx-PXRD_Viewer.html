@@ -23,7 +23,6 @@
 </script>
 <!-- ── END RESOURCE ACCESS CHECK ── -->
 
-
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Vx-PXRD Viewer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -185,6 +184,13 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
       <div class="dz-hint">2θ &nbsp; intensity &nbsp;·&nbsp; space-separated &nbsp;·&nbsp; no header required</div>
     </div>
     <input type="file" id="fileInput" accept=".xy,.dat,.txt,.zip" multiple style="display:none">
+
+    <div style="margin-top:10px; display:flex; align-items:center; gap:8px;">
+      <input type="checkbox" id="resetOnLoad" style="accent-color:var(--accent); width:13px; height:13px; cursor:pointer;">
+      <label for="resetOnLoad" style="font-family:var(--mono); font-size:10px; color:#666; cursor:pointer; letter-spacing:.04em;">
+        Reset all settings to defaults when loading new files
+      </label>
+    </div>
 
     <div class="row-actions" id="settingsActions" style="margin-top:14px">
       <span class="lbl">App settings</span>
@@ -390,7 +396,14 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
         <div class="cp-head"><span class="cp-title">Legends</span><span class="cp-arr">▼</span></div>
         <div class="cp-body">
           <div class="cr"><span class="cl">Show legends</span><input type="checkbox" id="stkShowLegends" checked></div>
-          <div class="cr"><span class="cl">Snap to left edge</span><input type="checkbox" id="stkSnapLeft" checked></div>
+          <div class="cr"><span class="cl">Snap legends</span>
+            <select id="stkSnapMode">
+              <option value="none">Off</option>
+              <option value="left" selected>Left edge</option>
+              <option value="center">Center</option>
+              <option value="right">Right edge</option>
+            </select>
+          </div>
           <div class="cr"><span class="cl">Reset positions</span><button class="btn out" style="padding:4px 12px;font-size:9px" id="stkResetLegends">Reset</button></div>
         </div>
       </div>
@@ -438,7 +451,7 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
     <p><strong>Per-pattern normalisation:</strong> each diffractogram is independently scaled to fill its band, so subtle peaks in low-intensity patterns are visible alongside strong peaks in high-intensity patterns.</p>
     <p><strong>Colour:</strong> the default is all-black diffractograms. Untick <em>All black</em> to use one of six colour ramps (Viridis, Plasma, Inferno, Cool, Warm, Rainbow); the ramp is applied from the first to the last pattern in the file order.</p>
     <p><strong>Plot box:</strong> by default only the bottom (X) axis is drawn. Tick <em>Show plot box</em> for a full rectangle. The axis/box weight is independent of the diffractogram line weight.</p>
-    <p><strong>Legends:</strong> each pattern's legend label is drawn directly on the plot and can be repositioned with the mouse. Hover over a legend to see the cursor become a grab handle, then drag it anywhere within its band. Tick <em>Snap to left edge</em> (on by default) to lock all legends to a common left-hand x-coordinate — dragging any one legend horizontally then moves them all. The <em>Reset</em> button restores the default positions, which are calculated so the widest legend ends 30 px in from the plot's right edge. Because legends are drawn on the canvas itself (not as a separate overlay), right-clicking the plot and choosing <em>Copy image</em> or <em>Save image as…</em> in the browser produces a complete figure with the legends in place.</p>
+    <p><strong>Legends:</strong> each pattern's legend label is drawn directly on the plot and can be repositioned with the mouse. Hover over a legend to see the cursor become a grab handle, then drag it anywhere within its band. The <em>Snap legends</em> selector controls horizontal alignment across all legends: <em>Left edge</em> (the default — every legend's left edge sits on the same vertical line), <em>Center</em> (all legend midpoints aligned), <em>Right edge</em> (all right edges aligned, useful when label widths vary a lot), or <em>Off</em> (each legend positioned independently). Dragging any one legend horizontally moves the entire stack when snapping is on; switching modes keeps the widest legend visually anchored and rearranges the others around it. The <em>Reset</em> button clears all positions and returns to defaults. Because legends are drawn on the canvas itself (not as a separate overlay), right-clicking the plot and choosing <em>Copy image</em> or <em>Save image as…</em> in the browser produces a complete figure with the legends in place.</p>
 
     <h3>Output size and reproducibility</h3>
     <p>By default both plots scale horizontally to fill the available browser width, which is convenient for exploration but means the same data can produce figures of different absolute dimensions on different days. For consistent figure preparation, tick <em>Lock plot size</em> (in the Output size group on each settings panel) and enter explicit pixel dimensions. The intensity map locks both width and height; the stacked plot locks the width — its height naturally follows from the number of patterns multiplied by the band height. Save the settings file once the layout is right, and the same dimensions are restored on every future session.</p>
@@ -475,7 +488,8 @@ let baseStackImage = null;     // ImageData snapshot of stack canvas before lege
 let stackLegendBounds = [];    // [{ key, x, y, w, h, idx }] hit-test boxes for canvas legends
 let draggingLegend = null;     // { key, idx, offsetX, offsetY } while dragging
 const legendPositions = {};   // keyed by filename → { xFrac, yFrac }
-let snapLeftXFrac = null;      // common left x (as fraction of plotW) for snap mode
+let snapXFrac = null;          // shared snap reference (interpretation per stkSnapMode)
+let prevSnapMode = 'left';     // previous snap mode for conversion on change
 
 // ═══════════════════════════════════════════════════
 //  Tab switching
@@ -552,6 +566,10 @@ function parseXY(text) {
 }
 
 async function loadFiles(files) {
+  // Reset all settings to defaults before processing — only if the user has opted in.
+  // Do this before touching `patterns` so any scroll/render state is already clean.
+  if (document.getElementById('resetOnLoad').checked) resetToDefaults();
+
   let added = 0;
   const entries = [];
   for (const f of files) {
@@ -1272,18 +1290,27 @@ function drawStackLegends(skipSet) {
   if (!document.getElementById('stkShowLegends').checked) return;
 
   const { M, plotW, bandH, order, font, legSz } = stackMeta;
-  const snap = document.getElementById('stkSnapLeft').checked;
+  const snapMode = document.getElementById('stkSnapMode').value;
+  const snapActive = snapMode !== 'none';
 
-  // Measure widest legend in current font for default-position computation
+  // Pre-measure all legend widths
   ctx.font = `${legSz}px ${font}`;
-  let widestW = 0;
-  order.forEach(p => {
+  const widths = order.map(p => {
     const txt = String(p.legend || (p.y != null ? p.y : p.filename));
-    const w = ctx.measureText(txt).width;
-    if (w > widestW) widestW = w;
+    return ctx.measureText(txt).width;
   });
+  const widestW = widths.length ? Math.max(...widths) : 0;
+  const widestWFrac = widestW / plotW;
   const RIGHT_BUFFER = 30;
-  const defaultXFrac = Math.max(0, (plotW - widestW - RIGHT_BUFFER) / plotW);
+  // Default left-edge position so the widest legend ends RIGHT_BUFFER from plot right
+  const defaultLeftXFrac = Math.max(0, (plotW - widestW - RIGHT_BUFFER) / plotW);
+
+  // Initialise snapXFrac if needed so the widest legend lands at the default position
+  if (snapActive && snapXFrac == null) {
+    if (snapMode === 'left')        snapXFrac = defaultLeftXFrac;
+    else if (snapMode === 'center') snapXFrac = defaultLeftXFrac + widestWFrac / 2;
+    else                            snapXFrac = defaultLeftXFrac + widestWFrac;
+  }
 
   ctx.fillStyle    = '#0f0e0d';
   ctx.textBaseline = 'top';
@@ -1293,21 +1320,34 @@ function drawStackLegends(skipSet) {
     const key = p.filename;
 
     // Ensure a position exists (initialise on first encounter)
-    if (!legendPositions[key]) legendPositions[key] = { xFrac: defaultXFrac, yFrac: 0.35 };
+    if (!legendPositions[key]) legendPositions[key] = { xFrac: defaultLeftXFrac, yFrac: 0.35 };
     // Legacy migration from earlier x-px storage
     if (legendPositions[key].xFrac == null && legendPositions[key].x != null) {
       legendPositions[key].xFrac = Math.max(0, Math.min(1, (legendPositions[key].x - M.left) / plotW));
       delete legendPositions[key].x;
     }
     const pos = legendPositions[key];
-    const xFrac = (snap && snapLeftXFrac != null) ? snapLeftXFrac : pos.xFrac;
-    const x = M.left + xFrac * plotW;
+    const w   = widths[idx];
+    const wFrac = w / plotW;
+
+    // Compute the legend's actual left-edge xFrac for this draw
+    let leftXFrac;
+    if (snapActive) {
+      if (snapMode === 'left')        leftXFrac = snapXFrac;
+      else if (snapMode === 'center') leftXFrac = snapXFrac - wFrac / 2;
+      else                            leftXFrac = snapXFrac - wFrac;
+      // Sync stored position so toggling snap off keeps everything in place
+      pos.xFrac = leftXFrac;
+    } else {
+      leftXFrac = pos.xFrac;
+    }
+
+    const x = M.left + leftXFrac * plotW;
     const y = M.top + idx * bandH + pos.yFrac * bandH;
 
     // Always record bounds for hit-testing — even if we're skipping the draw,
     // so the user can grab a "phantom" legend while dragging another in snap mode.
     const txt = String(p.legend || (p.y != null ? p.y : p.filename));
-    const w = ctx.measureText(txt).width;
     stackLegendBounds.push({ key, idx, x, y, w, h: legSz });
 
     if (skipSet && skipSet.has(key)) return;
@@ -1345,7 +1385,11 @@ function drawStackLegends(skipSet) {
     const hit = hitTest(cx, cy);
     if (!hit) return;
     e.preventDefault();
-    draggingLegend = { key: hit.key, idx: hit.idx, offsetX: cx - hit.x, offsetY: cy - hit.y };
+    draggingLegend = {
+      key: hit.key, idx: hit.idx,
+      offsetX: cx - hit.x, offsetY: cy - hit.y,
+      legendW: hit.w         // width of this legend in canvas px, for snap-anchor math
+    };
     canvas.style.cursor = 'grabbing';
   });
 
@@ -1353,22 +1397,27 @@ function drawStackLegends(skipSet) {
     if (!stackMeta) return;
     const { cx, cy } = getCanvasCoords(e);
     if (draggingLegend) {
-      const { key, idx, offsetX, offsetY } = draggingLegend;
+      const { key, idx, offsetX, offsetY, legendW } = draggingLegend;
       const { M, plotW, bandH, legSz } = stackMeta;
       const bandTop = M.top + idx * bandH;
       let newX = cx - offsetX;
       let newY = cy - offsetY;
       newY = Math.max(bandTop, Math.min(bandTop + bandH - legSz, newY));
       newX = Math.max(M.left, Math.min(M.left + plotW - 20, newX));
-      const newXFrac = (newX - M.left) / plotW;
+      const newLeftXFrac = (newX - M.left) / plotW;
       const newYFrac = (newY - bandTop) / bandH;
+      const wFrac = legendW / plotW;
 
-      if (document.getElementById('stkSnapLeft').checked) {
-        snapLeftXFrac = newXFrac;
-        Object.keys(legendPositions).forEach(k => { legendPositions[k].xFrac = newXFrac; });
-        legendPositions[key].yFrac = newYFrac;
+      const snapMode = document.getElementById('stkSnapMode').value;
+      if (snapMode !== 'none') {
+        // Update the shared snap reference based on the mode and this legend's width.
+        // Each legend's drawn left-edge xFrac is reconstructed in drawStackLegends.
+        if (snapMode === 'left')        snapXFrac = newLeftXFrac;
+        else if (snapMode === 'center') snapXFrac = newLeftXFrac + wFrac / 2;
+        else                            snapXFrac = newLeftXFrac + wFrac;
+        legendPositions[key].yFrac = newYFrac;     // y stays per-legend
       } else {
-        legendPositions[key].xFrac = newXFrac;
+        legendPositions[key].xFrac = newLeftXFrac;
         legendPositions[key].yFrac = newYFrac;
       }
       drawStackLegends(null);    // fast redraw — chart pixels come from baseStackImage
@@ -1391,15 +1440,36 @@ function drawStackLegends(skipSet) {
 
 document.getElementById('stkResetLegends').addEventListener('click', () => {
   Object.keys(legendPositions).forEach(k => delete legendPositions[k]);
-  snapLeftXFrac = null;
-  // Re-draw at default positions (fast — chart pixels reused via baseStackImage)
+  snapXFrac = null;
   drawStackLegends(null);
 });
-document.getElementById('stkSnapLeft').addEventListener('change', e => {
-  if (e.target.checked) {
-    const xFracs = Object.values(legendPositions).map(p => p.xFrac).filter(v => v != null);
-    if (xFracs.length) snapLeftXFrac = Math.min(...xFracs);
+document.getElementById('stkSnapMode').addEventListener('change', e => {
+  const newMode = e.target.value;
+  // Convert snapXFrac so the widest legend stays visually anchored across mode changes.
+  if (snapXFrac != null && stackMeta && prevSnapMode !== 'none' && newMode !== 'none') {
+    const { order, font, legSz, plotW } = stackMeta;
+    const meas = document.createElement('canvas').getContext('2d');
+    meas.font = `${legSz}px ${font}`;
+    let widestW = 0;
+    order.forEach(p => {
+      const w = meas.measureText(String(p.legend || (p.y != null ? p.y : p.filename))).width;
+      if (w > widestW) widestW = w;
+    });
+    const wF = widestW / plotW;
+    // Step 1: derive the widest legend's left-edge xFrac under the OLD mode
+    let widestLeft;
+    if (prevSnapMode === 'left')        widestLeft = snapXFrac;
+    else if (prevSnapMode === 'center') widestLeft = snapXFrac - wF / 2;
+    else                                widestLeft = snapXFrac - wF;
+    // Step 2: re-express as the NEW mode's reference
+    if (newMode === 'left')        snapXFrac = widestLeft;
+    else if (newMode === 'center') snapXFrac = widestLeft + wF / 2;
+    else                           snapXFrac = widestLeft + wF;
   }
+  // For 'none' → snap or snap → 'none': leave snapXFrac alone; drawStackLegends initialises
+  // a sensible default if needed, and 'none' mode reads each legend's stored xFrac
+  // (which has been kept in sync by drawStackLegends).
+  prevSnapMode = newMode;
   drawStackLegends(null);
 });
 
@@ -1415,6 +1485,67 @@ function scheduleRender() {
 function scheduleStackRender() {
   if (!patterns.length) return;
   clearTimeout(stackTimer); stackTimer = setTimeout(doStackRender, 300);
+}
+
+// ═══════════════════════════════════════════════════
+//  Default settings — mirrors every control's initial HTML value.
+//  Used by "Reset on load" and the Reset button.
+// ═══════════════════════════════════════════════════
+const DEFAULTS = {
+  map: {
+    yLabel:           'Temperature (°C)',
+    ttMin:            '',
+    ttMax:            '',
+    normMode:         'per_bl',
+    gridRes:          '2000',
+    peakColor:        '#000000',
+    bgColor:          '#ffffff',
+    plotHeightPx:     '',
+    peakEmphasis:     '1',
+    gammaSlider:      '0.40',
+    noiseFloor:       '0',
+    axisFont:         'Arial, sans-serif',
+    tickSize:         '25',
+    labelSize:        '30',
+    lwSlider:         '3',
+    showGridlines:    false,
+    gridlineWeight:   '1',
+    gridlineColor:    '#000000',
+    showPatternMarkers: false,
+    lockSize:         false,
+    lockWidth:        '1200',
+    lockHeight:       '700'
+  },
+  stack: {
+    stkTtMin:         '',
+    stkTtMax:         '',
+    stkReverse:       false,
+    stkBandHeight:    '80',
+    stkXPad:          '14',
+    stkAllBlack:      true,
+    stkColorScheme:   'viridis',
+    stkLineWt:        '1.25',
+    stkAxisWt:        '1.5',
+    stkShowBox:       false,
+    stkFont:          'Arial, sans-serif',
+    stkTickSize:      '25',
+    stkLabelSize:     '30',
+    stkLegendSize:    '25',
+    stkShowLegends:   true,
+    stkSnapMode:      'left',
+    stkLockWidth:     false,
+    stkLockWidthVal:  '1200'
+  }
+};
+
+function resetToDefaults() {
+  applySettings(JSON.parse(JSON.stringify(DEFAULTS)));   // deep-clone to avoid mutation
+  // Reset internal legend/snap state
+  Object.keys(legendPositions).forEach(k => delete legendPositions[k]);
+  snapXFrac   = null;
+  prevSnapMode = 'left';
+  // Slider value displays update via the 'input' events fired by applyControlValue,
+  // but applyControlValue uses dispatchEvent for ranges — no extra calls needed.
 }
 
 // Map controls
@@ -1436,7 +1567,7 @@ const STACK_CONTROLS = [
   'stkTtMin','stkTtMax','stkReverse','stkBandHeight','stkXPad',
   'stkAllBlack','stkColorScheme','stkLineWt','stkAxisWt','stkShowBox',
   'stkFont','stkTickSize','stkLabelSize','stkLegendSize',
-  'stkShowLegends','stkSnapLeft',
+  'stkShowLegends','stkSnapMode',
   'stkLockWidth','stkLockWidthVal'
 ];
 STACK_CONTROLS.forEach(id => {
@@ -1473,6 +1604,11 @@ function collectSettings() {
 
 function applySettings(settings) {
   if (!settings || typeof settings !== 'object') throw new Error('Invalid file');
+  // Legacy migration: stkSnapLeft (boolean) → stkSnapMode ('left' or 'none')
+  if (settings.stack && 'stkSnapLeft' in settings.stack && !('stkSnapMode' in settings.stack)) {
+    settings.stack.stkSnapMode = settings.stack.stkSnapLeft ? 'left' : 'none';
+    delete settings.stack.stkSnapLeft;
+  }
   if (settings.map)   MAP_CONTROLS.forEach(id => applyControlValue(id, settings.map[id]));
   if (settings.stack) STACK_CONTROLS.forEach(id => applyControlValue(id, settings.stack[id]));
 }
