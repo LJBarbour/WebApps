@@ -1,0 +1,1387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gas Properties Explorer — CoolProp</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,600;1,9..144,300&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ── Design tokens ───────────────────────────────────────────── */
+  :root {
+    --cream:    #F5F0E8;
+    --paper:    #FFFDF8;
+    --ink:      #1C1A16;
+    --ink-mid:  #4A4640;
+    --ink-faint:#9A948A;
+    --rule:     #DDD8CE;
+    --accent:   #2E5F8A;        /* steel blue — gas cylinders, vacuum lines */
+    --accent2:  #7BA3C4;        /* lighter blue for hover/secondary */
+    --warn:     #B05020;
+    --good:     #2A6B45;
+    --hi:       #5A8FBC;        /* highlight row */
+
+    --font-display: 'Fraunces', Georgia, serif;
+    --font-body:    'DM Sans', system-ui, sans-serif;
+    --font-mono:    'DM Mono', 'Courier New', monospace;
+
+    --radius: 4px;
+    --shadow: 0 1px 4px rgba(28,26,22,0.10);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--cream);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 14px;
+    line-height: 1.55;
+    min-height: 100vh;
+  }
+
+  /* ── Header ─────────────────────────────────────────────────── */
+  header {
+    background: var(--ink);
+    color: var(--cream);
+    padding: 18px 28px 14px;
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    flex-wrap: wrap;
+    border-bottom: 3px solid var(--accent);
+  }
+  header h1 {
+    font-family: var(--font-display);
+    font-size: 1.55rem;
+    font-weight: 300;
+    letter-spacing: -0.01em;
+    color: var(--paper);
+  }
+  header h1 em {
+    font-style: italic;
+    color: var(--accent2);
+  }
+  .header-sub {
+    font-family: var(--font-mono);
+    font-size: 0.70rem;
+    color: var(--ink-faint);
+    letter-spacing: 0.04em;
+  }
+  .status-pill {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    padding: 3px 10px;
+    border-radius: 20px;
+    letter-spacing: 0.05em;
+    transition: all 0.3s;
+  }
+  .status-pill.loading { background: #3A3620; color: var(--ink-faint); }
+  .status-pill.ready   { background: #1A3A26; color: #7ECFA0; }
+  .status-pill.error   { background: #3A1A10; color: #F09070; }
+
+  /* ── Setup notice ───────────────────────────────────────────── */
+  #setup-notice {
+    display: none;
+    background: #FFF8E8;
+    border-left: 4px solid var(--warn);
+    padding: 16px 20px;
+    margin: 16px 24px;
+    border-radius: var(--radius);
+    font-size: 0.85rem;
+    line-height: 1.7;
+  }
+  #setup-notice.visible { display: block; }
+  #setup-notice strong { color: var(--warn); }
+  #setup-notice code {
+    font-family: var(--font-mono);
+    background: #F0E8D8;
+    padding: 1px 5px;
+    border-radius: 2px;
+    font-size: 0.80rem;
+  }
+
+  /* ── Main layout ────────────────────────────────────────────── */
+  main {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 0;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0;
+  }
+
+  /* ── Left panel ─────────────────────────────────────────────── */
+  .panel-left {
+    background: var(--paper);
+    border-right: 1px solid var(--rule);
+    padding: 20px 20px 24px;
+    min-height: calc(100vh - 60px);
+  }
+
+  .section-label {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.1em;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .control-block { margin-bottom: 20px; }
+
+  label {
+    display: block;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--ink-mid);
+    margin-bottom: 4px;
+  }
+
+  select, input[type="number"], input[type="text"] {
+    width: 100%;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    padding: 7px 10px;
+    background: var(--cream);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    color: var(--ink);
+    outline: none;
+    transition: border-color 0.15s;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+  select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%239A948A'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; padding-right: 28px; }
+  select:focus, input:focus { border-color: var(--accent); }
+
+  /* fluid search */
+  .fluid-search-wrap { position: relative; }
+  #fluid-search {
+    width: 100%;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    padding: 7px 10px;
+    background: var(--cream);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius) var(--radius) 0 0;
+    color: var(--ink);
+    outline: none;
+  }
+  #fluid-search:focus { border-color: var(--accent); }
+  #fluid-list {
+    width: 100%;
+    height: 140px;
+    border: 1px solid var(--rule);
+    border-top: none;
+    border-radius: 0 0 var(--radius) var(--radius);
+    font-family: var(--font-mono);
+    font-size: 0.80rem;
+    background: var(--paper);
+    color: var(--ink);
+    outline: none;
+  }
+  #fluid-list option { padding: 4px 10px; }
+  #fluid-list option:checked { background: var(--accent); color: white; }
+  .fluid-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 6px;
+  }
+  .fluid-tag {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    background: var(--ink);
+    color: var(--cream);
+    padding: 2px 7px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .fluid-tag:hover { background: var(--accent); }
+
+  /* input pair section */
+  .input-row {
+    display: grid;
+    grid-template-columns: 1fr 120px 60px;
+    gap: 6px;
+    align-items: end;
+    margin-bottom: 6px;
+  }
+  .input-row label { margin-bottom: 2px; }
+
+  /* unit display */
+  .unit-badge {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--ink-faint);
+    background: var(--cream);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    padding: 8px 6px;
+    text-align: center;
+    align-self: end;
+  }
+
+  /* calculate button */
+  .btn-calc {
+    width: 100%;
+    padding: 10px 16px;
+    background: var(--accent);
+    color: var(--paper);
+    border: none;
+    border-radius: var(--radius);
+    font-family: var(--font-body);
+    font-size: 0.88rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    transition: background 0.15s;
+    margin-top: 4px;
+  }
+  .btn-calc:hover { background: #235078; }
+  .btn-calc:disabled { background: var(--ink-faint); cursor: not-allowed; }
+
+  /* phase indicator */
+  #phase-indicator {
+    margin-top: 10px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    padding: 6px 10px;
+    border-radius: var(--radius);
+    text-align: center;
+    display: none;
+  }
+  #phase-indicator.gas       { background: #E8F4FF; color: #1A4A7A; border: 1px solid #B0D0F0; }
+  #phase-indicator.liquid    { background: #E8F8EE; color: #1A4A2A; border: 1px solid #90D0A8; }
+  #phase-indicator.twophase  { background: #FFF8E0; color: #7A5000; border: 1px solid #E0C860; }
+  #phase-indicator.supercrit { background: #F0E8FF; color: #4A1A7A; border: 1px solid #C0A0E0; }
+  #phase-indicator.visible   { display: block; }
+
+  /* ── Right panel ─────────────────────────────────────────────── */
+  .panel-right {
+    padding: 20px 24px 32px;
+    background: var(--cream);
+  }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 0; border-bottom: 2px solid var(--rule); margin-bottom: 20px; }
+  .tab-btn {
+    font-family: var(--font-body);
+    font-size: 0.80rem;
+    font-weight: 500;
+    padding: 8px 16px;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    color: var(--ink-mid);
+    cursor: pointer;
+    letter-spacing: 0.02em;
+    transition: all 0.15s;
+  }
+  .tab-btn:hover { color: var(--accent); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ── Results table ───────────────────────────────────────────── */
+  .results-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .result-card {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    padding: 11px 14px;
+    position: relative;
+    transition: border-color 0.15s;
+  }
+  .result-card:hover { border-color: var(--accent2); }
+  .result-card .rc-label {
+    font-size: 0.72rem;
+    color: var(--ink-faint);
+    font-weight: 500;
+    margin-bottom: 2px;
+  }
+  .result-card .rc-name {
+    font-size: 0.80rem;
+    font-weight: 600;
+    color: var(--ink-mid);
+    margin-bottom: 4px;
+  }
+  .result-card .rc-value {
+    font-family: var(--font-mono);
+    font-size: 1.05rem;
+    font-weight: 500;
+    color: var(--ink);
+  }
+  .result-card .rc-unit {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--accent);
+    margin-left: 4px;
+  }
+  .result-card .rc-altvalue {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--ink-faint);
+    margin-top: 2px;
+  }
+  .result-card.highlight { border-color: var(--accent); background: #EEF5FF; }
+
+  /* empty / error states */
+  .results-empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--ink-faint);
+  }
+  .results-empty .empty-icon {
+    font-size: 2.4rem;
+    margin-bottom: 10px;
+    opacity: 0.4;
+  }
+  .results-empty p {
+    font-size: 0.85rem;
+    max-width: 300px;
+    margin: 0 auto;
+    line-height: 1.6;
+  }
+
+  /* ── Saturation table ───────────────────────────────────────── */
+  .sat-controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr auto;
+    gap: 10px;
+    align-items: end;
+    margin-bottom: 16px;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    padding: 14px;
+  }
+  .sat-controls label { margin-bottom: 2px; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    background: var(--paper);
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--rule);
+  }
+  thead tr { background: var(--ink); color: var(--cream); }
+  thead th {
+    padding: 8px 12px;
+    text-align: right;
+    font-weight: 400;
+    letter-spacing: 0.04em;
+    font-size: 0.70rem;
+  }
+  thead th:first-child { text-align: left; }
+  tbody tr { border-bottom: 1px solid var(--rule); transition: background 0.1s; }
+  tbody tr:hover { background: #EEF5FF; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody td { padding: 6px 12px; text-align: right; color: var(--ink); }
+  tbody td:first-child { text-align: left; font-weight: 500; color: var(--ink-mid); }
+  tbody td.liq { color: var(--good); }
+  tbody td.vap { color: var(--accent); }
+
+  .btn-small {
+    padding: 7px 14px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: var(--radius);
+    font-family: var(--font-body);
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s;
+  }
+  .btn-small:hover { background: #235078; }
+  .btn-copy {
+    padding: 5px 12px;
+    background: var(--paper);
+    color: var(--ink-mid);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    cursor: pointer;
+    transition: all 0.15s;
+    margin-left: 8px;
+  }
+  .btn-copy:hover { background: var(--cream); border-color: var(--accent); }
+
+  /* ── Fluid info tab ─────────────────────────────────────────── */
+  .info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .info-card {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+  }
+  .info-card .ic-label {
+    font-size: 0.68rem;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 500;
+    margin-bottom: 4px;
+  }
+  .info-card .ic-value {
+    font-family: var(--font-mono);
+    font-size: 0.92rem;
+    font-weight: 500;
+    color: var(--ink);
+  }
+  .info-card .ic-unit {
+    font-size: 0.68rem;
+    color: var(--accent);
+    margin-left: 3px;
+  }
+
+  /* ── Z-factor strip ─────────────────────────────────────────── */
+  .z-strip {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin-bottom: 14px;
+  }
+  .z-strip-title {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 10px;
+  }
+  .z-bar-wrap { display: flex; align-items: center; gap: 10px; }
+  .z-bar {
+    flex: 1;
+    height: 10px;
+    background: var(--rule);
+    border-radius: 5px;
+    overflow: hidden;
+  }
+  .z-bar-fill {
+    height: 100%;
+    border-radius: 5px;
+    background: linear-gradient(to right, var(--accent2), var(--accent));
+    transition: width 0.4s ease;
+  }
+  .z-value {
+    font-family: var(--font-mono);
+    font-size: 0.90rem;
+    font-weight: 500;
+    color: var(--ink);
+    width: 70px;
+    text-align: right;
+  }
+  .z-ideal-note {
+    font-size: 0.68rem;
+    color: var(--ink-faint);
+    margin-top: 6px;
+    font-family: var(--font-mono);
+  }
+
+  /* ── Header row for results ─────────────────────────────────── */
+  .results-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 12px;
+    gap: 10px;
+  }
+  .results-header h3 {
+    font-family: var(--font-display);
+    font-size: 1.0rem;
+    font-weight: 300;
+    color: var(--ink);
+  }
+  .results-header .fluid-badge {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    background: var(--ink);
+    color: var(--cream);
+    padding: 2px 10px;
+    border-radius: 10px;
+  }
+  .results-header .pt-badge {
+    font-family: var(--font-mono);
+    font-size: 0.70rem;
+    color: var(--ink-faint);
+  }
+
+  /* ── MOF context highlights ─────────────────────────────────── */
+  .mof-highlight {
+    background: linear-gradient(135deg, #EEF5FF 0%, #F5F0E8 100%);
+    border: 1px solid var(--accent2);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    margin-bottom: 14px;
+    display: none;
+  }
+  .mof-highlight.visible { display: block; }
+  .mof-highlight-title {
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 6px;
+  }
+  .mof-row {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .mof-item {
+    flex: 1;
+    min-width: 120px;
+  }
+  .mof-item .mi-label { font-size: 0.70rem; color: var(--ink-faint); }
+  .mof-item .mi-value {
+    font-family: var(--font-mono);
+    font-size: 0.88rem;
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  /* ── Footer ─────────────────────────────────────────────────── */
+  footer {
+    border-top: 1px solid var(--rule);
+    padding: 10px 28px;
+    font-size: 0.68rem;
+    color: var(--ink-faint);
+    font-family: var(--font-mono);
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  footer a { color: var(--accent2); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+
+  /* ── Responsive ─────────────────────────────────────────────── */
+  @media (max-width: 800px) {
+    main { grid-template-columns: 1fr; }
+    .panel-left { min-height: unset; border-right: none; border-bottom: 1px solid var(--rule); }
+    .sat-controls { grid-template-columns: 1fr 1fr; }
+  }
+
+  /* ── Spinner ─────────────────────────────────────────────────── */
+  .spinner {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border: 2px solid var(--rule);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    vertical-align: middle;
+    margin-right: 4px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<!-- CoolProp WASM — must be co-hosted alongside this file -->
+<script>
+  // Intercept Module to hook onRuntimeInitialized before coolprop.js sets it
+  window.Module = {
+    onRuntimeInitialized: function() {
+      window._coolpropReady = true;
+      document.dispatchEvent(new Event('coolprop-ready'));
+    },
+    onAbort: function(msg) {
+      window._coolpropError = msg;
+      document.dispatchEvent(new Event('coolprop-error'));
+    }
+  };
+</script>
+<script src="coolprop.js" onerror="window.dispatchEvent(new Event('coolprop-load-error'))"></script>
+
+<header>
+  <h1>Gas Properties <em>Explorer</em></h1>
+  <span class="header-sub">CoolProp · MOF &amp; Porous Materials Edition</span>
+  <span class="status-pill loading" id="status-pill">
+    <span class="spinner"></span>loading library…
+  </span>
+</header>
+
+<div id="setup-notice">
+  <strong>Library not found.</strong> This app requires <code>coolprop.js</code> and <code>coolprop.wasm</code>
+  to be placed in the <strong>same directory</strong> as this HTML file.<br>
+  Download both files from the
+  <a href="https://sourceforge.net/projects/coolprop/files/CoolProp/6.4.1/Javascript/" target="_blank">CoolProp SourceForge release page</a>
+  (v6.4.1 Javascript folder) and deploy all three files together on GitHub Pages.
+  No other setup is needed — the app is fully maintenance-free after that.
+</div>
+
+<main>
+  <!-- ── Left panel: inputs ─────────────────────────────── -->
+  <div class="panel-left">
+
+    <div class="control-block">
+      <div class="section-label">Fluid</div>
+      <div class="fluid-search-wrap">
+        <input type="text" id="fluid-search" placeholder="Search fluid…" autocomplete="off" spellcheck="false">
+        <select id="fluid-list" size="6"></select>
+      </div>
+      <!-- MOF-relevant quick-select tags -->
+      <div class="fluid-tags" id="mof-tags">
+        <span class="fluid-tag" data-fluid="CO2">CO₂</span>
+        <span class="fluid-tag" data-fluid="CH4">CH₄</span>
+        <span class="fluid-tag" data-fluid="N2">N₂</span>
+        <span class="fluid-tag" data-fluid="H2">H₂</span>
+        <span class="fluid-tag" data-fluid="O2">O₂</span>
+        <span class="fluid-tag" data-fluid="H2O">H₂O</span>
+        <span class="fluid-tag" data-fluid="Ar">Ar</span>
+        <span class="fluid-tag" data-fluid="CO">CO</span>
+        <span class="fluid-tag" data-fluid="H2S">H₂S</span>
+        <span class="fluid-tag" data-fluid="SO2">SO₂</span>
+        <span class="fluid-tag" data-fluid="NH3">NH₃</span>
+        <span class="fluid-tag" data-fluid="Ethane">C₂H₆</span>
+        <span class="fluid-tag" data-fluid="Propane">C₃H₈</span>
+        <span class="fluid-tag" data-fluid="n-Butane">n-C₄H₁₀</span>
+        <span class="fluid-tag" data-fluid="Acetylene">C₂H₂</span>
+        <span class="fluid-tag" data-fluid="Ethylene">C₂H₄</span>
+        <span class="fluid-tag" data-fluid="Helium">He</span>
+        <span class="fluid-tag" data-fluid="Xenon">Xe</span>
+        <span class="fluid-tag" data-fluid="Krypton">Kr</span>
+        <span class="fluid-tag" data-fluid="Air">Air</span>
+      </div>
+    </div>
+
+    <div class="control-block">
+      <div class="section-label">State Point Inputs</div>
+
+      <div class="input-row">
+        <div>
+          <label for="in1-prop">Property 1</label>
+          <select id="in1-prop">
+            <option value="T">Temperature (T)</option>
+            <option value="P">Pressure (P)</option>
+            <option value="D">Density (ρ)</option>
+            <option value="H">Enthalpy (H)</option>
+            <option value="S">Entropy (S)</option>
+            <option value="Q">Vapour quality (Q)</option>
+          </select>
+        </div>
+        <div>
+          <label for="in1-val">Value</label>
+          <input type="number" id="in1-val" value="298.15" step="any">
+        </div>
+        <div>
+          <label>&nbsp;</label>
+          <div class="unit-badge" id="in1-unit">K</div>
+        </div>
+      </div>
+
+      <div class="input-row">
+        <div>
+          <label for="in2-prop">Property 2</label>
+          <select id="in2-prop">
+            <option value="P">Pressure (P)</option>
+            <option value="T">Temperature (T)</option>
+            <option value="D">Density (ρ)</option>
+            <option value="H">Enthalpy (H)</option>
+            <option value="S">Entropy (S)</option>
+            <option value="Q">Vapour quality (Q)</option>
+          </select>
+        </div>
+        <div>
+          <label for="in2-val">Value</label>
+          <input type="number" id="in2-val" value="100" step="any">
+        </div>
+        <div>
+          <label>&nbsp;</label>
+          <div class="unit-badge" id="in2-unit">bar</div>
+        </div>
+      </div>
+
+      <!-- Unit system note -->
+      <p style="font-size:0.68rem; color:var(--ink-faint); margin-top:4px; font-family:var(--font-mono);">
+        T in K · P in bar · ρ in kg/m³ · H in kJ/kg · S in kJ/(kg·K)
+      </p>
+
+      <button class="btn-calc" id="calc-btn" disabled>Calculate Properties</button>
+
+      <div id="phase-indicator"></div>
+    </div>
+
+    <div class="control-block">
+      <div class="section-label">Options</div>
+      <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:400;">
+        <input type="checkbox" id="show-molar" style="width:auto; accent-color:var(--accent);">
+        Show molar quantities
+      </label>
+    </div>
+
+  </div><!-- /panel-left -->
+
+  <!-- ── Right panel: results ───────────────────────────── -->
+  <div class="panel-right">
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="properties">State Properties</button>
+      <button class="tab-btn" data-tab="saturation">Saturation Curve</button>
+      <button class="tab-btn" data-tab="fluidinfo">Fluid Info</button>
+    </div>
+
+    <!-- TAB: Properties -->
+    <div class="tab-panel active" id="tab-properties">
+
+      <div id="results-header" class="results-header" style="display:none">
+        <h3>Results</h3>
+        <span class="fluid-badge" id="rh-fluid">—</span>
+        <span class="pt-badge" id="rh-pt">—</span>
+        <button class="btn-copy" id="copy-results">copy TSV</button>
+      </div>
+
+      <!-- Z-factor bar -->
+      <div class="z-strip" id="z-strip" style="display:none">
+        <div class="z-strip-title">Compressibility factor Z = PV/nRT</div>
+        <div class="z-bar-wrap">
+          <div class="z-bar"><div class="z-bar-fill" id="z-bar-fill" style="width:50%"></div></div>
+          <div class="z-value" id="z-value">—</div>
+        </div>
+        <div class="z-ideal-note" id="z-ideal-note">ideal gas: Z = 1</div>
+      </div>
+
+      <!-- MOF context highlights -->
+      <div class="mof-highlight" id="mof-hl">
+        <div class="mof-highlight-title">▸ Storage &amp; Separation Context</div>
+        <div class="mof-row" id="mof-hl-row"></div>
+      </div>
+
+      <!-- Results grid -->
+      <div id="results-container">
+        <div class="results-empty">
+          <div class="empty-icon">⚗</div>
+          <p>Select a fluid, set temperature and pressure, then click <strong>Calculate Properties</strong>.</p>
+        </div>
+      </div>
+
+    </div><!-- /tab-properties -->
+
+    <!-- TAB: Saturation curve -->
+    <div class="tab-panel" id="tab-saturation">
+
+      <div class="sat-controls">
+        <div>
+          <label for="sat-fluid-display">Fluid</label>
+          <input type="text" id="sat-fluid-display" readonly style="background:var(--cream); cursor:default;">
+        </div>
+        <div>
+          <label for="sat-tmin">T min (K)</label>
+          <input type="number" id="sat-tmin" value="200" step="1">
+        </div>
+        <div>
+          <label for="sat-tmax">T max (K)</label>
+          <input type="number" id="sat-tmax" value="300" step="1">
+        </div>
+        <div>
+          <button class="btn-small" id="sat-calc-btn" disabled>Generate</button>
+        </div>
+      </div>
+
+      <div style="display:flex; align-items:center; margin-bottom:8px;">
+        <span style="font-size:0.75rem; color:var(--ink-faint);">Saturated liquid (liq) and vapour (vap) at equilibrium</span>
+        <button class="btn-copy" id="copy-sat">copy TSV</button>
+      </div>
+
+      <div id="sat-table-wrap">
+        <div class="results-empty" style="padding:40px 20px;">
+          <div class="empty-icon">📊</div>
+          <p>Select a fluid and click Generate to build the saturation table.</p>
+        </div>
+      </div>
+
+    </div><!-- /tab-saturation -->
+
+    <!-- TAB: Fluid info -->
+    <div class="tab-panel" id="tab-fluidinfo">
+
+      <div id="fluid-info-container">
+        <div class="results-empty" style="padding:60px 20px;">
+          <div class="empty-icon">🔬</div>
+          <p>Select a fluid from the left panel to view its critical constants and reference data.</p>
+        </div>
+      </div>
+
+    </div><!-- /tab-fluidinfo -->
+
+  </div><!-- /panel-right -->
+</main>
+
+<footer>
+  <span>CoolProp Gas Properties Explorer</span>
+  <a href="https://coolprop.org" target="_blank">coolprop.org</a>
+  <a href="https://coolprop.org/coolprop/HighLevelAPI.html" target="_blank">API reference</a>
+  <span>All calculations via CoolProp HEOS backend · SI units with practical conversions</span>
+</footer>
+
+<script>
+'use strict';
+
+// ── Unit conversion helpers ──────────────────────────────────────
+const CONV = {
+  // To/from SI (CoolProp internal is always SI)
+  PtoBar:  v => v / 1e5,
+  PfromBar:v => v * 1e5,
+  HtokJ:   v => v / 1000,
+  HfromkJ: v => v * 1000,
+  StokJ:   v => v / 1000,
+  SfromkJ: v => v * 1000,
+};
+
+// ── Property meta ────────────────────────────────────────────────
+// unit_in: units as user enters, toSI / fromSI: conversion fns
+const PROP_META = {
+  T: { label:'Temperature',      unit_in:'K',       toSI: v=>v,           fromSI: v=>v       },
+  P: { label:'Pressure',         unit_in:'bar',     toSI: CONV.PfromBar,  fromSI: CONV.PtoBar},
+  D: { label:'Density',          unit_in:'kg/m³',   toSI: v=>v,           fromSI: v=>v       },
+  H: { label:'Specific enthalpy',unit_in:'kJ/kg',   toSI: CONV.HfromkJ,  fromSI: CONV.HtokJ },
+  S: { label:'Specific entropy', unit_in:'kJ/(kg·K)',toSI: CONV.SfromkJ, fromSI: CONV.StokJ },
+  Q: { label:'Vapour quality',   unit_in:'[0–1]',   toSI: v=>v,           fromSI: v=>v       },
+};
+
+// ── Output properties to compute ────────────────────────────────
+// Each: { key, name, symbol, fromSI, unit, unit_molar, molar_key, decimals, highlight, mof }
+const OUTPUT_PROPS = [
+  { key:'T',   name:'Temperature',          symbol:'T',    fromSI:v=>v,             unit:'K',          decimals:3,  highlight:true },
+  { key:'P',   name:'Pressure',             symbol:'P',    fromSI:CONV.PtoBar,      unit:'bar',        decimals:4,  highlight:true,
+    altFn: v=>v/1e5, altUnit:'MPa', altMult:1e-1 },
+  { key:'D',   name:'Density',              symbol:'ρ',    fromSI:v=>v,             unit:'kg/m³',      decimals:4,  highlight:true, mof:true,
+    molar_key:'Dmolar', molar_unit:'mol/L', molar_fromSI:v=>v/1000 },
+  { key:'Z',   name:'Compressibility Z',    symbol:'Z',    fromSI:v=>v,             unit:'—',          decimals:5,  highlight:true, mof:true },
+  { key:'H',   name:'Specific enthalpy',    symbol:'h',    fromSI:CONV.HtokJ,       unit:'kJ/kg',      decimals:3  },
+  { key:'S',   name:'Specific entropy',     symbol:'s',    fromSI:CONV.StokJ,       unit:'kJ/(kg·K)',  decimals:4  },
+  { key:'U',   name:'Internal energy',      symbol:'u',    fromSI:CONV.HtokJ,       unit:'kJ/kg',      decimals:3  },
+  { key:'Cvmass',name:'Cv (isochoric cp)',  symbol:'Cᵥ',  fromSI:CONV.HtokJ,       unit:'kJ/(kg·K)',  decimals:4  },
+  { key:'Cpmass',name:'Cp (isobaric cp)',   symbol:'Cₚ',  fromSI:CONV.HtokJ,       unit:'kJ/(kg·K)',  decimals:4  },
+  { key:'speed_sound',name:'Speed of sound',symbol:'c',   fromSI:v=>v,             unit:'m/s',        decimals:2  },
+  { key:'viscosity',  name:'Dynamic viscosity',symbol:'η',fromSI:v=>v*1e6,         unit:'µPa·s',      decimals:3  },
+  { key:'conductivity',name:'Thermal conductivity',symbol:'λ',fromSI:v=>v*1000,    unit:'mW/(m·K)',   decimals:3  },
+  { key:'Prandtl',    name:'Prandtl number',symbol:'Pr',  fromSI:v=>v,             unit:'—',          decimals:4  },
+  { key:'surface_tension',name:'Surface tension',symbol:'σ',fromSI:v=>v*1000,      unit:'mN/m',       decimals:4  },
+  { key:'phase',      name:'Phase',          symbol:'φ',   fromSI:v=>v,             unit:'',           decimals:0, isPhase:true },
+];
+
+// PropsSI string keys
+const PROPSSI_KEYS = {
+  T:'T', P:'P', D:'D', Z:'Z', H:'Hmass', S:'Smass', U:'Umass',
+  Cvmass:'Cvmass', Cpmass:'Cpmass', speed_sound:'speed_sound',
+  viscosity:'viscosity', conductivity:'conductivity', Prandtl:'Prandtl',
+  surface_tension:'surface_tension', Dmolar:'Dmolar', phase:'Phase',
+};
+
+// ── MOF-focused quick gases (CoolProp names) ─────────────────────
+const MOF_FLUIDS_MAP = {
+  'CO2':'CO2','CH4':'Methane','N2':'Nitrogen','H2':'Hydrogen',
+  'O2':'Oxygen','H2O':'Water','Ar':'Argon','CO':'CarbonMonoxide',
+  'H2S':'HydrogenSulfide','SO2':'SulfurDioxide','NH3':'Ammonia',
+  'Ethane':'Ethane','Propane':'Propane','n-Butane':'n-Butane',
+  'Acetylene':'Acetylene','Ethylene':'Ethylene',
+  'Helium':'Helium','Xenon':'Xenon','Krypton':'Krypton','Air':'Air',
+};
+
+// ── State ────────────────────────────────────────────────────────
+let cp = null;           // CoolProp Module reference
+let allFluids = [];      // list from get_global_param_string
+let currentFluid = 'CO2';
+let lastResults = null;
+let lastSatData = null;
+
+// ── Library loading ──────────────────────────────────────────────
+function onLibraryReady() {
+  cp = window.Module;
+  document.getElementById('status-pill').className = 'status-pill ready';
+  document.getElementById('status-pill').textContent = 'CoolProp ' + cp.get_global_param_string('version');
+  document.getElementById('calc-btn').disabled = false;
+  document.getElementById('sat-calc-btn').disabled = false;
+  populateFluids();
+  selectFluid('CO2');
+  updateFluidInfo();
+}
+
+function onLibraryError() {
+  document.getElementById('status-pill').className = 'status-pill error';
+  document.getElementById('status-pill').textContent = 'library not found';
+  document.getElementById('setup-notice').classList.add('visible');
+}
+
+document.addEventListener('coolprop-ready', onLibraryReady);
+document.addEventListener('coolprop-error', onLibraryError);
+window.addEventListener('coolprop-load-error', onLibraryError);
+
+// Timeout fallback
+setTimeout(() => {
+  if (!cp) onLibraryError();
+}, 10000);
+
+// ── Fluid list ───────────────────────────────────────────────────
+function populateFluids() {
+  const raw = cp.get_global_param_string('FluidsList');
+  allFluids = raw.split(',').map(s => s.trim()).filter(Boolean).sort();
+  renderFluidList(allFluids);
+}
+
+function renderFluidList(fluids) {
+  const list = document.getElementById('fluid-list');
+  list.innerHTML = '';
+  fluids.forEach(f => {
+    const opt = document.createElement('option');
+    opt.value = f;
+    opt.textContent = f;
+    if (f === currentFluid) opt.selected = true;
+    list.appendChild(opt);
+  });
+}
+
+function selectFluid(name) {
+  currentFluid = name;
+  const list = document.getElementById('fluid-list');
+  for (let opt of list.options) {
+    if (opt.value === name) { opt.selected = true; break; }
+  }
+  document.getElementById('fluid-search').value = name;
+  document.getElementById('sat-fluid-display').value = name;
+  updateFluidInfo();
+}
+
+// ── Unit display ─────────────────────────────────────────────────
+function updateUnitBadges() {
+  document.getElementById('in1-unit').textContent = PROP_META[document.getElementById('in1-prop').value]?.unit_in || '';
+  document.getElementById('in2-unit').textContent = PROP_META[document.getElementById('in2-prop').value]?.unit_in || '';
+}
+
+// ── Safe PropsSI call ────────────────────────────────────────────
+function safePropsSI(out, in1, v1, in2, v2, fluid) {
+  try {
+    const val = cp.PropsSI(out, in1, v1, in2, v2, fluid);
+    if (!isFinite(val) || isNaN(val)) return null;
+    return val;
+  } catch(e) {
+    return null;
+  }
+}
+
+// ── Calculate ────────────────────────────────────────────────────
+function calculate() {
+  if (!cp) return;
+
+  const fluid    = currentFluid;
+  const in1prop  = document.getElementById('in1-prop').value;
+  const in1val   = parseFloat(document.getElementById('in1-val').value);
+  const in2prop  = document.getElementById('in2-prop').value;
+  const in2val   = parseFloat(document.getElementById('in2-val').value);
+  const showMolar= document.getElementById('show-molar').checked;
+
+  if (!fluid || isNaN(in1val) || isNaN(in2val)) return;
+
+  // Convert user units → SI
+  const v1si = PROP_META[in1prop].toSI(in1val);
+  const v2si = PROP_META[in2prop].toSI(in2val);
+
+  // Compute outputs
+  const res = {};
+  for (const op of OUTPUT_PROPS) {
+    const cpKey = PROPSSI_KEYS[op.key];
+    if (!cpKey) continue;
+    const val = safePropsSI(cpKey, in1prop, v1si, in2prop, v2si, fluid);
+    res[op.key] = val;
+  }
+  // Molar density
+  res['Dmolar'] = safePropsSI('Dmolar', in1prop, v1si, in2prop, v2si, fluid);
+
+  lastResults = { fluid, in1prop, in1val, in2prop, in2val, res, showMolar };
+  renderResults(lastResults);
+}
+
+// ── Render results ────────────────────────────────────────────────
+function renderResults({ fluid, in1prop, in1val, in2prop, in2val, res, showMolar }) {
+  // Header
+  document.getElementById('results-header').style.display = 'flex';
+  document.getElementById('rh-fluid').textContent = fluid;
+  const p1disp = PROP_META[in1prop];
+  const p2disp = PROP_META[in2prop];
+  document.getElementById('rh-pt').textContent =
+    `${p1disp.label} = ${in1val} ${p1disp.unit_in}  ·  ${p2disp.label} = ${in2val} ${p2disp.unit_in}`;
+
+  // Phase — CoolProp JS returns a string like "gas", "liquid", "twophase", "supercritical"
+  const phaseRaw = res['phase'];
+  const phaseEl  = document.getElementById('phase-indicator');
+  const PHASE_DISPLAY = {
+    'gas':'Gas', 'supercritical_gas':'Supercrit. gas', 'supercriticalgas':'Supercrit. gas',
+    'liquid':'Liquid', 'supercritical_liquid':'Supercrit. liquid', 'supercriticalliquid':'Supercrit. liquid',
+    'supercritical':'Supercritical', 'twophase':'Two-phase', 'two_phase':'Two-phase',
+    '0':'Gas','1':'Liquid','2':'Supercrit. liquid','3':'Two-phase','4':'Supercritical','5':'—',
+  };
+  if (phaseRaw !== null && phaseRaw !== undefined) {
+    const ps = String(phaseRaw).toLowerCase().replace(/_/g,'');
+    const label = PHASE_DISPLAY[ps] || PHASE_DISPLAY[String(Math.round(Number(phaseRaw)))] || String(phaseRaw);
+    phaseEl.textContent = '⬤ ' + label;
+    phaseEl.className = 'visible';
+    if (ps.includes('two'))                              phaseEl.classList.add('twophase');
+    else if (ps.includes('super'))                       phaseEl.classList.add('supercrit');
+    else if (ps.includes('liquid'))                      phaseEl.classList.add('liquid');
+    else                                                 phaseEl.classList.add('gas');
+    phaseEl.style.display = 'block';
+  } else {
+    phaseEl.style.display = 'none';
+  }
+
+  // Z factor
+  const Z = res['Z'];
+  const zStrip = document.getElementById('z-strip');
+  if (Z !== null) {
+    zStrip.style.display = 'block';
+    document.getElementById('z-value').textContent = Z.toFixed(5);
+    const pct = Math.min(100, Math.max(0, (Z / 2) * 100));
+    document.getElementById('z-bar-fill').style.width = pct + '%';
+    const dev = ((Z - 1)*100).toFixed(2);
+    document.getElementById('z-ideal-note').textContent =
+      `ideal gas: Z = 1  ·  deviation from ideal: ${dev > 0 ? '+' : ''}${dev}%`;
+  } else {
+    zStrip.style.display = 'none';
+  }
+
+  // MOF highlights
+  const T = res['T']; const P = res['P']; const D = res['D'];
+  const Dm = res['Dmolar'];
+  const mofHl = document.getElementById('mof-hl');
+  const mofRow = document.getElementById('mof-hl-row');
+  if (D !== null && T !== null && P !== null) {
+    mofHl.classList.add('visible');
+    let html = '';
+    if (D !== null) {
+      const dBar = (P/1e5).toFixed(2);
+      html += `<div class="mof-item"><div class="mi-label">Gas density</div><div class="mi-value">${D.toFixed(3)} <small style="color:var(--ink-faint)">kg/m³</small></div></div>`;
+    }
+    if (Dm !== null) {
+      html += `<div class="mof-item"><div class="mi-label">Molar density</div><div class="mi-value">${(Dm/1000).toFixed(4)} <small style="color:var(--ink-faint)">mol/L</small></div></div>`;
+    }
+    if (Z !== null) {
+      const Mideal = D !== null && Dm !== null ? (D / (Dm * 1e-3)).toFixed(2) : '—';
+      html += `<div class="mof-item"><div class="mi-label">Z (non-ideality)</div><div class="mi-value">${Z.toFixed(5)}</div></div>`;
+    }
+    // Reduced properties if we can get Tcrit/Pcrit
+    try {
+      const Tc = cp.Props1SI(fluid, 'Tcrit');
+      const Pc = cp.Props1SI(fluid, 'pcrit');
+      if (Tc && Pc) {
+        const Tr = (T/Tc).toFixed(3);
+        const Pr = (P/Pc).toFixed(3);
+        html += `<div class="mof-item"><div class="mi-label">Reduced T (T/Tᶜ)</div><div class="mi-value">${Tr}</div></div>`;
+        html += `<div class="mof-item"><div class="mi-label">Reduced P (P/Pᶜ)</div><div class="mi-value">${Pr}</div></div>`;
+      }
+    } catch(e) {}
+    mofRow.innerHTML = html;
+  } else {
+    mofHl.classList.remove('visible');
+  }
+
+  // Cards
+  const container = document.getElementById('results-container');
+  const cards = [];
+  for (const op of OUTPUT_PROPS) {
+    if (op.isPhase) continue;
+    const val = res[op.key];
+    if (val === null || val === undefined) continue;
+    let dispVal = op.fromSI(val);
+    let altText = '';
+
+    // Pressure: show bar and MPa
+    if (op.key === 'P') {
+      altText = (val/1e6).toFixed(4) + ' MPa';
+    }
+    // Molar density alternative
+    if (op.key === 'D' && res['Dmolar'] !== null) {
+      altText = (res['Dmolar']/1000).toFixed(5) + ' mol/L';
+    }
+    // Temperature: show °C
+    if (op.key === 'T') {
+      altText = (val - 273.15).toFixed(2) + ' °C';
+    }
+
+    const decimals = op.decimals || 4;
+    const formatted = Math.abs(dispVal) > 1e6 || (Math.abs(dispVal) < 1e-4 && dispVal !== 0)
+      ? dispVal.toExponential(4)
+      : dispVal.toFixed(decimals);
+
+    cards.push(`
+      <div class="result-card${op.highlight ? ' highlight' : ''}">
+        <div class="rc-label">${op.symbol}</div>
+        <div class="rc-name">${op.name}</div>
+        <div class="rc-value">${formatted}<span class="rc-unit">${op.unit}</span></div>
+        ${altText ? `<div class="rc-altvalue">${altText}</div>` : ''}
+      </div>`);
+  }
+
+  if (cards.length === 0) {
+    container.innerHTML = `<div class="results-empty"><div class="empty-icon">⚠</div><p>Could not compute properties for this state point. Check that the inputs define a valid thermodynamic state.</p></div>`;
+  } else {
+    container.innerHTML = `<div class="results-grid">${cards.join('')}</div>`;
+  }
+}
+
+// ── Fluid info ────────────────────────────────────────────────────
+function updateFluidInfo() {
+  if (!cp || !currentFluid) return;
+  const container = document.getElementById('fluid-info-container');
+
+  const props1 = [
+    { key:'Tcrit',   label:'Critical temperature', unit:'K',       altFn: v=>(v-273.15).toFixed(2)+' °C' },
+    { key:'pcrit',   label:'Critical pressure',    unit:'Pa',      altFn: v=>(v/1e5).toFixed(3)+' bar' },
+    { key:'rhocrit', label:'Critical density',     unit:'kg/m³',   altFn: null },
+    { key:'Ttriple',label:'Triple point T',        unit:'K',       altFn: v=>(v-273.15).toFixed(2)+' °C' },
+    { key:'ptriple', label:'Triple point P',       unit:'Pa',      altFn: v=>(v/1e5).toFixed(5)+' bar', skipIfZero:true },
+    { key:'Tmin',    label:'T min (EOS)',           unit:'K',       altFn: null },
+    { key:'Tmax',    label:'T max (EOS)',           unit:'K',       altFn: null },
+    { key:'pmax',    label:'P max (EOS)',           unit:'Pa',      altFn: v=>(v/1e6).toFixed(1)+' MPa'  },
+    { key:'molar_mass',label:'Molar mass',         unit:'kg/mol',  altFn: v=>(v*1000).toFixed(3)+' g/mol' },
+    { key:'acentric',label:'Acentric factor ω',    unit:'—',       altFn: null },
+    { key:'GWP100', label:'GWP (100 yr)',           unit:'—',       altFn: null, skipIfZero:true },
+    { key:'ODP',    label:'Ozone depletion pot.',   unit:'—',       altFn: null, skipIfZero:true },
+  ];
+
+  let html = `<div class="info-grid">`;
+  for (const p of props1) {
+    try {
+      const val = cp.Props1SI(currentFluid, p.key);
+      if (!isFinite(val) || isNaN(val)) continue;
+      if (p.skipIfZero && val === 0) continue;
+      let display, decimals;
+      if (p.key === 'molar_mass') { display = (val*1000).toFixed(4); }
+      else if (p.key === 'pcrit' || p.key === 'ptriple' || p.key === 'pmax') { display = val.toExponential(4); }
+      else if (Math.abs(val) > 1e6) { display = val.toExponential(4); }
+      else { display = val.toFixed(4); }
+      const alt = p.altFn ? p.altFn(val) : '';
+      html += `
+        <div class="info-card">
+          <div class="ic-label">${p.label}</div>
+          <div class="ic-value">${display}<span class="ic-unit">${p.unit}</span></div>
+          ${alt ? `<div style="font-family:var(--font-mono);font-size:0.68rem;color:var(--ink-faint)">${alt}</div>` : ''}
+        </div>`;
+    } catch(e) {}
+  }
+  html += `</div>`;
+
+  // CAS / aliases
+  try {
+    const cas   = cp.get_fluid_param_string(currentFluid, 'CAS');
+    const aliases = cp.get_fluid_param_string(currentFluid, 'aliases');
+    html += `<div style="margin-top:8px;">
+      <div class="section-label" style="margin-bottom:6px;">Identifiers</div>
+      <div style="font-family:var(--font-mono);font-size:0.78rem;color:var(--ink-mid);">
+        <span style="color:var(--ink-faint)">CAS: </span>${cas}
+        ${aliases ? `&nbsp;&nbsp;<span style="color:var(--ink-faint)">Aliases: </span>${aliases}` : ''}
+      </div>
+    </div>`;
+  } catch(e) {}
+
+  container.innerHTML = html;
+}
+
+// ── Saturation table ──────────────────────────────────────────────
+function generateSatTable() {
+  if (!cp || !currentFluid) return;
+  const tmin = parseFloat(document.getElementById('sat-tmin').value);
+  const tmax = parseFloat(document.getElementById('sat-tmax').value);
+  if (isNaN(tmin) || isNaN(tmax) || tmin >= tmax) return;
+
+  // Get Tcrit to clamp
+  let Tcrit = 999;
+  try { Tcrit = cp.Props1SI(currentFluid, 'Tcrit'); } catch(e) {}
+  const Tclamp = Math.min(tmax, Tcrit - 0.01);
+  if (tmin >= Tclamp) {
+    document.getElementById('sat-table-wrap').innerHTML =
+      `<div class="results-empty"><p>Temperature range exceeds critical point (${Tcrit.toFixed(2)} K). Reduce T max.</p></div>`;
+    return;
+  }
+
+  const N = 20;
+  const step = (Tclamp - tmin) / (N - 1);
+  const rows = [];
+
+  for (let i = 0; i < N; i++) {
+    const T = tmin + i * step;
+    try {
+      const Psat   = safePropsSI('P',       'T', T, 'Q', 0, currentFluid);
+      const rhoL   = safePropsSI('D',       'T', T, 'Q', 0, currentFluid);
+      const rhoV   = safePropsSI('D',       'T', T, 'Q', 1, currentFluid);
+      const hL     = safePropsSI('Hmass',   'T', T, 'Q', 0, currentFluid);
+      const hV     = safePropsSI('Hmass',   'T', T, 'Q', 1, currentFluid);
+      const sL     = safePropsSI('Smass',   'T', T, 'Q', 0, currentFluid);
+      const Hvap   = (hL !== null && hV !== null) ? (hV - hL) / 1000 : null;
+      rows.push({ T, Psat, rhoL, rhoV, hL, hV, sL, Hvap });
+    } catch(e) {}
+  }
+
+  lastSatData = { fluid: currentFluid, rows };
+  renderSatTable(rows);
+}
+
+function renderSatTable(rows) {
+  const wrap = document.getElementById('sat-table-wrap');
+  if (!rows.length) {
+    wrap.innerHTML = '<div class="results-empty"><p>No data could be computed for this range.</p></div>';
+    return;
+  }
+  let html = `<div style="overflow-x:auto">
+  <table>
+    <thead><tr>
+      <th>T (K)</th>
+      <th>T (°C)</th>
+      <th>P<sub>sat</sub> (bar)</th>
+      <th class="liq">ρ<sub>liq</sub> (kg/m³)</th>
+      <th class="vap">ρ<sub>vap</sub> (kg/m³)</th>
+      <th class="liq">h<sub>liq</sub> (kJ/kg)</th>
+      <th class="vap">h<sub>vap</sub> (kJ/kg)</th>
+      <th>ΔH<sub>vap</sub> (kJ/kg)</th>
+    </tr></thead>
+    <tbody>`;
+  for (const r of rows) {
+    const fmt = (v, d=3) => v !== null ? v.toFixed(d) : '—';
+    html += `<tr>
+      <td>${r.T.toFixed(2)}</td>
+      <td>${(r.T-273.15).toFixed(2)}</td>
+      <td>${r.Psat !== null ? CONV.PtoBar(r.Psat).toFixed(4) : '—'}</td>
+      <td class="liq">${fmt(r.rhoL, 3)}</td>
+      <td class="vap">${fmt(r.rhoV, 4)}</td>
+      <td class="liq">${r.hL !== null ? (r.hL/1000).toFixed(2) : '—'}</td>
+      <td class="vap">${r.hV !== null ? (r.hV/1000).toFixed(2) : '—'}</td>
+      <td>${fmt(r.Hvap, 2)}</td>
+    </tr>`;
+  }
+  html += `</tbody></table></div>`;
+  wrap.innerHTML = html;
+}
+
+// ── Copy TSV ─────────────────────────────────────────────────────
+function copyResultsTSV() {
+  if (!lastResults) return;
+  const { fluid, in1prop, in1val, in2prop, in2val, res } = lastResults;
+  let lines = [`Gas Properties Explorer — CoolProp`, `Fluid: ${fluid}`, `${PROP_META[in1prop].label}: ${in1val} ${PROP_META[in1prop].unit_in}`, `${PROP_META[in2prop].label}: ${in2val} ${PROP_META[in2prop].unit_in}`, ''];
+  lines.push('Property\tSymbol\tValue\tUnit');
+  for (const op of OUTPUT_PROPS) {
+    if (op.isPhase) continue;
+    const val = res[op.key];
+    if (val === null || val === undefined) continue;
+    const disp = op.fromSI(val);
+    lines.push(`${op.name}\t${op.symbol}\t${disp.toFixed(op.decimals||4)}\t${op.unit}`);
+  }
+  navigator.clipboard.writeText(lines.join('\n')).then(() => {
+    const btn = document.getElementById('copy-results');
+    btn.textContent = 'copied!';
+    setTimeout(() => btn.textContent = 'copy TSV', 1500);
+  });
+}
+
+function copySatTSV() {
+  if (!lastSatData) return;
+  const { fluid, rows } = lastSatData;
+  let lines = [`Saturation Curve — ${fluid}`, '', 'T(K)\tT(°C)\tP_sat(bar)\trho_liq(kg/m3)\trho_vap(kg/m3)\th_liq(kJ/kg)\th_vap(kJ/kg)\tDHvap(kJ/kg)'];
+  for (const r of rows) {
+    const f = (v, d) => v !== null ? v.toFixed(d) : '';
+    lines.push([
+      r.T.toFixed(3), (r.T-273.15).toFixed(3),
+      r.Psat !== null ? CONV.PtoBar(r.Psat).toFixed(5) : '',
+      f(r.rhoL,3), f(r.rhoV,5),
+      r.hL!==null?(r.hL/1000).toFixed(3):'', r.hV!==null?(r.hV/1000).toFixed(3):'',
+      f(r.Hvap,3)
+    ].join('\t'));
+  }
+  navigator.clipboard.writeText(lines.join('\n')).then(() => {
+    const btn = document.getElementById('copy-sat');
+    btn.textContent = 'copied!';
+    setTimeout(() => btn.textContent = 'copy TSV', 1500);
+  });
+}
+
+// ── Event wiring ─────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+
+  // Tabs
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    });
+  });
+
+  // Unit badges
+  document.getElementById('in1-prop').addEventListener('change', updateUnitBadges);
+  document.getElementById('in2-prop').addEventListener('change', updateUnitBadges);
+  updateUnitBadges();
+
+  // Fluid search
+  document.getElementById('fluid-search').addEventListener('input', e => {
+    const q = e.target.value.toLowerCase();
+    const filtered = allFluids.filter(f => f.toLowerCase().includes(q));
+    renderFluidList(filtered);
+  });
+
+  document.getElementById('fluid-list').addEventListener('change', e => {
+    selectFluid(e.target.value);
+  });
+
+  // MOF tags
+  document.querySelectorAll('.fluid-tag').forEach(tag => {
+    tag.addEventListener('click', () => {
+      const name = MOF_FLUIDS_MAP[tag.dataset.fluid] || tag.dataset.fluid;
+      if (cp) selectFluid(name);
+    });
+  });
+
+  // Calculate
+  document.getElementById('calc-btn').addEventListener('click', calculate);
+  document.getElementById('copy-results').addEventListener('click', copyResultsTSV);
+  document.getElementById('sat-calc-btn').addEventListener('click', generateSatTable);
+  document.getElementById('copy-sat').addEventListener('click', copySatTSV);
+
+  // Enter key
+  ['in1-val','in2-val'].forEach(id => {
+    document.getElementById(id).addEventListener('keydown', e => {
+      if (e.key === 'Enter') calculate();
+    });
+  });
+
+  // Molar checkbox re-renders
+  document.getElementById('show-molar').addEventListener('change', () => {
+    if (lastResults) renderResults(Object.assign({}, lastResults, { showMolar: document.getElementById('show-molar').checked }));
+  });
+
+  // Fluid info tab on fluid change — also update when tab clicked
+  document.querySelector('[data-tab="fluidinfo"]').addEventListener('click', () => {
+    if (cp) updateFluidInfo();
+  });
+
+  // Preset P for common gas storage conditions
+  // Auto-set Tmin/Tmax for saturation from critical point when fluid changes
+});
+
+</script>
+</body>
+</html>
