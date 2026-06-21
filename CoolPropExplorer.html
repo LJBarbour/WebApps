@@ -810,6 +810,7 @@
         <div class="pt-diagram-title">
           P – T Phase diagram
           <span class="pt-phase-label" id="pt-phase-label"></span>
+          <span id="pt-drag-hint" style="margin-left:auto; font-size:0.65rem; color:var(--ink-faint); display:none;">drag marker to explore</span>
         </div>
         <canvas id="pt-canvas" width="600" height="280"></canvas>
       </div>
@@ -1283,6 +1284,14 @@ function renderResults({ fluid, in1prop, in1val, in2prop, in2val, res, showMolar
 // Cache: fluid -> { Tmin, Tcrit, Pcrit, Ptriple, curveT, curveP }
 const _ptCache = {};
 
+// Current axis mapping — set by drawPhaseDiagram, read by drag handlers
+let _axisState = null;  // { PAD, pw, ph, W, H, Tlo, Thi, logPlo, logPhi }
+
+// Drag state
+let _dragging   = false;
+let _dragT      = null;   // T value being dragged (in K)
+let _dragP      = null;   // P value being dragged (in Pa)
+
 function buildSatCurve(fluid) {
   if (_ptCache[fluid]) return _ptCache[fluid];
   let Tmin, Tcrit, Pcrit, Ptriple, Ttriple;
@@ -1324,6 +1333,8 @@ function drawPhaseDiagram(fluid, stateT, stateP) {
     return;
   }
   wrap.classList.add('visible');
+  const dragHint = document.getElementById('pt-drag-hint');
+  if (dragHint) dragHint.style.display = 'inline';
 
   // ── Canvas setup ──────────────────────────────────────────────
   const dpr = window.devicePixelRatio || 1;
@@ -1353,6 +1364,9 @@ function drawPhaseDiagram(fluid, stateT, stateP) {
   // Coordinate transforms
   const tx = T => PAD.left + ((T - Tlo_plot) / (Thi_plot - Tlo_plot)) * pw;
   const ty = P => PAD.top  + ph - ((Math.log10(Math.max(P, Plo_raw)) - logPlo) / (logPhi - logPlo)) * ph;
+
+  // Save axis mapping for drag inverse transforms
+  _axisState = { PAD, pw, ph, W, H, Tlo: Tlo_plot, Thi: Thi_plot, logPlo, logPhi, Plo_raw };
 
   // ── Background regions ────────────────────────────────────────
   // CSS vars aren't accessible from canvas — use literal colours matching the palette
@@ -1777,6 +1791,178 @@ function copySatTSV() {
   });
 }
 
+// ── Canvas drag interaction ──────────────────────────────────────
+
+// Convert canvas pixel (CSS coords) → thermodynamic T, P
+function canvasToTP(cssX, cssY) {
+  if (!_axisState) return null;
+  const { PAD, pw, ph, Tlo, Thi, logPlo, logPhi, Plo_raw } = _axisState;
+  const T = Tlo + ((cssX - PAD.left) / pw) * (Thi - Tlo);
+  const logP = logPlo + ((PAD.top + ph - cssY) / ph) * (logPhi - logPlo);
+  const P = Math.pow(10, logP);
+  return { T, P };
+}
+
+// Get CSS coordinates from a mouse or touch event relative to the canvas
+function eventCSSCoords(e, canvas) {
+  const rect = canvas.getBoundingClientRect();
+  const src  = e.touches ? e.touches[0] : e;
+  return { x: src.clientX - rect.left, y: src.clientY - rect.top };
+}
+
+// Is the CSS point within the plot area?
+function inPlotArea(cssX, cssY) {
+  if (!_axisState) return false;
+  const { PAD, pw, ph } = _axisState;
+  return cssX >= PAD.left && cssX <= PAD.left + pw &&
+         cssY >= PAD.top  && cssY <= PAD.top  + ph;
+}
+
+// Is the CSS point near the current state dot (hit-test for drag start)?
+function nearStateDot(cssX, cssY) {
+  if (!_axisState || !lastResults) return false;
+  const { PAD, pw, ph, Tlo, Thi, logPlo, logPhi } = _axisState;
+  const T = lastResults.res['T'], P = lastResults.res['P'];
+  if (T === null || P === null) return false;
+  const sx = PAD.left + ((T - Tlo) / (Thi - Tlo)) * pw;
+  const sy = PAD.top  + ph - ((Math.log10(Math.max(P, _axisState.Plo_raw)) - logPlo) / (logPhi - logPlo)) * ph;
+  const dx = cssX - sx, dy = cssY - sy;
+  return Math.sqrt(dx*dx + dy*dy) <= 14;  // 14px hit radius
+}
+
+// Clamp T and P to the EOS validity range for the current fluid
+function clampToEOS(T, P, data) {
+  if (!data) return { T, P };
+  const Tmin = data.Tmin  || 0;
+  const Tmax = data.Tcrit * 2;  // generous upper bound; EOS usually extends well past Tcrit
+  const Pmin = data.Ptriple * 0.05;
+  T = Math.max(Tmin, Math.min(Tmax, T));
+  P = Math.max(Pmin, P);
+  return { T, P };
+}
+
+// Quick-redraw during drag — just redraws diagram with new marker position,
+// no full calculate() call. Updates the input fields and phase label live.
+function dragRedraw(T, P) {
+  const fluid = currentFluid;
+  // Update input fields
+  const in1prop = document.getElementById('in1-prop').value;
+  const in2prop = document.getElementById('in2-prop').value;
+  // Only update if inputs are T and P (the common case)
+  if (in1prop === 'T') document.getElementById('in1-val').value = T.toFixed(2);
+  else if (in2prop === 'T') document.getElementById('in2-val').value = T.toFixed(2);
+  if (in1prop === 'P') document.getElementById('in1-val').value = (P/1e5).toFixed(4);
+  else if (in2prop === 'P') document.getElementById('in2-val').value = (P/1e5).toFixed(4);
+
+  // Redraw diagram with provisional marker
+  drawPhaseDiagram(fluid, T, P);
+}
+
+// Wire canvas drag events (called once from DOMContentLoaded)
+function initCanvasDrag() {
+  const canvas = document.getElementById('pt-canvas');
+
+  // ── Mouse ────────────────────────────────────────────────────
+  canvas.addEventListener('mousedown', e => {
+    if (!lastResults) return;
+    const { x, y } = eventCSSCoords(e, canvas);
+    if (nearStateDot(x, y) || (e.altKey && inPlotArea(x, y))) {
+      _dragging = true;
+      canvas.style.cursor = 'grabbing';
+      e.preventDefault();
+    }
+  });
+
+  canvas.addEventListener('mousemove', e => {
+    if (!lastResults) return;
+    const { x, y } = eventCSSCoords(e, canvas);
+    if (_dragging) {
+      const tp = canvasToTP(x, y);
+      if (!tp) return;
+      const data  = buildSatCurve(currentFluid);
+      const clamped = clampToEOS(tp.T, tp.P, data);
+      _dragT = clamped.T;
+      _dragP = clamped.P;
+      dragRedraw(_dragT, _dragP);
+      e.preventDefault();
+    } else {
+      // Cursor hint: grab hand near dot, crosshair inside plot
+      if (nearStateDot(x, y)) canvas.style.cursor = 'grab';
+      else if (inPlotArea(x, y)) canvas.style.cursor = 'crosshair';
+      else canvas.style.cursor = 'default';
+    }
+  });
+
+  canvas.addEventListener('mouseup', e => {
+    if (_dragging && _dragT !== null && _dragP !== null) {
+      _dragging = false;
+      canvas.style.cursor = nearStateDot(...Object.values(eventCSSCoords(e, canvas))) ? 'grab' : 'crosshair';
+      // Push values into inputs and recalculate
+      commitDragValues(_dragT, _dragP);
+      _dragT = null; _dragP = null;
+    }
+  });
+
+  canvas.addEventListener('mouseleave', e => {
+    if (_dragging && _dragT !== null && _dragP !== null) {
+      _dragging = false;
+      commitDragValues(_dragT, _dragP);
+      _dragT = null; _dragP = null;
+    }
+    if (!_dragging) canvas.style.cursor = 'default';
+  });
+
+  // ── Touch ────────────────────────────────────────────────────
+  canvas.addEventListener('touchstart', e => {
+    if (!lastResults) return;
+    const { x, y } = eventCSSCoords(e, canvas);
+    if (nearStateDot(x, y) || inPlotArea(x, y)) {
+      _dragging = true;
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', e => {
+    if (!_dragging) return;
+    const { x, y } = eventCSSCoords(e, canvas);
+    const tp = canvasToTP(x, y);
+    if (!tp) return;
+    const data = buildSatCurve(currentFluid);
+    const clamped = clampToEOS(tp.T, tp.P, data);
+    _dragT = clamped.T;
+    _dragP = clamped.P;
+    dragRedraw(_dragT, _dragP);
+    e.preventDefault();
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', e => {
+    if (_dragging && _dragT !== null && _dragP !== null) {
+      _dragging = false;
+      commitDragValues(_dragT, _dragP);
+      _dragT = null; _dragP = null;
+    }
+  });
+}
+
+// Commit dragged T, P: update inputs, force in1/in2 to T+P if needed, calculate
+function commitDragValues(T, P) {
+  // Ensure inputs are set to T and P
+  const in1El = document.getElementById('in1-prop');
+  const in2El = document.getElementById('in2-prop');
+  // If neither input is T, switch in1 to T; if neither is P, switch in2 to P
+  const hasT = in1El.value === 'T' || in2El.value === 'T';
+  const hasP = in1El.value === 'P' || in2El.value === 'P';
+  if (!hasT) { in1El.value = 'T'; }
+  if (!hasP) { in2El.value === 'T' ? (in2El.value = 'P') : (in2El.value = 'P'); }
+  // Recheck after possible changes
+  if (in1El.value === 'T') document.getElementById('in1-val').value = T.toFixed(3);
+  else if (in2El.value === 'T') document.getElementById('in2-val').value = T.toFixed(3);
+  if (in1El.value === 'P') document.getElementById('in1-val').value = (P/1e5).toFixed(4);
+  else if (in2El.value === 'P') document.getElementById('in2-val').value = (P/1e5).toFixed(4);
+  updateUnitBadges();
+  calculate();
+}
+
 // ── Event wiring ─────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
 
@@ -1844,6 +2030,9 @@ document.addEventListener('DOMContentLoaded', () => {
       drawPhaseDiagram(fluid, res['T'], res['P']);
     }
   });
+
+  // Initialise canvas drag interaction
+  initCanvasDrag();
 });
 
 </script>
