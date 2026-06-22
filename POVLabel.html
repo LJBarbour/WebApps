@@ -369,7 +369,7 @@ function parseLBL(text) {
   const parsed = [];
   for (let i = 2; i < lines.length; i++) {
     const p = lines[i].split(/\s+/);
-    if (p.length < 14) continue;
+    if (p.length < 10) continue;
     if (p[0] !== 'Atom') continue;
     const atomColor     = parseInt(p[3]);
     const labelColorRaw = parseInt(p[7]);
@@ -377,6 +377,12 @@ function parseLBL(text) {
     // useAtomColor is true when the label color matches the atom color.
     const labelColorHex = longToHex(labelColorRaw);
     const useAtomColor  = (labelColorRaw === atomColor);
+    const hasFont  = p.length > 10 && p[10] && p[10].trim().length > 0 && p[10] !== '_';
+    const hasSize  = p.length > 11 && p[11] !== '_' && !isNaN(parseInt(p[11]));
+    const hasBold  = p.length > 12 && p[12] !== '_';
+    const hasItal  = p.length > 13 && p[13] !== '_';
+    const rawFont  = hasFont ? p[10].trim() : 'Arial';
+    const rawSize  = hasSize ? parseInt(p[11]) : 0;
     parsed.push({
       name:         p[1],
       element:      p[2],
@@ -389,10 +395,10 @@ function parseLBL(text) {
       labelColorHex: labelColorHex,
       labelX:       parseInt(p[8]),
       labelY:       parseInt(p[9]),
-      font:         p[10],
-      size:         parseInt(p[11]),
-      bold:         p[12] === 'T',
-      italic:       p[13] === 'T',
+      font:         rawFont || 'Arial',
+      size:         rawSize > 0 ? rawSize : 20,
+      bold:         hasBold ? p[12] === 'T' : false,
+      italic:       hasItal ? p[13] === 'T' : false,
     });
   }
   if (parsed.length === 0) throw new Error('No atom records found in LBL');
@@ -643,7 +649,15 @@ function updatePropPanel() {
   document.getElementById('pVisible').checked = ref.visible;
   document.getElementById('pBold').checked = ref.bold;
   document.getElementById('pItalic').checked = ref.italic;
-  document.getElementById('pFont').value = ref.font || 'Arial';
+  const fontName = ref.font || 'Arial';
+  const fontSel = document.getElementById('pFont');
+  // If the font isn't in the list, add it temporarily so it displays correctly
+  if (![...fontSel.options].some(o => o.value === fontName)) {
+    const opt = document.createElement('option');
+    opt.value = fontName; opt.textContent = fontName;
+    fontSel.appendChild(opt);
+  }
+  fontSel.value = fontName;
   document.getElementById('pSize').value = ref.size;
   document.getElementById('pColor').value = ref.labelColorHex;
   colorMode = ref.useAtomColor ? 'atom' : 'custom';
@@ -763,7 +777,7 @@ function resetView() {
 }
 
 function makeFontString(a) {
-  const s = a.size * scale;
+  const s = Math.max(a.size * scale, 8); // never below 8px or browser falls back to serif
   const style = (a.italic ? 'italic ' : '') + (a.bold ? 'bold ' : '');
   return `${style}${s}px "${a.font || 'Arial'}"`;
 }
@@ -953,6 +967,32 @@ canvas.addEventListener('mouseleave', () => {
   dragging = false;
   dragIdx = -1;
   canvas.style.cursor = 'default';
+});
+
+// Hit-test atom centre (for any atom, visible or not)
+function hitAtomCentre(ix, iy, radius) {
+  for (let i = atoms.length - 1; i >= 0; i--) {
+    const dx = ix - atoms[i].atomX;
+    const dy = iy - atoms[i].atomY;
+    if (dx * dx + dy * dy <= radius * radius) return i;
+  }
+  return -1;
+}
+
+canvas.addEventListener('dblclick', e => {
+  if (!atoms.length) return;
+  const pos = canvasPosToImage(e.clientX, e.clientY);
+  const radius = Math.max(10, 12 / scale);
+  const hit = hitAtomCentre(pos.x, pos.y, radius);
+  if (hit >= 0) {
+    atoms[hit].visible = !atoms[hit].visible;
+    updateAtomList();
+    updateFileInfo();
+    updatePropPanel();
+    render();
+    setStatus(`Label ${atoms[hit].name} ${atoms[hit].visible ? 'shown' : 'hidden'}`, atoms[hit].visible ? 'ok' : '');
+    e.preventDefault();
+  }
 });
 
 // -- Export PNG --
