@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Periodic Table</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=Fraunces:ital,opsz,wght@0,9..144,300;1,9..144,300&display=swap">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:      #FAF6EE;
+  --paper:   #F2EBE0;
+  --ink:     #2C2825;
+  --ink-mid: #6B5E52;
+  --ink-lt:  #A8998C;
+  --accent:  #8B5E3C;
+  --border:  #DDD5C8;
+  /* Category palette – muted, warm-leaning */
+  --c-alk: #F2C5BB; --c-aea: #F2E3BE; --c-tm:  #BAD3EE;
+  --c-ptm: #B8EED6; --c-met: #D2EEB8; --c-nmt: #EEF0B8;
+  --c-hal: #EEC8E8; --c-nob: #D4D0C8; --c-lan: #D8BEEE;
+  --c-act: #EEB8DA;
+}
+
+body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--ink); padding:1.5rem 1rem 4rem; min-height:100vh; }
+
+/* ── Header ── */
+header { text-align:center; margin-bottom:1.2rem; }
+h1 { font-family:'Fraunces',serif; font-weight:300; font-size:2rem; letter-spacing:-0.01em; }
+header p { font-size:12.5px; color:var(--ink-mid); margin-top:0.2rem; }
+
+/* ── Legend ── */
+.legend { display:flex; flex-wrap:wrap; gap:6px 14px; justify-content:center; margin-bottom:1.1rem; font-size:11px; color:var(--ink-mid); }
+.legend-item { display:flex; align-items:center; gap:4px; }
+.l-sw { width:11px; height:11px; border-radius:2px; flex-shrink:0; }
+
+/* ── Periodic table grid ── */
+.pt-outer { overflow-x:auto; margin-bottom:1.4rem; }
+.pt-grid {
+  display:grid;
+  grid-template-columns: repeat(18, 44px);
+  grid-template-rows: repeat(7,44px) 8px repeat(2,44px);
+  gap:2px;
+  width:fit-content;
+  margin:0 auto;
+}
+
+/* ── Element cell ── */
+.el {
+  width:44px; height:44px; border-radius:4px;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  cursor:pointer; border:1px solid transparent;
+  transition:filter .1s, border-color .1s; position:relative;
+}
+.el:hover { filter:brightness(.88); border-color:var(--accent); z-index:1; }
+.el.sel   { border:2px solid var(--accent); filter:brightness(.84); }
+.el-z   { font-size:7px; color:var(--ink-mid); font-family:'DM Mono',monospace; line-height:1; align-self:flex-start; margin:3px 0 0 4px; }
+.el-sym { font-size:15px; font-weight:600; line-height:1.1; }
+.el-nm  { font-size:5.5px; color:var(--ink-mid); line-height:1; max-width:42px; text-align:center; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+
+.cat-ALK{background:var(--c-alk)} .cat-AEA{background:var(--c-aea)}
+.cat-TM {background:var(--c-tm)}  .cat-PTM{background:var(--c-ptm)}
+.cat-MET{background:var(--c-met)} .cat-NMT{background:var(--c-nmt)}
+.cat-HAL{background:var(--c-hal)} .cat-NOB{background:var(--c-nob)}
+.cat-LAN{background:var(--c-lan)} .cat-ACT{background:var(--c-act)}
+
+/* placeholder asterisk markers for La/Ac in main grid */
+.pt-mark {
+  display:flex; align-items:center; justify-content:center;
+  font-size:17px; font-weight:300; color:var(--ink-lt);
+  cursor:default;
+}
+
+/* ── Detail panel ── */
+.detail {
+  display:none; max-width:860px; margin:0 auto;
+  background:var(--paper); border:1px solid var(--border); border-radius:8px; padding:1.25rem;
+}
+.detail.vis { display:block; }
+
+/* header strip */
+.d-head { display:flex; align-items:flex-start; gap:1.2rem; padding-bottom:1rem; border-bottom:1px solid var(--border); margin-bottom:1rem; }
+.d-box {
+  width:68px; height:68px; border-radius:6px; flex-shrink:0;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;
+}
+.d-box .d-z   { font-size:9px; font-family:'DM Mono',monospace; color:var(--ink-mid); line-height:1; }
+.d-box .d-sym { font-size:2.4rem; font-weight:700; line-height:1; }
+.d-box .d-m   { font-size:8px; font-family:'DM Mono',monospace; color:var(--ink-mid); line-height:1; }
+
+.d-info h2  { font-family:'Fraunces',serif; font-weight:300; font-size:1.75rem; line-height:1.1; }
+.d-badge {
+  display:inline-block; font-size:10px; padding:2px 8px; border-radius:10px;
+  margin-top:0.2rem; font-weight:500;
+}
+.d-config { font-family:'DM Mono',monospace; font-size:11.5px; color:var(--ink-mid); margin-top:0.35rem; }
+
+/* property grid */
+.d-grid { display:grid; grid-template-columns:1fr 1fr; gap:0.85rem; }
+.d-grid.wide { grid-template-columns:1fr; }
+
+.prop {
+  background:var(--bg); border-radius:6px; padding:0.65rem 0.75rem;
+}
+.prop-lbl {
+  font-size:9.5px; font-weight:600; letter-spacing:0.07em; text-transform:uppercase;
+  color:var(--ink-mid); margin-bottom:0.35rem;
+  display:flex; align-items:center; justify-content:space-between; gap:0.5rem;
+}
+.prop-val { font-family:'Fraunces',serif; font-weight:300; font-size:1.4rem; color:var(--ink); line-height:1; }
+.prop-unit { font-size:0.85rem; color:var(--ink-mid); }
+.prop-na  { font-size:0.95rem; color:var(--ink-lt); font-style:italic; }
+.prop-note { font-size:10.5px; color:var(--ink-mid); margin-top:0.3rem; }
+.prop-ref  { font-size:10px; }
+.prop-ref a { color:var(--accent); text-decoration:none; }
+.prop-ref a:hover { text-decoration:underline; }
+
+/* ox chips */
+.ox-wrap { display:flex; flex-wrap:wrap; gap:4px; margin-top:0.3rem; }
+.ox-chip { font-size:11.5px; font-family:'DM Mono',monospace; padding:2px 8px; border-radius:10px; background:var(--border); color:var(--ink); }
+
+/* vdW rows */
+.vdw-row { display:flex; align-items:baseline; justify-content:space-between; gap:0.5rem; padding:2px 0; }
+.vdw-src { font-size:10.5px; color:var(--ink-mid); }
+.vdw-src a { color:var(--ink-mid); text-decoration:none; }
+.vdw-src a:hover { color:var(--accent); text-decoration:underline; }
+.vdw-val { font-family:'DM Mono',monospace; font-size:12.5px; color:var(--ink); }
+.vdw-na  { font-family:'DM Mono',monospace; font-size:12px; color:var(--ink-lt); }
+
+/* ionic radii table */
+.ion-tbl { font-size:11px; width:100%; border-collapse:collapse; margin-top:0.4rem; }
+.ion-tbl th { font-size:9px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:var(--ink-mid); padding:2px 8px 4px; text-align:left; border-bottom:1px solid var(--border); }
+.ion-tbl td { padding:3px 8px; font-family:'DM Mono',monospace; color:var(--ink); border-bottom:1px solid var(--border); }
+.ion-tbl tr:last-child td { border-bottom:none; }
+.ion-tbl .ox { color:var(--accent); font-weight:500; }
+.ion-tbl .spin { font-size:9px; color:var(--ink-mid); }
+
+/* hint */
+.hint { text-align:center; font-size:12px; color:var(--ink-lt); margin-top:0; margin-bottom:0; }
+
+/* footnote */
+.footnote {
+  max-width:860px; margin:1.25rem auto 0; font-size:11px; color:var(--ink-mid);
+  border-top:1px solid var(--border); padding-top:0.75rem; line-height:1.6;
+}
+.footnote a { color:var(--accent); text-decoration:none; }
+.footnote a:hover { text-decoration:underline; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Periodic Table</h1>
+  <p>Click any element to view its properties</p>
+</header>
+
+<div class="legend">
+  <div class="legend-item"><div class="l-sw cat-ALK"></div>Alkali metals</div>
+  <div class="legend-item"><div class="l-sw cat-AEA"></div>Alkaline earth metals</div>
+  <div class="legend-item"><div class="l-sw cat-TM"></div>Transition metals</div>
+  <div class="legend-item"><div class="l-sw cat-LAN"></div>Lanthanoids</div>
+  <div class="legend-item"><div class="l-sw cat-ACT"></div>Actinoids</div>
+  <div class="legend-item"><div class="l-sw cat-PTM"></div>Post-transition metals</div>
+  <div class="legend-item"><div class="l-sw cat-MET"></div>Metalloids</div>
+  <div class="legend-item"><div class="l-sw cat-NMT"></div>Reactive nonmetals</div>
+  <div class="legend-item"><div class="l-sw cat-HAL"></div>Halogens</div>
+  <div class="legend-item"><div class="l-sw cat-NOB"></div>Noble gases</div>
+</div>
+
+<div class="pt-outer">
+  <div class="pt-grid" id="ptGrid"></div>
+</div>
+
+<div class="detail" id="detail"></div>
+
+<div class="footnote">
+  <strong>Data sources —</strong>
+  Atomic masses: IUPAC 2021 standard atomic weights. &nbsp;
+  Electronegativities: Pauling scale. &nbsp;
+  van der Waals radii (Bondi):
+    <a href="https://doi.org/10.1021/j100785a001" target="_blank">Bondi, <em>J. Phys. Chem.</em> 1964, 68, 441</a>. &nbsp;
+  van der Waals radii (Alvarez):
+    <a href="https://doi.org/10.1039/c3dt50599e" target="_blank">Alvarez, <em>Dalton Trans.</em> 2013, 42, 8617</a>. &nbsp;
+  Covalent radii:
+    <a href="https://doi.org/10.1039/b801115j" target="_blank">Alvarez, <em>Dalton Trans.</em> 2008, 2832</a> (single-bond). &nbsp;
+  Ionic radii:
+    <a href="https://doi.org/10.1107/S0567739476001551" target="_blank">Shannon, <em>Acta Cryst.</em> 1976, A32, 751</a> (effective ionic radii, O²⁻ = 1.40 Å). &nbsp;
+  — values shown as — are not reported in the cited source. Alvarez 2013 values for heavier lanthanoids and actinoids have larger statistical uncertainties; please verify against the original paper.
+</div>
+
+<script>
+'use strict';
+
+// ─── CATEGORY NAMES ───────────────────────────────
+const CNAME = {
+  ALK:'Alkali metal', AEA:'Alkaline earth metal', TM:'Transition metal',
+  PTM:'Post-transition metal', MET:'Metalloid', NMT:'Reactive nonmetal',
+  HAL:'Halogen', NOB:'Noble gas', LAN:'Lanthanoid', ACT:'Actinoid'
+};
+
+// ─── ELEMENT DATA ─────────────────────────────────
+// E(z, sym, name, cat, mass, config, eneg, ox[], vdwB, vdwA, covR, ionR[])
+// ionR: [oxidation_state_string, coord_number, radius_Å, spin_note]
+// null  = not reported in the cited source
+const ED = {};
+function E(z,s,n,c,m,cf,en,ox,vB,vA,cr,ir){
+  ED[z]={z,s,n,c,m,cf,en,ox,vB,vA,cr,ir:ir||[]};
+}
+
+E(1, 'H', 'Hydrogen',    'NMT', 1.008,  '1s¹',                    2.20, [-1,+1], 1.20, 1.20, 0.31, [['-1',4,2.08,'']]);
+E(2, 'He','Helium',      'NOB', 4.003,  '1s²',                    null, [],      1.40, 1.43, 0.28, []);
+E(3, 'Li','Lithium',     'ALK', 6.941,  '[He] 2s¹',               0.98, [+1],    1.82, 2.12, 1.28, [['+1',4,0.59,''],['+1',6,0.76,''],['+1',8,0.92,'']]);
+E(4, 'Be','Beryllium',   'AEA', 9.012,  '[He] 2s²',               1.57, [+2],    null, 1.98, 0.96, [['+2',4,0.27,''],['+2',6,0.45,'']]);
+E(5, 'B', 'Boron',       'MET', 10.81,  '[He] 2s²2p¹',            2.04, [+3],    null, 1.91, 0.84, [['+3',4,0.11,''],['+3',6,0.27,'']]);
+E(6, 'C', 'Carbon',      'NMT', 12.011, '[He] 2s²2p²',            2.55, [-4,+2,+4],1.70,1.77,0.76,[['+4',4,0.15,''],['+4',6,0.16,'']]);
+E(7, 'N', 'Nitrogen',    'NMT', 14.007, '[He] 2s²2p³',            3.04, [-3,+3,+5],1.55,1.66,0.71,[['-3',4,1.46,''],['+5',6,0.13,'']]);
+E(8, 'O', 'Oxygen',      'NMT', 15.999, '[He] 2s²2p⁴',            3.44, [-2,+2],  1.52,1.50,0.66,[['-2',2,1.35,''],['-2',4,1.38,''],['-2',6,1.40,''],['-2',8,1.42,'']]);
+E(9, 'F', 'Fluorine',    'HAL', 18.998, '[He] 2s²2p⁵',            3.98, [-1],     1.47,1.46,0.57,[['-1',2,1.285,''],['-1',4,1.31,''],['-1',6,1.33,'']]);
+E(10,'Ne','Neon',        'NOB', 20.180, '[He] 2s²2p⁶',            null, [],       1.54,1.58,0.58,[]);
+E(11,'Na','Sodium',      'ALK', 22.990, '[Ne] 3s¹',               0.93, [+1],     2.27,2.50,1.66,[['+1',4,0.99,''],['+1',6,1.02,''],['+1',8,1.18,''],['+1',12,1.39,'']]);
+E(12,'Mg','Magnesium',   'AEA', 24.305, '[Ne] 3s²',               1.31, [+2],     1.73,2.51,1.41,[['+2',4,0.57,''],['+2',6,0.72,''],['+2',8,0.89,'']]);
+E(13,'Al','Aluminium',   'PTM', 26.982, '[Ne] 3s²3p¹',            1.61, [+3],     null,2.25,1.21,[['+3',4,0.39,''],['+3',5,0.48,''],['+3',6,0.535,'']]);
+E(14,'Si','Silicon',     'MET', 28.085, '[Ne] 3s²3p²',            1.90, [-4,+4],  2.10,2.19,1.11,[['+4',4,0.26,''],['+4',6,0.40,'']]);
+E(15,'P', 'Phosphorus',  'NMT', 30.974, '[Ne] 3s²3p³',            2.19, [-3,+3,+5],1.80,1.90,1.07,[['+3',6,0.44,''],['+5',4,0.17,''],['+5',6,0.38,'']]);
+E(16,'S', 'Sulfur',      'NMT', 32.065, '[Ne] 3s²3p⁴',            2.58, [-2,+4,+6],1.80,1.89,1.05,[['-2',6,1.84,''],['+4',6,0.37,''],['+6',4,0.12,''],['+6',6,0.29,'']]);
+E(17,'Cl','Chlorine',    'HAL', 35.450, '[Ne] 3s²3p⁵',            3.16, [-1,+1,+3,+5,+7],1.75,1.82,1.02,[['-1',6,1.81,''],['+7',4,0.08,''],['+7',6,0.27,'']]);
+E(18,'Ar','Argon',       'NOB', 39.948, '[Ne] 3s²3p⁶',            null, [],       1.88,1.83,1.06,[]);
+E(19,'K', 'Potassium',   'ALK', 39.098, '[Ar] 4s¹',               0.82, [+1],     2.75,2.73,2.03,[['+1',6,1.38,''],['+1',8,1.51,''],['+1',12,1.64,'']]);
+E(20,'Ca','Calcium',     'AEA', 40.078, '[Ar] 4s²',               1.00, [+2],     null,2.62,1.76,[['+2',6,1.00,''],['+2',8,1.12,''],['+2',12,1.34,'']]);
+E(21,'Sc','Scandium',    'TM',  44.956, '[Ar] 3d¹4s²',            1.36, [+3],     null,2.58,1.70,[['+3',6,0.745,''],['+3',8,0.870,'']]);
+E(22,'Ti','Titanium',    'TM',  47.867, '[Ar] 3d²4s²',            1.54, [+2,+3,+4],null,2.46,1.60,[['+2',6,0.86,''],['+3',6,0.67,''],['+4',4,0.42,''],['+4',6,0.605,''],['+4',8,0.74,'']]);
+E(23,'V', 'Vanadium',    'TM',  50.942, '[Ar] 3d³4s²',            1.63, [+2,+3,+4,+5],null,2.42,1.53,[['+2',6,0.79,''],['+3',6,0.64,''],['+4',5,0.53,''],['+4',6,0.58,''],['+5',4,0.355,''],['+5',6,0.54,'']]);
+E(24,'Cr','Chromium',    'TM',  51.996, '[Ar] 3d⁵4s¹',            1.66, [+2,+3,+6],null,2.45,1.39,[['+2',6,0.73,''],['+3',6,0.615,''],['+6',4,0.26,''],['+6',6,0.44,'']]);
+E(25,'Mn','Manganese',   'TM',  54.938, '[Ar] 3d⁵4s²',            1.55, [+2,+3,+4,+7],null,2.45,1.61,[['+2',6,0.83,'HS'],['+2',6,0.67,'LS'],['+3',6,0.645,'HS'],['+3',6,0.58,'LS'],['+4',6,0.53,''],['+7',4,0.25,''],['+7',6,0.46,'']]);
+E(26,'Fe','Iron',        'TM',  55.845, '[Ar] 3d⁶4s²',            1.83, [+2,+3],  null,2.44,1.52,[['+2',6,0.78,'HS'],['+2',6,0.61,'LS'],['+3',4,0.49,''],['+3',6,0.645,'HS'],['+3',6,0.55,'LS']]);
+E(27,'Co','Cobalt',      'TM',  58.933, '[Ar] 3d⁷4s²',            1.88, [+2,+3],  null,2.40,1.50,[['+2',6,0.745,'HS'],['+2',6,0.65,'LS'],['+3',6,0.61,'HS'],['+3',6,0.545,'LS']]);
+E(28,'Ni','Nickel',      'TM',  58.693, '[Ar] 3d⁸4s²',            1.91, [+2,+3],  1.63,2.40,1.24,[['+2',4,0.55,''],['+2',6,0.69,''],['+3',6,0.56,'']]);
+E(29,'Cu','Copper',      'TM',  63.546, '[Ar] 3d¹⁰4s¹',           1.90, [+1,+2],  1.40,2.38,1.32,[['+1',2,0.46,''],['+1',4,0.60,''],['+1',6,0.77,''],['+2',4,0.57,''],['+2',6,0.73,'']]);
+E(30,'Zn','Zinc',        'TM',  65.38,  '[Ar] 3d¹⁰4s²',           1.65, [+2],     1.39,2.39,1.22,[['+2',4,0.60,''],['+2',6,0.74,''],['+2',8,0.90,'']]);
+E(31,'Ga','Gallium',     'PTM', 69.723, '[Ar] 3d¹⁰4s²4p¹',        1.81, [+3],     1.87,2.32,1.22,[['+3',4,0.47,''],['+3',6,0.62,'']]);
+E(32,'Ge','Germanium',   'MET', 72.630, '[Ar] 3d¹⁰4s²4p²',        2.01, [+2,+4],  null,2.29,1.20,[['+2',6,0.73,''],['+4',4,0.39,''],['+4',6,0.53,'']]);
+E(33,'As','Arsenic',     'MET', 74.922, '[Ar] 3d¹⁰4s²4p³',        2.18, [-3,+3,+5],1.85,1.88,1.19,[['+3',6,0.58,''],['+5',4,0.335,''],['+5',6,0.46,'']]);
+E(34,'Se','Selenium',    'NMT', 78.971, '[Ar] 3d¹⁰4s²4p⁴',        2.55, [-2,+4,+6],1.90,1.82,1.20,[['-2',6,1.98,''],['+4',6,0.50,''],['+6',4,0.28,''],['+6',6,0.42,'']]);
+E(35,'Br','Bromine',     'HAL', 79.904, '[Ar] 3d¹⁰4s²4p⁵',        2.96, [-1,+1,+3,+5,+7],1.85,1.86,1.20,[['-1',6,1.96,''],['+7',4,0.25,''],['+7',6,0.39,'']]);
+E(36,'Kr','Krypton',     'NOB', 83.798, '[Ar] 3d¹⁰4s²4p⁶',        3.00, [+2],     2.02,2.25,1.16,[]);
+E(37,'Rb','Rubidium',    'ALK', 85.468, '[Kr] 5s¹',               0.82, [+1],     null,3.21,2.20,[['+1',6,1.52,''],['+1',8,1.61,''],['+1',12,1.72,'']]);
+E(38,'Sr','Strontium',   'AEA', 87.620, '[Kr] 5s²',               0.95, [+2],     null,2.84,1.95,[['+2',6,1.18,''],['+2',8,1.26,''],['+2',12,1.44,'']]);
+E(39,'Y', 'Yttrium',     'TM',  88.906, '[Kr] 4d¹5s²',            1.22, [+3],     null,2.75,1.90,[['+3',6,0.900,''],['+3',8,1.019,'']]);
+E(40,'Zr','Zirconium',   'TM',  91.224, '[Kr] 4d²5s²',            1.33, [+4],     null,2.52,1.75,[['+4',4,0.59,''],['+4',6,0.72,''],['+4',8,0.84,'']]);
+E(41,'Nb','Niobium',     'TM',  92.906, '[Kr] 4d⁴5s¹',            1.60, [+3,+5],  null,2.56,1.64,[['+3',6,0.72,''],['+5',4,0.48,''],['+5',6,0.64,'']]);
+E(42,'Mo','Molybdenum',  'TM',  95.950, '[Kr] 4d⁵5s¹',            2.16, [+3,+4,+6],null,2.45,1.54,[['+3',6,0.69,''],['+4',6,0.65,''],['+6',4,0.41,''],['+6',6,0.59,'']]);
+E(43,'Tc','Technetium',  'TM',  97.00,  '[Kr] 4d⁵5s²',            1.90, [+4,+7],  null,2.44,1.47,[['+4',6,0.645,''],['+7',4,0.37,''],['+7',6,0.56,'']]);
+E(44,'Ru','Ruthenium',   'TM',  101.07, '[Kr] 4d⁷5s¹',            2.20, [+3,+4],  null,2.46,1.46,[['+3',6,0.68,''],['+4',6,0.62,'']]);
+E(45,'Rh','Rhodium',     'TM',  102.91, '[Kr] 4d⁸5s¹',            2.28, [+3,+4],  null,2.44,1.42,[['+3',6,0.665,''],['+4',6,0.60,'']]);
+E(46,'Pd','Palladium',   'TM',  106.42, '[Kr] 4d¹⁰',              2.20, [+2,+4],  1.63,2.15,1.39,[['+2',4,0.64,''],['+2',6,0.86,''],['+4',6,0.615,'']]);
+E(47,'Ag','Silver',      'TM',  107.87, '[Kr] 4d¹⁰5s¹',           1.93, [+1,+2],  1.72,2.53,1.45,[['+1',2,0.67,''],['+1',4,1.00,''],['+1',6,1.15,''],['+1',8,1.28,''],['+2',6,0.94,'']]);
+E(48,'Cd','Cadmium',     'TM',  112.41, '[Kr] 4d¹⁰5s²',           1.69, [+2],     1.58,2.49,1.44,[['+2',4,0.78,''],['+2',6,0.95,''],['+2',8,1.10,''],['+2',12,1.31,'']]);
+E(49,'In','Indium',      'PTM', 114.82, '[Kr] 4d¹⁰5s²5p¹',        1.78, [+3],     1.93,2.43,1.42,[['+3',6,0.80,'']]);
+E(50,'Sn','Tin',         'PTM', 118.71, '[Kr] 4d¹⁰5s²5p²',        1.96, [+2,+4],  2.17,2.42,1.39,[['+2',6,1.18,''],['+4',4,0.55,''],['+4',6,0.69,'']]);
+E(51,'Sb','Antimony',    'MET', 121.76, '[Kr] 4d¹⁰5s²5p³',        2.05, [-3,+3,+5],2.06,2.47,1.39,[['+3',6,0.76,''],['+5',6,0.60,'']]);
+E(52,'Te','Tellurium',   'MET', 127.60, '[Kr] 4d¹⁰5s²5p⁴',        2.10, [-2,+4,+6],2.06,1.99,1.38,[['-2',6,2.21,''],['+4',3,0.52,''],['+4',6,0.97,''],['+6',4,0.43,''],['+6',6,0.56,'']]);
+E(53,'I', 'Iodine',      'HAL', 126.90, '[Kr] 4d¹⁰5s²5p⁵',        2.66, [-1,+1,+5,+7],1.98,2.04,1.39,[['-1',6,2.20,''],['+5',3,0.44,''],['+5',6,0.95,''],['+7',4,0.42,''],['+7',6,0.53,'']]);
+E(54,'Xe','Xenon',       'NOB', 131.29, '[Kr] 4d¹⁰5s²5p⁶',        2.60, [+2,+4,+8],2.16,2.06,1.40,[]);
+E(55,'Cs','Caesium',     'ALK', 132.91, '[Xe] 6s¹',               0.79, [+1],     null,3.48,2.44,[['+1',6,1.67,''],['+1',8,1.74,''],['+1',12,1.88,'']]);
+E(56,'Ba','Barium',      'AEA', 137.33, '[Xe] 6s²',               0.89, [+2],     null,3.03,2.15,[['+2',6,1.35,''],['+2',8,1.42,''],['+2',12,1.61,'']]);
+E(57,'La','Lanthanum',   'LAN', 138.91, '[Xe] 5d¹6s²',            1.10, [+3],     null,2.98,2.07,[['+3',6,1.032,''],['+3',8,1.160,''],['+3',12,1.36,'']]);
+E(58,'Ce','Cerium',      'LAN', 140.12, '[Xe] 4f¹5d¹6s²',         1.12, [+3,+4],  null,2.88,2.04,[['+3',6,1.010,''],['+3',8,1.143,''],['+4',6,0.870,''],['+4',8,0.970,'']]);
+E(59,'Pr','Praseodymium','LAN', 140.91, '[Xe] 4f³6s²',            1.13, [+3,+4],  null,2.92,2.03,[['+3',6,0.990,''],['+3',8,1.126,''],['+4',6,0.850,''],['+4',8,0.960,'']]);
+E(60,'Nd','Neodymium',   'LAN', 144.24, '[Xe] 4f⁴6s²',            1.14, [+3],     null,2.95,2.01,[['+3',6,0.983,''],['+3',8,1.109,'']]);
+E(61,'Pm','Promethium',  'LAN', 145,    '[Xe] 4f⁵6s²',            1.13, [+3],     null,null, 1.99,[['+3',6,0.970,''],['+3',8,1.093,'']]);
+E(62,'Sm','Samarium',    'LAN', 150.36, '[Xe] 4f⁶6s²',            1.17, [+2,+3],  null,2.87,1.98,[['+2',7,1.22,''],['+3',6,0.958,''],['+3',8,1.079,'']]);
+E(63,'Eu','Europium',    'LAN', 151.96, '[Xe] 4f⁷6s²',            1.20, [+2,+3],  null,2.83,1.98,[['+2',6,1.17,''],['+2',8,1.25,''],['+3',6,0.947,''],['+3',8,1.066,'']]);
+E(64,'Gd','Gadolinium',  'LAN', 157.25, '[Xe] 4f⁷5d¹6s²',         1.20, [+3],     null,2.79,1.96,[['+3',6,0.938,''],['+3',8,1.053,'']]);
+E(65,'Tb','Terbium',     'LAN', 158.93, '[Xe] 4f⁹6s²',            1.10, [+3,+4],  null,2.87,1.94,[['+3',6,0.923,''],['+3',8,1.040,''],['+4',6,0.760,''],['+4',8,0.880,'']]);
+E(66,'Dy','Dysprosium',  'LAN', 162.50, '[Xe] 4f¹⁰6s²',           1.22, [+3],     null,2.81,1.92,[['+3',6,0.912,''],['+3',8,1.027,'']]);
+E(67,'Ho','Holmium',     'LAN', 164.93, '[Xe] 4f¹¹6s²',           1.23, [+3],     null,2.83,1.92,[['+3',6,0.901,''],['+3',8,1.015,'']]);
+E(68,'Er','Erbium',      'LAN', 167.26, '[Xe] 4f¹²6s²',           1.24, [+3],     null,2.79,1.89,[['+3',6,0.890,''],['+3',8,1.004,'']]);
+E(69,'Tm','Thulium',     'LAN', 168.93, '[Xe] 4f¹³6s²',           1.25, [+3],     null,2.87,1.90,[['+3',6,0.880,''],['+3',8,0.994,'']]);
+E(70,'Yb','Ytterbium',   'LAN', 173.05, '[Xe] 4f¹⁴6s²',           1.10, [+2,+3],  null,2.81,1.87,[['+2',6,1.02,''],['+2',8,1.14,''],['+3',6,0.868,''],['+3',8,0.985,'']]);
+E(71,'Lu','Lutetium',    'LAN', 174.97, '[Xe] 4f¹⁴5d¹6s²',        1.27, [+3],     null,2.74,1.87,[['+3',6,0.861,''],['+3',8,0.977,'']]);
+E(72,'Hf','Hafnium',     'TM',  178.49, '[Xe] 4f¹⁴5d²6s²',        1.30, [+4],     null,2.63,1.75,[['+4',4,0.58,''],['+4',6,0.71,''],['+4',8,0.83,'']]);
+E(73,'Ta','Tantalum',    'TM',  180.95, '[Xe] 4f¹⁴5d³6s²',        1.50, [+3,+5],  null,2.53,1.70,[['+3',6,0.72,''],['+5',6,0.64,''],['+5',8,0.74,'']]);
+E(74,'W', 'Tungsten',    'TM',  183.84, '[Xe] 4f¹⁴5d⁴6s²',        2.36, [+4,+6],  null,2.57,1.62,[['+4',6,0.66,''],['+6',4,0.42,''],['+6',6,0.60,'']]);
+E(75,'Re','Rhenium',     'TM',  186.21, '[Xe] 4f¹⁴5d⁵6s²',        1.90, [+4,+7],  null,2.49,1.51,[['+4',6,0.63,''],['+7',4,0.38,''],['+7',6,0.53,'']]);
+E(76,'Os','Osmium',      'TM',  190.23, '[Xe] 4f¹⁴5d⁶6s²',        2.20, [+4,+6],  null,2.48,1.44,[['+4',6,0.63,''],['+6',6,0.545,'']]);
+E(77,'Ir','Iridium',     'TM',  192.22, '[Xe] 4f¹⁴5d⁷6s²',        2.20, [+3,+4],  null,2.41,1.41,[['+3',6,0.68,''],['+4',6,0.625,'']]);
+E(78,'Pt','Platinum',    'TM',  195.08, '[Xe] 4f¹⁴5d⁹6s¹',        2.28, [+2,+4],  1.75,2.29,1.36,[['+2',4,0.60,''],['+2',6,0.80,''],['+4',6,0.625,'']]);
+E(79,'Au','Gold',        'TM',  196.97, '[Xe] 4f¹⁴5d¹⁰6s¹',       2.54, [+1,+3],  1.66,2.32,1.36,[['+1',6,1.37,''],['+3',4,0.64,''],['+3',6,0.85,'']]);
+E(80,'Hg','Mercury',     'TM',  200.59, '[Xe] 4f¹⁴5d¹⁰6s²',       2.00, [+1,+2],  null,2.45,1.32,[['+1',3,0.97,''],['+1',6,1.19,''],['+2',2,0.69,''],['+2',4,0.96,''],['+2',6,1.02,'']]);
+E(81,'Tl','Thallium',    'PTM', 204.38, '[Xe] 4f¹⁴5d¹⁰6s²6p¹',    1.62, [+1,+3],  1.96,2.47,1.45,[['+1',6,1.50,''],['+1',8,1.59,''],['+1',12,1.70,''],['+3',4,0.75,''],['+3',6,0.885,'']]);
+E(82,'Pb','Lead',        'PTM', 207.20, '[Xe] 4f¹⁴5d¹⁰6s²6p²',    2.33, [+2,+4],  2.02,2.60,1.46,[['+2',4,0.98,''],['+2',6,1.19,''],['+2',8,1.29,''],['+2',12,1.49,''],['+4',4,0.65,''],['+4',6,0.775,'']]);
+E(83,'Bi','Bismuth',     'PTM', 208.98, '[Xe] 4f¹⁴5d¹⁰6s²6p³',    2.02, [+3,+5],  2.07,2.54,1.48,[['+3',5,0.96,''],['+3',6,1.03,''],['+3',8,1.17,''],['+5',6,0.76,'']]);
+E(84,'Po','Polonium',    'PTM', 209,    '[Xe] 4f¹⁴5d¹⁰6s²6p⁴',    2.00, [+2,+4],  null,2.67,1.40,[['+4',6,0.94,'']]);
+E(85,'At','Astatine',    'HAL', 210,    '[Xe] 4f¹⁴5d¹⁰6s²6p⁵',    2.20, [-1,+1,+3,+5],null,null,1.50,[]);
+E(86,'Rn','Radon',       'NOB', 222,    '[Xe] 4f¹⁴5d¹⁰6s²6p⁶',    null, [],       null,2.20,1.50,[]);
+E(87,'Fr','Francium',    'ALK', 223,    '[Rn] 7s¹',               0.70, [+1],     null,3.48,2.60,[]);
+E(88,'Ra','Radium',      'AEA', 226,    '[Rn] 7s²',               0.90, [+2],     null,2.83,2.21,[['+2',8,1.48,''],['+2',12,1.70,'']]);
+E(89,'Ac','Actinium',    'ACT', 227,    '[Rn] 6d¹7s²',            1.10, [+3],     null,2.68,2.15,[['+3',6,1.12,'']]);
+E(90,'Th','Thorium',     'ACT', 232.04, '[Rn] 6d²7s²',            1.30, [+4],     null,2.93,2.06,[['+4',6,0.94,''],['+4',8,1.05,''],['+4',12,1.21,'']]);
+E(91,'Pa','Protactinium','ACT', 231.04, '[Rn] 5f²6d¹7s²',         1.50, [+4,+5],  null,2.88,2.00,[['+4',6,0.90,''],['+5',6,0.78,''],['+5',8,0.91,'']]);
+E(92,'U', 'Uranium',     'ACT', 238.03, '[Rn] 5f³6d¹7s²',         1.38, [+3,+4,+5,+6],null,2.71,1.96,[['+3',6,1.025,''],['+4',6,0.89,''],['+4',8,1.00,''],['+5',6,0.76,''],['+6',2,0.45,''],['+6',4,0.52,''],['+6',6,0.73,'']]);
+E(93,'Np','Neptunium',   'ACT', 237,    '[Rn] 5f⁴6d¹7s²',         1.36, [+3,+4,+5,+6],null,2.82,1.90,[['+3',6,1.01,''],['+5',6,0.75,''],['+6',6,0.72,'']]);
+E(94,'Pu','Plutonium',   'ACT', 244,    '[Rn] 5f⁶7s²',            1.28, [+3,+4,+5,+6],null,2.81,1.87,[['+3',6,1.00,''],['+4',6,0.86,'']]);
+E(95,'Am','Americium',   'ACT', 243,    '[Rn] 5f⁷7s²',            1.30, [+3],     null,2.83,1.80,[['+3',6,0.975,'']]);
+E(96,'Cm','Curium',      'ACT', 247,    '[Rn] 5f⁷6d¹7s²',         1.30, [+3],     null,3.05,1.69,[['+3',6,0.970,'']]);
+
+// Stub entries for Z=97–118
+[
+  [97,'Bk','Berkelium','ACT',247],[98,'Cf','Californium','ACT',251],
+  [99,'Es','Einsteinium','ACT',252],[100,'Fm','Fermium','ACT',257],
+  [101,'Md','Mendelevium','ACT',258],[102,'No','Nobelium','ACT',259],
+  [103,'Lr','Lawrencium','ACT',266],[104,'Rf','Rutherfordium','TM',267],
+  [105,'Db','Dubnium','TM',268],[106,'Sg','Seaborgium','TM',269],
+  [107,'Bh','Bohrium','TM',270],[108,'Hs','Hassium','TM',277],
+  [109,'Mt','Meitnerium','TM',278],[110,'Ds','Darmstadtium','TM',281],
+  [111,'Rg','Roentgenium','TM',282],[112,'Cn','Copernicium','TM',285],
+  [113,'Nh','Nihonium','PTM',286],[114,'Fl','Flerovium','PTM',289],
+  [115,'Mc','Moscovium','PTM',290],[116,'Lv','Livermorium','PTM',293],
+  [117,'Ts','Tennessine','HAL',294],[118,'Og','Oganesson','NOB',294]
+].forEach(([z,s,n,c,m]) => { ED[z]={z,s,n,c,m,cf:null,en:null,ox:[],vB:null,vA:null,cr:null,ir:[]}; });
+
+// ─── GRID POSITIONS [col, row] ───────────────────
+const GP = {
+   1:[1,1],2:[18,1],
+   3:[1,2],4:[2,2],5:[13,2],6:[14,2],7:[15,2],8:[16,2],9:[17,2],10:[18,2],
+  11:[1,3],12:[2,3],13:[13,3],14:[14,3],15:[15,3],16:[16,3],17:[17,3],18:[18,3],
+  19:[1,4],20:[2,4],21:[3,4],22:[4,4],23:[5,4],24:[6,4],25:[7,4],26:[8,4],
+  27:[9,4],28:[10,4],29:[11,4],30:[12,4],31:[13,4],32:[14,4],33:[15,4],34:[16,4],35:[17,4],36:[18,4],
+  37:[1,5],38:[2,5],39:[3,5],40:[4,5],41:[5,5],42:[6,5],43:[7,5],44:[8,5],
+  45:[9,5],46:[10,5],47:[11,5],48:[12,5],49:[13,5],50:[14,5],51:[15,5],52:[16,5],53:[17,5],54:[18,5],
+  55:[1,6],56:[2,6],
+  57:[3,9],58:[4,9],59:[5,9],60:[6,9],61:[7,9],62:[8,9],63:[9,9],64:[10,9],
+  65:[11,9],66:[12,9],67:[13,9],68:[14,9],69:[15,9],70:[16,9],71:[17,9],
+  72:[4,6],73:[5,6],74:[6,6],75:[7,6],76:[8,6],77:[9,6],78:[10,6],79:[11,6],
+  80:[12,6],81:[13,6],82:[14,6],83:[15,6],84:[16,6],85:[17,6],86:[18,6],
+  87:[1,7],88:[2,7],
+  89:[3,10],90:[4,10],91:[5,10],92:[6,10],93:[7,10],94:[8,10],95:[9,10],96:[10,10],
+  97:[11,10],98:[12,10],99:[13,10],100:[14,10],101:[15,10],102:[16,10],103:[17,10],
+  104:[4,7],105:[5,7],106:[6,7],107:[7,7],108:[8,7],109:[9,7],110:[10,7],111:[11,7],
+  112:[12,7],113:[13,7],114:[14,7],115:[15,7],116:[16,7],117:[17,7],118:[18,7]
+};
+
+// ─── RENDER TABLE ────────────────────────────────
+const grid = document.getElementById('ptGrid');
+
+function makeCell(z) {
+  const e = ED[z];
+  const [col, row] = GP[z];
+  const div = document.createElement('div');
+  div.className = `el cat-${e.c}`;
+  div.style.gridColumn = col;
+  div.style.gridRow = row;
+  div.dataset.z = z;
+  div.innerHTML = `<span class="el-z">${z}</span><span class="el-sym">${e.s}</span><span class="el-nm">${e.n}</span>`;
+  div.addEventListener('click', () => showElement(z));
+  grid.appendChild(div);
+}
+
+// La/Ac placeholder markers
+function makeMark(col, row, cat) {
+  const div = document.createElement('div');
+  div.className = `el pt-mark cat-${cat}`;
+  div.style.gridColumn = col;
+  div.style.gridRow = row;
+  div.title = cat === 'LAN' ? 'La–Lu' : 'Ac–Lr';
+  div.textContent = '*';
+  grid.appendChild(div);
+}
+
+for (let z = 1; z <= 118; z++) makeCell(z);
+makeMark(3, 6, 'LAN');
+makeMark(3, 7, 'ACT');
+
+// ─── DETAIL PANEL ────────────────────────────────
+let selZ = null;
+
+function fmtOx(v) {
+  if (v === 0) return '0';
+  return (v > 0 ? '+' : '\u2212') + Math.abs(v);
+}
+
+function valOrDash(v, decimals = 2) {
+  return v !== null && v !== undefined ? v.toFixed(decimals) : '\u2014';
+}
+
+function renderVdW(e) {
+  const row = (label, href, r) => `
+    <div class="vdw-row">
+      <span class="vdw-src"><a href="${href}" target="_blank">${label}</a></span>
+      ${r !== null
+        ? `<span class="vdw-val">${r.toFixed(2)} Å</span>`
+        : `<span class="vdw-na">\u2014</span>`}
+    </div>`;
+  return `
+    <div class="prop-lbl">van der Waals radius</div>
+    ${row('Bondi (1964)',   'https://doi.org/10.1021/j100785a001', e.vB)}
+    ${row('Alvarez (2013)', 'https://doi.org/10.1039/c3dt50599e',  e.vA)}`;
+}
+
+function renderIonic(e) {
+  if (!e.ir || e.ir.length === 0) return '<div class="prop-na">\u2014</div>';
+  const rows = e.ir.map(([ox,cn,r,sp]) =>
+    `<tr><td class="ox">${ox}</td><td>${cn}</td><td>${r.toFixed(3)}</td><td class="spin">${sp}</td></tr>`
+  ).join('');
+  return `<table class="ion-tbl">
+    <thead><tr><th>Ox.</th><th>CN</th><th>r (Å)</th><th></th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <div class="prop-note prop-ref" style="margin-top:0.35rem;">Ref: <a href="https://doi.org/10.1107/S0567739476001551" target="_blank">Shannon 1976</a></div>`;
+}
+
+function showElement(z) {
+  const e = ED[z];
+  // Update selection highlight
+  if (selZ) document.querySelector(`.el[data-z="${selZ}"]`).classList.remove('sel');
+  selZ = z;
+  document.querySelector(`.el[data-z="${z}"]`).classList.add('sel');
+
+  const panel = document.getElementById('detail');
+  panel.className = 'detail vis';
+
+  const massStr = e.m ? (Number.isInteger(e.m) ? `[${e.m}]` : e.m.toFixed(3)) : '—';
+  const configStr = e.cf || '—';
+  const enegStr = e.en !== null ? e.en.toFixed(2) : '\u2014';
+  const covStr = e.cr !== null ? e.cr.toFixed(2) : '\u2014';
+  const oxHtml = e.ox.length
+    ? e.ox.map(v => `<span class="ox-chip">${fmtOx(v)}</span>`).join('')
+    : '<span class="prop-na">\u2014</span>';
+
+  panel.innerHTML = `
+    <div class="d-head">
+      <div class="d-box cat-${e.c}">
+        <span class="d-z">${z}</span>
+        <span class="d-sym">${e.s}</span>
+        <span class="d-m">${massStr}</span>
+      </div>
+      <div class="d-info">
+        <h2>${e.n}</h2>
+        <div class="d-badge cat-${e.c}">${CNAME[e.c]}</div>
+        <div class="d-config">${configStr}</div>
+      </div>
+    </div>
+
+    <div class="d-grid">
+      <div class="prop">
+        <div class="prop-lbl">Atomic mass</div>
+        <div class="prop-val">${massStr}<span class="prop-unit"> u</span></div>
+        ${Number.isInteger(e.m) ? '<div class="prop-note">Most stable isotope; no stable nuclide.</div>' : ''}
+      </div>
+      <div class="prop">
+        <div class="prop-lbl">Electronegativity</div>
+        ${e.en !== null
+          ? `<div class="prop-val">${enegStr}</div><div class="prop-note">Pauling scale</div>`
+          : `<div class="prop-na">\u2014 not defined</div>`}
+      </div>
+      <div class="prop">
+        <div class="prop-lbl">Oxidation states</div>
+        <div class="ox-wrap">${oxHtml}</div>
+      </div>
+      <div class="prop">
+        <div class="prop-lbl">Covalent radius</div>
+        ${e.cr !== null
+          ? `<div class="prop-val">${covStr}<span class="prop-unit"> Å</span></div>
+             <div class="prop-note prop-ref">Single bond · <a href="https://doi.org/10.1039/b801115j" target="_blank">Alvarez 2008</a></div>`
+          : `<div class="prop-na">\u2014</div>`}
+      </div>
+      <div class="prop">
+        ${renderVdW(e)}
+      </div>
+      <div class="prop">
+        <div class="prop-lbl">Ionic radii (Shannon 1976)</div>
+        ${renderIonic(e)}
+      </div>
+    </div>`;
+
+  panel.scrollIntoView({ behavior:'smooth', block:'nearest' });
+}
+</script>
+</body>
+</html>
