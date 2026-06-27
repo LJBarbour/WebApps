@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CIF Splitter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&family=Fraunces:ital,opsz,wght@0,9..144,300;1,9..144,300&display=swap">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:      #FAF6EE;
+  --paper:   #F2EBE0;
+  --ink:     #2C2825;
+  --ink-mid: #6B5E52;
+  --ink-lt:  #A8998C;
+  --accent:  #8B5E3C;
+  --border:  #DDD5C8;
+  --ok-bg:   #EFF7EE; --ok-ink: #2A6A2A; --ok-bd: #A8D0A8;
+  --no-bg:   #F5F2EE; --no-ink: #A8998C;
+}
+body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--ink); min-height:100vh; padding:0 0 4rem; }
+
+/* ── Header ── */
+header { text-align:center; padding:2.5rem 1rem 1.5rem; }
+h1 { font-family:'Fraunces',serif; font-weight:300; font-size:2rem; letter-spacing:-0.01em; }
+header p { font-size:12.5px; color:var(--ink-mid); margin-top:0.3rem; max-width:500px; margin-inline:auto; }
+
+/* ── Drop zone ── */
+.drop-zone {
+  max-width:620px; margin:0 auto 1.5rem;
+  border:2px dashed var(--border); border-radius:8px;
+  background:var(--paper); padding:2.5rem 1.5rem;
+  text-align:center; cursor:pointer;
+  transition:border-color .15s, background .15s;
+}
+.drop-zone:hover, .drop-zone.drag { border-color:var(--accent); background:var(--bg); }
+.drop-icon { font-size:2rem; margin-bottom:0.5rem; color:var(--ink-lt); }
+.drop-zone p { font-size:13px; color:var(--ink-mid); margin-top:0.25rem; }
+.drop-zone strong { color:var(--accent); }
+.drop-zone .formats { font-family:'DM Mono',monospace; font-size:11px; color:var(--ink-lt); margin-top:0.5rem; }
+
+/* ── Results ── */
+#results { max-width:620px; margin:0 auto; display:none; flex-direction:column; gap:1rem; }
+#results.vis { display:flex; }
+
+/* file info bar */
+.file-bar {
+  display:flex; align-items:center; justify-content:space-between;
+  background:var(--paper); border:1px solid var(--border); border-radius:6px;
+  padding:0.6rem 0.9rem; font-size:12.5px;
+}
+.file-bar .name { font-family:'DM Mono',monospace; font-weight:500; color:var(--ink); }
+.file-bar .meta { font-family:'DM Mono',monospace; font-size:11px; color:var(--ink-mid); }
+
+/* summary label */
+.summary-label {
+  font-family:'DM Mono',monospace; font-size:11px; font-weight:500;
+  letter-spacing:0.07em; text-transform:uppercase; color:var(--ink-mid);
+}
+
+/* block list */
+.block-list { display:flex; flex-direction:column; gap:6px; }
+
+.block-card {
+  background:var(--paper); border:1px solid var(--border); border-radius:6px;
+  padding:0.75rem 0.9rem;
+}
+.block-name {
+  font-family:'DM Mono',monospace; font-size:12.5px; font-weight:500;
+  color:var(--accent); margin-bottom:0.45rem;
+}
+.file-chips { display:flex; gap:6px; flex-wrap:wrap; }
+.chip {
+  font-family:'DM Mono',monospace; font-size:11px; font-weight:500;
+  padding:2px 9px; border-radius:10px;
+}
+.chip-yes { background:var(--ok-bg); color:var(--ok-ink); border:1px solid var(--ok-bd); }
+.chip-no  { background:var(--no-bg); color:var(--no-ink); border:1px solid var(--border); }
+
+/* no-embed notice */
+.notice {
+  background:var(--paper); border:1px solid var(--border); border-radius:6px;
+  padding:0.75rem 0.9rem; font-size:12.5px; color:var(--ink-mid);
+  font-family:'DM Mono',monospace;
+}
+
+/* extract button */
+.extract-btn {
+  display:block; width:100%;
+  background:var(--accent); color:#fff;
+  border:none; border-radius:6px;
+  padding:0.85rem; font-family:'DM Sans',sans-serif;
+  font-size:0.95rem; font-weight:600; cursor:pointer;
+  transition:opacity .15s;
+}
+.extract-btn:hover { opacity:0.88; }
+.extract-btn:disabled { opacity:0.4; cursor:default; }
+
+/* folder toggle */
+.opt-row {
+  display:flex; align-items:center; gap:0.5rem;
+  font-family:'DM Mono',monospace; font-size:12px; color:var(--ink-mid);
+  cursor:pointer; user-select:none;
+}
+.opt-row input[type=checkbox] { accent-color:var(--accent); width:14px; height:14px; cursor:pointer; }
+
+/* status message */
+.status-msg {
+  text-align:center; font-family:'DM Mono',monospace;
+  font-size:12px; color:var(--accent); min-height:1.4em;
+  transition:opacity .3s;
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>CIF Splitter</h1>
+  <p>Splits multi-structure CIF files and extracts embedded SHELX files (RES, HKL, FAB) — similar to Sheldrick's SHREDCIF</p>
+</header>
+
+<div class="drop-zone" id="dropZone">
+  <div class="drop-icon">⬆</div>
+  <p>Drop a <strong>CIF file</strong> here, or <strong>click to browse</strong></p>
+  <p class="formats">Extracts: .cif per block · .res · .hkl · .fab</p>
+</div>
+<input type="file" id="fileInput" accept=".cif,.fcf" style="display:none">
+
+<div id="results">
+  <div class="file-bar">
+    <span class="name" id="fileName"></span>
+    <span class="meta" id="fileMeta"></span>
+  </div>
+  <div class="summary-label" id="summaryLabel"></div>
+  <div class="block-list" id="blockList"></div>
+  <label class="opt-row" id="folderOptRow" style="display:none">
+    <input type="checkbox" id="useFolders"> Use a separate folder per structure
+  </label>
+  <button class="extract-btn" id="extractBtn">Extract to ZIP</button>
+  <div class="status-msg" id="statusMsg"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+'use strict';
+
+// ── Embedded file definitions ─────────────────────────────────────────
+// Each entry: label shown in UI, output extension, CIF key variants to try
+const EMBEDDED = [
+  { label:'RES', ext:'res', keys:['_shelx_res_file',  '_shelxl_res_file']  },
+  { label:'HKL', ext:'hkl', keys:['_shelx_hkl_file',  '_shelxl_hkl_file']  },
+  { label:'FAB', ext:'fab', keys:['_shelx_fab_file',  '_shelxl_fab_file']  },
+];
+
+// ── CIF block splitter ────────────────────────────────────────────────
+// Splits on data_ headers; returns [{name, text, embedded:{ext->content}}]
+function splitCIF(text) {
+  const norm = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines = norm.split('\n');
+  const blocks = [];
+  let curName = null, curLines = [];
+
+  for (const line of lines) {
+    const m = line.match(/^(data_\S*)/i);
+    if (m) {
+      if (curName !== null) blocks.push(buildBlock(curName, curLines));
+      curName = m[1].slice(5); // strip 'data_'
+      curLines = [line];
+    } else if (curName !== null) {
+      curLines.push(line);
+    }
+    // text before first data_ (comments, global_) is silently skipped
+  }
+  if (curName !== null && curLines.length) blocks.push(buildBlock(curName, curLines));
+  return blocks;
+}
+
+function buildBlock(name, lines) {
+  // Trim trailing blank lines but keep a single trailing newline
+  while (lines.length > 1 && lines[lines.length - 1].trim() === '') lines.pop();
+  const text = lines.join('\n') + '\n';
+  const embedded = {};
+  for (const e of EMBEDDED) {
+    const content = extractSemiField(text, e.keys);
+    if (content !== null) embedded[e.ext] = content;
+  }
+  return { name, text, embedded };
+}
+
+// ── Semicolon-delimited text field extractor ──────────────────────────
+// Handles: _key\n;\ncontent\n;
+function extractSemiField(text, keys) {
+  for (const key of keys) {
+    // Consume the \r?\n after the opening ; so content never starts with a blank line
+    const re = new RegExp(
+      `(?:^|\\n)[ \\t]*${key.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}[ \\t]*\\n;\\r?\\n([\\s\\S]*?)\\n;`,
+      'i'
+    );
+    const m = text.match(re);
+    if (m) return m[1];
+  }
+  return null;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────
+function safeName(s) {
+  // Strip/replace characters not safe in filenames
+  return s.replace(/[/\\:*?"<>|]/g, '_').replace(/\s+/g, '_');
+}
+function fmtSize(b) {
+  return b < 1024 ? `${b} B` : b < 1048576 ? `${(b/1024).toFixed(1)} KB` : `${(b/1048576).toFixed(2)} MB`;
+}
+function toCRLF(s) {
+  return s.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
+}
+// For HKL and FAB: stop at the first line where H K L are all 0 (the SHELX terminator record).
+// This guards against CIF files where the closing semicolon is malformed and the regex
+// sweeps past the terminator into the next embedded field.
+function truncateAtZeroRecord(content) {
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const fields = lines[i].trim().split(/\s+/);
+    if (fields.length >= 3 && fields[0] === '0' && fields[1] === '0' && fields[2] === '0') {
+      return lines.slice(0, i + 1).join('\n');
+    }
+  }
+  return content; // no terminator found — return as-is
+}
+function esc(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── State ─────────────────────────────────────────────────────────────
+let currentBlocks = [];
+let sourceFileName = '';
+let sourceFileHandle = null;
+
+// ── Render results ────────────────────────────────────────────────────
+function renderResults(blocks, fileName, fileSize) {
+  sourceFileName = fileName;
+  currentBlocks = blocks;
+
+  document.getElementById('fileName').textContent = fileName;
+  document.getElementById('fileMeta').textContent =
+    `${fmtSize(fileSize)} · ${blocks.length} data block${blocks.length !== 1 ? 's' : ''}`;
+
+  const hasAnyEmbedded = blocks.some(b => Object.keys(b.embedded).length > 0);
+  const multiBlock = blocks.length > 1;
+
+  let summaryParts = [];
+  if (multiBlock)      summaryParts.push(`${blocks.length} structures`);
+  if (hasAnyEmbedded)  summaryParts.push('embedded SHELX files detected');
+  document.getElementById('summaryLabel').textContent = summaryParts.join(' · ');
+
+  const list = document.getElementById('blockList');
+  list.innerHTML = '';
+
+  for (const block of blocks) {
+    const extCount = Object.keys(block.embedded).length;
+    const chips = EMBEDDED.map(e => {
+      const has = block.embedded[e.ext] !== undefined;
+      return `<span class="chip ${has ? 'chip-yes' : 'chip-no'}">${has ? '✓' : '—'} ${e.label}</span>`;
+    }).join('');
+
+    const card = document.createElement('div');
+    card.className = 'block-card';
+    card.innerHTML = `
+      <div class="block-name">data_${esc(block.name)}</div>
+      <div class="file-chips">
+        <span class="chip chip-yes">✓ CIF</span>
+        ${chips}
+      </div>`;
+    list.appendChild(card);
+  }
+
+  // Show notice if single block with nothing embedded
+  if (!multiBlock && !hasAnyEmbedded) {
+    const n = document.createElement('div');
+    n.className = 'notice';
+    n.textContent = 'Single block · no embedded SHELX files found. Only a .cif will be extracted.';
+    list.appendChild(n);
+  }
+
+  document.getElementById('extractBtn').disabled = false;
+  document.getElementById('statusMsg').textContent = '';
+  // Only offer folder option when there are multiple blocks
+  document.getElementById('folderOptRow').style.display = multiBlock ? 'flex' : 'none';
+  document.getElementById('results').classList.add('vis');
+}
+
+// ── Extract to ZIP ────────────────────────────────────────────────────
+document.getElementById('extractBtn').addEventListener('click', async () => {
+  if (!currentBlocks.length) return;
+  const btn = document.getElementById('extractBtn');
+  const status = document.getElementById('statusMsg');
+  btn.disabled = true;
+  status.textContent = 'Building ZIP…';
+
+  try {
+    const zip = new JSZip();
+
+    const useFolders = document.getElementById('useFolders').checked;
+
+    for (const block of currentBlocks) {
+      const stem = safeName(block.name);
+      const prefix = useFolders ? `${stem}/` : '';
+      zip.file(`${prefix}${stem}.cif`, toCRLF(block.text));
+      for (const e of EMBEDDED) {
+        if (block.embedded[e.ext] !== undefined) {
+          let raw = block.embedded[e.ext];
+          // HKL and FAB must end at their zero-record terminator
+          if (e.ext === 'hkl' || e.ext === 'fab') raw = truncateAtZeroRecord(raw);
+          const content = raw.replace(/[\r\n]+$/, '') + '\n';
+          zip.file(`${prefix}${stem}.${e.ext}`, toCRLF(content));
+        }
+      }
+    }
+
+    const zipBlob = await zip.generateAsync({
+      type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 }
+    });
+
+    const zipName = sourceFileName.replace(/\.cif$/i, '') + '_split.zip';
+
+    if (window.showSaveFilePicker) {
+      try {
+        const fh = await window.showSaveFilePicker({
+          suggestedName: zipName,
+          startIn: sourceFileHandle ?? 'downloads',
+          types: [{ description: 'ZIP archive', accept: { 'application/zip': ['.zip'] } }]
+        });
+        const w = await fh.createWritable();
+        await w.write(zipBlob);
+        await w.close();
+        status.textContent = `Saved ${zipName}`;
+      } catch (e) {
+        if (e.name === 'AbortError') { status.textContent = ''; btn.disabled = false; return; }
+        triggerDownload(zipBlob, zipName); // fallback
+        status.textContent = `Downloaded ${zipName}`;
+      }
+    } else {
+      triggerDownload(zipBlob, zipName);
+      status.textContent = `Downloaded ${zipName}`;
+    }
+  } catch (err) {
+    status.textContent = 'Error: ' + err.message;
+  }
+
+  btn.disabled = false;
+});
+
+function triggerDownload(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 2000);
+}
+
+// ── File handling ─────────────────────────────────────────────────────
+async function loadFile(file, handle) {
+  sourceFileHandle = handle ?? null;
+  const text = await file.text();
+  const blocks = splitCIF(text);
+  if (!blocks.length) {
+    alert('No data_ blocks found — is this a valid CIF file?');
+    return;
+  }
+  renderResults(blocks, file.name, file.size);
+}
+
+// Drop zone
+const dz = document.getElementById('dropZone');
+const fi = document.getElementById('fileInput');
+
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
+['dragleave','dragend'].forEach(ev => dz.addEventListener(ev, () => dz.classList.remove('drag')));
+
+dz.addEventListener('drop', async e => {
+  e.preventDefault();
+  dz.classList.remove('drag');
+  const items = [...e.dataTransfer.items].filter(i => i.kind === 'file');
+  if (!items.length) return;
+
+  // Grab all handles synchronously before any await
+  const handlePromises = items.map(i =>
+    i.getAsFileSystemHandle ? i.getAsFileSystemHandle().catch(() => null) : Promise.resolve(null)
+  );
+  const plainFiles = items.map(i => i.getAsFile ? i.getAsFile() : null);
+
+  const handles = await Promise.all(handlePromises);
+  // Use the first CIF file dropped
+  for (let i = 0; i < handles.length; i++) {
+    const fh = handles[i];
+    if (fh && fh.kind === 'file') {
+      const file = await fh.getFile();
+      if (file.name.match(/\.(cif|fcf)$/i)) { await loadFile(file, fh); return; }
+    } else if (plainFiles[i]) {
+      if (plainFiles[i].name.match(/\.(cif|fcf)$/i)) { await loadFile(plainFiles[i], null); return; }
+    }
+  }
+  alert('Please drop a .cif file.');
+});
+
+dz.addEventListener('click', () => fi.click());
+fi.addEventListener('change', async () => {
+  if (fi.files[0]) { await loadFile(fi.files[0], null); fi.value = ''; }
+});
+</script>
+</body>
+</html>
