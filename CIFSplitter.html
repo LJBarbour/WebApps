@@ -65,10 +65,21 @@ header p { font-size:12.5px; color:var(--ink-mid); margin-top:0.3rem; max-width:
 .block-card {
   background:var(--paper); border:1px solid var(--border); border-radius:6px;
   padding:0.75rem 0.9rem;
+  transition: opacity .18s, border-color .18s;
+}
+.block-card.excluded { opacity:0.38; border-color:var(--border); }
+
+.block-header-row {
+  display:flex; align-items:center; gap:0.5rem;
+  cursor:pointer; user-select:none; margin-bottom:0.45rem;
+}
+.block-cb {
+  accent-color:var(--accent); width:14px; height:14px;
+  cursor:pointer; flex-shrink:0;
 }
 .block-name {
   font-family:'DM Mono',monospace; font-size:12.5px; font-weight:500;
-  color:var(--accent); margin-bottom:0.45rem;
+  color:var(--accent);
 }
 .file-chips { display:flex; gap:6px; flex-wrap:wrap; }
 .chip {
@@ -256,8 +267,8 @@ function renderResults(blocks, fileName, fileSize) {
   const list = document.getElementById('blockList');
   list.innerHTML = '';
 
-  for (const block of blocks) {
-    const extCount = Object.keys(block.embedded).length;
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i];
     const chips = EMBEDDED.map(e => {
       const has = block.embedded[e.ext] !== undefined;
       return `<span class="chip ${has ? 'chip-yes' : 'chip-no'}">${has ? '✓' : '—'} ${e.label}</span>`;
@@ -266,11 +277,18 @@ function renderResults(blocks, fileName, fileSize) {
     const card = document.createElement('div');
     card.className = 'block-card';
     card.innerHTML = `
-      <div class="block-name">data_${esc(block.name)}</div>
+      <label class="block-header-row">
+        <input type="checkbox" class="block-cb" data-idx="${i}" checked>
+        <span class="block-name">data_${esc(block.name)}</span>
+      </label>
       <div class="file-chips">
         <span class="chip chip-yes">✓ CIF</span>
         ${chips}
       </div>`;
+    card.querySelector('.block-cb').addEventListener('change', e => {
+      card.classList.toggle('excluded', !e.target.checked);
+      updateExtractBtn();
+    });
     list.appendChild(card);
   }
 
@@ -286,7 +304,18 @@ function renderResults(blocks, fileName, fileSize) {
   document.getElementById('statusMsg').textContent = '';
   // Only offer folder option when there are multiple blocks
   document.getElementById('folderOptRow').style.display = multiBlock ? 'flex' : 'none';
+  updateExtractBtn();
   document.getElementById('results').classList.add('vis');
+}
+
+function updateExtractBtn() {
+  const cbs = document.querySelectorAll('.block-cb');
+  const nSelected = [...cbs].filter(cb => cb.checked).length;
+  const btn = document.getElementById('extractBtn');
+  btn.disabled = nSelected === 0;
+  btn.textContent = nSelected === currentBlocks.length
+    ? 'Extract to ZIP'
+    : `Extract ${nSelected} of ${currentBlocks.length} to ZIP`;
 }
 
 // ── Extract to ZIP ────────────────────────────────────────────────────
@@ -302,7 +331,10 @@ document.getElementById('extractBtn').addEventListener('click', async () => {
 
     const useFolders = document.getElementById('useFolders').checked;
 
-    for (const block of currentBlocks) {
+    for (let idx = 0; idx < currentBlocks.length; idx++) {
+      const cb = document.querySelector(`.block-cb[data-idx="${idx}"]`);
+      if (!cb || !cb.checked) continue;
+      const block = currentBlocks[idx];
       const stem = safeName(block.name);
       const prefix = useFolders ? `${stem}/` : '';
       zip.file(`${prefix}${stem}.cif`, toCRLF(block.text));
