@@ -53,6 +53,15 @@ header p { font-size:12.5px; color:var(--ink-mid); margin-top:0.3rem; max-width:
 .file-bar .name { font-family:'DM Mono',monospace; font-weight:500; color:var(--ink); }
 .file-bar .meta { font-family:'DM Mono',monospace; font-size:11px; color:var(--ink-mid); }
 
+/* summary + select-all row */
+.list-header { display:flex; align-items:center; justify-content:space-between; }
+.btn-select-all {
+  font-family:'DM Mono',monospace; font-size:11px; color:var(--accent);
+  background:transparent; border:none; cursor:pointer; padding:0;
+  text-decoration:underline; text-underline-offset:2px;
+}
+.btn-select-all:hover { opacity:0.7; }
+
 /* summary label */
 .summary-label {
   font-family:'DM Mono',monospace; font-size:11px; font-weight:500;
@@ -143,7 +152,10 @@ header p { font-size:12.5px; color:var(--ink-mid); margin-top:0.3rem; max-width:
     <span class="name" id="fileName"></span>
     <span class="meta" id="fileMeta"></span>
   </div>
-  <div class="summary-label" id="summaryLabel"></div>
+  <div class="list-header">
+    <div class="summary-label" id="summaryLabel"></div>
+    <button class="btn-select-all" id="selectAllBtn" style="display:none">Deselect all</button>
+  </div>
   <div class="block-list" id="blockList"></div>
   <label class="opt-row" id="folderOptRow" style="display:none">
     <input type="checkbox" id="useFolders"> Use a separate folder per structure
@@ -302,21 +314,35 @@ function renderResults(blocks, fileName, fileSize) {
 
   document.getElementById('extractBtn').disabled = false;
   document.getElementById('statusMsg').textContent = '';
-  // Only offer folder option when there are multiple blocks
+  // Only offer folder/select-all options when there are multiple blocks
   document.getElementById('folderOptRow').style.display = multiBlock ? 'flex' : 'none';
+  document.getElementById('selectAllBtn').style.display = multiBlock ? 'inline' : 'none';
   updateExtractBtn();
   document.getElementById('results').classList.add('vis');
 }
 
 function updateExtractBtn() {
-  const cbs = document.querySelectorAll('.block-cb');
-  const nSelected = [...cbs].filter(cb => cb.checked).length;
+  const cbs = [...document.querySelectorAll('.block-cb')];
+  const nSelected = cbs.filter(cb => cb.checked).length;
   const btn = document.getElementById('extractBtn');
   btn.disabled = nSelected === 0;
   btn.textContent = nSelected === currentBlocks.length
     ? 'Extract to ZIP'
     : `Extract ${nSelected} of ${currentBlocks.length} to ZIP`;
+  // Update select-all button label
+  const saBtn = document.getElementById('selectAllBtn');
+  saBtn.textContent = nSelected === 0 ? 'Select all' : 'Deselect all';
 }
+
+document.getElementById('selectAllBtn').addEventListener('click', () => {
+  const cbs = [...document.querySelectorAll('.block-cb')];
+  const anyChecked = cbs.some(cb => cb.checked);
+  cbs.forEach(cb => {
+    cb.checked = !anyChecked;
+    cb.closest('.block-card').classList.toggle('excluded', anyChecked);
+  });
+  updateExtractBtn();
+});
 
 // ── Extract to ZIP ────────────────────────────────────────────────────
 document.getElementById('extractBtn').addEventListener('click', async () => {
