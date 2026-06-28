@@ -159,10 +159,10 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
 
     <div class="dz" id="dropZone">
       <div class="dz-ico">⇪</div>
-      <div class="dz-txt">Drop <strong>.xy</strong> files or a <strong>.zip</strong> archive here, or click to browse</div>
+      <div class="dz-txt">Drop <strong>.xy / .xye</strong> files or a <strong>.zip</strong> archive here, or click to browse</div>
       <div class="dz-hint">2θ &nbsp; intensity &nbsp;·&nbsp; space-separated &nbsp;·&nbsp; no header required</div>
     </div>
-    <input type="file" id="fileInput" accept=".xy,.dat,.txt,.zip" multiple style="display:none">
+    <input type="file" id="fileInput" accept=".xy,.xye,.dat,.txt,.zip" multiple style="display:none">
 
     <div style="margin-top:10px; display:flex; align-items:center; gap:8px;">
       <input type="checkbox" id="resetOnLoad" style="accent-color:var(--accent); width:13px; height:13px; cursor:pointer;">
@@ -407,7 +407,7 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
 
     <h3>Workflow</h3>
     <ul>
-      <li>On the <strong>Files</strong> tab, drop your <code>.xy</code> files (two columns: 2θ and intensity) or a <code>.zip</code> archive of them. The app will try to extract the variable value from each filename automatically.</li>
+      <li>On the <strong>Files</strong> tab, drop your data files or a <strong>.zip</strong> archive of them. The app will try to extract the variable value from each filename automatically.</li>
       <li>Check the auto-detected values in the file table and edit any that are missing or wrong. Each row also has a <em>Legend label</em> field for the stacked plot — the Y-value plus unit is used as the default.</li>
       <li>Reorder rows using the up/down arrows in the Order column, or click <em>Auto-sort</em> to restore the canonical order. Use the ✕ button to remove individual files.</li>
       <li>Switch to <strong>Intensity Map</strong> or <strong>Stacked Plots</strong>, adjust the settings on the right, and the plot updates automatically as you change controls.</li>
@@ -436,7 +436,7 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
     <p>By default both plots scale horizontally to fill the available browser width, which is convenient for exploration but means the same data can produce figures of different absolute dimensions on different days. For consistent figure preparation, tick <em>Lock plot size</em> (in the Output size group on each settings panel) and enter explicit pixel dimensions. The intensity map locks both width and height; the stacked plot locks the width — its height naturally follows from the number of patterns multiplied by the band height. Save the settings file once the layout is right, and the same dimensions are restored on every future session.</p>
 
     <h3>File-naming and order</h3>
-    <p>Input files are plain text with two whitespace- or comma-separated columns. The first column is 2θ in degrees; the second is intensity. Lines starting with <code>#</code>, <code>!</code>, or <code>;</code> are treated as comments and skipped. Extensions <code>.xy</code>, <code>.dat</code>, and <code>.txt</code> are all accepted.</p>
+    <p>Input files are plain text with two or more whitespace- or comma-separated columns. The first column is 2θ in degrees; the second is intensity. Any additional columns (e.g. the estimated standard deviation in <code>.xye</code> files exported by CSD Mercury) are silently ignored. Single-value header lines such as the wavelength line in <code>.xye</code> files are also skipped automatically. Lines starting with <code>#</code>, <code>!</code>, or <code>;</code> are treated as comments and skipped. Extensions <code>.xy</code>, <code>.xye</code>, <code>.dat</code>, and <code>.txt</code> are all accepted.</p>
     <p>The variable value is extracted from the last numeric segment of the filename, preceded by an underscore or hyphen. For example, <code>sample_KD66_150.xy</code> gives 150. The legend label is auto-built from the value plus any unit detected in the Y-axis label string (e.g. <code>150 °C</code>). Always check the auto-extracted values and override any that are wrong.</p>
     <p><strong>Non-numeric series:</strong> if your filenames don't contain numbers (e.g. <code>α-phase.xy</code>, <code>β-phase.xy</code>, <code>sample_A.xy</code>), the Y value is left blank and the legend defaults to the filename stem. Patterns are sorted in natural alphabetical order. The stacked plot works normally; the intensity map cannot be drawn without Y values (it would be physically meaningless) but is simply not used in this workflow.</p>
 
@@ -536,9 +536,12 @@ function parseXY(text) {
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line || line[0] === '#' || line[0] === '!' || line[0] === ';') continue;
-    const parts = line.split(/[\s,;]+/);
+    const parts = line.split(/[\s,;]+/).filter(Boolean);
+    // Skip header/metadata lines that have fewer than 2 tokens (e.g. a bare wavelength value)
     if (parts.length < 2) continue;
     const a = parseFloat(parts[0]), b = parseFloat(parts[1]);
+    // Accept rows where the first two tokens are both finite numbers;
+    // any additional columns (e.g. esd in .xye format) are silently ignored.
     if (isFinite(a) && isFinite(b)) { twoTheta.push(a); intensity.push(b); }
   }
   return { twoTheta, intensity };
@@ -557,13 +560,13 @@ async function loadFiles(files) {
       try {
         const zip = await JSZip.loadAsync(f);
         zip.forEach((rel, ze) => {
-          if (!ze.dir && /\.(xy|dat|txt)$/i.test(rel)) {
+          if (!ze.dir && /\.(xy|xye|dat|txt)$/i.test(rel)) {
             const basename = rel.split('/').pop();
             entries.push({ name: basename, getText: () => ze.async('string') });
           }
         });
       } catch (e) { setStatus(`Could not open ${f.name}: ${e.message}`, 'err'); }
-    } else if (/\.(xy|dat|txt)$/i.test(f.name)) {
+    } else if (/\.(xy|xye|dat|txt)$/i.test(f.name)) {
       entries.push({ name: f.name, getText: () => f.text() });
     }
   }
