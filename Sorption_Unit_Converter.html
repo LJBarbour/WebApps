@@ -2,28 +2,6 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-
-<!-- ── RESOURCE ACCESS CHECK ── -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script>
-(async function() {
-  const sb = supabase.createClient(
-    'https://mqpvnisphntdwhqoiqlt.supabase.co',
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xcHZuaXNwaG50ZHdocW9pcWx0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc1NzM5NjIsImV4cCI6MjA5MzE0OTk2Mn0.7eAeXAh0heqiaTLclqUzAeNY2gQDcbxNRe2LrLXvpHg'
-  );
-  const { data: { session } } = await sb.auth.getSession();
-  if (!session) { window.location.href = 'https://ljbarbour.github.io/WebApps/resources.html'; return; }
-  const email = session.user.email;
-  const { data: u } = await sb.from('users').select('can_access_resources').eq('email', email).maybeSingle();
-  const { data: r } = await sb.from('resource_users').select('can_access_resources').eq('email', email).maybeSingle();
-  if (!(u?.can_access_resources || r?.can_access_resources)) {
-    window.location.href = 'https://ljbarbour.github.io/WebApps/resources.html';
-  }
-})();
-</script>
-<!-- ── END RESOURCE ACCESS CHECK ── -->
-
-
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sorption Unit Converter</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:wght@300;600&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
@@ -979,9 +957,9 @@ function detectUptakeUnit(s){
   if(/mmol\/g/.test(sl))                 return 'mmol/g';
   if(/mol\/mol/.test(sl))                return 'mol/mol';
   if(/mol\/kg/.test(sl))                 return 'mol/kg';
-  // Volumetric
-  if(/cc.*stp|cm3.*stp|ml.*stp/.test(sl)) return 'cc(STP)/g';
-  if(/cm3\/g|cc\/g/.test(sl))            return 'cm3/g';
+  // Volumetric — must distinguish per-gram (/g) from absolute (no /g)
+  if(/(cc|cm3|ml).*stp/.test(sl))        return /\/g/.test(sl) ? 'cc(STP)/g' : 'cm3_abs';
+  if(/cm3\/g|cc\/g/.test(sl))            return 'cc(STP)/g';
   // Mass fraction
   if(/wt\s*%|wt%/.test(sl))             return 'wt%';
   if(/g\/g/.test(sl))                    return 'g/g';
