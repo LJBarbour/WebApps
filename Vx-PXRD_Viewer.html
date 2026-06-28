@@ -313,7 +313,10 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
         <canvas id="stackCanvas" class="plot"></canvas>
         <!-- legend handles injected dynamically -->
       </div>
-      <div class="status" id="stackStatus">Load at least one diffractogram to begin.</div>
+      <div class="status" id="stackStatus" style="display:flex; justify-content:space-between; align-items:baseline;">
+        <span id="stackStatusMsg">Load at least one diffractogram to begin.</span>
+        <span id="stackCursorReadout" style="opacity:0; transition:opacity .1s;"></span>
+      </div>
     </div>
 
     <div class="card">
@@ -796,7 +799,12 @@ function setStatus(msg, cls) {
 }
 function setStackStatus(msg, cls) {
   const el = document.getElementById('stackStatus');
-  el.textContent = msg; el.className = 'status' + (cls ? ' ' + cls : '');
+  const msgEl = document.getElementById('stackStatusMsg');
+  msgEl.textContent = msg;
+  el.className = 'status' + (cls ? ' ' + cls : '');
+  el.style.display = 'flex';
+  el.style.justifyContent = 'space-between';
+  el.style.alignItems = 'baseline';
 }
 function niceStep(rough) {
   if (rough <= 0) return 1;
@@ -1240,7 +1248,7 @@ function _stackRender() {
   ctx.fillText('Intensity', 0, 0);
   ctx.restore();
 
-  stackMeta = { M, plotW, plotH, bandH, order, font, legSz, totalW, totalH };
+  stackMeta = { M, plotW, plotH, bandH, order, font, legSz, totalW, totalH, ttMin, ttMax };
 
   // Take a snapshot of the canvas WITHOUT legends drawn.
   // We use this to quickly re-draw legends during drag (no expensive chart redraw).
@@ -1407,6 +1415,16 @@ function drawStackLegends(skipSet) {
       // Hover: change cursor when over a draggable legend
       canvas.style.cursor = hitTest(cx, cy) ? 'grab' : 'crosshair';
     }
+    // 2θ readout: show when cursor is within the plot area
+    const { M, plotW, ttMin, ttMax } = stackMeta;
+    const readout = document.getElementById('stackCursorReadout');
+    if (cx >= M.left && cx <= M.left + plotW) {
+      const tt = ttMin + (cx - M.left) / plotW * (ttMax - ttMin);
+      readout.textContent = `2θ ${tt.toFixed(3)}°`;
+      readout.style.opacity = '1';
+    } else {
+      readout.style.opacity = '0';
+    }
   });
 
   window.addEventListener('mouseup', () => {
@@ -1417,6 +1435,7 @@ function drawStackLegends(skipSet) {
   });
   canvas.addEventListener('mouseleave', () => {
     if (!draggingLegend) canvas.style.cursor = 'crosshair';
+    document.getElementById('stackCursorReadout').style.opacity = '0';
   });
 })();
 
