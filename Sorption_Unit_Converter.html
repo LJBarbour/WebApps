@@ -1487,13 +1487,15 @@ function validateUnits(){
   const mwGas=gn('mwGas'), mwHost=gn('mwHost'), rhoHost=gn('rhoHost');
   const massHost=gn('massHost'), gasKey=gv('gasPreset')||'';
   const msgs=[];
-  if((needsGas(qIn)||needsGas(qOut))&&!mwGas)
+  // When uptake units are identical, values pass through unchanged — no uptake parameters needed
+  const qSame = qIn===qOut;
+  if(!qSame&&(needsGas(qIn)||needsGas(qOut))&&!mwGas)
     msgs.push('Gas molecular weight (M<sub>gas</sub>, g/mol) is required for <b>'+[qIn,qOut].filter(u=>needsGas(u)).join(', ')+'</b> — enter it in Gas Properties.');
-  if((needsHost(qIn)||needsHost(qOut))&&!mwHost)
+  if(!qSame&&(needsHost(qIn)||needsHost(qOut))&&!mwHost)
     msgs.push('<b>mol/mol</b> requires the host formula-unit molecular weight: uptake [mmol/g] × M<sub>host</sub> [g/mol] ÷ 1000 = mol guest / mol host. Enter the host formula or MW in Host Material.');
-  if((needsMass(qIn)||needsMass(qOut))&&!massHost)
+  if(!qSame&&(needsMass(qIn)||needsMass(qOut))&&!massHost)
     msgs.push('<b>Absolute mass units (mg/µg)</b> require the mass of the host sample in mg — enter it in Host Material.');
-  if((needsRho(qIn)||needsRho(qOut))&&!rhoHost)
+  if(!qSame&&(needsRho(qIn)||needsRho(qOut))&&!rhoHost)
     msgs.push('Host density is required for <b>cm³/g (liquid)</b> — enter it in Host Material.');
   // p/p0 validation (input or output)
   const pSatVal=gn('pSat');
@@ -1540,10 +1542,12 @@ function tryConvert(silent){
   const pSat=gn('pSat');
   const prm={mwGas,mwHost,rhoHost,massHost,gasKey,tempK,pSat};
   const missing=[];
-  if((needsGas(qIn)||needsGas(qOut))&&!mwGas)     missing.push('gas MW (set in Gas Properties)');
-  if((needsHost(qIn)||needsHost(qOut))&&!mwHost)   missing.push('host MW (set in Host Material)');
-  if((needsMass(qIn)||needsMass(qOut))&&!massHost)  missing.push('mass of host sample in mg (set in Host Material)');
-  if((needsRho(qIn)||needsRho(qOut))&&!rhoHost)    missing.push('host density (set in Host Material)');
+  // When uptake units are identical, values pass through unchanged — no uptake parameters needed
+  const qSame = qIn===qOut;
+  if(!qSame&&(needsGas(qIn)||needsGas(qOut))&&!mwGas)     missing.push('gas MW (set in Gas Properties)');
+  if(!qSame&&(needsHost(qIn)||needsHost(qOut))&&!mwHost)   missing.push('host MW (set in Host Material)');
+  if(!qSame&&(needsMass(qIn)||needsMass(qOut))&&!massHost)  missing.push('mass of host sample in mg (set in Host Material)');
+  if(!qSame&&(needsRho(qIn)||needsRho(qOut))&&!rhoHost)    missing.push('host density (set in Host Material)');
   if(pIn==='p/p0'&&!gn('pSat')) missing.push('saturation pressure Pₛₐₜ in bar (set in Metadata panel)');
   if(missing.length){
     if(!silent){
@@ -1557,8 +1561,14 @@ function tryConvert(silent){
   convData=[];let bad=0;
   for(const pt of rawData){
     const pB=pToBar(pt.p,pIn,prm.pSat),pC=pFromBar(pB,pOut,prm.pSat);
-    const qM=qToMmolG(pt.q,qIn,prm);if(qM===null){bad++;continue;}
-    const qC=qFromMmolG(qM,qOut,prm);if(qC===null){bad++;continue;}
+    // If uptake units are identical, pass the value through without touching it
+    let qC;
+    if(qIn===qOut){
+      qC=pt.q;
+    } else {
+      const qM=qToMmolG(pt.q,qIn,prm);if(qM===null){bad++;continue;}
+      qC=qFromMmolG(qM,qOut,prm);if(qC===null){bad++;continue;}
+    }
     convData.push({p:pC,q:qC,branch:pt.branch});
   }
   if(!silent){
@@ -1892,6 +1902,8 @@ function renderChart(){
   } else {
     ctx.fillText(xLblTxt, ML+PW/2, H-2);
   }
+  // Reset font to axis label size before drawing y label (p/p₀ branch may have left a smaller font set)
+  ctx.font=bold+axSz+'px '+font;
   // Y label: translate to just left of the tick number area
   const yLblX = axSz+4;
   ctx.translate(yLblX, MT+PH/2);
