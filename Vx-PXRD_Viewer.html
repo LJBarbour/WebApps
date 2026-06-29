@@ -70,6 +70,7 @@ header .sub { font-family:var(--mono); font-size:9px; color:var(--accent); lette
 .ftbl td.range { color:#666; }
 .ftbl input[type=number], .ftbl input[type=text] { background:var(--cream); border:1.5px solid var(--rule); padding:3px 6px; font-family:var(--mono); font-size:11px; color:var(--ink); outline:none; width:110px; }
 .ftbl input.legend-input { width:170px; }
+.ftbl input[type=color].colour-input { width:36px; height:22px; padding:1px 2px; border:1.5px solid var(--rule); background:var(--cream); cursor:pointer; vertical-align:middle; }
 .ftbl input:focus { border-color:var(--accent); }
 .ftbl input.missing { border-color:var(--accent); }
 .del-btn { background:none; border:1px solid var(--rule); border-radius:0; cursor:pointer; color:#888; font-size:11px; padding:2px 7px; font-family:var(--mono); transition:all .12s; }
@@ -194,6 +195,7 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
             <th>2θ range</th>
             <th id="yColHead">Y value</th>
             <th>Legend label</th>
+            <th>Colour</th>
             <th></th>
           </tr>
         </thead>
@@ -345,6 +347,7 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
               <option value="cool">Cool</option>
               <option value="warm">Warm</option>
               <option value="rainbow">Rainbow</option>
+              <option value="custom">Custom (per pattern)</option>
             </select>
           </div>
           <div class="cr"><span class="cl">Diffractogram weight</span><input type="range" id="stkLineWt" min="0.5" max="6" step="0.25" value="1.25"><span class="rv" id="stkLineWtVal">1.25</span></div>
@@ -641,6 +644,7 @@ function refreshTable() {
        <td><input class="y-input${yVal === '' ? ' missing' : ''}" type="number"
            value="${yVal}" placeholder="required" data-i="${i}"></td>
        <td><input class="legend-input" type="text" value="${escAttr(p.legend || '')}" data-i="${i}"></td>
+       <td><input class="colour-input" type="color" value="${p.colour || '#000000'}" data-i="${i}" title="Pattern colour (used with Custom colour scheme)"></td>
        <td><button class="del-btn" data-i="${i}" title="Remove">✕</button></td>`;
     tbody.appendChild(tr);
   });
@@ -663,6 +667,13 @@ function refreshTable() {
     el.addEventListener('input', e => {
       const i = +e.target.dataset.i;
       patterns[i].legend = e.target.value;
+      scheduleStackRender();
+    });
+  });
+  tbody.querySelectorAll('.colour-input').forEach(el => {
+    el.addEventListener('input', e => {
+      const i = +e.target.dataset.i;
+      patterns[i].colour = e.target.value;
       scheduleStackRender();
     });
   });
@@ -1197,7 +1208,13 @@ function _stackRender() {
 
     // Stroke colour
     let stroke = '#000';
-    if (!allBlack && N > 1) stroke = rampColor(scheme, idx / (N - 1));
+    if (!allBlack) {
+      if (scheme === 'custom') {
+        stroke = L.p.colour || '#000000';
+      } else if (N > 1) {
+        stroke = rampColor(scheme, idx / (N - 1));
+      }
+    }
     ctx.strokeStyle = stroke;
     ctx.lineWidth = lineWt;
     ctx.lineJoin = 'round';
@@ -1310,7 +1327,10 @@ function drawStackLegends(skipSet) {
     else                            snapXFrac = defaultLeftXFrac + widestWFrac;
   }
 
-  ctx.fillStyle    = '#0f0e0d';
+  const allBlack  = document.getElementById('stkAllBlack').checked;
+  const scheme    = document.getElementById('stkColorScheme').value;
+  const N         = order.length;
+
   ctx.textBaseline = 'top';
   ctx.textAlign    = 'left';
 
@@ -1349,6 +1369,12 @@ function drawStackLegends(skipSet) {
     stackLegendBounds.push({ key, idx, x, y, w, h: legSz });
 
     if (skipSet && skipSet.has(key)) return;
+    // Match legend text colour to the pattern's stroke colour
+    if (allBlack || scheme !== 'custom') {
+      ctx.fillStyle = '#0f0e0d';
+    } else {
+      ctx.fillStyle = p.colour || '#000000';
+    }
     ctx.fillText(txt, x, y);
   });
 }
