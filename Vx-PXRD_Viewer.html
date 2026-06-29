@@ -514,7 +514,7 @@ document.getElementById('clearAllBtn').addEventListener('click', () => {
   patterns.length = 0;
   Object.keys(legendPositions).forEach(k => delete legendPositions[k]);
   refreshTable();
-  setStatus('Load at least two diffractograms to begin.', '');
+  clearMap();
   setStackStatus('Load at least one diffractogram to begin.', '');
 });
 
@@ -692,7 +692,7 @@ function refreshTable() {
       patterns.splice(i, 1);
       refreshTable();
       if (!patterns.length) {
-        setStatus('Load at least two diffractograms to begin.', '');
+        clearMap();
         setStackStatus('Load at least one diffractogram to begin.', '');
       } else {
         scheduleRender(); scheduleStackRender();
@@ -890,9 +890,17 @@ document.getElementById('renderBtn').addEventListener('click', () => {
 });
 function doRender() { try { _render(); } catch (e) { setStatus('Error: ' + e.message, 'err'); console.error(e); } }
 
+function clearMap() {
+  const canvas = document.getElementById('plotCanvas');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  canvas.width = 0; canvas.height = 0;   // collapse the canvas element to zero size
+  setStatus('Load at least two diffractograms to begin.', '');
+}
+
 function _render() {
-  if (patterns.length < 2) return;
-  if (patterns.some(p => p.y == null || !isFinite(p.y))) return;
+  if (patterns.length < 2) { clearMap(); return; }
+  if (patterns.some(p => p.y == null || !isFinite(p.y))) { clearMap(); return; }
 
   const canvas    = document.getElementById('plotCanvas');
   const ctx       = canvas.getContext('2d');
@@ -1479,8 +1487,6 @@ document.getElementById('stkSnapMode').addEventListener('change', e => {
 // ═══════════════════════════════════════════════════
 let mapTimer = null, stackTimer = null;
 function scheduleRender() {
-  if (patterns.length < 2) return;
-  if (patterns.some(p => p.y == null || !isFinite(p.y))) return;
   clearTimeout(mapTimer); mapTimer = setTimeout(doRender, 300);
 }
 function scheduleStackRender() {
