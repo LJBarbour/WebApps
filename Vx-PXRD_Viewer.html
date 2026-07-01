@@ -118,6 +118,7 @@ header .sub { font-family:var(--mono); font-size:9px; color:var(--accent); lette
 .plot-wrap { width:100%; position:relative; background:#fff; }
 canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
 .cursor-info { position:absolute; bottom:8px; right:10px; font-family:var(--mono); font-size:10px; color:#666; pointer-events:none; background:rgba(246,241,234,0.85); padding:3px 7px; letter-spacing:.05em; }
+.stack-tooltip { position:fixed; display:none; font-family:var(--mono); font-size:10px; color:var(--ink); background:rgba(246,241,234,0.92); border:1px solid var(--rule); padding:3px 8px; pointer-events:none; letter-spacing:.05em; z-index:9999; white-space:nowrap; }
 .action-row { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
 .status { font-family:var(--mono); font-size:10px; color:#888; letter-spacing:.05em; padding:6px 0 0; min-height:1.4em; }
 .status.ok { color:var(--ok); }
@@ -148,7 +149,7 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
 <header>
   <h1>Vx-PXRD Viewer</h1>
   <span class="sub">Variable-Condition Powder Diffraction</span>
-  <span class="sub" style="margin-left:auto;opacity:.6">v2.2</span>
+  <span class="sub" style="margin-left:auto;opacity:.6">v2.7</span>
 </header>
 
 <div class="tabs">
@@ -224,7 +225,6 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
       </div>
       <div class="plot-wrap">
         <canvas id="plotCanvas" class="plot"></canvas>
-        <div id="cursorInfo" class="cursor-info"></div>
       </div>
       <div class="status" id="statusMsg">Load at least two diffractograms to begin.</div>
     </div>
@@ -329,9 +329,8 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
         <canvas id="stackCanvas" class="plot"></canvas>
         <!-- legend handles injected dynamically -->
       </div>
-      <div class="status" id="stackStatus" style="display:flex; justify-content:space-between; align-items:baseline;">
+      <div class="status" id="stackStatus">
         <span id="stackStatusMsg">Load at least one diffractogram to begin.</span>
-        <span id="stackCursorReadout" style="opacity:0; transition:opacity .1s;"></span>
       </div>
     </div>
 
@@ -427,53 +426,61 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
 
     <h3>Workflow</h3>
     <ul>
-      <li>On the <strong>Files</strong> tab, drop your data files or a <strong>.zip</strong> archive of them. The app will try to extract the variable value from each filename automatically.</li>
-      <li>Check the auto-detected values in the file table and edit any that are missing or wrong. Each row also has a <em>Legend label</em> field for the stacked plot — the Y-value plus unit is used as the default.</li>
+      <li>On the <strong>Files</strong> tab, drop your data files, a <strong>.zip</strong> archive, or a <strong>series CSV</strong> (see below). The app will try to extract the variable value from each filename automatically.</li>
       <li>Drag rows by the grip handle (⠿) in the leftmost column to reorder patterns freely — essential for cooling/heating cycles or any non-monotonic sequence. Click <em>Auto-sort</em> to restore Y-value order. Use the ✕ button to remove individual files.</li>
-      <li>Switch to <strong>Intensity Map</strong> or <strong>Stacked Plots</strong>, adjust the settings on the right, and the plot updates automatically as you change controls.</li>
+      <li>Check the Y values and legend labels; edit any that are wrong.</li>
+      <li>Switch to <strong>Intensity Map</strong> or <strong>Stacked Plots</strong>, adjust the settings on the right, and the plot updates automatically.</li>
     </ul>
 
+    <h3>Supported file formats</h3>
+    <p><strong>Plain-text formats</strong> (<code>.xy</code>, <code>.xye</code>, <code>.dat</code>, <code>.txt</code>): two or more whitespace- or comma-separated columns; first column is 2θ in degrees, second is intensity. Additional columns (e.g. esd in <code>.xye</code> files from CSD Mercury) are ignored. Single-value header lines and lines starting with <code>#</code>, <code>!</code>, or <code>;</code> are skipped.</p>
+    <p><strong>PANalytical XRDML format</strong> (<code>.xrdml</code>): XML files produced by X'Pert Pro and Empyrean instruments. The app reads the 2θ start/end positions, reconstructs the angular grid, and extracts the non-ambient condition automatically. Temperature values in Kelvin are converted to °C. XRDML files can be loaded individually or inside a <code>.zip</code> archive.</p>
+
+    <h3>Series CSV — saving and restoring your work</h3>
+    <p>After arranging and labelling a series on the Files tab, click <em>Export series…</em> to save everything to a CSV. In Chrome and Edge a Save As dialog lets you choose folder and filename; other browsers download automatically. You can also drag a CSV file directly onto the app to import it.</p>
+    <p>CSV structure: row 0 — Y-axis label; row 1 — stimulus value per pattern (every other column); row 2 — legend label per pattern; rows 3 onwards — 2θ and intensity columns interleaved per pattern. On import the pattern order, Y values, and legend labels are restored exactly.</p>
+
     <h3>The intensity map</h3>
-    <p>The intensity map is a 2D image of the entire dataset. The horizontal axis is 2θ, the vertical axis is the variable condition, and the brightness of each pixel encodes the peak intensity at that (2θ, condition) coordinate.</p>
-    <p><strong>How it is built:</strong> each diffractogram is resampled onto a uniform 2θ grid and normalised (by default with a per-pattern baseline subtraction). For every row of pixels in the output image, the app finds the two patterns that bracket the row's condition value, and linearly interpolates the normalised intensities between them. The result is a smoothly shaded map where peaks appear as continuous bands and any shift, broadening, or appearance of new reflections with changing condition is immediately visible.</p>
-    <p><strong>Reading the map:</strong> a vertical streak means a peak that holds its position over the range of conditions. A diagonal streak indicates a peak that shifts with the condition (typical of thermal expansion, lattice swelling, or pressure-induced compression). A streak that fades and another that appears nearby usually indicates a phase transition. Discrete jumps suggest abrupt structural changes.</p>
-    <p><strong>Contrast and colour:</strong> the gamma slider stretches or compresses the intensity scale — values below 1 boost weak features (recommended for highlighting minor peaks), values above 1 emphasise only the strongest peaks. The peak and background colours can be set independently, so the conventional black-on-white can be flipped to white-on-black, or replaced with any duotone scheme.</p>
-    <p><strong>Normalisation:</strong> <em>Per-pattern &amp; baseline</em> subtracts each pattern's minimum (its baseline) and scales to the maximum — best when patterns have varying backgrounds. <em>Per-pattern (no baseline)</em> scales to the maximum only, preserving relative background levels. <em>Global</em> uses the same scale across all patterns, which preserves absolute intensity changes but can wash out weaker patterns.</p>
-    <p><strong>Peak emphasis:</strong> a pre-normalisation power transform applied to each pattern individually. The pattern's baseline is subtracted (so noise is centred near zero), then the result is raised to the power <em>p</em>. At <em>p</em>=1 (default) this is a no-op. At <em>p</em>=2 the intensities are squared, which improves signal-to-noise ratio because peaks of amplitude <em>A</em> grow to <em>A²</em> while noise of amplitude <em>N</em> shrinks relatively to <em>N²/A²</em> — a quadratic gain in contrast. Higher powers (3–4) further suppress noise but make the brightest peaks dominate the visual scale. Especially helpful when some patterns are much noisier than others (e.g. high-temperature data) and per-pattern normalisation would otherwise bring their noise up to the same brightness as real peaks in cleaner patterns.</p>
-    <p><strong>Noise floor:</strong> a percentage of the maximum peak height (0–5%). Applied to each pattern's normalised intensity array before the map is built — any value at or below the threshold becomes a hard zero, and remaining values are linearly rescaled so peak contrast is preserved. The interpolation between patterns then operates on clean data rather than on noise, so faint streaks vanish completely rather than just being dimmed. Set to 0% by default; 1–2% is usually enough to clear background noise from typical PXRD data. Higher values will start to erase weak but genuine peaks.</p>
-    <p><strong>Pattern markers:</strong> the intensity map's Y axis is continuous, so the actual measurement positions can be hidden between interpolated rows. Tick the <em>Pattern markers (right edge)</em> option in the Data &amp; scale group to draw a small tick on the right side of the plot at each pattern's exact Y value — useful when you want to be transparent about where the data was actually measured versus where it was interpolated.</p>
-    <p><strong>Gridlines:</strong> off by default. When enabled, dashed lines are drawn at every tick position in the chosen colour and weight.</p>
+    <p>The intensity map is a 2D image of the entire dataset. The horizontal axis is 2θ, the vertical axis is the variable condition, and pixel brightness encodes intensity. A floating tooltip follows the mouse cursor showing the current 2θ angle and stimulus value — visible anywhere on screen regardless of scroll position.</p>
+    <p><strong>Y-axis mode</strong> controls how the vertical axis is constructed. <em>By stimulus value</em> sorts patterns by their Y value — the standard view for a monotonic scan. <em>By sequence order</em> preserves the table order and spaces rows evenly, with tick labels showing the actual stimulus at each pattern position. Use sequence order for cooling/heating/cooling cycles or any non-monotonic series.</p>
+    <p><strong>How it is built:</strong> each diffractogram is resampled onto a uniform 2θ grid and normalised (default: per-pattern baseline subtraction). For every pixel row the app finds the two bracketing patterns and linearly interpolates between them.</p>
+    <p><strong>Reading the map:</strong> vertical streak = peak fixed in position; diagonal streak = peak shifting with condition; fading/appearing streaks = phase transition.</p>
+    <p><strong>Contrast and colour:</strong> gamma stretches or compresses the intensity scale. Peak and background colours are set independently.</p>
+    <p><strong>Normalisation:</strong> <em>Per-pattern &amp; baseline</em> subtracts minimum and scales to maximum. <em>Per-pattern (no baseline)</em> scales to maximum only. <em>Global</em> uses the same scale across all patterns.</p>
+    <p><strong>Peak emphasis:</strong> a pre-normalisation power transform. At p=1 (default) this is a no-op; higher values boost peaks relative to noise.</p>
+    <p><strong>Noise floor:</strong> normalised values at or below the threshold (0–5%) become zero before interpolation, removing background noise streaks without affecting genuine peaks.</p>
+    <p><strong>Pattern markers:</strong> tick <em>Pattern markers (right edge)</em> to draw a tick at each pattern's exact Y position on the right edge of the plot.</p>
+    <p><strong>Gridlines:</strong> off by default. When enabled, dashed lines are drawn at every tick position.</p>
 
     <h3>The stacked plot</h3>
-    <p>The stacked plot shows each diffractogram as a conventional intensity-vs-2θ line, with the patterns offset vertically into bands so they don't overlap. The Y axis has no ticks (the absolute intensity is not generally meaningful between patterns) but is labelled "Intensity" by convention.</p>
-    <p><strong>Order:</strong> the patterns appear from bottom to top in the file order shown on the Files tab. With Y-sorted data this means the lowest-condition pattern is at the bottom, matching the intensity map's orientation. Tick <em>Reverse order</em> to flip this. You can reorder patterns manually on the Files tab by dragging any row by its grip handle (⠿) on the left — useful for cooling/heating cycles or other non-monotonic sequences where the auto-sort does not reflect the true measurement order.</p>
-    <p><strong>Per-pattern normalisation:</strong> each diffractogram is independently scaled to fill its band, so subtle peaks in low-intensity patterns are visible alongside strong peaks in high-intensity patterns.</p>
-    <p><strong>Colour:</strong> the default is all-black diffractograms. Untick <em>All black</em> to use one of six colour ramps (Viridis, Plasma, Inferno, Cool, Warm, Rainbow); the ramp is applied from the first to the last pattern in the file order.</p>
-    <p><strong>Plot box:</strong> by default only the bottom (X) axis is drawn. Tick <em>Show plot box</em> for a full rectangle. The axis/box weight is independent of the diffractogram line weight.</p>
-    <p><strong>Legends:</strong> each pattern's legend label is drawn directly on the plot and can be repositioned with the mouse. Hover over a legend to see the cursor become a grab handle, then drag it anywhere within its band. The <em>Snap legends</em> selector controls horizontal alignment across all legends: <em>Left edge</em> (the default — every legend's left edge sits on the same vertical line), <em>Center</em> (all legend midpoints aligned), <em>Right edge</em> (all right edges aligned, useful when label widths vary a lot), or <em>Off</em> (each legend positioned independently). Dragging any one legend horizontally moves the entire stack when snapping is on; switching modes keeps the widest legend visually anchored and rearranges the others around it. The <em>Reset</em> button clears all positions and returns to defaults. Because legends are drawn on the canvas itself (not as a separate overlay), right-clicking the plot and choosing <em>Copy image</em> or <em>Save image as…</em> in the browser produces a complete figure with the legends in place.</p>
+    <p>The stacked plot shows each diffractogram as an intensity-vs-2θ line, offset vertically into bands. A floating tooltip follows the mouse cursor showing the current 2θ angle — visible regardless of scroll position.</p>
+    <p><strong>Order:</strong> patterns appear bottom to top in file-table order (index 0 at the bottom, last index at the top), matching the intensity map in sequence mode. Tick <em>Reverse order</em> to flip. Drag rows by the grip handle (⠿) on the Files tab to reorder freely.</p>
+    <p><strong>Per-pattern normalisation:</strong> each diffractogram is independently scaled to fill its band.</p>
+    <p><strong>Colour:</strong> all-black by default. Untick <em>All black</em> to apply a colour ramp (Viridis, Plasma, Inferno, Cool, Warm, Rainbow, or Custom per-pattern).</p>
+    <p><strong>Legends:</strong> drawn directly on the canvas and draggable within each band. The <em>Snap legends</em> selector aligns all legends by left edge, centre, or right edge. Right-clicking the canvas gives <em>Copy image</em> / <em>Save image as…</em> with legends included.</p>
 
     <h3>Output size and reproducibility</h3>
-    <p>By default both plots scale horizontally to fill the available browser width, which is convenient for exploration but means the same data can produce figures of different absolute dimensions on different days. For consistent figure preparation, tick <em>Lock plot size</em> (in the Output size group on each settings panel) and enter explicit pixel dimensions. The intensity map locks both width and height; the stacked plot locks the width — its height naturally follows from the number of patterns multiplied by the band height. Save the settings file once the layout is right, and the same dimensions are restored on every future session.</p>
+    <p>By default both plots scale to fill the browser width. For consistent figures, tick <em>Lock plot size</em> and enter explicit pixel dimensions. Save the settings JSON once the layout is right — dimensions are restored on every future session.</p>
 
-    <h3>File-naming and order</h3>
-    <p>Input files are plain text with two or more whitespace- or comma-separated columns. The first column is 2θ in degrees; the second is intensity. Any additional columns (e.g. the estimated standard deviation in <code>.xye</code> files exported by CSD Mercury) are silently ignored. Single-value header lines such as the wavelength line in <code>.xye</code> files are also skipped automatically. Lines starting with <code>#</code>, <code>!</code>, or <code>;</code> are treated as comments and skipped. Extensions <code>.xy</code>, <code>.xye</code>, <code>.dat</code>, and <code>.txt</code> are all accepted.</p>
-    <p>The variable value is extracted from the last numeric segment of the filename, preceded by an underscore or hyphen. For example, <code>sample_KD66_150.xy</code> gives 150. The legend label is auto-built from the value plus any unit detected in the Y-axis label string (e.g. <code>150 °C</code>). Always check the auto-extracted values and override any that are wrong.</p>
-    <p><strong>Non-numeric series:</strong> if your filenames don't contain numbers (e.g. <code>α-phase.xy</code>, <code>β-phase.xy</code>, <code>sample_A.xy</code>), the Y value is left blank and the legend defaults to the filename stem. Patterns are sorted in natural alphabetical order. The stacked plot works normally; the intensity map cannot be drawn without Y values (it would be physically meaningless) but is simply not used in this workflow.</p>
+    <h3>File-naming and Y values</h3>
+    <p>The variable value is extracted from the last numeric segment of the filename, e.g. <code>sample_150.xy</code> gives 150. XRDML files extract the value from embedded metadata. Always check and correct auto-extracted values. If filenames contain no numbers the Y value is left blank; the stacked plot works normally but the intensity map (stimulus mode) requires Y values to be entered manually.</p>
 
     <h3>Save and load settings</h3>
-    <p>The <em>Save settings…</em> and <em>Load settings…</em> buttons on the Files tab let you preserve your control choices for both plots in a small JSON file. This is useful when you want consistent appearance across figures prepared over several sessions, or when sharing a publication style with a colleague. Save creates a file you can place anywhere on your computer; Load reads it back and applies every setting (settings only — the file table and any pattern data are unaffected).</p>
+    <p>The <em>Save settings…</em> and <em>Load settings…</em> buttons on the Files tab preserve all control choices for both plots in a JSON file. Note: settings only — pattern data is not included (use Export series for that).</p>
 
     <h3>Tips</h3>
     <ul>
-      <li>Both plots auto-update on any settings change after a short delay. Use the <em>Render now</em> button only if you want an immediate refresh.</li>
-      <li>The Y-axis label on the intensity map and the legend label on each pattern are independent: the former describes the variable being plotted, the latter is just the per-pattern annotation.</li>
-      <li>For variable-temperature data, a typical legend label might be "30 °C" or "150 °C"; for variable-pressure, "5 bar"; for time-resolved, "10 min", etc.</li>
-      <li>Two ways to export the plots: the <em>Copy to clipboard</em> button places a PNG at full canvas resolution; right-clicking the plot offers the browser's standard <em>Copy image</em> and <em>Save image as…</em> options, which save the same content directly to file or clipboard. Both methods include the legends on the stacked plot.</li>
-      <li>The plot box and X axis on the stacked plot share the same "Axis/box weight" — keep it modest (1.5–2 px) for screen viewing, increase to 3–4 px for high-resolution publication exports.</li>
+      <li>Both plots auto-update on any settings change after a short delay.</li>
+      <li>The floating tooltip shows 2θ (and stimulus value on the intensity map) at the cursor position regardless of scroll — useful for tall stacked plots or large intensity maps.</li>
+      <li>For cooling/heating/cooling series: load files, drag into the correct sequence order, set Y-axis mode to <em>By sequence order</em>, then export to CSV so you never have to rearrange again.</li>
+      <li>Two ways to export plots: <em>Copy to clipboard</em> (PNG at full canvas resolution) or right-click → <em>Copy image</em> / <em>Save image as…</em>.</li>
+      <li>Keep axis/box weight modest (1.5–2 px) for screen viewing; increase to 3–4 px for publication exports.</li>
     </ul>
   </div>
 </div>
 
+<div class="stack-tooltip" id="stackTooltip"></div>
+<div class="stack-tooltip" id="mapTooltip"></div>
 <script>
 'use strict';
 
@@ -922,9 +929,6 @@ function setStackStatus(msg, cls) {
   const msgEl = document.getElementById('stackStatusMsg');
   msgEl.textContent = msg;
   el.className = 'status' + (cls ? ' ' + cls : '');
-  el.style.display = 'flex';
-  el.style.justifyContent = 'space-between';
-  el.style.alignItems = 'baseline';
 }
 function niceStep(rough) {
   if (rough <= 0) return 1;
@@ -1277,7 +1281,7 @@ function _render() {
   ctx.fillText(yLabelTxt, 0, 0);
   ctx.restore();
 
-  plotMeta = { ttMin, ttMax, yMin, yMax, MARGIN, plotW, plotH };
+  plotMeta = { ttMin, ttMax, yMin, yMax, MARGIN, plotW, plotH, yAxisMode, rowFrac, ordered };
   setStatus(`Rendered ${ordered.length} patterns · 2\u03b8 ${ttMin.toFixed(2)}–${ttMax.toFixed(2)}° · γ = ${gamma.toFixed(2)}`, 'ok');
 }
 
@@ -1616,15 +1620,17 @@ function drawStackLegends(skipSet) {
       // Hover: change cursor when over a draggable legend
       canvas.style.cursor = hitTest(cx, cy) ? 'grab' : 'crosshair';
     }
-    // 2θ readout: show when cursor is within the plot area
+    // 2θ tooltip: follows the mouse cursor in viewport coordinates
     const { M, plotW, ttMin, ttMax } = stackMeta;
-    const readout = document.getElementById('stackCursorReadout');
+    const tooltip = document.getElementById('stackTooltip');
     if (cx >= M.left && cx <= M.left + plotW) {
       const tt = ttMin + (cx - M.left) / plotW * (ttMax - ttMin);
-      readout.textContent = `2θ ${tt.toFixed(3)}°`;
-      readout.style.opacity = '1';
+      tooltip.textContent = `2θ ${tt.toFixed(3)}°`;
+      tooltip.style.display = 'block';
+      tooltip.style.left = (e.clientX + 14) + 'px';
+      tooltip.style.top  = (e.clientY - 22) + 'px';
     } else {
-      readout.style.opacity = '0';
+      tooltip.style.display = 'none';
     }
   });
 
@@ -1636,7 +1642,7 @@ function drawStackLegends(skipSet) {
   });
   canvas.addEventListener('mouseleave', () => {
     if (!draggingLegend) canvas.style.cursor = 'crosshair';
-    document.getElementById('stackCursorReadout').style.opacity = '0';
+    document.getElementById('stackTooltip').style.display = 'none';
   });
 })();
 
@@ -1799,7 +1805,7 @@ async function importCsvFile(f) {
       const y = parseFloat(stimCells[p * 2]);
       const legend = legCells[p * 2] ? legCells[p * 2].trim() : '';
       patterns.push({
-        filename: legend || `pattern_${p + 1}`,
+        filename: `pattern_${p + 1}${legend ? '_' + legend : ''}`,
         twoTheta: twoThetaArr[p],
         intensity: intensArr[p],
         y: isFinite(y) ? y : null,
@@ -2017,21 +2023,46 @@ document.getElementById('settingsFileInput').addEventListener('change', async e 
 //  Cursor readout — intensity map
 // ═══════════════════════════════════════════════════
 const mapCanvas = document.getElementById('plotCanvas');
-const cursorInfo = document.getElementById('cursorInfo');
+const mapTooltip = document.getElementById('mapTooltip');
 mapCanvas.addEventListener('mousemove', e => {
-  if (!plotMeta) { cursorInfo.textContent = ''; return; }
+  if (!plotMeta) { mapTooltip.style.display = 'none'; return; }
   const rect = mapCanvas.getBoundingClientRect();
   const sx = mapCanvas.width / rect.width, sy = mapCanvas.height / rect.height;
   const cx = (e.clientX - rect.left) * sx, cy = (e.clientY - rect.top) * sy;
-  const { ttMin, ttMax, yMin, yMax, MARGIN, plotW, plotH } = plotMeta;
+  const { ttMin, ttMax, yMin, yMax, MARGIN, plotW, plotH, yAxisMode, rowFrac, ordered } = plotMeta;
   const fx = (cx - MARGIN.left) / plotW, fy = (cy - MARGIN.top) / plotH;
-  if (fx < 0 || fx > 1 || fy < 0 || fy > 1) { cursorInfo.textContent = ''; return; }
+  if (fx < 0 || fx > 1 || fy < 0 || fy > 1) { mapTooltip.style.display = 'none'; return; }
   const tt = ttMin + fx * (ttMax - ttMin);
-  const yv = yMax - fy * (yMax - yMin);
   const lbl = document.getElementById('yLabel').value || 'Y';
-  cursorInfo.textContent = `2θ ${tt.toFixed(3)}°  •  ${lbl.replace(/\s*\(.*\)/, '')} ${yv.toFixed(1)}`;
+  const lblShort = lbl.replace(/\s*\(.*\)/, '');
+  let yv;
+  if (yAxisMode === 'sequence') {
+    const frac = 1 - fy;
+    const n = rowFrac.length;
+    if (frac <= rowFrac[0]) {
+      yv = ordered[0].y;
+    } else if (frac >= rowFrac[n - 1]) {
+      yv = ordered[n - 1].y;
+    } else {
+      yv = ordered[0].y;
+      for (let k = 0; k < n - 1; k++) {
+        if (frac >= rowFrac[k] && frac <= rowFrac[k + 1]) {
+          const span = rowFrac[k + 1] - rowFrac[k];
+          const t = span > 0 ? (frac - rowFrac[k]) / span : 0;
+          yv = ordered[k].y * (1 - t) + ordered[k + 1].y * t;
+          break;
+        }
+      }
+    }
+  } else {
+    yv = yMax - fy * (yMax - yMin);
+  }
+  mapTooltip.textContent = `2θ ${tt.toFixed(3)}°  •  ${lblShort} ${yv.toFixed(1)}`;
+  mapTooltip.style.display = 'block';
+  mapTooltip.style.left = (e.clientX + 14) + 'px';
+  mapTooltip.style.top  = (e.clientY - 22) + 'px';
 });
-mapCanvas.addEventListener('mouseleave', () => { cursorInfo.textContent = ''; });
+mapCanvas.addEventListener('mouseleave', () => { mapTooltip.style.display = 'none'; });
 
 // ═══════════════════════════════════════════════════
 //  Copy to clipboard
