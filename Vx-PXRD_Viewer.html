@@ -149,7 +149,7 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
 <header>
   <h1>Vx-PXRD Viewer</h1>
   <span class="sub">Variable-Condition Powder Diffraction</span>
-  <span class="sub" style="margin-left:auto;opacity:.6">v2.7</span>
+  <span class="sub" style="margin-left:auto;opacity:.6">v2.9</span>
 </header>
 
 <div class="tabs">
@@ -497,6 +497,7 @@ const legendPositions = {};   // keyed by filename → { xFrac, yFrac }
 let snapXFrac = null;          // shared snap reference (interpretation per stkSnapMode)
 let prevSnapMode = 'left';     // previous snap mode for conversion on change
 let dragSrcIdx = null;         // index of row being dragged (null = no row drag in progress)
+let sourceFileHandle = null;   // FileSystemFileHandle of last opened file (for startIn)
 
 // ═══════════════════════════════════════════════════
 //  Tab switching
@@ -536,14 +537,30 @@ function isFileDrag(e) {
 }
 dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('over'); });
 dropZone.addEventListener('dragleave', e => { if (!dropZone.contains(e.relatedTarget)) dropZone.classList.remove('over'); });
-dropZone.addEventListener('drop', e => {
+dropZone.addEventListener('drop', async e => {
   e.preventDefault();
   e.stopPropagation();
   dropZone.classList.remove('over');
   if (!isFileDrag(e)) return;
-  const allFiles   = [...e.dataTransfer.files];
-  const csvFiles   = allFiles.filter(f => /\.csv$/i.test(f.name));
-  const otherFiles = allFiles.filter(f => !/\.csv$/i.test(f.name));
+  const items = [...e.dataTransfer.items];
+  const csvFiles = [], otherFiles = [];
+  for (const item of items) {
+    if (item.kind !== 'file') continue;
+    if (item.getAsFileSystemHandle) {
+      try {
+        const fh = await item.getAsFileSystemHandle();
+        const file = await fh.getFile();
+        sourceFileHandle = fh;
+        if (/\.csv$/i.test(file.name)) csvFiles.push(file);
+        else otherFiles.push(file);
+        continue;
+      } catch(_) {}
+    }
+    const file = item.getAsFile ? item.getAsFile() : null;
+    if (!file) continue;
+    if (/\.csv$/i.test(file.name)) csvFiles.push(file);
+    else otherFiles.push(file);
+  }
   if (csvFiles.length)   importCsvFile(csvFiles[0]);
   if (otherFiles.length) loadFiles(otherFiles);
 });
@@ -557,13 +574,31 @@ document.addEventListener('dragover', e => {
 document.addEventListener('dragleave', e => {
   if (e.relatedTarget === null) dropZone.classList.remove('over');
 });
-document.addEventListener('drop', e => {
+document.addEventListener('drop', async e => {
   if (dragSrcIdx !== null || !isFileDrag(e)) return;
   e.preventDefault();
   dropZone.classList.remove('over');
-  const allFiles = [...e.dataTransfer.files];
-  const csvFiles   = allFiles.filter(f => /\.csv$/i.test(f.name));
-  const otherFiles = allFiles.filter(f => !/\.csv$/i.test(f.name));
+  const items = [...e.dataTransfer.items];
+  const csvFiles = [], otherFiles = [];
+  for (const item of items) {
+    if (item.kind !== 'file') continue;
+    // Try to get a FileSystemHandle so startIn works in save dialogs
+    if (item.getAsFileSystemHandle) {
+      try {
+        const fh = await item.getAsFileSystemHandle();
+        const file = await fh.getFile();
+        sourceFileHandle = fh;
+        if (/\.csv$/i.test(file.name)) csvFiles.push(file);
+        else otherFiles.push(file);
+        continue;
+      } catch(_) {}
+    }
+    // Fallback
+    const file = item.getAsFile ? item.getAsFile() : null;
+    if (!file) continue;
+    if (/\.csv$/i.test(file.name)) csvFiles.push(file);
+    else otherFiles.push(file);
+  }
   if (csvFiles.length) importCsvFile(csvFiles[0]);
   if (otherFiles.length) loadFiles(otherFiles);
 });
@@ -1732,6 +1767,7 @@ document.getElementById('exportCsvBtn').addEventListener('click', async () => {
     try {
       const handle = await window.showSaveFilePicker({
         suggestedName: defaultName,
+        startIn: sourceFileHandle,
         types: [{ description: 'CSV file', accept: { 'text/csv': ['.csv'] } }]
       });
       const writable = await handle.createWritable();
@@ -1753,7 +1789,23 @@ document.getElementById('exportCsvBtn').addEventListener('click', async () => {
   setStatus('Series downloaded.', 'ok');
 });
 
-document.getElementById('importCsvBtn').addEventListener('click', () => {
+document.getElementById('importCsvBtn').addEventListener('click', async () => {
+  if (window.showOpenFilePicker) {
+    try {
+      const [fh] = await window.showOpenFilePicker({
+        startIn: sourceFileHandle,
+        types: [{ description: 'CSV series file', accept: { 'text/csv': ['.csv'] } }],
+        multiple: false
+      });
+      sourceFileHandle = fh;
+      const f = await fh.getFile();
+      await importCsvFile(f);
+      return;
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+      // fall through to input
+    }
+  }
   document.getElementById('csvFileInput').click();
 });
 
@@ -1972,6 +2024,7 @@ document.getElementById('saveSettingsBtn').addEventListener('click', async () =>
     try {
       const handle = await window.showSaveFilePicker({
         suggestedName: defaultName,
+        startIn: sourceFileHandle,
         types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }]
       });
       const writable = await handle.createWritable();
@@ -1998,7 +2051,28 @@ document.getElementById('saveSettingsBtn').addEventListener('click', async () =>
   setStackStatus('Settings downloaded.', 'ok');
 });
 
-document.getElementById('loadSettingsBtn').addEventListener('click', () => {
+document.getElementById('loadSettingsBtn').addEventListener('click', async () => {
+  if (window.showOpenFilePicker) {
+    try {
+      const [fh] = await window.showOpenFilePicker({
+        startIn: sourceFileHandle,
+        types: [{ description: 'JSON settings', accept: { 'application/json': ['.json'] } }],
+        multiple: false
+      });
+      sourceFileHandle = fh;
+      const f = await fh.getFile();
+      const text = await f.text();
+      const obj = JSON.parse(text);
+      applySettings(obj);
+      scheduleRender(); scheduleStackRender();
+      setStatus('Settings loaded.', 'ok');
+      setStackStatus('Settings loaded.', 'ok');
+      return;
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+      // fall through to input
+    }
+  }
   document.getElementById('settingsFileInput').click();
 });
 document.getElementById('settingsFileInput').addEventListener('change', async e => {
