@@ -79,6 +79,10 @@ header .sub { font-family:var(--mono); font-size:9px; color:var(--accent); lette
 .ord-btn { background:none; border:1px solid var(--rule); cursor:pointer; color:#888; font-size:10px; padding:1px 5px; font-family:var(--mono); transition:all .12s; line-height:1; }
 .ord-btn:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); background:var(--cream); }
 .ord-btn:disabled { opacity:.25; cursor:not-allowed; }
+.drag-handle { cursor:grab; color:#bbb; font-size:14px; padding:0 6px; user-select:none; line-height:1; }
+.drag-handle:active { cursor:grabbing; }
+.ftbl tr.drag-over td { background:var(--cream); box-shadow:inset 0 2px 0 var(--accent); }
+.ftbl tr.dragging { opacity:.35; }
 
 /* ── Buttons ── */
 .btn { display:inline-block; padding:8px 16px; font-family:var(--mono); font-size:10px; font-weight:500; letter-spacing:.12em; text-transform:uppercase; cursor:pointer; border:1.5px solid var(--ink); background:var(--ink); color:var(--paper); transition:background .15s, border-color .15s; }
@@ -144,6 +148,7 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
 <header>
   <h1>Vx-PXRD Viewer</h1>
   <span class="sub">Variable-Condition Powder Diffraction</span>
+  <span class="sub" style="margin-left:auto;opacity:.6">v2.2</span>
 </header>
 
 <div class="tabs">
@@ -160,10 +165,10 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
 
     <div class="dz" id="dropZone">
       <div class="dz-ico">⇪</div>
-      <div class="dz-txt">Drop <strong>.xy / .xye</strong> files or a <strong>.zip</strong> archive here, or click to browse</div>
-      <div class="dz-hint">2θ &nbsp; intensity &nbsp;·&nbsp; space-separated &nbsp;·&nbsp; no header required</div>
+      <div class="dz-txt">Drop <strong>.xy / .xye / .xrdml</strong> files or a <strong>.zip</strong> archive here, or click to browse</div>
+      <div class="dz-hint">xy/xye: 2θ · intensity · space-separated &nbsp;·&nbsp; xrdml: PANalytical XML format</div>
     </div>
-    <input type="file" id="fileInput" accept=".xy,.xye,.dat,.txt,.zip" multiple style="display:none">
+    <input type="file" id="fileInput" accept=".xy,.xye,.dat,.txt,.xrdml,.zip" multiple style="display:none">
 
     <div style="margin-top:10px; display:flex; align-items:center; gap:8px;">
       <input type="checkbox" id="resetOnLoad" style="accent-color:var(--accent); width:13px; height:13px; cursor:pointer;">
@@ -182,14 +187,17 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
     <div class="row-actions" id="rowActions" style="margin-top:14px;display:none">
       <span class="lbl" id="fileCount"></span>
       <button class="btn out" id="sortByYBtn">Auto-sort</button>
+      <button class="btn out" id="exportCsvBtn">Export series…</button>
+      <button class="btn out" id="importCsvBtn">Import series…</button>
       <button class="btn out" id="clearAllBtn">Clear all</button>
     </div>
+    <input type="file" id="csvFileInput" accept=".csv" style="display:none">
 
     <div class="ftbl-wrap" id="fileTableWrap" style="display:none">
       <table class="ftbl">
         <thead>
           <tr>
-            <th>Order</th>
+            <th title="Drag to reorder"></th>
             <th>Filename</th>
             <th style="text-align:right">Points</th>
             <th>2θ range</th>
@@ -228,6 +236,12 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
         <div class="cp-head"><span class="cp-title">Data &amp; scale</span><span class="cp-arr">▼</span></div>
         <div class="cp-body">
           <div class="cr"><span class="cl">Y-axis label</span><input type="text" id="yLabel" value="Temperature (°C)"></div>
+          <div class="cr"><span class="cl">Y-axis mode</span>
+            <select id="yAxisMode">
+              <option value="stimulus" selected>By stimulus value</option>
+              <option value="sequence">By sequence order</option>
+            </select>
+          </div>
           <div class="cr"><span class="cl">2θ min (°)</span><input type="number" id="ttMin" step="0.1" placeholder="auto"></div>
           <div class="cr"><span class="cl">2θ max (°)</span><input type="number" id="ttMax" step="0.1" placeholder="auto"></div>
           <div class="cr"><span class="cl">Normalisation</span>
@@ -415,7 +429,7 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
     <ul>
       <li>On the <strong>Files</strong> tab, drop your data files or a <strong>.zip</strong> archive of them. The app will try to extract the variable value from each filename automatically.</li>
       <li>Check the auto-detected values in the file table and edit any that are missing or wrong. Each row also has a <em>Legend label</em> field for the stacked plot — the Y-value plus unit is used as the default.</li>
-      <li>Reorder rows using the up/down arrows in the Order column, or click <em>Auto-sort</em> to restore the canonical order. Use the ✕ button to remove individual files.</li>
+      <li>Drag rows by the grip handle (⠿) in the leftmost column to reorder patterns freely — essential for cooling/heating cycles or any non-monotonic sequence. Click <em>Auto-sort</em> to restore Y-value order. Use the ✕ button to remove individual files.</li>
       <li>Switch to <strong>Intensity Map</strong> or <strong>Stacked Plots</strong>, adjust the settings on the right, and the plot updates automatically as you change controls.</li>
     </ul>
 
@@ -432,7 +446,7 @@ canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
 
     <h3>The stacked plot</h3>
     <p>The stacked plot shows each diffractogram as a conventional intensity-vs-2θ line, with the patterns offset vertically into bands so they don't overlap. The Y axis has no ticks (the absolute intensity is not generally meaningful between patterns) but is labelled "Intensity" by convention.</p>
-    <p><strong>Order:</strong> the patterns appear from bottom to top in the file order shown on the Files tab. With Y-sorted data this means the lowest-condition pattern is at the bottom, matching the intensity map's orientation. Tick <em>Reverse order</em> to flip this. Manual reordering on the Files tab is respected directly.</p>
+    <p><strong>Order:</strong> the patterns appear from bottom to top in the file order shown on the Files tab. With Y-sorted data this means the lowest-condition pattern is at the bottom, matching the intensity map's orientation. Tick <em>Reverse order</em> to flip this. You can reorder patterns manually on the Files tab by dragging any row by its grip handle (⠿) on the left — useful for cooling/heating cycles or other non-monotonic sequences where the auto-sort does not reflect the true measurement order.</p>
     <p><strong>Per-pattern normalisation:</strong> each diffractogram is independently scaled to fill its band, so subtle peaks in low-intensity patterns are visible alongside strong peaks in high-intensity patterns.</p>
     <p><strong>Colour:</strong> the default is all-black diffractograms. Untick <em>All black</em> to use one of six colour ramps (Viridis, Plasma, Inferno, Cool, Warm, Rainbow); the ramp is applied from the first to the last pattern in the file order.</p>
     <p><strong>Plot box:</strong> by default only the bottom (X) axis is drawn. Tick <em>Show plot box</em> for a full rectangle. The axis/box weight is independent of the diffractogram line weight.</p>
@@ -475,6 +489,7 @@ let draggingLegend = null;     // { key, idx, offsetX, offsetY } while dragging
 const legendPositions = {};   // keyed by filename → { xFrac, yFrac }
 let snapXFrac = null;          // shared snap reference (interpretation per stkSnapMode)
 let prevSnapMode = 'left';     // previous snap mode for conversion on change
+let dragSrcIdx = null;         // index of row being dragged (null = no row drag in progress)
 
 // ═══════════════════════════════════════════════════
 //  Tab switching
@@ -504,14 +519,47 @@ document.querySelectorAll('.cp-head').forEach(h => {
 const dropZone  = document.getElementById('dropZone');
 const fileInput = document.getElementById('fileInput');
 dropZone.addEventListener('click', () => fileInput.click());
-dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.classList.add('over'); });
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('over'));
+fileInput.addEventListener('change', () => { loadFiles([...fileInput.files]); fileInput.value = ''; });
+
+// File drag-and-drop. We listen on the dropZone itself AND on document
+// so that files dragged over the table (which sits below the drop zone)
+// are still accepted. Row-reorder drags are ignored (dragSrcIdx is non-null).
+function isFileDrag(e) {
+  return e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+}
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('over'); });
+dropZone.addEventListener('dragleave', e => { if (!dropZone.contains(e.relatedTarget)) dropZone.classList.remove('over'); });
 dropZone.addEventListener('drop', e => {
   e.preventDefault();
+  e.stopPropagation();
   dropZone.classList.remove('over');
-  loadFiles([...e.dataTransfer.files]);
+  if (!isFileDrag(e)) return;
+  const allFiles   = [...e.dataTransfer.files];
+  const csvFiles   = allFiles.filter(f => /\.csv$/i.test(f.name));
+  const otherFiles = allFiles.filter(f => !/\.csv$/i.test(f.name));
+  if (csvFiles.length)   importCsvFile(csvFiles[0]);
+  if (otherFiles.length) loadFiles(otherFiles);
 });
-fileInput.addEventListener('change', () => { loadFiles([...fileInput.files]); fileInput.value = ''; });
+// Also catch drops anywhere on the page (e.g. over the file table)
+document.addEventListener('dragover', e => {
+  if (dragSrcIdx !== null || !isFileDrag(e)) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+  dropZone.classList.add('over');
+});
+document.addEventListener('dragleave', e => {
+  if (e.relatedTarget === null) dropZone.classList.remove('over');
+});
+document.addEventListener('drop', e => {
+  if (dragSrcIdx !== null || !isFileDrag(e)) return;
+  e.preventDefault();
+  dropZone.classList.remove('over');
+  const allFiles = [...e.dataTransfer.files];
+  const csvFiles   = allFiles.filter(f => /\.csv$/i.test(f.name));
+  const otherFiles = allFiles.filter(f => !/\.csv$/i.test(f.name));
+  if (csvFiles.length) importCsvFile(csvFiles[0]);
+  if (otherFiles.length) loadFiles(otherFiles);
+});
 
 document.getElementById('clearAllBtn').addEventListener('click', () => {
   patterns.length = 0;
@@ -553,6 +601,43 @@ function parseXY(text) {
   return { twoTheta, intensity };
 }
 
+
+// ═══════════════════════════════════════════════════
+//  XRDML parser (PANalytical XML format)
+// ═══════════════════════════════════════════════════
+function parseXRDML(text) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(text, 'application/xml');
+  if (doc.querySelector('parsererror')) return { twoTheta: [], intensity: [], temperature: null };
+  const getVal = (el, tag) => { const f = el.querySelector(tag); return f ? f.textContent.trim() : null; };
+  let startPos = null, endPos = null;
+  for (const pos of doc.querySelectorAll('positions')) {
+    if (pos.getAttribute('axis') === '2Theta') {
+      startPos = parseFloat(getVal(pos, 'startPosition'));
+      endPos   = parseFloat(getVal(pos, 'endPosition'));
+      break;
+    }
+  }
+  if (!isFinite(startPos) || !isFinite(endPos)) return { twoTheta: [], intensity: [], temperature: null };
+  const intensEl = doc.querySelector('intensities');
+  if (!intensEl) return { twoTheta: [], intensity: [], temperature: null };
+  const rawInts = intensEl.textContent.trim().split(/\s+/).map(Number).filter(isFinite);
+  const n = rawInts.length;
+  if (n < 2) return { twoTheta: [], intensity: [], temperature: null };
+  const twoTheta = Array.from({ length: n }, (_, i) => startPos + (i / (n - 1)) * (endPos - startPos));
+  let temperature = null;
+  const naEl = doc.querySelector('nonAmbientPoints');
+  if (naEl) {
+    const unit = naEl.getAttribute('unit') || '';
+    const vals = getVal(naEl, 'nonAmbientValues');
+    if (vals) {
+      const v = parseFloat(vals.split(/[\s,]+/)[0]);
+      if (isFinite(v)) temperature = (unit === 'K') ? +(v - 273.15).toFixed(2) : v;
+    }
+  }
+  return { twoTheta, intensity: rawInts, temperature };
+}
+
 async function loadFiles(files) {
   // Reset all settings to defaults before processing — only if the user has opted in.
   // Do this before touching `patterns` so any scroll/render state is already clean.
@@ -566,22 +651,30 @@ async function loadFiles(files) {
       try {
         const zip = await JSZip.loadAsync(f);
         zip.forEach((rel, ze) => {
-          if (!ze.dir && /\.(xy|xye|dat|txt)$/i.test(rel)) {
+          if (!ze.dir && /\.(xy|xye|dat|txt|xrdml)$/i.test(rel)) {
             const basename = rel.split('/').pop();
             entries.push({ name: basename, getText: () => ze.async('string') });
           }
         });
       } catch (e) { setStatus(`Could not open ${f.name}: ${e.message}`, 'err'); }
-    } else if (/\.(xy|xye|dat|txt)$/i.test(f.name)) {
+    } else if (/\.(xy|xye|dat|txt|xrdml)$/i.test(f.name)) {
       entries.push({ name: f.name, getText: () => f.text() });
     }
   }
   for (const entry of entries) {
     if (patterns.find(p => p.filename === entry.name)) continue;
     const text = await entry.getText();
-    const { twoTheta, intensity } = parseXY(text);
+    let twoTheta, intensity, embeddedY = null;
+    if (/\.xrdml$/i.test(entry.name)) {
+      const parsed = parseXRDML(text);
+      twoTheta  = parsed.twoTheta;
+      intensity = parsed.intensity;
+      embeddedY = parsed.temperature;
+    } else {
+      ({ twoTheta, intensity } = parseXY(text));
+    }
     if (twoTheta.length < 10) continue;
-    const y = extractYFromFilename(entry.name);
+    const y = embeddedY != null ? embeddedY : extractYFromFilename(entry.name);
     const yUnit = (document.getElementById('yLabel').value.match(/\(([^)]+)\)/) || [, ''])[1].trim();
     const legend = y != null && isFinite(y) ? (yUnit ? `${y} ${yUnit}` : `${y}`) : entry.name.replace(/\.[^.]+$/, '');
     patterns.push({ filename: entry.name, twoTheta, intensity, y, legend, nPts: twoTheta.length });
@@ -608,7 +701,7 @@ function sortPatterns() {
 }
 
 // ═══════════════════════════════════════════════════
-//  File table
+//  File table  (with drag-to-reorder)
 // ═══════════════════════════════════════════════════
 function refreshTable() {
   const wrap   = document.getElementById('fileTableWrap');
@@ -633,11 +726,10 @@ function refreshTable() {
     const ttMax = p.twoTheta[p.twoTheta.length - 1].toFixed(3);
     const yVal  = p.y != null && isFinite(p.y) ? p.y : '';
     const tr = document.createElement('tr');
+    tr.draggable = true;
+    tr.dataset.i = i;
     tr.innerHTML =
-      `<td><span class="ord-btns">
-          <button class="ord-btn up"   data-i="${i}" ${i === 0 ? 'disabled' : ''} title="Move up">▲</button>
-          <button class="ord-btn down" data-i="${i}" ${i === patterns.length - 1 ? 'disabled' : ''} title="Move down">▼</button>
-        </span></td>
+      `<td style="width:28px;text-align:center"><span class="drag-handle" title="Drag to reorder">⠿</span></td>
        <td class="fname" title="${p.filename}">${p.filename}</td>
        <td class="num">${p.nPts}</td>
        <td class="range">${ttMin} – ${ttMax}</td>
@@ -649,6 +741,43 @@ function refreshTable() {
     tbody.appendChild(tr);
   });
 
+  // ── Drag-to-reorder events ──────────────────────
+  tbody.querySelectorAll('tr').forEach(tr => {
+    tr.addEventListener('dragstart', e => {
+      dragSrcIdx = +tr.dataset.i;
+      tr.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', dragSrcIdx); // required for Firefox
+    });
+    tr.addEventListener('dragend', () => {
+      tbody.querySelectorAll('tr').forEach(r => r.classList.remove('dragging', 'drag-over'));
+      dragSrcIdx = null;
+    });
+    tr.addEventListener('dragover', e => {
+      // Ignore OS file drops — let them fall through to the drop zone
+      if (dragSrcIdx === null) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      // Highlight target only — clear others first
+      tbody.querySelectorAll('tr').forEach(r => r.classList.remove('drag-over'));
+      if (+tr.dataset.i !== dragSrcIdx) tr.classList.add('drag-over');
+    });
+    tr.addEventListener('dragleave', () => tr.classList.remove('drag-over'));
+    tr.addEventListener('drop', e => {
+      // Ignore OS file drops
+      if (dragSrcIdx === null) return;
+      e.preventDefault();
+      const dstIdx = +tr.dataset.i;
+      if (dragSrcIdx === dstIdx) return;
+      // Splice the dragged pattern out and insert at destination
+      const [moved] = patterns.splice(dragSrcIdx, 1);
+      patterns.splice(dstIdx, 0, moved);
+      refreshTable();
+      scheduleRender(); scheduleStackRender();
+    });
+  });
+
+  // ── Input event handlers ─────────────────────────
   tbody.querySelectorAll('.y-input').forEach(el => {
     el.addEventListener('input', e => {
       const i = +e.target.dataset.i;
@@ -658,8 +787,6 @@ function refreshTable() {
       scheduleRender(); scheduleStackRender();
     });
     el.addEventListener('change', () => {
-      // Y-value changed but don't auto-sort — the user owns the order.
-      // Use "Sort by Y" button to re-sort.
       scheduleRender(); scheduleStackRender();
     });
   });
@@ -675,24 +802,6 @@ function refreshTable() {
       const i = +e.target.dataset.i;
       patterns[i].colour = e.target.value;
       scheduleStackRender();
-    });
-  });
-  tbody.querySelectorAll('.ord-btn.up').forEach(el => {
-    el.addEventListener('click', e => {
-      const i = +e.currentTarget.dataset.i;
-      if (i <= 0) return;
-      [patterns[i - 1], patterns[i]] = [patterns[i], patterns[i - 1]];
-      refreshTable();
-      scheduleRender(); scheduleStackRender();
-    });
-  });
-  tbody.querySelectorAll('.ord-btn.down').forEach(el => {
-    el.addEventListener('click', e => {
-      const i = +e.currentTarget.dataset.i;
-      if (i >= patterns.length - 1) return;
-      [patterns[i + 1], patterns[i]] = [patterns[i], patterns[i + 1]];
-      refreshTable();
-      scheduleRender(); scheduleStackRender();
     });
   });
   tbody.querySelectorAll('.del-btn').forEach(el => {
@@ -861,18 +970,27 @@ function rampColor(scheme, t) {
 // ═══════════════════════════════════════════════════
 //  Margin layout — INTENSITY MAP
 // ═══════════════════════════════════════════════════
-function computeMargins(ttMin, ttMax, yMin, yMax, tickSize, labelSize, axisFont, tickLen) {
+function computeMargins(ttMin, ttMax, yMin, yMax, tickSize, labelSize, axisFont, tickLen, yTickVals) {
   const tmp = document.createElement('canvas');
   const tc  = tmp.getContext('2d');
   tc.font   = `${tickSize}px ${axisFont}`;
-  const yRange = yMax - yMin;
-  const yStep  = niceStep(yRange / 6);
-  const yStart = Math.ceil(yMin / yStep) * yStep;
-  const yDec   = decimalsForStep(yStep);
   let maxYTickW = 0;
-  for (let yv = yStart; yv <= yMax + 1e-9; yv = +(yv + yStep).toFixed(9)) {
-    const w = tc.measureText(fmtTick(yv, yDec)).width;
-    if (w > maxYTickW) maxYTickW = w;
+  if (yTickVals) {
+    // Sequence mode: measure the actual label at each pattern position
+    const yDec = decimalsForStep(niceStep(Math.abs(yMax - yMin) / (yTickVals.length || 1)));
+    for (const yv of yTickVals) {
+      const w = tc.measureText(fmtTick(yv, yDec)).width;
+      if (w > maxYTickW) maxYTickW = w;
+    }
+  } else {
+    const yRange = yMax - yMin;
+    const yStep  = niceStep(yRange / 6);
+    const yStart = Math.ceil(yMin / yStep) * yStep;
+    const yDec   = decimalsForStep(yStep);
+    for (let yv = yStart; yv <= yMax + 1e-9; yv = +(yv + yStep).toFixed(9)) {
+      const w = tc.measureText(fmtTick(yv, yDec)).width;
+      if (w > maxYTickW) maxYTickW = w;
+    }
   }
   maxYTickW = Math.ceil(maxYTickW);
   const leftPad        = 4;
@@ -894,8 +1012,11 @@ function computeMargins(ttMin, ttMax, yMin, yMax, tickSize, labelSize, axisFont,
 // ═══════════════════════════════════════════════════
 document.getElementById('renderBtn').addEventListener('click', () => {
   if (patterns.length < 2) { setStatus('Need at least two patterns.', 'err'); return; }
-  const bad = patterns.filter(p => p.y == null || !isFinite(p.y));
-  if (bad.length) { setStatus(`Missing Y value: ${bad.map(p => p.filename).join(', ')}`, 'err'); return; }
+  const mode = document.getElementById('yAxisMode').value;
+  if (mode === 'stimulus') {
+    const bad = patterns.filter(p => p.y == null || !isFinite(p.y));
+    if (bad.length) { setStatus(`Missing Y value: ${bad.map(p => p.filename).join(', ')}`, 'err'); return; }
+  }
   setStatus('Rendering…', '');
   setTimeout(doRender, 25);
 });
@@ -916,10 +1037,10 @@ function _render() {
   const canvas    = document.getElementById('plotCanvas');
   const ctx       = canvas.getContext('2d');
   const yLabelTxt = document.getElementById('yLabel').value || 'Condition';
+  const yAxisMode = document.getElementById('yAxisMode').value; // 'stimulus' | 'sequence'
   const normMode  = document.getElementById('normMode').value;
   const gamma     = parseFloat(document.getElementById('gammaSlider').value);
   const peakEmphasis = parseFloat(document.getElementById('peakEmphasis').value) || 1;
-  // Noise floor: slider is in percent (0-5), convert to a fraction of the per-pattern max
   const noiseFloor = (parseFloat(document.getElementById('noiseFloor').value) || 0) / 100;
   const noiseScale = noiseFloor > 0 ? 1 / (1 - noiseFloor) : 1;
   const GRID_N    = parseInt(document.getElementById('gridRes').value);
@@ -938,26 +1059,47 @@ function _render() {
   const lockSize = document.getElementById('lockSize').checked;
   const lockW = parseInt(document.getElementById('lockWidth').value)  || 1200;
   const lockH = parseInt(document.getElementById('lockHeight').value) || 700;
+  const showMarkers = document.getElementById('showPatternMarkers').checked;
 
   let ttMin = parseFloat(document.getElementById('ttMin').value);
   let ttMax = parseFloat(document.getElementById('ttMax').value);
   if (!isFinite(ttMin)) ttMin = Math.min(...patterns.map(p => p.twoTheta[0]));
   if (!isFinite(ttMax)) ttMax = Math.max(...patterns.map(p => p.twoTheta[p.twoTheta.length - 1]));
 
-  const sorted = [...patterns].sort((a, b) => a.y - b.y);
-  const yVals  = sorted.map(p => p.y);
-  const yMin = yVals[0], yMax = yVals[yVals.length - 1];
-  const yRange = yMax - yMin;
+  // ── Choose ordering & Y-axis representation ──────────────────────────────
+  // STIMULUS MODE: sort by Y value, axis shows real stimulus values (original behaviour).
+  // SEQUENCE MODE: preserve table order, axis runs 0…N-1 but TICK LABELS show the
+  //   actual stimulus value at each pattern position, following the zigzag.
+  let ordered;         // patterns in the order they appear top→bottom on the map
+  let rowFrac;         // rowFrac[i] = fractional Y position of pattern i (0=bottom,1=top)
+  let yMin, yMax;      // values shown on the Y axis (for margin calc)
 
-  const MARGIN = computeMargins(ttMin, ttMax, yMin, yMax, tickSize, labelSize, axisFont, tickLen);
+  if (yAxisMode === 'stimulus') {
+    ordered  = [...patterns].sort((a, b) => a.y - b.y);
+    const yVals = ordered.map(p => p.y);
+    yMin = yVals[0]; yMax = yVals[yVals.length - 1];
+    const yRange = yMax - yMin || 1;
+    rowFrac = yVals.map(v => (v - yMin) / yRange);
+  } else {
+    // Sequence mode: table order (index 0 = bottom of map, last = top)
+    ordered = [...patterns];
+    yMin = ordered[0].y;
+    yMax = ordered[ordered.length - 1].y;
+    // rowFrac: evenly spaced 0…1 along the sequence
+    rowFrac = ordered.map((_, i) => i / (ordered.length - 1));
+  }
 
-  const rawArrays = sorted.map(p => resample(p.twoTheta, p.intensity, ttMin, ttMax, GRID_N));
+  // For margin computation we need the widest tick label.
+  // In sequence mode use the full set of y-values as tick candidates.
+  const yTickVals = yAxisMode === 'stimulus'
+    ? null   // computed inside computeMargins the usual way
+    : ordered.map(p => p.y);
 
-  // Optional peak emphasis: pre-normalisation power transform.
-  // For each pattern, subtract its own baseline (so noise is centred near zero)
-  // then raise to the power `peakEmphasis`. Peaks (large amplitudes above
-  // baseline) grow faster than noise (small amplitudes), boosting the
-  // signal-to-noise ratio before per-pattern normalisation. p=1 is a no-op.
+  const MARGIN = computeMargins(ttMin, ttMax, yMin, yMax, tickSize, labelSize, axisFont, tickLen, yTickVals);
+
+  // ── Resample & normalise ─────────────────────────────────────────────────
+  const rawArrays = ordered.map(p => resample(p.twoTheta, p.intensity, ttMin, ttMax, GRID_N));
+
   if (peakEmphasis > 1) {
     for (const arr of rawArrays) {
       let lo = Infinity;
@@ -976,10 +1118,6 @@ function _render() {
   }
   const normArrays = rawArrays.map(arr => normalize(arr, normMode, gMin, gMax));
 
-  // Apply noise floor at the source: anything ≤ threshold in the normalised
-  // intensity arrays is set to 0 BEFORE interpolation, so noise streaks can't
-  // sneak in between bracketing patterns. Remaining values are linearly
-  // rescaled so the full 0-1 range is preserved.
   if (noiseFloor > 0) {
     for (const arr of normArrays) {
       for (let i = 0; i < arr.length; i++) {
@@ -993,6 +1131,7 @@ function _render() {
   canvas.width = totalW; canvas.height = totalH;
   const plotW = totalW - MARGIN.left - MARGIN.right;
   const plotH = totalH - MARGIN.top  - MARGIN.bottom;
+  const nPat  = ordered.length;
 
   // Background
   ctx.fillStyle = `rgb(${bgR},${bgG},${bgB})`;
@@ -1003,20 +1142,26 @@ function _render() {
   ctx.fillRect(MARGIN.left, MARGIN.top + plotH, plotW, MARGIN.bottom);
   ctx.fillRect(MARGIN.left + plotW, 0, MARGIN.right, totalH);
 
-  // Image data
+  // ── Pixel fill ───────────────────────────────────────────────────────────
+  // rowFrac[i] maps pattern i → fractional height (0=bottom,1=top of plot).
+  // For each pixel row, find the two bracketing patterns and lerp.
   const imgData = ctx.createImageData(plotW, plotH);
   const px4 = imgData.data;
-  const nPat = sorted.length;
   for (let iy = 0; iy < plotH; iy++) {
-    const yVal = yMax - (iy / (plotH - 1)) * yRange;
+    // frac = 1 at top of plot (iy=0), 0 at bottom (iy=plotH-1)
+    const frac = 1 - iy / (plotH - 1);
+    // Find bracketing patterns by their rowFrac
     let loI = 0, hiI = nPat - 1, t = 0;
-    if (yVal <= yVals[0]) loI = hiI = 0;
-    else if (yVal >= yVals[nPat - 1]) loI = hiI = nPat - 1;
-    else for (let k = 0; k < nPat - 1; k++) {
-      if (yVal >= yVals[k] && yVal <= yVals[k + 1]) {
-        loI = k; hiI = k + 1;
-        t = (yVal - yVals[k]) / (yVals[k + 1] - yVals[k]);
-        break;
+    if (frac <= rowFrac[0]) { loI = hiI = 0; }
+    else if (frac >= rowFrac[nPat - 1]) { loI = hiI = nPat - 1; }
+    else {
+      for (let k = 0; k < nPat - 1; k++) {
+        if (frac >= rowFrac[k] && frac <= rowFrac[k + 1]) {
+          loI = k; hiI = k + 1;
+          const span = rowFrac[k + 1] - rowFrac[k];
+          t = span > 0 ? (frac - rowFrac[k]) / span : 0;
+          break;
+        }
       }
     }
     const arrLo = normArrays[loI], arrHi = normArrays[hiI];
@@ -1036,7 +1181,7 @@ function _render() {
   }
   ctx.putImageData(imgData, MARGIN.left, MARGIN.top);
 
-  // Axes
+  // ── Axes ─────────────────────────────────────────────────────────────────
   const INK = '#0f0e0d';
   // X axis
   const xStep  = niceStep((ttMax - ttMin) / 8);
@@ -1068,36 +1213,58 @@ function _render() {
     ctx.fillStyle = INK;
     ctx.fillText('2\u03b8 (\u00b0)', MARGIN.left + plotW / 2, xLabelY);
   }
-  // Y axis
-  const yStep  = niceStep(yRange / 6);
-  const yStart = Math.ceil(yMin / yStep) * yStep;
-  const yDec   = decimalsForStep(yStep);
+
+  // ── Y axis ticks ─────────────────────────────────────────────────────────
   ctx.font = `${tickSize}px ${axisFont}`;
   ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-  for (let yv = yStart; yv <= yMax + 1e-9; yv = +(yv + yStep).toFixed(9)) {
-    const py = MARGIN.top + (1 - (yv - yMin) / yRange) * plotH;
-    ctx.strokeStyle = INK; ctx.lineWidth = lineWeight;
-    ctx.beginPath(); ctx.moveTo(MARGIN.left - tickLen, py); ctx.lineTo(MARGIN.left, py); ctx.stroke();
-    if (showGridlines) {
-      ctx.strokeStyle = gridlineColor; ctx.lineWidth = gridlineWt;
-      ctx.setLineDash([3, 5]);
-      ctx.beginPath(); ctx.moveTo(MARGIN.left, py); ctx.lineTo(MARGIN.left + plotW, py); ctx.stroke();
-      ctx.setLineDash([]);
-    }
-    ctx.fillStyle = INK;
-    ctx.font = `${tickSize}px ${axisFont}`;
-    ctx.fillText(fmtTick(yv, yDec), MARGIN.left - tickLen - 3, py);
-  }
 
-  // Optional pattern-position markers on the right edge — one per measured pattern
-  if (document.getElementById('showPatternMarkers').checked) {
-    ctx.strokeStyle = INK; ctx.lineWidth = lineWeight;
-    sorted.forEach(p => {
-      const py = MARGIN.top + (1 - (p.y - yMin) / yRange) * plotH;
-      ctx.beginPath();
-      ctx.moveTo(MARGIN.left + plotW, py);
-      ctx.lineTo(MARGIN.left + plotW + tickLen, py);
-      ctx.stroke();
+  if (yAxisMode === 'stimulus') {
+    // Standard: evenly-spaced nice ticks on the stimulus scale
+    const yRange  = yMax - yMin || 1;
+    const yStep   = niceStep(yRange / 6);
+    const yStart2 = Math.ceil(yMin / yStep) * yStep;
+    const yDec    = decimalsForStep(yStep);
+    for (let yv = yStart2; yv <= yMax + 1e-9; yv = +(yv + yStep).toFixed(9)) {
+      const py = MARGIN.top + (1 - (yv - yMin) / yRange) * plotH;
+      ctx.strokeStyle = INK; ctx.lineWidth = lineWeight;
+      ctx.beginPath(); ctx.moveTo(MARGIN.left - tickLen, py); ctx.lineTo(MARGIN.left, py); ctx.stroke();
+      if (showGridlines) {
+        ctx.strokeStyle = gridlineColor; ctx.lineWidth = gridlineWt;
+        ctx.setLineDash([3, 5]);
+        ctx.beginPath(); ctx.moveTo(MARGIN.left, py); ctx.lineTo(MARGIN.left + plotW, py); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      ctx.fillStyle = INK; ctx.font = `${tickSize}px ${axisFont}`;
+      ctx.fillText(fmtTick(yv, yDec), MARGIN.left - tickLen - 3, py);
+    }
+    if (showMarkers) {
+      ctx.strokeStyle = INK; ctx.lineWidth = lineWeight;
+      ordered.forEach(p => {
+        const frac = (p.y - yMin) / (yMax - yMin || 1);
+        const py = MARGIN.top + (1 - frac) * plotH;
+        ctx.beginPath(); ctx.moveTo(MARGIN.left + plotW, py); ctx.lineTo(MARGIN.left + plotW + tickLen, py); ctx.stroke();
+      });
+    }
+  } else {
+    // Sequence mode: one tick per pattern at its evenly-spaced row position,
+    // labelled with the actual stimulus value.
+    const yDec = decimalsForStep(niceStep(Math.abs(yMax - yMin) / (nPat || 1)));
+    ordered.forEach((p, i) => {
+      const py = MARGIN.top + (1 - rowFrac[i]) * plotH;
+      ctx.strokeStyle = INK; ctx.lineWidth = lineWeight;
+      ctx.beginPath(); ctx.moveTo(MARGIN.left - tickLen, py); ctx.lineTo(MARGIN.left, py); ctx.stroke();
+      if (showGridlines) {
+        ctx.strokeStyle = gridlineColor; ctx.lineWidth = gridlineWt;
+        ctx.setLineDash([3, 5]);
+        ctx.beginPath(); ctx.moveTo(MARGIN.left, py); ctx.lineTo(MARGIN.left + plotW, py); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      ctx.fillStyle = INK; ctx.font = `${tickSize}px ${axisFont}`;
+      ctx.fillText(fmtTick(p.y, yDec), MARGIN.left - tickLen - 3, py);
+      if (showMarkers) {
+        ctx.strokeStyle = INK; ctx.lineWidth = lineWeight;
+        ctx.beginPath(); ctx.moveTo(MARGIN.left + plotW, py); ctx.lineTo(MARGIN.left + plotW + tickLen, py); ctx.stroke();
+      }
     });
   }
 
@@ -1111,7 +1278,7 @@ function _render() {
   ctx.restore();
 
   plotMeta = { ttMin, ttMax, yMin, yMax, MARGIN, plotW, plotH };
-  setStatus(`Rendered ${sorted.length} patterns · 2\u03b8 ${ttMin.toFixed(2)}–${ttMax.toFixed(2)}° · γ = ${gamma.toFixed(2)}`, 'ok');
+  setStatus(`Rendered ${ordered.length} patterns · 2\u03b8 ${ttMin.toFixed(2)}–${ttMax.toFixed(2)}° · γ = ${gamma.toFixed(2)}`, 'ok');
 }
 
 // ═══════════════════════════════════════════════════
@@ -1508,6 +1675,149 @@ document.getElementById('stkSnapMode').addEventListener('change', e => {
   drawStackLegends(null);
 });
 
+
+// ═══════════════════════════════════════════════════
+//  CSV series export / import
+// ═══════════════════════════════════════════════════
+document.getElementById('exportCsvBtn').addEventListener('click', async () => {
+  if (!patterns.length) return;
+  const yLabel = document.getElementById('yLabel').value || 'Condition';
+  const nPat = patterns.length;
+
+  // Find the maximum number of data points across all patterns
+  const maxPts = Math.max(...patterns.map(p => p.twoTheta.length));
+
+  // Row 0: Y-axis label (single cell)
+  // Row 1: stimulus values, one per pattern pair of columns
+  // Row 2: legend labels, one per pattern pair of columns
+  // Row 3+: 2theta, intensity pairs
+  const rows = [];
+
+  // Row 0: axis label
+  rows.push([yLabel]);
+
+  // Row 1: stimulus values  (col 0 = stim for pat 0, col 2 = stim for pat 1, …)
+  const stimRow = [];
+  patterns.forEach(p => { stimRow.push(p.y != null ? p.y : ''); stimRow.push(''); });
+  rows.push(stimRow);
+
+  // Row 2: legend labels
+  const legRow = [];
+  patterns.forEach(p => { legRow.push(p.legend || ''); legRow.push(''); });
+  rows.push(legRow);
+
+  // Rows 3+: 2theta | intensity per pattern
+  for (let r = 0; r < maxPts; r++) {
+    const row = [];
+    patterns.forEach(p => {
+      if (r < p.twoTheta.length) {
+        row.push(p.twoTheta[r].toFixed(5));
+        row.push(p.intensity[r].toFixed(2));
+      } else {
+        row.push(''); row.push('');
+      }
+    });
+    rows.push(row);
+  }
+
+  const csv = rows.map(r => r.join(',')).join('\n');
+  const defaultName = 'Vx-PXRD_series.csv';
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: defaultName,
+        types: [{ description: 'CSV file', accept: { 'text/csv': ['.csv'] } }]
+      });
+      const writable = await handle.createWritable();
+      await writable.write(csv);
+      await writable.close();
+      setStatus('Series saved.', 'ok');
+      return;
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+      // fall through to download
+    }
+  }
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = defaultName;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  setStatus('Series downloaded.', 'ok');
+});
+
+document.getElementById('importCsvBtn').addEventListener('click', () => {
+  document.getElementById('csvFileInput').click();
+});
+
+document.getElementById('csvFileInput').addEventListener('change', async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  e.target.value = '';
+  await importCsvFile(f);
+});
+
+async function importCsvFile(f) {
+  try {
+    const text = await f.text();
+    const lines = text.split(/\r?\n/);
+    if (lines.length < 4) throw new Error('File too short to be a valid series CSV.');
+
+    // Row 0: Y-axis label
+    const yLabel = lines[0].split(',')[0].trim();
+    if (yLabel) document.getElementById('yLabel').value = yLabel;
+
+    // Row 1: stimulus values (even columns)
+    const stimCells = lines[1].split(',');
+    // Row 2: legend labels (even columns)
+    const legCells  = lines[2].split(',');
+
+    const nPat = Math.floor(stimCells.length / 2);
+    if (nPat < 1) throw new Error('No patterns found in CSV.');
+
+    // Parse data rows
+    const twoThetaArr = Array.from({ length: nPat }, () => []);
+    const intensArr   = Array.from({ length: nPat }, () => []);
+    for (let r = 3; r < lines.length; r++) {
+      const cells = lines[r].split(',');
+      for (let p = 0; p < nPat; p++) {
+        const tt = parseFloat(cells[p * 2]);
+        const ii = parseFloat(cells[p * 2 + 1]);
+        if (isFinite(tt) && isFinite(ii)) {
+          twoThetaArr[p].push(tt);
+          intensArr[p].push(ii);
+        }
+      }
+    }
+
+    // Rebuild patterns array preserving CSV order
+    patterns.length = 0;
+    Object.keys(legendPositions).forEach(k => delete legendPositions[k]);
+    for (let p = 0; p < nPat; p++) {
+      if (twoThetaArr[p].length < 2) continue;
+      const y = parseFloat(stimCells[p * 2]);
+      const legend = legCells[p * 2] ? legCells[p * 2].trim() : '';
+      patterns.push({
+        filename: legend || `pattern_${p + 1}`,
+        twoTheta: twoThetaArr[p],
+        intensity: intensArr[p],
+        y: isFinite(y) ? y : null,
+        legend: legend,
+        nPts: twoThetaArr[p].length
+      });
+    }
+
+    refreshTable();
+    autoFillRange();
+    scheduleRender(); scheduleStackRender();
+    setStatus(`Imported ${patterns.length} patterns from CSV.`, 'ok');
+    setStackStatus(`Imported ${patterns.length} patterns from CSV.`, 'ok');
+  } catch (err) {
+    setStatus('CSV import failed: ' + err.message, 'err');
+  }
+}
+
 // ═══════════════════════════════════════════════════
 //  Auto-render (debounced)
 // ═══════════════════════════════════════════════════
@@ -1526,6 +1836,7 @@ function scheduleStackRender() {
 // ═══════════════════════════════════════════════════
 const DEFAULTS = {
   map: {
+    yAxisMode:        'stimulus',
     yLabel:           'Temperature (°C)',
     ttMin:            '',
     ttMax:            '',
@@ -1583,7 +1894,7 @@ function resetToDefaults() {
 
 // Map controls
 const MAP_CONTROLS = [
-  'yLabel','ttMin','ttMax','normMode','gridRes','peakColor','bgColor','plotHeightPx',
+  'yAxisMode','yLabel','ttMin','ttMax','normMode','gridRes','peakColor','bgColor','plotHeightPx',
   'peakEmphasis','gammaSlider','noiseFloor','axisFont','tickSize','labelSize','lwSlider',
   'showGridlines','gridlineWeight','gridlineColor','showPatternMarkers',
   'lockSize','lockWidth','lockHeight'
