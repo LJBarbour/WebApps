@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FT-IR Plotter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@300;600&family=DM+Sans:wght@400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#FAF6EE;--paper:#F3EDE0;--paper2:#EDE6D4;--ink:#2C2416;--ink-mid:#6B5C3E;
+  --ink-faint:#B8A98A;--accent:#4A6FA5;--accent-soft:#EEF3FA;--line:#DDD5C0;--border:#CEC3AA;
+  --danger:#C0392B;--ok:#4E8367;
+  --mono:'DM Mono',monospace;--sans:'DM Sans',sans-serif;--display:'Fraunces',serif;
+}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:13px;
+     display:flex;flex-direction:column;overflow:hidden}
+::-webkit-scrollbar{width:7px;height:7px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+header{flex-shrink:0;padding:10px 18px 9px;border-bottom:1.5px solid var(--line);
+       display:flex;align-items:baseline;gap:12px}
+header h1{font-family:var(--display);font-weight:600;font-size:19px;color:var(--ink)}
+header .sub{font-size:10px;color:var(--ink-mid);font-family:var(--mono);letter-spacing:.5px}
+header .spacer{flex:1}
+.hbtn{font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;
+      color:var(--accent);background:transparent;border:1px solid var(--border);border-radius:4px;
+      padding:3px 10px;cursor:pointer;transition:background .15s,border-color .15s;align-self:center}
+.hbtn:hover{background:var(--accent-soft);border-color:var(--accent)}
+.body{flex:1;display:flex;min-height:0}
+.left{width:300px;flex-shrink:0;border-right:1.5px solid var(--line);
+      background:var(--paper);display:flex;flex-direction:column;overflow-y:auto;padding:12px 11px}
+.drop-zone{border:1.5px dashed var(--ink-faint);border-radius:5px;padding:12px 6px;
+           text-align:center;cursor:pointer;transition:border-color .2s,background .2s;background:var(--bg);margin-bottom:8px}
+.drop-zone:hover,.drop-zone.drag-over{border-color:var(--accent);background:var(--accent-soft)}
+.drop-zone .dz-lbl{font-size:10.5px;color:var(--ink-mid);line-height:1.45;pointer-events:none}
+.drop-zone .dz-lbl strong{color:var(--ink)}
+.drop-zone .dz-hint{font-family:var(--mono);font-size:9px;color:var(--ink-faint);margin-top:3px;pointer-events:none}
+.s-head{font-family:var(--mono);font-size:9.5px;letter-spacing:1.1px;text-transform:uppercase;
+        color:var(--ink-faint);margin:8px 0 4px;display:flex;align-items:center;gap:6px}
+.s-head .tail{margin-left:auto;font-size:8.5px;text-transform:none;letter-spacing:0}
+.ds-list{display:flex;flex-direction:column;gap:3px}
+.ds-card{display:flex;align-items:center;gap:5px;background:var(--bg);border:1px solid var(--line);
+         border-radius:4px;padding:4px 5px;cursor:pointer;transition:border-color .15s}
+.ds-card.sel{border-color:var(--accent)}
+.ds-card.drag-over{box-shadow:inset 0 2px 0 var(--accent)}
+.ds-card.dragging{opacity:.35}
+.ds-grip{cursor:grab;color:var(--ink-faint);font-size:13px;line-height:1;user-select:none;flex:none}
+.ds-grip:active{cursor:grabbing}
+.ds-card input[type=color]{width:19px;height:18px;padding:0;border:1px solid var(--border);border-radius:3px;cursor:pointer;flex:none;background:none}
+.ds-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.ds-name{border:none;background:transparent;font-family:var(--sans);font-size:11px;color:var(--ink);
+   outline:none;padding:1px 2px;border-radius:2px;width:100%}
+.ds-name:focus{background:#fff;box-shadow:0 0 0 1px var(--accent)}
+.ds-meta{font-family:var(--mono);font-size:8.5px;color:var(--ink-faint);padding-left:2px;
+   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ds-ico{border:none;background:transparent;cursor:pointer;font-size:11px;line-height:1;
+   color:var(--ink-faint);padding:2px;flex:none;transition:color .15s}
+.ds-ico:hover{color:var(--danger)}
+.ds-empty{font-size:11px;color:var(--ink-faint);padding:4px 2px;font-style:italic}
+.editor{display:none;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:7px 8px;margin-top:6px}
+.editor.on{display:block}
+.f-row{display:flex;align-items:center;gap:5px;margin-bottom:4px}
+.f-row:last-child{margin-bottom:0}
+.f-row label{font-family:var(--mono);font-size:9px;color:var(--ink-faint);flex:none;min-width:48px;letter-spacing:.04em}
+.f-row input,.f-row select{flex:1;min-width:0;padding:3px 5px;border:1px solid var(--border);
+  border-radius:3px;font-family:var(--mono);font-size:10.5px;background:var(--bg);color:var(--ink);outline:none}
+.f-row input:focus,.f-row select:focus{border-color:var(--accent)}
+.f-row input[type=color]{width:28px;height:20px;padding:1px;cursor:pointer;flex:none}
+.f-row input[type=range]{-webkit-appearance:none;flex:1;height:3px;background:var(--line);border-radius:2px;outline:none}
+.f-row input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:var(--accent);cursor:pointer}
+.f-row .rv{font-family:var(--mono);font-size:10.5px;color:var(--ink);min-width:22px;text-align:right}
+.mini-btn{font-family:var(--mono);font-size:9.5px;letter-spacing:.6px;text-transform:uppercase;
+   color:var(--accent);background:transparent;border:1px solid var(--border);border-radius:3px;
+   padding:3px 8px;cursor:pointer;transition:background .15s;white-space:nowrap}
+.mini-btn:hover{background:var(--accent-soft);border-color:var(--accent)}
+.mini-btn:disabled{opacity:.35;cursor:default}
+.mini-row{display:flex;gap:6px;margin-bottom:8px}
+.mini-row .mini-btn{flex:1}
+.btn{width:100%;padding:6px;background:var(--accent);color:#fff;border:none;border-radius:4px;
+     font-family:var(--sans);font-size:12px;font-weight:500;cursor:pointer;margin-top:5px;transition:opacity .15s}
+.btn:hover{opacity:.88} .btn:disabled{opacity:.38;cursor:default}
+.btn.ghost{background:transparent;color:var(--accent);border:1.5px solid var(--accent)}
+.error-msg{color:var(--danger);font-family:var(--mono);font-size:10px;padding:4px 6px;
+           background:#FDF0EE;border:1px solid #E8C4BE;border-radius:3px;margin-bottom:6px;display:none;white-space:pre-wrap}
+.centre{flex:1;display:flex;flex-direction:column;min-width:0;background:var(--bg)}
+.plot-wrap{flex:1;position:relative;display:flex;overflow:auto;padding:14px}
+.plot-wrap.picking{outline:2px solid var(--accent);outline-offset:-6px;border-radius:8px}
+canvas#pc{display:block;margin:auto;cursor:crosshair;box-shadow:0 1px 4px rgba(44,36,22,.10),0 0 0 1px var(--line);
+  border-radius:2px;max-width:100%;max-height:100%}
+.zoom-rect{position:absolute;border:1px solid var(--accent);background:rgba(74,111,165,.10);pointer-events:none;display:none}
+.empty-state{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;pointer-events:none}
+.empty-state .es-icon{font-size:34px}
+.empty-state p{color:var(--ink-faint);font-size:12px;text-align:center;max-width:360px;line-height:1.5}
+.empty-state .mini-btn{pointer-events:auto}
+.statusbar{flex-shrink:0;border-top:1px solid var(--line);padding:3px 12px;
+           font-family:var(--mono);font-size:10.5px;color:var(--ink-mid);display:flex;align-items:center;gap:14px}
+.statusbar .cursor{color:var(--accent);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.statusbar .zr{display:none;font-family:var(--mono);font-size:9.5px;color:var(--accent);
+   border:1px solid var(--border);border-radius:3px;background:transparent;padding:1px 7px;cursor:pointer}
+.statusbar .zr:hover{background:var(--accent-soft)}
+.statusbar.ok .msg{color:var(--ok)} .statusbar.err .msg{color:var(--danger)}
+.floating-tip{position:fixed;display:none;font-family:var(--mono);font-size:10px;color:var(--ink);
+  background:rgba(250,246,238,0.95);border:1px solid var(--border);border-radius:4px;padding:4px 9px;
+  pointer-events:none;letter-spacing:.03em;z-index:9999;white-space:nowrap;line-height:1.7;box-shadow:0 2px 6px rgba(44,36,22,.15)}
+.right{width:280px;flex-shrink:0;border-left:1.5px solid var(--line);background:var(--paper);overflow-y:auto}
+.cp-group{border-bottom:1px solid var(--line)}
+.cp-header{display:flex;align-items:center;justify-content:space-between;padding:7px 10px;cursor:pointer;user-select:none;
+           font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--ink-mid)}
+.cp-header:hover{background:var(--paper2)}
+.cp-chevron{font-size:10px;transition:transform .2s}
+.cp-group.open .cp-chevron{transform:rotate(90deg)}
+.cp-body{padding:8px 10px;flex-direction:column;gap:6px;display:none}
+.cp-group.open .cp-body{display:flex}
+.cp-row{display:flex;align-items:center;gap:5px}
+.cp-label{font-size:10.5px;color:var(--ink-mid);flex:1;white-space:nowrap}
+.cp-val{font-family:var(--mono);font-size:10.5px;color:var(--ink);min-width:30px;text-align:right}
+.cp-note{font-size:9.5px;color:var(--ink-faint);line-height:1.5}
+input[type=range]{-webkit-appearance:none;flex:1;height:3px;background:var(--line);border-radius:2px;outline:none;min-width:50px}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:var(--accent);cursor:pointer}
+.cp-row input[type=number],.cp-row input[type=text]{flex:1;padding:3px 5px;border:1px solid var(--border);border-radius:3px;
+  font-family:var(--mono);font-size:11px;background:var(--bg);color:var(--ink);outline:none;min-width:0}
+.cp-row input[type=number]:focus,.cp-row input[type=text]:focus{border-color:var(--accent)}
+.cp-row input[type=color]{width:28px;height:22px;padding:1px 2px;border:1px solid var(--border);border-radius:3px;cursor:pointer;background:none}
+select.cp-sel{flex:1;padding:3px 4px;border:1px solid var(--border);border-radius:3px;
+  font-family:var(--sans);font-size:11px;background:var(--bg);color:var(--ink);outline:none}
+.cp-row input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;cursor:pointer}
+.ann-item{background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:4px 7px;
+  font-family:var(--mono);font-size:10px;display:flex;align-items:center;gap:5px;margin-bottom:3px}
+.ann-item .at{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ann-item .arm{border:none;background:none;cursor:pointer;color:var(--ink-faint);font-size:10px;padding:2px}
+.ann-item .arm:hover{color:var(--danger)}
+.ann-item .aed{border:none;background:none;cursor:pointer;color:var(--ink-faint);font-family:var(--mono);font-size:9px;padding:2px;letter-spacing:.04em;text-transform:uppercase}
+.ann-item .aed:hover{color:var(--accent)}
+.pal{display:flex;flex-wrap:wrap;gap:2px;margin-bottom:6px}
+.pal button{min-width:22px;height:22px;font-size:13px;font-family:Georgia,serif;background:var(--bg);
+  border:1px solid var(--border);cursor:pointer;padding:0 3px;line-height:1;color:var(--ink);transition:background .1s;border-radius:2px}
+.pal button:hover{background:var(--paper2)}
+.modal-veil{position:fixed;inset:0;background:rgba(44,36,22,.35);display:none;align-items:center;justify-content:center;z-index:50}
+.modal-veil.show{display:flex}
+.modal{background:var(--bg);border:1.5px solid var(--border);border-radius:8px;
+   width:min(720px,92vw);max-height:85vh;overflow-y:auto;padding:22px 26px;box-shadow:0 8px 30px rgba(44,36,22,.25)}
+.modal h2{font-family:var(--display);font-weight:600;font-size:20px;margin-bottom:10px}
+.modal h3{font-family:var(--display);font-weight:600;font-size:14px;margin:14px 0 4px}
+.modal p,.modal li{font-size:12.5px;line-height:1.65;color:var(--ink-mid)}
+.modal ul{padding-left:18px}
+.modal code{font-family:var(--mono);font-size:11px;background:var(--paper2);border-radius:3px;padding:0 5px;color:var(--ink)}
+.modal .close-x{float:right;border:none;background:none;font-size:18px;cursor:pointer;color:var(--ink-mid)}
+#toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%) translateY(10px);
+  background:var(--ink);color:var(--bg);font-family:var(--mono);font-size:11px;
+  padding:6px 14px;border-radius:5px;opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;z-index:60}
+#toast.show{opacity:.94;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+<header>
+  <h1>FT-IR Plotter</h1>
+  <span class="sub">v3.0 &middot; Fourier-transform infrared spectroscopy &middot; publication-ready figures</span>
+  <span class="spacer"></span>
+  <button class="hbtn" id="guideBtn">Guide</button>
+</header>
+<div class="body">
+<div class="left">
+  <div class="drop-zone" id="dropZone">
+    <div class="dz-lbl"><strong>Drop spectra files</strong> or click to browse</div>
+    <div class="dz-hint">.dpt &middot; .csv &middot; .txt &mdash; multiple files accepted</div>
+    <input type="file" id="fileInput" accept=".dpt,.csv,.txt" multiple style="display:none">
+  </div>
+  <div class="mini-row">
+    <button class="mini-btn" id="clearAllBtn">Clear all</button>
+    <button class="mini-btn" id="exportCSVBtn" disabled>Export merged CSV</button>
+  </div>
+  <div class="s-head">Spectra <span id="dsCount"></span>
+    <span class="tail">drag &#x28FF; to reorder</span></div>
+  <div class="ds-list" id="dsList"><div class="ds-empty">No spectra loaded.</div></div>
+  <div class="editor" id="editor">
+    <div class="f-row"><label>Label</label><input type="text" id="ae-label"></div>
+    <div class="f-row"><label>Colour</label><input type="color" id="ae-color">
+      <label style="min-width:32px">Style</label>
+      <select id="ae-dash"><option value="">Solid</option><option value="10,4">Dashed</option>
+        <option value="3,4">Dotted</option><option value="10,4,3,4">Dash-dot</option></select></div>
+    <div class="f-row"><label>Width</label><input type="range" id="ae-width" min="0.5" max="8" step="0.5" value="2">
+      <span class="rv" id="ae-widthV">2</span></div>
+    <div class="f-row"><label>Y offset</label><input type="number" id="ae-offset" step="0.01" value="0" style="width:70px;flex:none"></div>
+  </div>
+</div>
+<div class="centre">
+  <div class="plot-wrap" id="plotWrap">
+    <canvas id="pc"></canvas>
+    <div class="zoom-rect" id="zoomRect"></div>
+    <div class="empty-state" id="emptyState">
+      <div class="es-icon">&#x301C;</div>
+      <p>Drop spectrum files anywhere to begin, or load a demo.</p>
+      <button class="mini-btn" id="exampleBtn">Load demo spectra</button>
+    </div>
+  </div>
+  <div class="statusbar" id="statusbar">
+    <span id="cursorEl" class="cursor" style="display:none"></span>
+    <button class="zr" id="zoomResetBtn">Reset zoom</button>
+    <span id="statusEl" class="msg">Ready</span>
+  </div>
+</div>
+<div class="right" id="rightPanel">
+  <div class="cp-group"><div class="cp-header">Axis Ranges<span class="cp-chevron">&#x203A;</span></div>
+    <div class="cp-body">
+      <div class="cp-row"><span class="cp-label">X min (cm&#x207B;&#xB9;)</span><input type="number" id="xMin" value="400" style="width:66px;flex:none"></div>
+      <div class="cp-row"><span class="cp-label">X max (cm&#x207B;&#xB9;)</span><input type="number" id="xMax" value="4000" style="width:66px;flex:none"></div>
+      <div class="cp-row"><span class="cp-label">X direction</span>
+        <select class="cp-sel" id="xDir"><option value="desc">4000 &#x2192; 400</option><option value="asc">400 &#x2192; 4000</option></select></div>
+      <div class="cp-row"><span class="cp-label">Y min</span><input type="number" id="yMin" placeholder="auto" style="width:66px;flex:none"></div>
+      <div class="cp-row"><span class="cp-label">Y max</span><input type="number" id="yMax" placeholder="auto" style="width:66px;flex:none"></div>
+      <div class="cp-note">Drag across the plot to zoom; double-click or Reset to restore.</div>
+    </div></div>
+  <div class="cp-group"><div class="cp-header">Y-Axis Mode<span class="cp-chevron">&#x203A;</span></div>
+    <div class="cp-body">
+      <div class="cp-row"><span class="cp-label">Mode</span>
+        <select class="cp-sel" id="yMode"><option value="raw">Raw (as-loaded)</option><option value="T">Transmittance</option><option value="A">Absorbance</option></select></div>
+      <div class="cp-row"><span class="cp-label">Y label</span><input type="text" id="yLbl" value="Intensity (a.u.)"></div>
+      <div class="cp-row"><span class="cp-label">Normalise</span>
+        <select class="cp-sel" id="norm"><option value="none">None</option><option value="max">0&ndash;1 per spectrum</option><option value="area">Area = 1</option></select></div>
+    </div></div>
+  <div class="cp-group"><div class="cp-header">Typography<span class="cp-chevron">&#x203A;</span></div>
+    <div class="cp-body">
+      <div class="cp-row"><span class="cp-label">Title</span><input type="text" id="figTitle" placeholder="(none)"></div>
+      <div class="cp-row"><span class="cp-label">X label</span><input type="text" id="xLbl" value="Wavenumber / cm&#x207B;&#xB9;"></div>
+      <div class="cp-row"><span class="cp-label">Font</span>
+        <select class="cp-sel" id="fontFam"><option value="Arial" selected>Arial</option><option value="Helvetica">Helvetica</option>
+          <option value="Georgia">Georgia</option><option value="Times New Roman">Times NR</option>
+          <option value="DM Sans">DM Sans</option><option value="DM Mono">DM Mono</option></select></div>
+      <div class="cp-row"><span class="cp-label">Label size</span><input type="range" id="axSz" min="8" max="72" value="34"><span class="cp-val" id="axSzV">34</span></div>
+      <div class="cp-row"><span class="cp-label">Tick size</span><input type="range" id="tkSz" min="8" max="60" value="28"><span class="cp-val" id="tkSzV">28</span></div>
+      <div class="cp-row"><span class="cp-label">Title size</span><input type="range" id="titSz" min="8" max="80" value="38"><span class="cp-val" id="titSzV">38</span></div>
+    </div></div>
+  <div class="cp-group"><div class="cp-header">Grid, Ticks &amp; Frame<span class="cp-chevron">&#x203A;</span></div>
+    <div class="cp-body">
+      <div class="cp-row"><span class="cp-label">Show grid</span><input type="checkbox" id="gridOn"></div>
+      <div class="cp-row"><span class="cp-label">Show Y ticks</span><input type="checkbox" id="showYTicks"></div>
+      <div class="cp-row"><span class="cp-label">Grid colour</span><input type="color" id="gridCol" value="#DDDDDD"></div>
+      <div class="cp-row"><span class="cp-label">Grid width</span><input type="range" id="gridW" min="0.5" max="3" step="0.5" value="1"><span class="cp-val" id="gridWV">1.0</span></div>
+      <div class="cp-row"><span class="cp-label">Tick length</span><input type="range" id="tickLen" min="2" max="20" value="10"><span class="cp-val" id="tickLenV">10</span></div>
+      <div class="cp-row"><span class="cp-label">Tick width</span><input type="range" id="tickW" min="0.5" max="5" step="0.5" value="2.5"><span class="cp-val" id="tickWV">2.5</span></div>
+      <div class="cp-row"><span class="cp-label">Tick direction</span>
+        <select class="cp-sel" id="tickDir"><option value="in">Inward</option><option value="out" selected>Outward</option><option value="both">Both</option></select></div>
+      <div class="cp-row"><span class="cp-label">Frame width</span><input type="range" id="frameW" min="0.5" max="6" step="0.5" value="2.5"><span class="cp-val" id="frameWV">2.5</span></div>
+      <div class="cp-row"><span class="cp-label">Frame colour</span><input type="color" id="frameCol" value="#000000"></div>
+      <div class="cp-row"><span class="cp-label">Plot box</span><input type="checkbox" id="plotBox" checked></div>
+      <div class="cp-row"><span class="cp-label">Axis colour</span><input type="color" id="axCol" value="#000000"></div>
+    </div></div>
+  <div class="cp-group"><div class="cp-header">Background<span class="cp-chevron">&#x203A;</span></div>
+    <div class="cp-body">
+      <div class="cp-row"><span class="cp-label">Chart bg</span><input type="color" id="chartBg" value="#FFFFFF"></div>
+    </div></div>
+  <div class="cp-group"><div class="cp-header">Annotations<span class="cp-chevron">&#x203A;</span></div>
+    <div class="cp-body">
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.8px;text-transform:uppercase;color:var(--ink-faint);margin-bottom:3px">Greek &mdash; click to insert</div>
+      <div class="pal" id="greekPal"></div>
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:.8px;text-transform:uppercase;color:var(--ink-faint);margin-bottom:3px">Symbols</div>
+      <div class="pal" id="chemPal"></div>
+      <div class="f-row" style="margin-bottom:6px">
+        <div style="display:flex;flex-direction:column;gap:3px;width:80px;flex:none">
+          <span style="font-family:var(--mono);font-size:9px;color:var(--ink-faint)">Wavenumber</span>
+          <div style="display:flex;gap:3px"><input type="number" id="ann-wn" placeholder="1640" style="flex:1;min-width:0">
+            <button class="mini-btn" id="annPickBtn" style="padding:2px 5px;font-size:12px" title="Pick from plot">&#x2316;</button></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:0">
+          <span style="font-family:var(--mono);font-size:9px;color:var(--ink-faint)">Label</span>
+          <input type="text" id="ann-lbl" placeholder="&#x03BD;(OH)" style="width:100%"></div>
+        <button class="mini-btn" id="addAnnBtn" style="align-self:flex-end;padding:4px 9px">Add</button>
+      </div>
+      <div class="cp-row"><span class="cp-label">Show vert. lines</span><input type="checkbox" id="annLines" checked></div>
+      <div class="cp-row"><span class="cp-label">Ann. font</span>
+        <select class="cp-sel" id="annFont"><option value="Arial" selected>Arial</option><option value="Helvetica">Helvetica</option>
+          <option value="Georgia">Georgia</option><option value="Times New Roman">Times NR</option></select></div>
+      <div class="cp-row"><span class="cp-label">Ann. size</span><input type="range" id="annSz" min="6" max="48" value="20"><span class="cp-val" id="annSzV">20</span></div>
+      <div class="cp-row"><span class="cp-label">Ann. colour</span><input type="color" id="annCol" value="#000000"></div>
+      <div class="s-head" style="margin-top:4px">Added <span class="tail"><button class="mini-btn" id="clearAnnsBtn" style="padding:1px 6px;font-size:8px">clear all</button></span></div>
+      <div id="annList"></div>
+    </div></div>
+  <div class="cp-group"><div class="cp-header">Legend<span class="cp-chevron">&#x203A;</span></div>
+    <div class="cp-body">
+      <div class="cp-row"><span class="cp-label">Show legend</span><input type="checkbox" id="legShow" checked></div>
+      <div class="cp-row"><span class="cp-label">Position</span>
+        <select class="cp-sel" id="legPos"><option value="tl">Top left</option><option value="tr" selected>Top right</option>
+          <option value="bl">Bottom left</option><option value="br">Bottom right</option></select></div>
+      <div class="cp-row"><span class="cp-label">Legend size</span><input type="range" id="legSz" min="8" max="40" value="16"><span class="cp-val" id="legSzV">16</span></div>
+    </div></div>
+  <div class="cp-group"><div class="cp-header">Export<span class="cp-chevron">&#x203A;</span></div>
+    <div class="cp-body">
+      <div class="cp-row"><span class="cp-label">Width (px)</span><input type="number" id="expW" value="1400" style="width:70px;flex:none"></div>
+      <div class="cp-row"><span class="cp-label">Height (px)</span><input type="number" id="expH" value="900" style="width:70px;flex:none"></div>
+      <div class="cp-row"><span class="cp-label">PNG scale</span>
+        <select class="cp-sel" id="pngScale" style="flex:none;width:70px"><option value="1">1x</option><option value="2" selected>2x</option><option value="3">3x</option></select></div>
+      <button class="btn" id="savePNGBtn" disabled>Save PNG&#8230;</button>
+      <button class="btn ghost" id="saveSVGBtn" disabled>Save SVG (vector)&#8230;</button>
+      <button class="btn ghost" id="copyPNGBtn" disabled>Copy to clipboard</button>
+      <button class="btn ghost" id="saveSettingsBtn">Save settings&#8230;</button>
+      <button class="btn ghost" id="loadSettingsBtn">Load settings&#8230;</button>
+    </div></div>
+</div>
+</div>
+<div class="modal-veil" id="guideVeil"><div class="modal">
+  <button class="close-x" id="guideClose">&times;</button>
+  <h2>FT-IR Plotter &mdash; guide</h2>
+  <p>Overlay and annotate FT-IR spectra for publication-ready figures. Everything runs locally; no data leaves the browser.</p>
+  <h3>Loading spectra</h3>
+  <ul><li>Drop <code>.dpt</code>, <code>.csv</code>, or <code>.txt</code> files anywhere on the page or into the drop zone. Multiple files are accepted at once.</li>
+    <li>Two-column whitespace/comma/semicolon/tab-delimited data: column 1 = wavenumber (cm&#x207B;&#xB9;), column 2 = intensity.</li>
+    <li>Each spectrum gets a card in the left panel with a colour swatch, editable label, and drag grip for reordering.</li></ul>
+  <h3>Per-spectrum editing</h3>
+  <p>Click a card to select it and open the editor: change the <strong>label</strong>, <strong>colour</strong>, line <strong>style</strong> (solid/dashed/dotted/dash-dot), <strong>width</strong>, and <strong>Y offset</strong> for stacking.</p>
+  <h3>Y-axis mode</h3>
+  <p><strong>Raw</strong> plots the data as-loaded. <strong>Transmittance</strong> and <strong>Absorbance</strong> convert assuming the raw values are fractional transmittance (or % T if &gt; 1). <strong>Normalise</strong> scales each spectrum independently: 0&ndash;1 or area = 1.</p>
+  <h3>Annotations</h3>
+  <p>Type a wavenumber and label (use the Greek/chemistry palettes to insert special characters), or <strong>pick from the plot</strong> by clicking the crosshair button then clicking on the spectrum. Annotation labels are <strong>draggable vertically</strong> on the canvas. Each annotation can be edited or removed individually.</p>
+  <h3>Plot interaction</h3>
+  <ul><li><kbd>drag</kbd> to zoom the wavenumber range; <kbd>double-click</kbd> or Reset to restore.</li>
+    <li>A floating tooltip reports the wavenumber and each spectrum's value at the cursor.</li></ul>
+  <h3>Export</h3>
+  <p><strong>PNG</strong> (at chosen size &times; scale), <strong>SVG</strong> (true vector), clipboard copy, merged <strong>CSV</strong>, and <strong>settings JSON</strong> round-trip.</p>
+</div></div>
+<div class="floating-tip" id="floatTip"></div>
+<div id="toast"></div>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+function val(id){const e=$(id);if(!e)return'';return e.type==='checkbox'?e.checked:e.value;}
+function numv(id,def){const v=parseFloat(val(id));return isFinite(v)?v:(def!==undefined?def:null);}
+function showToast(m){const t=$('toast');t.textContent=m;t.classList.add('show');
+  clearTimeout(showToast._t);showToast._t=setTimeout(()=>t.classList.remove('show'),1900);}
+function setStatus(msg,cls){const sb=$('statusbar');$('statusEl').textContent=msg;
+  sb.classList.remove('ok','err');if(cls)sb.classList.add(cls);}
+
+const PALETTE=['#4A6FA5','#C0603A','#4E8367','#8A5A9E','#C79A2E','#546E7A','#A34E63','#7A7146'];
+let spectra=[],activeIdx=null,anns=[],zs={xMin:null,xMax:null},dragSrcIdx=null;
+let pickMode=false,pickEditIdx=null,lastAnnFocus=null;
+const canvas=$('pc'),ctx=canvas.getContext('2d');
+const measCtx=document.createElement('canvas').getContext('2d');
+let plotMeta=null,sourceFileHandle=null;
+
+// ---- Parse ----
+function parse(text){
+  const pts=[];
+  for(const l of text.replace(/\r/g,'').trim().split('\n')){
+    const p=l.trim().split(/[\s,;\t]+/);
+    if(p.length<2)continue;
+    const wn=parseFloat(p[0]),y=parseFloat(p[1]);
+    if(isFinite(wn)&&isFinite(y))pts.push({wn,y});
+  }
+  return pts.sort((a,b)=>a.wn-b.wn);
+}
+// ---- Mode / norm ----
+function toAbs(pts){return pts.map(p=>{let t=p.y;if(t>1&&t<=100)t/=100;t=Math.max(t,1e-9);t=Math.min(t,1);return{wn:p.wn,y:-Math.log10(t)};});}
+function toTrans(pts){return pts.map(p=>{let t=p.y;if(t>1&&t<=100)t/=100;return{wn:p.wn,y:t};});}
+function applyMode(pts,mode){if(mode==='A')return toAbs(pts);if(mode==='T')return toTrans(pts);return pts;}
+function applyNorm(pts,norm){
+  if(norm==='max'){let lo=Infinity,hi=-Infinity;for(const p of pts){if(p.y<lo)lo=p.y;if(p.y>hi)hi=p.y;}const r=hi-lo||1;return pts.map(p=>({wn:p.wn,y:(p.y-lo)/r}));}
+  if(norm==='area'){let a=0;for(let i=1;i<pts.length;i++)a+=Math.abs(pts[i].wn-pts[i-1].wn)*(pts[i].y+pts[i-1].y)/2;a=a||1;return pts.map(p=>({wn:p.wn,y:p.y/a}));}
+  return pts;
+}
+function processed(sp){let pts=applyMode(sp.raw,val('yMode'));pts=applyNorm(pts,val('norm'));return pts.map(p=>({wn:p.wn,y:p.y+sp.offset}));}
+
+// ---- Ticks ----
+function niceR(min,max,n){n=n||5;if(!isFinite(min)||!isFinite(max)||min===max){const c=isFinite(min)?min:0;return{min:c-1,max:c+1,ticks:[c-1,c,c+1]};}
+  const rng=max-min,step=Math.pow(10,Math.floor(Math.log10(rng/n)));
+  const ns=[1,2,2.5,5,10].map(s=>s*step).find(s=>rng/s<=n+1)||step;
+  const lo=Math.floor(min/ns)*ns,hi=Math.ceil(max/ns)*ns;
+  const ticks=[];for(let v=lo;v<=hi+1e-10;v+=ns)ticks.push(+v.toPrecision(10));return{min:lo,max:hi,ticks};}
+function tickDec(ticks){if(!ticks||ticks.length<2)return 0;const step=Math.abs(ticks[1]-ticks[0]);if(!step||step>=1)return 0;
+  let dec=Math.min(6,Math.ceil(-Math.log10(step)-1e-9));
+  for(const v of ticks){const s=v*Math.pow(10,dec);if(Math.abs(s-Math.round(s))>1e-6)dec=Math.min(6,dec+1);}return dec;}
+function fmtTick(v,dp){if(Object.is(v,-0))v=0;if(Math.abs(v)>=1e5||(Math.abs(v)<0.001&&v!==0))return v.toExponential(2);return v.toFixed(dp);}
+function measureText(s,sz,font){measCtx.font=sz+'px '+font;return measCtx.measureText(s).width;}
+
+// ---- Render backends ----
+function canvasBackend(c){return{kind:'canvas',ctx:c,
+  rect(x,y,w,h,fill){c.fillStyle=fill;c.fillRect(x,y,w,h);},
+  box(x,y,w,h,stroke,lw){c.strokeStyle=stroke;c.lineWidth=lw;c.strokeRect(x,y,w,h);},
+  line(x1,y1,x2,y2,stroke,lw,dash){c.strokeStyle=stroke;c.lineWidth=lw;if(dash)c.setLineDash(dash);c.beginPath();c.moveTo(x1,y1);c.lineTo(x2,y2);c.stroke();if(dash)c.setLineDash([]);},
+  poly(pts,stroke,lw,dash){if(pts.length<4)return;c.strokeStyle=stroke;c.lineWidth=lw;c.lineJoin='round';c.lineCap='round';if(dash)c.setLineDash(dash.split(',').map(Number));c.beginPath();c.moveTo(pts[0],pts[1]);for(let i=2;i<pts.length;i+=2)c.lineTo(pts[i],pts[i+1]);c.stroke();if(dash)c.setLineDash([]);},
+  text(s,x,y,o){c.font=(o.italic?'italic ':'')+(o.bold?'bold ':'')+o.size+'px '+o.font;c.fillStyle=o.color;c.textAlign=o.align||'left';c.textBaseline=o.baseline||'alphabetic';if(o.rotate){c.save();c.translate(x,y);c.rotate(o.rotate*Math.PI/180);c.fillText(s,0,0);c.restore();}else c.fillText(s,x,y);},
+  pushClip(x,y,w,h){c.save();c.beginPath();c.rect(x,y,w,h);c.clip();},popClip(){c.restore();},};}
+function svgBackend(w,h){const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');const N=v=>+v.toFixed(2);let defs='',body='',clipN=0;
+  const BL={alphabetic:'',middle:' dominant-baseline="central"',top:' dominant-baseline="text-before-edge"'};
+  const AN={left:'start',center:'middle',right:'end'};
+  return{kind:'svg',
+    rect(x,y,ww,hh,fill){body+='<rect x="'+N(x)+'" y="'+N(y)+'" width="'+N(ww)+'" height="'+N(hh)+'" fill="'+fill+'"/>';},
+    box(x,y,ww,hh,stroke,lw){body+='<rect x="'+N(x)+'" y="'+N(y)+'" width="'+N(ww)+'" height="'+N(hh)+'" fill="none" stroke="'+stroke+'" stroke-width="'+lw+'"/>';},
+    line(x1,y1,x2,y2,stroke,lw,dash){body+='<line x1="'+N(x1)+'" y1="'+N(y1)+'" x2="'+N(x2)+'" y2="'+N(y2)+'" stroke="'+stroke+'" stroke-width="'+lw+'"'+(dash?' stroke-dasharray="'+dash.join(',')+'"':'')+'/>';},
+    poly(pts,stroke,lw,dash){if(pts.length<4)return;let s='';for(let i=0;i<pts.length;i+=2)s+=N(pts[i])+','+N(pts[i+1])+' ';
+      body+='<polyline points="'+s.trim()+'" fill="none" stroke="'+stroke+'" stroke-width="'+lw+'"'+(dash?' stroke-dasharray="'+dash+'"':'')+' stroke-linejoin="round" stroke-linecap="round"/>';},
+    text(s,x,y,o){body+='<text x="'+(o.rotate?0:N(x))+'" y="'+(o.rotate?0:N(y))+'" font-family="'+esc(o.font)+'" font-size="'+o.size+'"'+(o.bold?' font-weight="bold"':'')+(o.italic?' font-style="italic"':'')+' fill="'+o.color+'" text-anchor="'+(AN[o.align||'left'])+'"'+(BL[o.baseline||'alphabetic']||'')+(o.rotate?' transform="translate('+N(x)+','+N(y)+') rotate('+o.rotate+')"':'')+'>'+esc(s)+'</text>';},
+    pushClip(x,y,ww,hh){const id='clip'+(clipN++);defs+='<clipPath id="'+id+'"><rect x="'+N(x)+'" y="'+N(y)+'" width="'+N(ww)+'" height="'+N(hh)+'"/></clipPath>';body+='<g clip-path="url(#'+id+')">';},popClip(){body+='</g>';},
+    toString(){return'<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'" viewBox="0 0 '+w+' '+h+'"><defs>'+defs+'</defs>'+body+'</svg>';}};}
+
+// ---- drawFigure ----
+function drawFigure(be,CW,CH,forScreen){
+  const font=val('fontFam')||'Arial',axSz=numv('axSz',34),tkSz=numv('tkSz',28),titSz=numv('titSz',38);
+  const axC=val('axCol')||'#000',frameC=val('frameCol')||'#000',fW=numv('frameW',2.5);
+  const gridOn=val('gridOn'),gridC=val('gridCol'),gridW_=numv('gridW',1);
+  const TL=numv('tickLen',10),tW=numv('tickW',2.5),tickDir=val('tickDir')||'out';
+  const bgCol=val('chartBg')||'#fff',plotBox=val('plotBox'),showYTicks=val('showYTicks');
+  const legShow=val('legShow'),legSz=numv('legSz',16),legPos=val('legPos')||'tr';
+  const figTitle=val('figTitle')||'',xLblTxt=val('xLbl')||'Wavenumber / cm\u207B\u00B9',yLblTxt=val('yLbl')||'Intensity (a.u.)';
+  const annShowLines=val('annLines'),annFont=val('annFont')||'Arial',annSz=numv('annSz',20),annCol=val('annCol')||'#000';
+  const hasData=spectra.length>0;
+  const xFwd=val('xDir')==='asc';
+  // ranges
+  const allPts=spectra.flatMap(sp=>processed(sp));
+  let xLoD=numv('xMin',400),xHiD=numv('xMax',4000);
+  if(zs.xMin!==null)xLoD=zs.xMin;if(zs.xMax!==null)xHiD=zs.xMax;
+  if(xLoD>xHiD){const t=xLoD;xLoD=xHiD;xHiD=t;}
+  const xrNice=niceR(xLoD,xHiD,8);
+  const xTicks=xrNice.ticks.filter(v=>v>=xLoD-1e-9&&v<=xHiD+1e-9);
+  const xDp=tickDec(xTicks.length?xTicks:xrNice.ticks);
+  let yLo=0,yHi=1;
+  if(allPts.length){const vis=allPts.filter(p=>p.wn>=xLoD&&p.wn<=xHiD);
+    if(vis.length){yLo=Math.min(...vis.map(p=>p.y));yHi=Math.max(...vis.map(p=>p.y));}}
+  const uYMin=numv('yMin'),uYMax=numv('yMax');
+  const yrNice=niceR(uYMin!==null?uYMin:yLo,uYMax!==null?uYMax:yHi,6);
+  const yR={min:uYMin!==null?uYMin:yrNice.min,max:uYMax!==null?uYMax:yrNice.max};
+  const yTicks=niceR(yR.min,yR.max,6).ticks.filter(v=>v>=yR.min-1e-9&&v<=yR.max+1e-9);
+  const yDp=tickDec(yTicks.length?yTicks:yrNice.ticks);
+  // margins
+  const yTickW=showYTicks?Math.max(...(yTicks.length?yTicks:[0]).map(v=>measureText(fmtTick(v,yDp),tkSz,font))):0;
+  const ML=Math.round(axSz+8+(showYTicks?TL+4+yTickW:4));
+  const MR=Math.round(Math.max(axSz*0.5,Math.max(...(xTicks.length?xTicks:[0]).map(v=>measureText(fmtTick(v,xDp),tkSz,font)))/2+8));
+  const hasTitle=figTitle.length>0;
+  const MT=Math.round((hasTitle?titSz+10:0)+tkSz*0.5+8);
+  const MB=Math.round(axSz+8+TL+tkSz*1.6+10);
+  const PW=CW-ML-MR,PH=CH-MT-MB;
+  function sx(wn){const frac=xFwd?(wn-xLoD)/(xHiD-xLoD):(xHiD-wn)/(xHiD-xLoD);return ML+frac*PW;}
+  function sy(y){return MT+PH-(y-yR.min)/(yR.max-yR.min)*PH;}
+  be.rect(0,0,CW,CH,bgCol);
+  // grid
+  if(gridOn){be.pushClip(ML,MT,PW,PH);
+    for(const v of xTicks){const x=sx(v);be.line(x,MT,x,MT+PH,gridC,gridW_,[3,5]);}
+    for(const v of yTicks){const y=sy(v);be.line(ML,y,ML+PW,y,gridC,gridW_,[3,5]);}
+    be.popClip();}
+  // frame
+  if(plotBox)be.box(ML,MT,PW,PH,frameC,fW);
+  else{be.line(ML,MT+PH,ML+PW,MT+PH,frameC,fW);if(showYTicks)be.line(ML,MT,ML,MT+PH,frameC,fW);}
+  // x ticks
+  for(const v of xTicks){const x=sx(v);if(x<ML-1||x>ML+PW+1)continue;
+    if(tickDir==='out'||tickDir==='both')be.line(x,MT+PH,x,MT+PH+TL,axC,tW);
+    if(tickDir==='in'||tickDir==='both')be.line(x,MT+PH,x,MT+PH-TL,axC,tW);
+    be.text(fmtTick(v,xDp),x,MT+PH+TL+6,{size:tkSz,font,color:axC,align:'center',baseline:'top'});}
+  be.text(xLblTxt,ML+PW/2,MT+PH+TL+tkSz*1.6+6,{size:axSz,font,color:axC,align:'center',baseline:'top'});
+  // y ticks
+  if(showYTicks){for(const v of yTicks){const y=sy(v);if(y<MT-1||y>MT+PH+1)continue;
+    if(tickDir==='out'||tickDir==='both')be.line(ML,y,ML-TL,y,axC,tW);
+    if(tickDir==='in'||tickDir==='both')be.line(ML,y,ML+TL,y,axC,tW);
+    be.text(fmtTick(v,yDp),ML-TL-4,y,{size:tkSz,font,color:axC,align:'right',baseline:'middle'});}}
+  if(showYTicks||plotBox)be.text(yLblTxt,axSz/2+4,MT+PH/2,{size:axSz,font,color:axC,align:'center',baseline:'middle',rotate:-90});
+  if(hasTitle)be.text(figTitle,ML+PW/2,8,{size:titSz,font,color:axC,align:'center',baseline:'top'});
+  // curves
+  be.pushClip(ML,MT,PW,PH);
+  spectra.forEach(sp=>{
+    const pts=processed(sp).filter(p=>p.wn>=xLoD-1&&p.wn<=xHiD+1).sort((a,b)=>a.wn-b.wn);
+    if(!pts.length)return;
+    const run=[];pts.forEach(p=>run.push(sx(p.wn),sy(p.y)));
+    be.poly(run,sp.color,sp.width,sp.dash||'');
+  });
+  // annotations
+  anns.forEach(a=>{if(a.wn<xLoD||a.wn>xHiD)return;
+    const x=sx(a.wn),yFrac=a.yFrac!==undefined?a.yFrac:0.08,labelY=MT+PH*yFrac;
+    if(annShowLines)be.line(x,MT,x,MT+PH,'rgba(0,0,0,0.25)',1,[4,4]);
+    // Greek chars -> serif fallback for correct glyph rendering
+    const isG=ch=>/[\u0370-\u03FF]/.test(ch);
+    let tw=0;for(const ch of a.label){const f=isG(ch)?'Georgia':annFont;tw+=measureText(ch,annSz,f);}
+    let cx=x-tw/2;
+    for(const ch of a.label){const f=isG(ch)?'Georgia':annFont;
+      be.text(ch,cx,labelY,{size:annSz,font:f,color:annCol,align:'left',baseline:'middle'});cx+=measureText(ch,annSz,f);}
+    if(forScreen)a._box={x:x-tw/2-4,y:labelY-annSz/2-2,w:tw+8,h:annSz+4};
+  });
+  be.popClip();
+  // legend
+  if(legShow&&spectra.length){
+    const lpad=legSz*0.6,lh=legSz*1.7,llen=legSz*1.5;
+    const maxLW=Math.max(...spectra.map(sp=>measureText(sp.label,legSz,font)));
+    const bW=llen+lpad*2+maxLW+lpad,bH=spectra.length*lh+lpad;
+    let bx,by;
+    if(legPos==='tl'){bx=ML+legSz*0.5;by=MT+legSz*0.5;}
+    else if(legPos==='tr'){bx=ML+PW-bW-legSz*0.5;by=MT+legSz*0.5;}
+    else if(legPos==='bl'){bx=ML+legSz*0.5;by=MT+PH-bH-legSz*0.5;}
+    else{bx=ML+PW-bW-legSz*0.5;by=MT+PH-bH-legSz*0.5;}
+    be.pushClip(ML,MT,PW,PH);
+    be.rect(bx,by,bW,bH,'rgba(255,255,255,0.88)');be.box(bx,by,bW,bH,'#cccccc',1);
+    spectra.forEach((sp,i)=>{const ly=by+lpad*0.7+legSz+i*lh;
+      be.line(bx+lpad,ly-legSz*0.2,bx+lpad+llen,ly-legSz*0.2,sp.color,sp.width);
+      be.text(sp.label,bx+lpad+llen+lpad*0.5,ly,{size:legSz,font,color:axC,align:'left',baseline:'alphabetic'});});
+    be.popClip();}
+  if(forScreen)plotMeta={ML,MR,MT,MB,PW,PH,xLoD,xHiD,yR,sx,sy,xFwd,CW,CH};
+}
+
+// ---- Screen render ----
+let rafPending=false,renderTimer=null;
+function scheduleRender(){clearTimeout(renderTimer);renderTimer=setTimeout(()=>{if(rafPending)return;rafPending=true;requestAnimationFrame(()=>{rafPending=false;doRender();});},30);}
+function doRender(){
+  if(!spectra.length){ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,canvas.width,canvas.height);canvas.width=0;canvas.height=0;
+    $('emptyState').style.display='flex';updateBtns();return;}
+  $('emptyState').style.display='none';
+  const wrap=$('plotWrap'),W=Math.max(420,wrap.clientWidth-28),H=Math.max(300,wrap.clientHeight-28);
+  const dpr=window.devicePixelRatio||1;
+  canvas.style.width=W+'px';canvas.style.height=H+'px';
+  canvas.width=Math.round(W*dpr);canvas.height=Math.round(H*dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  drawFigure(canvasBackend(ctx),W,H,true);
+  $('zoomResetBtn').style.display=(zs.xMin!==null)?'inline-block':'none';
+  updateBtns();
+}
+new ResizeObserver(()=>scheduleRender()).observe($('plotWrap'));
+function updateBtns(){const any=spectra.length>0;$('exportCSVBtn').disabled=!any;$('savePNGBtn').disabled=!any;$('saveSVGBtn').disabled=!any;$('copyPNGBtn').disabled=!any;}
+
+// ---- Sidebar ----
+function renderDsList(){
+  const list=$('dsList');$('dsCount').textContent=spectra.length?'('+spectra.length+')':'';
+  if(!spectra.length){list.innerHTML='<div class="ds-empty">No spectra loaded.</div>';$('editor').classList.remove('on');return;}
+  list.innerHTML='';
+  spectra.forEach((sp,i)=>{
+    const card=document.createElement('div');
+    card.className='ds-card'+(i===activeIdx?' sel':'');card.draggable=true;card.dataset.i=i;
+    card.innerHTML='<span class="ds-grip" title="Drag to reorder">&#x28FF;</span>'+
+      '<input type="color" value="'+sp.color+'" title="Colour">'+
+      '<div class="ds-main"><input type="text" class="ds-name" value="'+(sp.label||'').replace(/"/g,'&quot;')+'" title="Label">'+
+      '<span class="ds-meta">'+sp.raw.length+' pts</span></div>'+
+      '<button class="ds-ico" title="Remove">&#x2715;</button>';
+    const[,colorIn,mainDiv,rmBtn]=card.children;const nameIn=mainDiv.querySelector('.ds-name');
+    colorIn.addEventListener('input',()=>{sp.color=colorIn.value;scheduleRender();});
+    colorIn.addEventListener('click',e=>e.stopPropagation());
+    nameIn.addEventListener('input',()=>{sp.label=nameIn.value;scheduleRender();});
+    nameIn.addEventListener('click',e=>e.stopPropagation());
+    rmBtn.addEventListener('click',e=>{e.stopPropagation();spectra.splice(i,1);
+      if(activeIdx===i)activeIdx=spectra.length?Math.min(i,spectra.length-1):null;
+      else if(activeIdx>i)activeIdx--;
+      renderDsList();scheduleRender();setStatus(spectra.length?spectra.length+' spectra loaded':'Ready');});
+    card.addEventListener('click',()=>{activeIdx=i;renderDsList();scheduleRender();});
+    card.addEventListener('dragstart',e=>{dragSrcIdx=i;card.classList.add('dragging');e.dataTransfer.effectAllowed='move';try{e.dataTransfer.setData('text/plain',String(i));}catch(_){}});
+    card.addEventListener('dragend',()=>{list.querySelectorAll('.ds-card').forEach(c=>c.classList.remove('dragging','drag-over'));dragSrcIdx=null;});
+    card.addEventListener('dragover',e=>{if(dragSrcIdx===null)return;e.preventDefault();e.dataTransfer.dropEffect='move';list.querySelectorAll('.ds-card').forEach(c=>c.classList.remove('drag-over'));if(i!==dragSrcIdx)card.classList.add('drag-over');});
+    card.addEventListener('dragleave',()=>card.classList.remove('drag-over'));
+    card.addEventListener('drop',e=>{if(dragSrcIdx===null)return;e.preventDefault();
+      const[m]=spectra.splice(dragSrcIdx,1);spectra.splice(i,0,m);
+      if(activeIdx===dragSrcIdx)activeIdx=i;renderDsList();scheduleRender();});
+    list.appendChild(card);
+  });
+  const ed=$('editor');
+  if(activeIdx!==null&&spectra[activeIdx]){const sp=spectra[activeIdx];ed.classList.add('on');
+    $('ae-label').value=sp.label;$('ae-color').value=sp.color;$('ae-dash').value=sp.dash||'';
+    const wEl=$('ae-width');wEl.value=sp.width;$('ae-widthV').textContent=sp.width;
+    $('ae-offset').value=sp.offset;
+  }else ed.classList.remove('on');
+}
+['ae-label','ae-color','ae-dash','ae-offset'].forEach(id=>{
+  $(id).addEventListener('input',()=>{if(activeIdx===null)return;const sp=spectra[activeIdx];
+    sp.label=$('ae-label').value;sp.color=$('ae-color').value;sp.dash=$('ae-dash').value;sp.offset=parseFloat($('ae-offset').value)||0;
+    renderDsList();scheduleRender();});});
+$('ae-width').addEventListener('input',function(){if(activeIdx===null)return;spectra[activeIdx].width=parseFloat(this.value)||2;$('ae-widthV').textContent=this.value;scheduleRender();});
+
+// ---- File loading ----
+function loadFile(file){const r=new FileReader();r.onload=e=>{const pts=parse(e.target.result);
+  if(!pts.length){showToast('No data found in '+file.name);return;}
+  spectra.push({label:file.name.replace(/\.[^.]+$/,''),raw:pts,color:PALETTE[spectra.length%PALETTE.length],dash:'',width:2,offset:0});
+  activeIdx=spectra.length-1;renderDsList();scheduleRender();
+  setStatus(spectra.length+' spectr'+(spectra.length===1?'um':'a')+' loaded','ok');};r.readAsText(file);}
+function loadFiles(files){for(const f of files)loadFile(f);}
+const dz=$('dropZone');dz.addEventListener('click',()=>$('fileInput').click());
+$('fileInput').addEventListener('change',e=>{loadFiles([...e.target.files]);e.target.value='';});
+dz.addEventListener('dragover',e=>{e.preventDefault();e.stopPropagation();dz.classList.add('drag-over');});
+dz.addEventListener('dragleave',e=>{if(!dz.contains(e.relatedTarget))dz.classList.remove('drag-over');});
+dz.addEventListener('drop',e=>{e.preventDefault();e.stopPropagation();dz.classList.remove('drag-over');loadFiles([...e.dataTransfer.files]);});
+document.addEventListener('dragover',e=>{e.preventDefault();});
+document.addEventListener('drop',e=>{if(dragSrcIdx!==null)return;e.preventDefault();if(e.dataTransfer&&e.dataTransfer.files.length)loadFiles([...e.dataTransfer.files]);});
+$('clearAllBtn').addEventListener('click',()=>{spectra=[];activeIdx=null;anns=[];renderDsList();renderAnnList();scheduleRender();setStatus('Ready');});
+
+// ---- Demo ----
+function loadDemo(){
+  const gauss=(x,c,w,a)=>a*Math.exp(-0.5*((x-c)/w)**2);
+  const base=wn=>0.92-0.0001*(wn-2000);
+  const pts1=[],pts2=[];
+  for(let wn=400;wn<=4000;wn+=2){
+    let y=base(wn)-gauss(wn,3400,120,0.35)-gauss(wn,2920,30,0.18)-gauss(wn,2850,25,0.12)
+      -gauss(wn,1720,20,0.52)-gauss(wn,1640,18,0.28)-gauss(wn,1450,15,0.15)
+      -gauss(wn,1380,12,0.10)-gauss(wn,1050,25,0.32)+(Math.random()-0.5)*0.003;
+    pts1.push({wn,y:+y.toFixed(5)});
+    let y2=base(wn)*0.98-gauss(wn,3300,100,0.30)-gauss(wn,1650,22,0.45)
+      -gauss(wn,1550,18,0.35)-gauss(wn,1250,20,0.22)-gauss(wn,800,15,0.12)
+      +(Math.random()-0.5)*0.003;
+    pts2.push({wn,y:+y2.toFixed(5)});
+  }
+  spectra=[{label:'Polymer film',raw:pts1,color:PALETTE[0],dash:'',width:2,offset:0},
+    {label:'Amide compound',raw:pts2,color:PALETTE[1],dash:'',width:2,offset:0}];
+  anns=[{wn:3400,label:'\u03BD(O\u2013H)',yFrac:0.12},{wn:1720,label:'\u03BD(C=O)',yFrac:0.08},{wn:1640,label:'\u03B4(H\u2082O)',yFrac:0.22}];
+  activeIdx=0;renderDsList();renderAnnList();scheduleRender();setStatus('Demo: 2 spectra + 3 annotations','ok');
+}
+$('exampleBtn').addEventListener('click',loadDemo);
+
+// ---- Interaction ----
+let dragX0=null;
+let annDrag={active:false,idx:-1,startY:0,startFrac:0};
+function hitAnn(cx,cy){for(let i=0;i<anns.length;i++){const b=anns[i]._box;if(b&&cx>=b.x&&cx<=b.x+b.w&&cy>=b.y&&cy<=b.y+b.h)return i;}return-1;}
+function evtXY(e){const r=canvas.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
+canvas.addEventListener('mousedown',e=>{const{x,y}=evtXY(e);
+  if(e.button===0&&!pickMode){const hi=hitAnn(x,y);if(hi>=0){annDrag={active:true,idx:hi,startY:y,startFrac:anns[hi].yFrac!==undefined?anns[hi].yFrac:0.08};canvas.style.cursor='ns-resize';return;}}
+  if(e.button===0&&!pickMode)dragX0=x;});
+canvas.addEventListener('mousemove',e=>{if(!plotMeta)return;const{x,y}=evtXY(e);
+  if(annDrag.active){const dy=y-annDrag.startY;let frac=annDrag.startFrac+dy/plotMeta.PH;frac=Math.max(0,Math.min(1,frac));anns[annDrag.idx].yFrac=frac;scheduleRender();return;}
+  if(dragX0!==null&&Math.abs(x-dragX0)>3){const zr=$('zoomRect'),cr=canvas.getBoundingClientRect(),wr=$('plotWrap').getBoundingClientRect();
+    zr.style.display='block';zr.style.left=Math.min(dragX0,x)+(cr.left-wr.left)+'px';zr.style.width=Math.abs(x-dragX0)+'px';
+    zr.style.top=(plotMeta.MT+(cr.top-wr.top))+'px';zr.style.height=plotMeta.PH+'px';}
+  // tooltip
+  const tip=$('floatTip'),{ML,PW,MT,PH,xLoD,xHiD,xFwd}=plotMeta;
+  if(x>=ML&&x<=ML+PW&&y>=MT&&y<=MT+PH){
+    const wn=xFwd?xLoD+(x-ML)/PW*(xHiD-xLoD):xHiD-(x-ML)/PW*(xHiD-xLoD);
+    let html='<span style="color:var(--ink-faint)">\u03BD = </span>'+wn.toFixed(1)+' cm\u207B\u00B9';
+    let bar='\u03BD '+wn.toFixed(1)+' cm\u207B\u00B9';
+    spectra.forEach(sp=>{const pts=processed(sp);if(!pts.length)return;
+      const near=pts.reduce((b,d)=>Math.abs(d.wn-wn)<Math.abs(b.wn-wn)?d:b);
+      html+='<br><span style="color:'+sp.color+'">'+sp.label+'</span> = '+near.y.toFixed(5);});
+    tip.innerHTML=html;tip.style.display='block';tip.style.left=(e.clientX+14)+'px';tip.style.top=(e.clientY-10)+'px';
+    if(!annDrag.active&&dragX0===null)canvas.style.cursor=hitAnn(x,y)>=0?'ns-resize':'crosshair';
+  }else{tip.style.display='none';}
+});
+window.addEventListener('mouseup',e=>{if(annDrag.active){annDrag.active=false;canvas.style.cursor='crosshair';return;}
+  if(dragX0!==null&&plotMeta){const{x}=evtXY(e);$('zoomRect').style.display='none';
+    if(Math.abs(x-dragX0)>8){const{xLoD,xHiD,xFwd,ML,PW}=plotMeta;
+      const wnAtPx=px=>xFwd?xLoD+(px-ML)/PW*(xHiD-xLoD):xHiD-(px-ML)/PW*(xHiD-xLoD);
+      const w0=wnAtPx(dragX0),w1=wnAtPx(x);
+      zs.xMin=Math.min(w0,w1);zs.xMax=Math.max(w0,w1);scheduleRender();}dragX0=null;}});
+canvas.addEventListener('click',e=>{if(!pickMode||!plotMeta)return;const{x,y}=evtXY(e);
+  const{ML,PW,MT,PH,xLoD,xHiD,xFwd}=plotMeta;
+  if(x<ML||x>ML+PW||y<MT||y>MT+PH)return;
+  const wn=Math.round(xFwd?xLoD+(x-ML)/PW*(xHiD-xLoD):xHiD-(x-ML)/PW*(xHiD-xLoD));
+  if(pickEditIdx!==null){const el=$('ann-edit-wn-'+pickEditIdx);if(el){el.value=wn;el.dispatchEvent(new Event('input'));}}
+  else $('ann-wn').value=wn;
+  cancelPick();$('ann-lbl').focus();});
+canvas.addEventListener('dblclick',()=>{zs={xMin:null,xMax:null};$('yMin').value='';$('yMax').value='';scheduleRender();});
+canvas.addEventListener('contextmenu',e=>e.preventDefault());
+canvas.addEventListener('mouseleave',()=>{$('floatTip').style.display='none';if(annDrag.active){annDrag.active=false;canvas.style.cursor='crosshair';}if(dragX0!==null){dragX0=null;$('zoomRect').style.display='none';}});
+$('zoomResetBtn').addEventListener('click',()=>{zs={xMin:null,xMax:null};$('yMin').value='';$('yMax').value='';scheduleRender();});
+
+// ---- Annotations ----
+function togglePick(editIdx){const same=pickMode&&pickEditIdx===(editIdx===undefined?null:editIdx);if(pickMode)cancelPick();if(same)return;
+  pickMode=true;pickEditIdx=editIdx!==undefined?editIdx:null;$('plotWrap').classList.add('picking');canvas.style.cursor='crosshair';setStatus('Click on the plot to pick a wavenumber...');}
+function cancelPick(){pickMode=false;pickEditIdx=null;$('plotWrap').classList.remove('picking');canvas.style.cursor='crosshair';
+  // Reset pick button highlight if an edit row is open
+  if(editingAnnIdx!==null){const pb=$('ann-edit-pick-'+editingAnnIdx);if(pb){pb.style.background='';pb.style.borderColor='';pb.style.color='';}}
+  setStatus('');}
+$('annPickBtn').addEventListener('click',()=>togglePick());
+$('addAnnBtn').addEventListener('click',addAnn);
+$('ann-wn').addEventListener('keydown',e=>{if(e.key==='Enter')addAnn();});
+$('ann-lbl').addEventListener('keydown',e=>{if(e.key==='Enter')addAnn();});
+function addAnn(){const wn=parseFloat($('ann-wn').value);if(!isFinite(wn))return;
+  const label=$('ann-lbl').value.trim()||String(Math.round(wn));
+  anns.push({wn,label,yFrac:0.08});$('ann-wn').value='';$('ann-lbl').value='';renderAnnList();scheduleRender();}
+function removeAnn(i){if(pickMode&&pickEditIdx===i)cancelPick();anns.splice(i,1);if(editingAnnIdx===i)editingAnnIdx=null;else if(editingAnnIdx>i)editingAnnIdx--;renderAnnList();scheduleRender();}
+$('clearAnnsBtn').addEventListener('click',()=>{anns=[];renderAnnList();scheduleRender();});
+let editingAnnIdx=null;
+function renderAnnList(){
+  const box=$('annList');
+  if(!anns.length){box.innerHTML='<div class="ds-empty" style="font-size:9.5px">No annotations added.</div>';return;}
+  box.innerHTML='';
+  anns.forEach((a,i)=>{
+    const wrap=document.createElement('div');
+    wrap.style.marginBottom='3px';
+    const isEditing=(editingAnnIdx===i);
+    if(isEditing){
+      // Build edit row via DOM so IDs are properly registered
+      const shell=document.createElement('div');
+      shell.style.cssText='background:var(--accent-soft);border:1px solid var(--accent);border-radius:4px;padding:5px 7px;';
+      // top row: wavenumber + pick + label
+      const topRow=document.createElement('div');
+      topRow.style.cssText='display:flex;gap:4px;align-items:center;margin-bottom:4px;';
+      const wnIn=document.createElement('input');wnIn.type='number';wnIn.id='ann-edit-wn-'+i;wnIn.value=a.wn;
+      wnIn.style.cssText='width:62px;flex:none;padding:3px 5px;border:1px solid var(--border);border-radius:3px;font-family:var(--mono);font-size:11px;background:#fff;color:var(--ink);outline:none;';
+      const pickBtn=document.createElement('button');pickBtn.id='ann-edit-pick-'+i;pickBtn.title='Pick from plot';pickBtn.textContent='\u2316';
+      pickBtn.style.cssText='background:var(--bg);border:1px solid var(--border);border-radius:3px;padding:3px 7px;font-size:12px;cursor:pointer;color:var(--ink-mid);';
+      const lblIn=document.createElement('input');lblIn.type='text';lblIn.id='ann-edit-lbl-'+i;lblIn.value=a.label;
+      lblIn.style.cssText='flex:1;min-width:0;padding:3px 5px;border:1px solid var(--border);border-radius:3px;font-family:var(--mono);font-size:11px;background:#fff;color:var(--ink);outline:none;';
+      topRow.appendChild(wnIn);topRow.appendChild(pickBtn);topRow.appendChild(lblIn);
+      // bottom row: OK + Del
+      const botRow=document.createElement('div');botRow.style.cssText='display:flex;gap:4px;';
+      const okBtn=document.createElement('button');okBtn.id='ann-edit-ok-'+i;okBtn.textContent='OK';
+      okBtn.style.cssText='flex:1;padding:3px 0;background:var(--accent);color:#fff;border:none;border-radius:3px;font-family:var(--mono);font-size:9px;letter-spacing:.6px;text-transform:uppercase;cursor:pointer;';
+      const delBtn=document.createElement('button');delBtn.id='ann-edit-del-'+i;delBtn.textContent='Del';
+      delBtn.style.cssText='flex:none;padding:3px 9px;background:transparent;color:var(--danger);border:1px solid var(--danger);border-radius:3px;font-family:var(--mono);font-size:9px;letter-spacing:.6px;text-transform:uppercase;cursor:pointer;';
+      botRow.appendChild(okBtn);botRow.appendChild(delBtn);
+      shell.appendChild(topRow);shell.appendChild(botRow);wrap.appendChild(shell);
+      // wire events
+      const commit=()=>{const wn=parseFloat(wnIn.value);if(isFinite(wn))a.wn=wn;const lbl=lblIn.value.trim();if(lbl)a.label=lbl;editingAnnIdx=null;renderAnnList();scheduleRender();};
+      okBtn.addEventListener('click',commit);
+      delBtn.addEventListener('click',()=>removeAnn(i));
+      pickBtn.addEventListener('click',()=>togglePick(i));
+      wnIn.addEventListener('keydown',e=>{if(e.key==='Enter')commit();if(e.key==='Escape'){editingAnnIdx=null;renderAnnList();}});
+      lblIn.addEventListener('keydown',e=>{if(e.key==='Enter')commit();if(e.key==='Escape'){editingAnnIdx=null;renderAnnList();}});
+      setTimeout(()=>lblIn.focus(),0);
+    }else{
+      const row=document.createElement('div');row.className='ann-item';row.style.cursor='pointer';row.title='Click to edit';
+      const lbl=document.createElement('span');lbl.className='at';
+      lbl.innerHTML=a.label+' <span style="color:var(--ink-faint)">'+a.wn+'</span>';
+      const editBtn=document.createElement('button');editBtn.className='aed';editBtn.textContent='edit';
+      const rmBtn=document.createElement('button');rmBtn.className='arm';rmBtn.innerHTML='&#x2715;';
+      editBtn.addEventListener('click',e=>{e.stopPropagation();editingAnnIdx=i;renderAnnList();});
+      rmBtn.addEventListener('click',e=>{e.stopPropagation();removeAnn(i);});
+      row.addEventListener('click',()=>{editingAnnIdx=i;renderAnnList();});
+      row.appendChild(lbl);row.appendChild(editBtn);row.appendChild(rmBtn);
+      wrap.appendChild(row);
+    }
+    box.appendChild(wrap);
+  });
+}
+
+// ---- Greek / chemistry palettes ----
+const GREEK=['\u03B1','\u03B2','\u03B3','\u03B4','\u03B5','\u03B6','\u03B7','\u03B8','\u03BA','\u03BB','\u03BC','\u03BD','\u03BE','\u03C0','\u03C1','\u03C3','\u03C4','\u03C5','\u03C6','\u03C7','\u03C8','\u03C9','\u0394','\u0398','\u039B','\u03A0','\u03A3','\u03A6','\u03A8','\u03A9'];
+const CHEM=['\u2013','\u2550','\u2261','\u2192','\u21CC','\u00B7','\u00B0','\u207B','\u207A','\u00B9','\u00B2','\u00B3','\u00BD','\u00B1','\u2206'];
+function buildPal(el,chars){el.innerHTML='';chars.forEach(ch=>{const btn=document.createElement('button');btn.textContent=ch;
+  btn.addEventListener('mousedown',e=>{e.preventDefault();const tgt=lastAnnFocus||$('ann-lbl');if(!tgt)return;
+    const s=tgt.selectionStart,end=tgt.selectionEnd,v=tgt.value;tgt.value=v.slice(0,s)+ch+v.slice(end);tgt.selectionStart=tgt.selectionEnd=s+ch.length;tgt.focus();});
+  el.appendChild(btn);});}
+buildPal($('greekPal'),GREEK);buildPal($('chemPal'),CHEM);
+document.addEventListener('focusin',e=>{if(e.target&&(e.target.id==='ann-lbl'||e.target.id.startsWith('ann-edit-lbl')))lastAnnFocus=e.target;});
+
+// ---- Export ----
+async function saveBlob(blob,fname,desc,ext,mime){
+  if(window.showSaveFilePicker){try{const opts={suggestedName:fname,types:[{description:desc,accept:{[mime]:[ext]}}]};
+    if(sourceFileHandle)opts.startIn=sourceFileHandle;const fh=await window.showSaveFilePicker(opts);
+    const w=await fh.createWritable();await w.write(blob);await w.close();showToast('Saved '+fh.name);return true;}catch(e){if(e.name==='AbortError')return false;}}
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fname;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000);showToast('Saved '+fname);return true;}
+function fileSlug(){return(spectra[0]?spectra[0].label:'ftir').replace(/[^A-Za-z0-9]+/g,'_').replace(/_+$/,'')||'ftir';}
+$('savePNGBtn').addEventListener('click',()=>{const W=numv('expW',1400),H=numv('expH',900),sc=parseInt(val('pngScale'))||2;
+  const off=document.createElement('canvas');off.width=Math.round(W*sc);off.height=Math.round(H*sc);const oc=off.getContext('2d');oc.scale(sc,sc);
+  drawFigure(canvasBackend(oc),W,H,false);off.toBlob(b=>saveBlob(b,fileSlug()+'.png','PNG image','.png','image/png'),'image/png');});
+$('saveSVGBtn').addEventListener('click',async()=>{const W=numv('expW',1400),H=numv('expH',900);const be=svgBackend(W,H);drawFigure(be,W,H,false);
+  await saveBlob(new Blob([be.toString()],{type:'image/svg+xml'}),fileSlug()+'.svg','SVG vector','.svg','image/svg+xml');});
+$('copyPNGBtn').addEventListener('click',async()=>{try{const off=document.createElement('canvas');const W=numv('expW',1400),H=numv('expH',900);off.width=W*2;off.height=H*2;const oc=off.getContext('2d');oc.scale(2,2);drawFigure(canvasBackend(oc),W,H,false);
+  const blob=await new Promise(r=>off.toBlob(r,'image/png'));await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);showToast('Copied to clipboard');}catch(e){showToast('Clipboard blocked');}});
+$('exportCSVBtn').addEventListener('click',()=>{if(!spectra.length)return;
+  const xLoD=Math.min(numv('xMin',400),numv('xMax',4000)),xHiD=Math.max(numv('xMin',400),numv('xMax',4000));
+  const mode=val('yMode'),yCol=mode==='A'?'Absorbance':mode==='T'?'Transmittance':'Intensity';
+  const allWN=new Set();const maps=spectra.map(sp=>{const m={};processed(sp).filter(p=>p.wn>=xLoD&&p.wn<=xHiD).forEach(p=>{const k=p.wn.toFixed(2);m[k]=p.y;allWN.add(k);});return{label:sp.label,m};});
+  const wns=[...allWN].map(Number).sort((a,b)=>b-a);
+  const header=['Wavenumber_cm-1',...maps.map(m=>m.label+'_'+yCol)].join(',');
+  const rows=wns.map(wn=>[wn.toFixed(2),...maps.map(m=>(m.m[wn.toFixed(2)]!==undefined?m.m[wn.toFixed(2)]:''))].join(','));
+  saveBlob(new Blob([[header,...rows].join('\n')],{type:'text/csv'}),fileSlug()+'_ftir.csv','CSV','.csv','text/csv');});
+
+// ---- Settings ----
+const SIDS=['xMin','xMax','xDir','yMin','yMax','yMode','yLbl','norm','figTitle','xLbl','fontFam','axSz','tkSz','titSz','gridOn','showYTicks','gridCol','gridW','tickLen','tickW','tickDir','frameW','frameCol','plotBox','axCol','chartBg','legShow','legPos','legSz','annLines','annFont','annSz','annCol','expW','expH','pngScale'];
+$('saveSettingsBtn').addEventListener('click',async()=>{const s={};SIDS.forEach(id=>{const e=$(id);if(e)s[id]=e.type==='checkbox'?e.checked:e.value;});
+  await saveBlob(new Blob([JSON.stringify(s,null,2)],{type:'application/json'}),'ftir_settings.json','JSON settings','.json','application/json');});
+$('loadSettingsBtn').addEventListener('click',async()=>{
+  const apply=t=>{const s=JSON.parse(t);SIDS.forEach(id=>{const e=$(id);if(e&&s[id]!==undefined){if(e.type==='checkbox')e.checked=!!s[id];else e.value=s[id];}});syncLabels();scheduleRender();showToast('Settings loaded');};
+  if(window.showOpenFilePicker){try{const[fh]=await window.showOpenFilePicker({types:[{description:'JSON',accept:{'application/json':['.json']}}],multiple:false});apply(await(await fh.getFile()).text());return;}catch(e){if(e.name==='AbortError')return;}}
+  const inp=document.createElement('input');inp.type='file';inp.accept='.json';inp.onchange=async()=>{if(inp.files[0])try{apply(await inp.files[0].text());}catch(e){showToast('Bad settings file');}};inp.click();});
+
+// ---- Wiring ----
+document.querySelectorAll('.cp-header').forEach(h=>h.addEventListener('click',()=>h.parentElement.classList.toggle('open')));
+function syncLabels(){[['axSz','axSzV'],['tkSz','tkSzV'],['titSz','titSzV'],['gridW','gridWV'],['tickLen','tickLenV'],['tickW','tickWV'],['frameW','frameWV'],['legSz','legSzV'],['annSz','annSzV']].forEach(([a,b])=>{const el=$(a),lb=$(b);if(el&&lb){const v=parseFloat(el.value);lb.textContent=el.step&&parseFloat(el.step)<1?v.toFixed(1):Math.round(v);}});}
+document.querySelectorAll('#rightPanel input, #rightPanel select').forEach(el=>{
+  const ev=(el.type==='range'||el.type==='text'||el.type==='number')?'input':'change';
+  el.addEventListener(ev,()=>{syncLabels();if(el.id==='yMode'){const map={raw:'Intensity (a.u.)',T:'Transmittance',A:'Absorbance (a.u.)'};$('yLbl').value=map[el.value]||'';}
+    if(el.id==='xMin'||el.id==='xMax')zs={xMin:null,xMax:null};scheduleRender();});
+  if(el.type==='color')el.addEventListener('input',scheduleRender);});
+$('guideBtn').addEventListener('click',()=>$('guideVeil').classList.add('show'));
+$('guideClose').addEventListener('click',()=>$('guideVeil').classList.remove('show'));
+$('guideVeil').addEventListener('click',e=>{if(e.target===$('guideVeil'))$('guideVeil').classList.remove('show');});
+window.addEventListener('keydown',e=>{if(e.key==='Escape'){$('guideVeil').classList.remove('show');if(pickMode)cancelPick();}});
+syncLabels();renderDsList();renderAnnList();setStatus('Ready \u2014 drop a .dpt / .csv / .txt file to begin');
+</script>
+</body>
+</html>
