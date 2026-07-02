@@ -5,2170 +5,1357 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Vx-PXRD Viewer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:wght@300;600&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,600&family=DM+Sans:wght@400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
-*,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
-:root {
-  --ink:#0f0e0d;
-  --paper:#f6f1ea;
-  --cream:#ede7d8;
-  --pale:#e0d9cc;
-  --rule:#c5bba9;
-  --accent:#b84a2e;
-  --ok:#2a7a3b;
-  --err:#b84a2e;
-  --mono:'DM Mono',monospace;
-  --serif:'Fraunces',Georgia,serif;
-  --sans:'DM Sans',sans-serif;
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#FAF6EE;--paper:#F3EDE0;--paper2:#EDE6D4;--ink:#2C2416;--ink-mid:#6B5C3E;
+  --ink-faint:#B8A98A;--accent:#4A6FA5;--accent-soft:#EEF3FA;--line:#DDD5C0;--border:#CEC3AA;
+  --danger:#C0392B;--ok:#4E8367;
+  --mono:'DM Mono',monospace;--sans:'DM Sans',sans-serif;--display:'Fraunces',serif;
 }
-html,body { height:100%; background:var(--paper); color:var(--ink); font-family:var(--sans); font-size:13px; }
-::-webkit-scrollbar { width:5px; height:5px; }
-::-webkit-scrollbar-track { background:var(--pale); }
-::-webkit-scrollbar-thumb { background:var(--rule); border-radius:2px; }
-body { display:grid; grid-template-rows:auto auto 1fr; min-height:100vh; }
+html,body{height:100%;}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:13px;
+     display:flex;flex-direction:column;overflow:hidden;}
+::-webkit-scrollbar{width:7px;height:7px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
 
 /* ── Header ── */
-header { border-bottom:2px solid var(--ink); padding:12px 22px; display:flex; align-items:baseline; gap:16px; }
-header h1 { font-family:var(--serif); font-size:23px; font-weight:600; letter-spacing:-.4px; }
-header .sub { font-family:var(--mono); font-size:9px; color:var(--accent); letter-spacing:.15em; text-transform:uppercase; }
+header{flex-shrink:0;padding:10px 18px 9px;border-bottom:1.5px solid var(--line);
+       display:flex;align-items:baseline;gap:12px;}
+header h1{font-family:var(--display);font-weight:600;font-size:19px;color:var(--ink);}
+header .sub{font-size:10px;color:var(--ink-mid);font-family:var(--mono);letter-spacing:.5px;}
+header .spacer{flex:1;}
+.hbtn{font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;
+      color:var(--accent);background:transparent;border:1px solid var(--border);border-radius:4px;
+      padding:3px 10px;cursor:pointer;transition:background .15s,border-color .15s;align-self:center;}
+.hbtn:hover{background:var(--accent-soft);border-color:var(--accent);}
 
-/* ── Tab bar ── */
-.tabs { border-bottom:2px solid var(--ink); display:flex; background:var(--paper); padding:0 22px; }
-.tab { padding:10px 22px; font-family:var(--mono); font-size:10px; letter-spacing:.18em; text-transform:uppercase; cursor:pointer; border:none; background:none; color:#888; border-right:1px solid var(--rule); transition:background .15s, color .15s; }
-.tab:first-child { border-left:1px solid var(--rule); }
-.tab:hover { background:var(--cream); color:var(--ink); }
-.tab.active { background:var(--cream); color:var(--accent); border-bottom:2px solid var(--accent); margin-bottom:-2px; font-weight:500; }
+/* ── Mode switch (segmented) ── */
+.modeseg{display:flex;align-self:center;border:1px solid var(--border);border-radius:5px;overflow:hidden;}
+.modeseg button{font-family:var(--mono);font-size:10px;letter-spacing:.6px;text-transform:uppercase;
+  color:var(--ink-mid);background:transparent;border:none;padding:4px 13px;cursor:pointer;
+  border-right:1px solid var(--border);transition:background .15s,color .15s;}
+.modeseg button:last-child{border-right:none;}
+.modeseg button.on{background:var(--accent);color:#fff;}
+.modeseg button:not(.on):hover{background:var(--accent-soft);}
 
-/* ── Page container ── */
-.page { display:none; padding:22px; min-height:0; }
-.page.active { display:block; }
-.page-grid { display:grid; gap:22px; align-items:start; }
-.page-grid.split { grid-template-columns:1fr 320px; }
-@media (max-width:1100px) { .page-grid.split { grid-template-columns:1fr; } }
+/* ── Body layout ── */
+.body{flex:1;display:flex;min-height:0;}
 
-/* ── Card ── */
-.card { background:var(--paper); border:1.5px solid var(--ink); padding:18px 20px; }
-.card-title { font-family:var(--mono); font-size:10px; letter-spacing:.18em; text-transform:uppercase; color:var(--accent); margin-bottom:14px; padding-bottom:8px; border-bottom:1px solid var(--rule); }
+/* ── Left sidebar ── */
+.left{width:340px;flex-shrink:0;border-right:1.5px solid var(--line);
+      background:var(--paper);display:flex;flex-direction:column;overflow-y:auto;padding:12px 11px;}
+.drop-zone{border:1.5px dashed var(--ink-faint);border-radius:6px;padding:14px 8px;
+           text-align:center;cursor:pointer;transition:border-color .2s,background .2s;
+           background:var(--bg);margin-bottom:8px;}
+.drop-zone:hover,.drop-zone.drag-over{border-color:var(--accent);background:var(--accent-soft);}
+.drop-zone .dz-icon{font-size:20px;margin-bottom:3px;}
+.drop-zone .dz-lbl{font-size:11px;color:var(--ink-mid);line-height:1.5;}
+.drop-zone .dz-lbl strong{color:var(--ink);}
+.drop-zone .dz-hint{font-family:var(--mono);font-size:9px;color:var(--ink-faint);margin-top:4px;letter-spacing:.03em;}
+.drop-zone>*{pointer-events:none;}
+.mini-btn{font-family:var(--mono);font-size:9.5px;letter-spacing:.6px;text-transform:uppercase;
+   color:var(--accent);background:transparent;border:1px solid var(--border);border-radius:3px;
+   padding:3px 8px;cursor:pointer;transition:background .15s;white-space:nowrap;}
+.mini-btn:hover{background:var(--accent-soft);border-color:var(--accent);}
+.mini-btn:disabled{opacity:.35;cursor:default;}
+.mini-row{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;}
+.mini-row .mini-btn{flex:1;}
+.optline{display:flex;align-items:center;gap:6px;margin-bottom:8px;font-family:var(--mono);
+  font-size:9.5px;color:var(--ink-mid);letter-spacing:.03em;}
+.optline input{accent-color:var(--accent);width:13px;height:13px;cursor:pointer;}
 
-/* ── Drop zone ── */
-.dz { border:2px dashed var(--rule); padding:32px 20px; text-align:center; cursor:pointer; transition:border-color .2s, background .2s; user-select:none; }
-.dz.over, .dz:hover { border-color:var(--accent); background:var(--cream); }
-.dz-ico { font-size:28px; margin-bottom:6px; }
-.dz-txt { font-size:13px; color:#444; line-height:1.6; }
-.dz-hint { font-family:var(--mono); font-size:10px; color:#888; margin-top:4px; letter-spacing:.05em; }
-.dz > * { pointer-events:none; }
+.s-head{font-family:var(--mono);font-size:9.5px;letter-spacing:1.1px;text-transform:uppercase;
+        color:var(--ink-faint);margin:10px 0 5px;display:flex;align-items:center;gap:6px;}
+.s-head .cnt{color:var(--ink-mid);}
+.s-head .tail{margin-left:auto;}
 
-/* ── File table ── */
-.ftbl-wrap { margin-top:18px; overflow-x:auto; }
-.ftbl { width:100%; border-collapse:collapse; font-size:12px; }
-.ftbl th { text-align:left; padding:6px 10px; border-bottom:1.5px solid var(--ink); font-family:var(--mono); font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:#888; font-weight:500; white-space:nowrap; }
-.ftbl td { padding:6px 10px; border-bottom:1px solid var(--pale); font-family:var(--mono); font-size:11px; vertical-align:middle; }
-.ftbl tr:last-child td { border-bottom:none; }
-.ftbl td.fname { color:var(--ink); max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.ftbl td.num { color:#666; text-align:right; }
-.ftbl td.range { color:#666; }
-.ftbl input[type=number], .ftbl input[type=text] { background:var(--cream); border:1.5px solid var(--rule); padding:3px 6px; font-family:var(--mono); font-size:11px; color:var(--ink); outline:none; width:110px; }
-.ftbl input.legend-input { width:170px; }
-.ftbl input[type=color].colour-input { width:36px; height:22px; padding:1px 2px; border:1.5px solid var(--rule); background:var(--cream); cursor:pointer; vertical-align:middle; }
-.ftbl input:focus { border-color:var(--accent); }
-.ftbl input.missing { border-color:var(--accent); }
-.del-btn { background:none; border:1px solid var(--rule); border-radius:0; cursor:pointer; color:#888; font-size:11px; padding:2px 7px; font-family:var(--mono); transition:all .12s; }
-.del-btn:hover { border-color:var(--accent); color:var(--accent); background:var(--cream); }
-.ord-btns { display:inline-flex; gap:2px; }
-.ord-btn { background:none; border:1px solid var(--rule); cursor:pointer; color:#888; font-size:10px; padding:1px 5px; font-family:var(--mono); transition:all .12s; line-height:1; }
-.ord-btn:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); background:var(--cream); }
-.ord-btn:disabled { opacity:.25; cursor:not-allowed; }
-.drag-handle { cursor:grab; color:#bbb; font-size:14px; padding:0 6px; user-select:none; line-height:1; }
-.drag-handle:active { cursor:grabbing; }
-.ftbl tr.drag-over td { background:var(--cream); box-shadow:inset 0 2px 0 var(--accent); }
-.ftbl tr.dragging { opacity:.35; }
+.error-msg{color:var(--danger);font-family:var(--mono);font-size:10px;padding:4px 6px;
+           background:#FDF0EE;border:1px solid #E8C4BE;border-radius:3px;
+           margin-bottom:6px;display:none;white-space:pre-wrap;}
 
-/* ── Buttons ── */
-.btn { display:inline-block; padding:8px 16px; font-family:var(--mono); font-size:10px; font-weight:500; letter-spacing:.12em; text-transform:uppercase; cursor:pointer; border:1.5px solid var(--ink); background:var(--ink); color:var(--paper); transition:background .15s, border-color .15s; }
-.btn:hover:not(:disabled) { background:var(--accent); border-color:var(--accent); }
-.btn:disabled { opacity:.3; cursor:not-allowed; }
-.btn.out { background:transparent; color:var(--ink); }
-.btn.out:hover:not(:disabled) { background:var(--ink); color:var(--paper); }
+/* dataset cards */
+.ds-list{display:flex;flex-direction:column;gap:4px;}
+.ds-card{display:flex;align-items:center;gap:5px;background:var(--bg);border:1px solid var(--line);
+         border-radius:4px;padding:4px 5px;}
+.ds-card.drag-over{box-shadow:inset 0 2px 0 var(--accent);}
+.ds-card.dragging{opacity:.35;}
+.ds-grip{cursor:grab;color:var(--ink-faint);font-size:13px;line-height:1;user-select:none;flex:none;}
+.ds-grip:active{cursor:grabbing;}
+.ds-card input[type=color]{width:19px;height:18px;padding:0;border:1px solid var(--border);border-radius:3px;cursor:pointer;flex:none;background:none;}
+.ds-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;}
+.ds-name{border:none;background:transparent;font-family:var(--sans);font-size:11px;color:var(--ink);
+   outline:none;padding:1px 2px;border-radius:2px;width:100%;}
+.ds-name:focus{background:#fff;box-shadow:0 0 0 1px var(--accent);}
+.ds-meta{font-family:var(--mono);font-size:8.5px;color:var(--ink-faint);padding-left:2px;
+   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ds-y{width:52px;flex:none;border:1px solid var(--border);border-radius:3px;background:var(--bg);
+   font-family:var(--mono);font-size:10px;color:var(--ink);outline:none;padding:2px 3px;text-align:right;}
+.ds-y:focus{border-color:var(--accent);}
+.ds-y.missing{border-color:var(--danger);}
+.ds-ico{border:none;background:transparent;cursor:pointer;font-size:11px;line-height:1;
+   color:var(--ink-faint);padding:2px;flex:none;transition:color .15s;}
+.ds-ico:hover{color:var(--danger);}
+.ds-empty{font-size:11px;color:var(--ink-faint);padding:4px 2px;}
 
-/* ── Control panel (right side) ── */
-.cp-group { border-bottom:1px solid var(--rule); }
-.cp-group:last-child { border-bottom:none; }
-.cp-head { display:flex; justify-content:space-between; align-items:center; padding:10px 0; cursor:pointer; user-select:none; }
-.cp-head:hover .cp-title { color:var(--ink); }
-.cp-title { font-family:var(--mono); font-size:10px; letter-spacing:.18em; text-transform:uppercase; color:var(--accent); transition:color .15s; }
-.cp-arr { font-size:10px; color:#888; transition:transform .2s; }
-.cp-group.open .cp-arr { transform:rotate(180deg); }
-.cp-body { display:none; padding:4px 0 12px; }
-.cp-group.open .cp-body { display:block; }
-.cr { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
-.cr:last-child { margin-bottom:0; }
-.cl { font-size:11px; color:#555; flex:1; white-space:nowrap; line-height:1.4; }
-.cr input[type=text], .cr input[type=number], .cr select { background:var(--cream); border:1.5px solid var(--rule); padding:4px 6px; font-family:var(--mono); font-size:11px; color:var(--ink); outline:none; min-width:0; max-width:100%; }
-.cr input[type=text]:focus, .cr input[type=number]:focus, .cr select:focus { border-color:var(--accent); }
-.cr input[type=text], .cr select { flex:1; }
-.cr input[type=number] { width:72px; }
-.cr input[type=color] { width:32px; height:22px; border:1.5px solid var(--rule); background:none; cursor:pointer; padding:1px; }
-.cr input[type=checkbox] { width:14px; height:14px; cursor:pointer; accent-color:var(--accent); }
-.cr input[type=range] { flex:1; min-width:55px; accent-color:var(--accent); }
-.rv { font-family:var(--mono); font-size:11px; min-width:32px; text-align:right; color:var(--ink); }
-.cr select { appearance:none; -webkit-appearance:none; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 8px center; padding-right:24px; }
+.btn{width:100%;padding:6px;background:var(--accent);color:#fff;border:none;border-radius:4px;
+     font-family:var(--sans);font-size:12px;font-weight:500;cursor:pointer;margin-top:5px;transition:opacity .15s;}
+.btn:hover{opacity:.88;} .btn:disabled{opacity:.38;cursor:default;}
+.btn.ghost{background:transparent;color:var(--accent);border:1.5px solid var(--accent);}
 
-/* ── Plot area ── */
-.plot-wrap { width:100%; position:relative; background:#fff; }
-canvas.plot { display:block; width:100%; height:auto; cursor:crosshair; }
-.cursor-info { position:absolute; bottom:8px; right:10px; font-family:var(--mono); font-size:10px; color:#666; pointer-events:none; background:rgba(246,241,234,0.85); padding:3px 7px; letter-spacing:.05em; }
-.stack-tooltip { position:fixed; display:none; font-family:var(--mono); font-size:10px; color:var(--ink); background:rgba(246,241,234,0.92); border:1px solid var(--rule); padding:3px 8px; pointer-events:none; letter-spacing:.05em; z-index:9999; white-space:nowrap; }
-.action-row { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
-.status { font-family:var(--mono); font-size:10px; color:#888; letter-spacing:.05em; padding:6px 0 0; min-height:1.4em; }
-.status.ok { color:var(--ok); }
-.status.err { color:var(--err); }
+/* ── Centre ── */
+.centre{flex:1;display:flex;flex-direction:column;min-width:0;background:var(--bg);}
+.plot-wrap{flex:1;position:relative;display:flex;
+           overflow:auto;padding:14px;}
+canvas#pc{display:block;margin:auto;cursor:crosshair;box-shadow:0 1px 4px rgba(44,36,22,.10),0 0 0 1px var(--line);
+  border-radius:2px;max-width:100%;}
+.zoom-rect{position:absolute;border:1px solid var(--accent);background:rgba(74,111,165,.10);
+           pointer-events:none;display:none;}
+.empty-state{position:absolute;inset:0;display:flex;flex-direction:column;
+             align-items:center;justify-content:center;gap:8px;pointer-events:none;}
+.empty-state .es-icon{font-size:34px;}
+.empty-state p{color:var(--ink-faint);font-size:12px;text-align:center;max-width:340px;line-height:1.5;}
+.empty-state .mini-btn{pointer-events:auto;}
+.statusbar{flex-shrink:0;border-top:1px solid var(--line);padding:3px 12px;
+           font-family:var(--mono);font-size:10.5px;color:var(--ink-mid);
+           display:flex;align-items:center;gap:14px;}
+.statusbar .cursor{color:var(--accent);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.statusbar .zr{display:none;font-family:var(--mono);font-size:9.5px;color:var(--accent);
+   border:1px solid var(--border);border-radius:3px;background:transparent;padding:1px 7px;cursor:pointer;}
+.statusbar .zr:hover{background:var(--accent-soft);}
+.statusbar.ok .msg{color:var(--ok);} .statusbar.err .msg{color:var(--danger);}
+.floating-tip{position:fixed;display:none;font-family:var(--mono);font-size:10px;color:var(--ink);
+  background:rgba(250,246,238,0.94);border:1px solid var(--border);border-radius:4px;padding:3px 8px;
+  pointer-events:none;letter-spacing:.03em;z-index:9999;white-space:nowrap;box-shadow:0 2px 6px rgba(44,36,22,.15);}
 
-/* ── Stacked plot wrapper ── */
-.stack-wrap { position:relative; user-select:none; }
+/* ── Right panel ── */
+.right{width:280px;flex-shrink:0;border-left:1.5px solid var(--line);
+       background:var(--paper);overflow-y:auto;}
+.cp-group{border-bottom:1px solid var(--line);}
+.cp-header{display:flex;align-items:center;justify-content:space-between;
+           padding:7px 10px;cursor:pointer;user-select:none;
+           font-family:var(--mono);font-size:10px;letter-spacing:.8px;
+           text-transform:uppercase;color:var(--ink-mid);}
+.cp-header:hover{background:var(--paper2);}
+.cp-chevron{font-size:10px;transition:transform .2s;}
+.cp-group.open .cp-chevron{transform:rotate(90deg);}
+.cp-body{padding:8px 10px;flex-direction:column;gap:6px;display:none;}
+.cp-group.open .cp-body{display:flex;}
+.cp-row{display:flex;align-items:center;gap:5px;}
+.cp-label{font-size:10.5px;color:var(--ink-mid);flex:1;white-space:nowrap;}
+.cp-val{font-family:var(--mono);font-size:10.5px;color:var(--ink);min-width:34px;text-align:right;}
+.cp-note{font-size:9.5px;color:var(--ink-faint);line-height:1.45;}
+input[type=range]{-webkit-appearance:none;flex:1;height:3px;background:var(--line);border-radius:2px;outline:none;min-width:50px;}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:var(--accent);cursor:pointer;}
+input[type=range]::-moz-range-thumb{width:12px;height:12px;border:none;border-radius:50%;background:var(--accent);cursor:pointer;}
+input[type=number],input[type=text]{flex:1;padding:3px 5px;border:1px solid var(--border);border-radius:3px;
+  font-family:var(--mono);font-size:11px;background:var(--bg);color:var(--ink);outline:none;min-width:0;}
+input[type=number]:focus,input[type=text]:focus{border-color:var(--accent);}
+input[type=color]{width:28px;height:22px;padding:1px 2px;border:1px solid var(--border);border-radius:3px;cursor:pointer;background:none;}
+select.cp-sel{flex:1;padding:3px 4px;border:1px solid var(--border);border-radius:3px;
+  font-family:var(--sans);font-size:11px;background:var(--bg);color:var(--ink);outline:none;}
+select.cp-sel:focus{border-color:var(--accent);}
+input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;cursor:pointer;}
+.mode-only{display:none;}
 
-/* ── Guide ── */
-.guide { max-width:780px; margin:0 auto; line-height:1.75; font-size:14px; color:#222; }
-.guide h2 { font-family:var(--serif); font-weight:600; font-size:20px; margin:24px 0 10px; color:var(--ink); }
-.guide h2:first-child { margin-top:0; }
-.guide h3 { font-family:var(--mono); font-size:10px; letter-spacing:.18em; text-transform:uppercase; color:var(--accent); margin:18px 0 8px; padding-bottom:5px; border-bottom:1px solid var(--rule); }
-.guide p { margin-bottom:10px; }
-.guide ul { margin:8px 0 12px 20px; }
-.guide li { margin-bottom:6px; }
-.guide strong { color:var(--ink); font-weight:500; }
-.guide code { font-family:var(--mono); font-size:12px; background:var(--cream); padding:1px 5px; }
+/* modal */
+.modal-veil{position:fixed;inset:0;background:rgba(44,36,22,.35);display:none;
+   align-items:center;justify-content:center;z-index:50;}
+.modal-veil.show{display:flex;}
+.modal{background:var(--bg);border:1.5px solid var(--border);border-radius:8px;
+   width:min(720px,92vw);max-height:85vh;overflow-y:auto;padding:22px 26px;
+   box-shadow:0 8px 30px rgba(44,36,22,.25);}
+.modal h2{font-family:var(--display);font-weight:600;font-size:20px;margin-bottom:10px;}
+.modal h3{font-family:var(--display);font-weight:600;font-size:14px;margin:14px 0 4px;}
+.modal p,.modal li{font-size:12.5px;line-height:1.65;color:var(--ink-mid);}
+.modal ul{padding-left:18px;}
+.modal code{font-family:var(--mono);font-size:11px;background:var(--paper2);border-radius:3px;padding:0 5px;color:var(--ink);}
+.modal kbd{font-family:var(--mono);font-size:10.5px;background:var(--paper2);
+   border:1px solid var(--border);border-radius:3px;padding:0 5px;color:var(--ink);}
+.modal .close-x{float:right;border:none;background:none;font-size:18px;cursor:pointer;color:var(--ink-mid);}
 
-/* ── Misc ── */
-.empty-state { padding:60px 20px; text-align:center; color:#888; font-family:var(--mono); font-size:11px; letter-spacing:.05em; }
-.row-actions { display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; align-items:center; }
-.row-actions .lbl { font-family:var(--mono); font-size:10px; color:#888; letter-spacing:.1em; text-transform:uppercase; margin-right:auto; }
+/* toast */
+#toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%) translateY(10px);
+  background:var(--ink);color:var(--bg);font-family:var(--mono);font-size:11px;
+  padding:6px 14px;border-radius:5px;opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;z-index:60;}
+#toast.show{opacity:.94;transform:translateX(-50%) translateY(0);}
 </style>
 </head>
 <body>
-
 <header>
   <h1>Vx-PXRD Viewer</h1>
-  <span class="sub">Variable-Condition Powder Diffraction</span>
-  <span class="sub" style="margin-left:auto;opacity:.6">v2.9</span>
+  <span class="sub">v3.0 · variable-condition powder diffraction · stacked &amp; intensity-mapped figures</span>
+  <span class="spacer"></span>
+  <div class="modeseg" id="modeSeg">
+    <button data-mode="stack" class="on">Stacked</button>
+    <button data-mode="map">Intensity map</button>
+  </div>
+  <button class="hbtn" id="guideBtn">Guide</button>
 </header>
 
-<div class="tabs">
-  <button class="tab active" data-tab="files">Files</button>
-  <button class="tab" data-tab="map">Intensity Map</button>
-  <button class="tab" data-tab="stack">Stacked Plots</button>
-  <button class="tab" data-tab="guide">Guide</button>
+<div class="body">
+
+<!-- ══ LEFT SIDEBAR ══ -->
+<div class="left">
+  <div class="drop-zone" id="dropZone">
+    <div class="dz-icon">🗂</div>
+    <div class="dz-lbl"><strong>Drop .xy / .xye / .xrdml / .zip</strong><br>or a series .csv — click to browse</div>
+    <div class="dz-hint">xy/xye: 2θ · I &nbsp;·&nbsp; xrdml: PANalytical XML &nbsp;·&nbsp; csv: saved series</div>
+    <input type="file" id="fileInput" accept=".xy,.xye,.dat,.txt,.xrdml,.zip,.csv" multiple style="display:none">
+  </div>
+  <div class="mini-row">
+    <button class="mini-btn" id="autosortBtn">Auto-sort</button>
+    <button class="mini-btn" id="clearBtn">Clear all</button>
+  </div>
+  <div class="mini-row">
+    <button class="mini-btn" id="exportCsvBtn">Export series</button>
+    <button class="mini-btn" id="importCsvBtn">Import series</button>
+  </div>
+  <div class="optline">
+    <input type="checkbox" id="resetOnLoad">
+    <label for="resetOnLoad">Reset settings to defaults on load</label>
+  </div>
+  <div class="error-msg" id="errorMsg"></div>
+
+  <div class="s-head">Patterns <span class="cnt" id="dsCount"></span>
+    <span class="tail" style="font-size:8.5px;text-transform:none;letter-spacing:0;">drag ⠿ to reorder</span></div>
+  <div class="ds-list" id="dsList"><div class="ds-empty">Nothing loaded yet.</div></div>
 </div>
 
-<!-- ══════════════ PAGE 1: FILES ══════════════ -->
-<div class="page active" id="page-files">
-  <div class="card">
-    <div class="card-title">Diffractogram files</div>
-
-    <div class="dz" id="dropZone">
-      <div class="dz-ico">⇪</div>
-      <div class="dz-txt">Drop <strong>.xy / .xye / .xrdml</strong> files or a <strong>.zip</strong> archive here, or click to browse</div>
-      <div class="dz-hint">xy/xye: 2θ · intensity · space-separated &nbsp;·&nbsp; xrdml: PANalytical XML format</div>
+<!-- ══ CENTRE ══ -->
+<div class="centre">
+  <div class="plot-wrap" id="plotWrap">
+    <canvas id="pc"></canvas>
+    <div class="zoom-rect" id="zoomRect"></div>
+    <div class="empty-state" id="emptyState">
+      <div class="es-icon">📊</div>
+      <p>Drop a series of diffractograms to build a stacked plot or intensity map.</p>
+      <button class="mini-btn" id="exampleBtn">Load a demo VT series</button>
     </div>
-    <input type="file" id="fileInput" accept=".xy,.xye,.dat,.txt,.xrdml,.zip" multiple style="display:none">
-
-    <div style="margin-top:10px; display:flex; align-items:center; gap:8px;">
-      <input type="checkbox" id="resetOnLoad" style="accent-color:var(--accent); width:13px; height:13px; cursor:pointer;">
-      <label for="resetOnLoad" style="font-family:var(--mono); font-size:10px; color:#666; cursor:pointer; letter-spacing:.04em;">
-        Reset all settings to defaults when loading new files
-      </label>
-    </div>
-
-    <div class="row-actions" id="settingsActions" style="margin-top:14px">
-      <span class="lbl">App settings</span>
-      <button class="btn out" id="saveSettingsBtn">Save settings…</button>
-      <button class="btn out" id="loadSettingsBtn">Load settings…</button>
-    </div>
-    <input type="file" id="settingsFileInput" accept=".json,application/json" style="display:none">
-
-    <div class="row-actions" id="rowActions" style="margin-top:14px;display:none">
-      <span class="lbl" id="fileCount"></span>
-      <button class="btn out" id="sortByYBtn">Auto-sort</button>
-      <button class="btn out" id="exportCsvBtn">Export series…</button>
-      <button class="btn out" id="importCsvBtn">Import series…</button>
-      <button class="btn out" id="clearAllBtn">Clear all</button>
-    </div>
-    <input type="file" id="csvFileInput" accept=".csv" style="display:none">
-
-    <div class="ftbl-wrap" id="fileTableWrap" style="display:none">
-      <table class="ftbl">
-        <thead>
-          <tr>
-            <th title="Drag to reorder"></th>
-            <th>Filename</th>
-            <th style="text-align:right">Points</th>
-            <th>2θ range</th>
-            <th id="yColHead">Y value</th>
-            <th>Legend label</th>
-            <th>Colour</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="fileTableBody"></tbody>
-      </table>
-    </div>
+  </div>
+  <div class="statusbar" id="statusbar">
+    <span id="cursorEl" class="cursor"></span>
+    <button class="zr" id="zoomResetBtn">Reset zoom</button>
+    <span id="statusEl" class="msg">Ready</span>
   </div>
 </div>
 
-<!-- ══════════════ PAGE 2: INTENSITY MAP ══════════════ -->
-<div class="page" id="page-map">
-  <div class="page-grid split">
-    <div class="card">
-      <div class="card-title">Intensity map</div>
-      <div class="action-row">
-        <button class="btn" id="renderBtn">Render now</button>
-        <button class="btn out" id="copyBtn">Copy to clipboard</button>
-      </div>
-      <div class="plot-wrap">
-        <canvas id="plotCanvas" class="plot"></canvas>
-      </div>
-      <div class="status" id="statusMsg">Load at least two diffractograms to begin.</div>
-    </div>
+<!-- ══ RIGHT PANEL ══ -->
+<div class="right" id="rightPanel"><!-- control groups injected by JS --></div>
 
-    <div class="card">
-      <div class="card-title">Settings</div>
+</div><!-- /body -->
 
-      <div class="cp-group open">
-        <div class="cp-head"><span class="cp-title">Data &amp; scale</span><span class="cp-arr">▼</span></div>
-        <div class="cp-body">
-          <div class="cr"><span class="cl">Y-axis label</span><input type="text" id="yLabel" value="Temperature (°C)"></div>
-          <div class="cr"><span class="cl">Y-axis mode</span>
-            <select id="yAxisMode">
-              <option value="stimulus" selected>By stimulus value</option>
-              <option value="sequence">By sequence order</option>
-            </select>
-          </div>
-          <div class="cr"><span class="cl">2θ min (°)</span><input type="number" id="ttMin" step="0.1" placeholder="auto"></div>
-          <div class="cr"><span class="cl">2θ max (°)</span><input type="number" id="ttMax" step="0.1" placeholder="auto"></div>
-          <div class="cr"><span class="cl">Normalisation</span>
-            <select id="normMode">
-              <option value="per_bl" selected>Per-pattern &amp; baseline</option>
-              <option value="per">Per-pattern (no baseline)</option>
-              <option value="global">Global</option>
-            </select>
-          </div>
-          <div class="cr"><span class="cl">Grid resolution</span>
-            <select id="gridRes">
-              <option value="1000">1000 pts (fast)</option>
-              <option value="2000" selected>2000 pts</option>
-              <option value="4000">4000 pts (fine)</option>
-            </select>
-          </div>
-          <div class="cr"><span class="cl">Pattern markers (right edge)</span><input type="checkbox" id="showPatternMarkers"></div>
-        </div>
-      </div>
+<!-- Guide modal -->
+<div class="modal-veil" id="guideVeil">
+  <div class="modal">
+    <button class="close-x" id="guideClose">×</button>
+    <h2>Vx-PXRD Viewer — guide</h2>
+    <p>Turns a series of powder diffractograms collected under a varying condition — temperature, pressure, time, humidity, or simply different phases — into a single publication-ready figure, as either a stacked line/waterfall plot or a 2-D intensity map. Everything runs locally in the browser; no data leaves this page.</p>
 
-      <div class="cp-group open">
-        <div class="cp-head"><span class="cp-title">Colours &amp; contrast</span><span class="cp-arr">▼</span></div>
-        <div class="cp-body">
-          <div class="cr"><span class="cl">Peak colour</span><input type="color" id="peakColor" value="#000000"></div>
-          <div class="cr"><span class="cl">Background</span><input type="color" id="bgColor" value="#ffffff"></div>
-          <div class="cr"><span class="cl">Plot height (px)</span><input type="number" id="plotHeightPx" min="200" max="4000" step="50" placeholder="auto"></div>
-          <div class="cr"><span class="cl">Peak emphasis</span><input type="range" id="peakEmphasis" min="1" max="4" step="0.1" value="1"><span class="rv" id="peakEmphasisVal">1.0</span></div>
-          <div class="cr"><span class="cl">Gamma</span><input type="range" id="gammaSlider" min="0.10" max="3.00" step="0.05" value="0.40"><span class="rv" id="gammaVal">0.40</span></div>
-          <div class="cr"><span class="cl">Noise floor</span><input type="range" id="noiseFloor" min="0" max="5" step="0.1" value="0"><span class="rv" id="noiseFloorVal">0.0%</span></div>
-        </div>
-      </div>
-
-      <div class="cp-group open">
-        <div class="cp-head"><span class="cp-title">Typography &amp; lines</span><span class="cp-arr">▼</span></div>
-        <div class="cp-body">
-          <div class="cr"><span class="cl">Font</span>
-            <select id="axisFont">
-              <option value="'DM Sans', sans-serif">DM Sans</option>
-              <option value="'DM Mono', monospace">DM Mono</option>
-              <option value="'Fraunces', serif">Fraunces</option>
-              <option value="Arial, sans-serif" selected>Arial</option>
-              <option value="Helvetica, sans-serif">Helvetica</option>
-              <option value="'Times New Roman', serif">Times New Roman</option>
-              <option value="Georgia, serif">Georgia</option>
-              <option value="'Courier New', monospace">Courier New</option>
-            </select>
-          </div>
-          <div class="cr"><span class="cl">Tick labels (px)</span><input type="number" id="tickSize" value="25" min="10" max="60" step="1"></div>
-          <div class="cr"><span class="cl">Axis labels (px)</span><input type="number" id="labelSize" value="30" min="10" max="75" step="1"></div>
-          <div class="cr"><span class="cl">Line weight</span><input type="range" id="lwSlider" min="1" max="6" step="0.5" value="3"><span class="rv" id="lwVal">3.0</span></div>
-        </div>
-      </div>
-
-      <div class="cp-group open">
-        <div class="cp-head"><span class="cp-title">Gridlines</span><span class="cp-arr">▼</span></div>
-        <div class="cp-body">
-          <div class="cr"><span class="cl">Show gridlines</span><input type="checkbox" id="showGridlines"></div>
-          <div class="cr"><span class="cl">Colour</span><input type="color" id="gridlineColor" value="#000000"></div>
-          <div class="cr"><span class="cl">Weight</span><input type="range" id="gridlineWeight" min="0.5" max="4" step="0.5" value="1"><span class="rv" id="glwVal">1.0</span></div>
-        </div>
-      </div>
-
-      <div class="cp-group open">
-        <div class="cp-head"><span class="cp-title">Output size</span><span class="cp-arr">▼</span></div>
-        <div class="cp-body">
-          <div class="cr"><span class="cl">Lock plot size</span><input type="checkbox" id="lockSize"></div>
-          <div class="cr"><span class="cl">Width (px)</span><input type="number" id="lockWidth" value="1200" min="300" max="6000" step="50"></div>
-          <div class="cr"><span class="cl">Height (px)</span><input type="number" id="lockHeight" value="700" min="200" max="6000" step="50"></div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ══════════════ PAGE 3: STACKED PLOTS ══════════════ -->
-<div class="page" id="page-stack">
-  <div class="page-grid split">
-    <div class="card">
-      <div class="card-title">Stacked diffractograms</div>
-      <div class="action-row">
-        <button class="btn" id="stackRenderBtn">Render now</button>
-        <button class="btn out" id="stackCopyBtn">Copy to clipboard</button>
-      </div>
-      <div class="stack-wrap" id="stackWrap">
-        <canvas id="stackCanvas" class="plot"></canvas>
-        <!-- legend handles injected dynamically -->
-      </div>
-      <div class="status" id="stackStatus">
-        <span id="stackStatusMsg">Load at least one diffractogram to begin.</span>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-title">Settings</div>
-
-      <div class="cp-group open">
-        <div class="cp-head"><span class="cp-title">Range &amp; layout</span><span class="cp-arr">▼</span></div>
-        <div class="cp-body">
-          <div class="cr"><span class="cl">2θ min (°)</span><input type="number" id="stkTtMin" step="0.1" placeholder="auto"></div>
-          <div class="cr"><span class="cl">2θ max (°)</span><input type="number" id="stkTtMax" step="0.1" placeholder="auto"></div>
-          <div class="cr"><span class="cl">Reverse order</span><input type="checkbox" id="stkReverse"></div>
-          <div class="cr"><span class="cl">Band height (px)</span><input type="number" id="stkBandHeight" value="80" min="30" max="400" step="5"></div>
-          <div class="cr"><span class="cl">Plot width gap</span><input type="range" id="stkXPad" min="0" max="40" step="2" value="14"><span class="rv" id="stkXPadVal">14</span></div>
-        </div>
-      </div>
-
-      <div class="cp-group open">
-        <div class="cp-head"><span class="cp-title">Colour &amp; lines</span><span class="cp-arr">▼</span></div>
-        <div class="cp-body">
-          <div class="cr"><span class="cl">All black</span><input type="checkbox" id="stkAllBlack" checked></div>
-          <div class="cr"><span class="cl">Colour scheme</span>
-            <select id="stkColorScheme">
-              <option value="viridis">Viridis</option>
-              <option value="plasma">Plasma</option>
-              <option value="inferno">Inferno</option>
-              <option value="cool">Cool</option>
-              <option value="warm">Warm</option>
-              <option value="rainbow">Rainbow</option>
-              <option value="custom">Custom (per pattern)</option>
-            </select>
-          </div>
-          <div class="cr"><span class="cl">Diffractogram weight</span><input type="range" id="stkLineWt" min="0.5" max="6" step="0.25" value="1.25"><span class="rv" id="stkLineWtVal">1.25</span></div>
-          <div class="cr"><span class="cl">Axis/box weight</span><input type="range" id="stkAxisWt" min="0.5" max="6" step="0.25" value="1.5"><span class="rv" id="stkAxisWtVal">1.5</span></div>
-          <div class="cr"><span class="cl">Show plot box</span><input type="checkbox" id="stkShowBox"></div>
-        </div>
-      </div>
-
-      <div class="cp-group open">
-        <div class="cp-head"><span class="cp-title">Typography</span><span class="cp-arr">▼</span></div>
-        <div class="cp-body">
-          <div class="cr"><span class="cl">Font</span>
-            <select id="stkFont">
-              <option value="'DM Sans', sans-serif">DM Sans</option>
-              <option value="'DM Mono', monospace">DM Mono</option>
-              <option value="'Fraunces', serif">Fraunces</option>
-              <option value="Arial, sans-serif" selected>Arial</option>
-              <option value="Helvetica, sans-serif">Helvetica</option>
-              <option value="'Times New Roman', serif">Times New Roman</option>
-              <option value="Georgia, serif">Georgia</option>
-              <option value="'Courier New', monospace">Courier New</option>
-            </select>
-          </div>
-          <div class="cr"><span class="cl">Tick label size</span><input type="number" id="stkTickSize" value="25" min="8" max="60"></div>
-          <div class="cr"><span class="cl">Axis label size</span><input type="number" id="stkLabelSize" value="30" min="10" max="75"></div>
-          <div class="cr"><span class="cl">Legend size</span><input type="number" id="stkLegendSize" value="25" min="8" max="60"></div>
-        </div>
-      </div>
-
-      <div class="cp-group open">
-        <div class="cp-head"><span class="cp-title">Legends</span><span class="cp-arr">▼</span></div>
-        <div class="cp-body">
-          <div class="cr"><span class="cl">Show legends</span><input type="checkbox" id="stkShowLegends" checked></div>
-          <div class="cr"><span class="cl">Snap legends</span>
-            <select id="stkSnapMode">
-              <option value="none">Off</option>
-              <option value="left" selected>Left edge</option>
-              <option value="center">Center</option>
-              <option value="right">Right edge</option>
-            </select>
-          </div>
-          <div class="cr"><span class="cl">Reset positions</span><button class="btn out" style="padding:4px 12px;font-size:9px" id="stkResetLegends">Reset</button></div>
-        </div>
-      </div>
-
-      <div class="cp-group open">
-        <div class="cp-head"><span class="cp-title">Output size</span><span class="cp-arr">▼</span></div>
-        <div class="cp-body">
-          <div class="cr"><span class="cl">Lock plot width</span><input type="checkbox" id="stkLockWidth"></div>
-          <div class="cr"><span class="cl">Width (px)</span><input type="number" id="stkLockWidthVal" value="1200" min="300" max="6000" step="50"></div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ══════════════ PAGE 4: GUIDE ══════════════ -->
-<div class="page" id="page-guide">
-  <div class="guide">
-    <h2>About Vx-PXRD Viewer</h2>
-    <p>This app visualises a series of powder X-ray diffractograms collected under a variable condition — temperature, pressure, time, relative humidity, or any other parameter — by combining them into a single figure. It also handles series where the patterns are simply different phases or materials rather than a parametric scan.</p>
-    <p>Two complementary views are provided: a greyscale (or coloured) <strong>intensity map</strong> and a more conventional <strong>stacked line plot</strong>. The same data underlies both views; switch between them with the tabs above.</p>
-
-    <h3>Workflow</h3>
+    <h3>Quick start</h3>
     <ul>
-      <li>On the <strong>Files</strong> tab, drop your data files, a <strong>.zip</strong> archive, or a <strong>series CSV</strong> (see below). The app will try to extract the variable value from each filename automatically.</li>
-      <li>Drag rows by the grip handle (⠿) in the leftmost column to reorder patterns freely — essential for cooling/heating cycles or any non-monotonic sequence. Click <em>Auto-sort</em> to restore Y-value order. Use the ✕ button to remove individual files.</li>
-      <li>Check the Y values and legend labels; edit any that are wrong.</li>
-      <li>Switch to <strong>Intensity Map</strong> or <strong>Stacked Plots</strong>, adjust the settings on the right, and the plot updates automatically.</li>
+      <li>Drop <code>.xy</code>, <code>.xye</code>, <code>.xrdml</code> files, a <code>.zip</code> archive, or a saved series <code>.csv</code> anywhere on the page. The stimulus value is auto-extracted from each filename (last numeric segment) or from XRDML metadata.</li>
+      <li>Drag rows by the grip (⠿) to reorder freely — essential for cooling/heating cycles. <strong>Auto-sort</strong> restores ascending-value order.</li>
+      <li>Switch between <strong>Stacked</strong> and <strong>Intensity map</strong> at top right; adjust settings on the right; export as <strong>SVG</strong> (vector), <strong>PNG</strong>, or copy to clipboard.</li>
     </ul>
 
-    <h3>Supported file formats</h3>
-    <p><strong>Plain-text formats</strong> (<code>.xy</code>, <code>.xye</code>, <code>.dat</code>, <code>.txt</code>): two or more whitespace- or comma-separated columns; first column is 2θ in degrees, second is intensity. Additional columns (e.g. esd in <code>.xye</code> files from CSD Mercury) are ignored. Single-value header lines and lines starting with <code>#</code>, <code>!</code>, or <code>;</code> are skipped.</p>
-    <p><strong>PANalytical XRDML format</strong> (<code>.xrdml</code>): XML files produced by X'Pert Pro and Empyrean instruments. The app reads the 2θ start/end positions, reconstructs the angular grid, and extracts the non-ambient condition automatically. Temperature values in Kelvin are converted to °C. XRDML files can be loaded individually or inside a <code>.zip</code> archive.</p>
-
-    <h3>Series CSV — saving and restoring your work</h3>
-    <p>After arranging and labelling a series on the Files tab, click <em>Export series…</em> to save everything to a CSV. In Chrome and Edge a Save As dialog lets you choose folder and filename; other browsers download automatically. You can also drag a CSV file directly onto the app to import it.</p>
-    <p>CSV structure: row 0 — Y-axis label; row 1 — stimulus value per pattern (every other column); row 2 — legend label per pattern; rows 3 onwards — 2θ and intensity columns interleaved per pattern. On import the pattern order, Y values, and legend labels are restored exactly.</p>
-
-    <h3>The intensity map</h3>
-    <p>The intensity map is a 2D image of the entire dataset. The horizontal axis is 2θ, the vertical axis is the variable condition, and pixel brightness encodes intensity. A floating tooltip follows the mouse cursor showing the current 2θ angle and stimulus value — visible anywhere on screen regardless of scroll position.</p>
-    <p><strong>Y-axis mode</strong> controls how the vertical axis is constructed. <em>By stimulus value</em> sorts patterns by their Y value — the standard view for a monotonic scan. <em>By sequence order</em> preserves the table order and spaces rows evenly, with tick labels showing the actual stimulus at each pattern position. Use sequence order for cooling/heating/cooling cycles or any non-monotonic series.</p>
-    <p><strong>How it is built:</strong> each diffractogram is resampled onto a uniform 2θ grid and normalised (default: per-pattern baseline subtraction). For every pixel row the app finds the two bracketing patterns and linearly interpolates between them.</p>
-    <p><strong>Reading the map:</strong> vertical streak = peak fixed in position; diagonal streak = peak shifting with condition; fading/appearing streaks = phase transition.</p>
-    <p><strong>Contrast and colour:</strong> gamma stretches or compresses the intensity scale. Peak and background colours are set independently.</p>
-    <p><strong>Normalisation:</strong> <em>Per-pattern &amp; baseline</em> subtracts minimum and scales to maximum. <em>Per-pattern (no baseline)</em> scales to maximum only. <em>Global</em> uses the same scale across all patterns.</p>
-    <p><strong>Peak emphasis:</strong> a pre-normalisation power transform. At p=1 (default) this is a no-op; higher values boost peaks relative to noise.</p>
-    <p><strong>Noise floor:</strong> normalised values at or below the threshold (0–5%) become zero before interpolation, removing background noise streaks without affecting genuine peaks.</p>
-    <p><strong>Pattern markers:</strong> tick <em>Pattern markers (right edge)</em> to draw a tick at each pattern's exact Y position on the right edge of the plot.</p>
-    <p><strong>Gridlines:</strong> off by default. When enabled, dashed lines are drawn at every tick position.</p>
-
-    <h3>The stacked plot</h3>
-    <p>The stacked plot shows each diffractogram as an intensity-vs-2θ line, offset vertically into bands. A floating tooltip follows the mouse cursor showing the current 2θ angle — visible regardless of scroll position.</p>
-    <p><strong>Order:</strong> patterns appear bottom to top in file-table order (index 0 at the bottom, last index at the top), matching the intensity map in sequence mode. Tick <em>Reverse order</em> to flip. Drag rows by the grip handle (⠿) on the Files tab to reorder freely.</p>
-    <p><strong>Per-pattern normalisation:</strong> each diffractogram is independently scaled to fill its band.</p>
-    <p><strong>Colour:</strong> all-black by default. Untick <em>All black</em> to apply a colour ramp (Viridis, Plasma, Inferno, Cool, Warm, Rainbow, or Custom per-pattern).</p>
-    <p><strong>Legends:</strong> drawn directly on the canvas and draggable within each band. The <em>Snap legends</em> selector aligns all legends by left edge, centre, or right edge. Right-clicking the canvas gives <em>Copy image</em> / <em>Save image as…</em> with legends included.</p>
-
-    <h3>Output size and reproducibility</h3>
-    <p>By default both plots scale to fill the browser width. For consistent figures, tick <em>Lock plot size</em> and enter explicit pixel dimensions. Save the settings JSON once the layout is right — dimensions are restored on every future session.</p>
-
-    <h3>File-naming and Y values</h3>
-    <p>The variable value is extracted from the last numeric segment of the filename, e.g. <code>sample_150.xy</code> gives 150. XRDML files extract the value from embedded metadata. Always check and correct auto-extracted values. If filenames contain no numbers the Y value is left blank; the stacked plot works normally but the intensity map (stimulus mode) requires Y values to be entered manually.</p>
-
-    <h3>Save and load settings</h3>
-    <p>The <em>Save settings…</em> and <em>Load settings…</em> buttons on the Files tab preserve all control choices for both plots in a JSON file. Note: settings only — pattern data is not included (use Export series for that).</p>
-
-    <h3>Tips</h3>
+    <h3>Stacked plot</h3>
     <ul>
-      <li>Both plots auto-update on any settings change after a short delay.</li>
-      <li>The floating tooltip shows 2θ (and stimulus value on the intensity map) at the cursor position regardless of scroll — useful for tall stacked plots or large intensity maps.</li>
-      <li>For cooling/heating/cooling series: load files, drag into the correct sequence order, set Y-axis mode to <em>By sequence order</em>, then export to CSV so you never have to rearrange again.</li>
-      <li>Two ways to export plots: <em>Copy to clipboard</em> (PNG at full canvas resolution) or right-click → <em>Copy image</em> / <em>Save image as…</em>.</li>
-      <li>Keep axis/box weight modest (1.5–2 px) for screen viewing; increase to 3–4 px for publication exports.</li>
+      <li><strong>Line</strong> mode draws each pattern in its own band; <strong>Waterfall</strong> mode overlaps filled traces with a single shared intensity axis — the classic VT presentation.</li>
+      <li>Per-pattern colour (swatch on each card) with the Custom scheme, or a scientific colour ramp (Viridis, Plasma, Inferno, Cividis, Cool, Warm).</li>
+      <li>Legends are drawn on the canvas and draggable within each band; the snap selector aligns them by left, centre, or right edge.</li>
     </ul>
+
+    <h3>Intensity map</h3>
+    <ul>
+      <li>Horizontal axis 2θ, vertical axis the stimulus, brightness ∝ intensity. <em>By stimulus value</em> places rows at true positions; <em>By sequence order</em> spaces them evenly (for non-monotonic cycles), labelling each with its real value.</li>
+      <li>Reading it: vertical streak = fixed peak; diagonal = shifting peak; fading/appearing = phase transition.</li>
+      <li>Gamma, peak emphasis and a noise floor control contrast. A <strong>colourbar</strong> can be shown alongside, and <strong>peak-track guides</strong> can be dropped at chosen 2θ values (see below).</li>
+    </ul>
+
+    <h3>Peak-track guides (intensity map)</h3>
+    <p>Enable <em>Peak-track guides</em>, then click on the map to drop a vertical reference line at that 2θ; click a guide's handle to remove it. Guides export with the figure — useful for annotating a peak that shifts or splits through a transition.</p>
+
+    <h3>Plot interaction</h3>
+    <ul>
+      <li><kbd>drag</kbd> horizontally to zoom the 2θ range; <kbd>double-click</kbd> or Reset-zoom restores full range.</li>
+      <li>A floating tooltip follows the cursor with 2θ (and stimulus on the map), visible regardless of scroll.</li>
+    </ul>
+
+    <h3>Series CSV &amp; settings</h3>
+    <p><strong>Export series</strong> writes stimulus values, legends, order and all data to a CSV you can re-import later (drag it back in). <strong>Save/Load settings</strong> (in the Export group) preserves every control choice as JSON — data not included.</p>
+
+    <h3>Supported formats</h3>
+    <p><strong>Text</strong> (<code>.xy .xye .dat .txt</code>): whitespace/comma-separated, col 1 = 2θ, col 2 = intensity; extra columns and comment lines (<code>#  !  ;</code>) ignored. <strong>XRDML</strong>: X'Pert Pro / Empyrean XML — 2θ grid reconstructed, non-ambient value extracted (Kelvin converted to °C).</p>
   </div>
 </div>
 
-<div class="stack-tooltip" id="stackTooltip"></div>
-<div class="stack-tooltip" id="mapTooltip"></div>
+<div class="floating-tip" id="floatTip"></div>
+<div id="toast"></div>
+
 <script>
 'use strict';
 
-// ═══════════════════════════════════════════════════
-//  State
-// ═══════════════════════════════════════════════════
-const patterns = [];      // { filename, twoTheta[], intensity[], y, legend, nPts }
-let plotMeta = null;
-let stackMeta = null;
-let baseStackImage = null;     // ImageData snapshot of stack canvas before legends drawn
-let stackLegendBounds = [];    // [{ key, x, y, w, h, idx }] hit-test boxes for canvas legends
-let draggingLegend = null;     // { key, idx, offsetX, offsetY } while dragging
-const legendPositions = {};   // keyed by filename → { xFrac, yFrac }
-let snapXFrac = null;          // shared snap reference (interpretation per stkSnapMode)
-let prevSnapMode = 'left';     // previous snap mode for conversion on change
-let dragSrcIdx = null;         // index of row being dragged (null = no row drag in progress)
-let sourceFileHandle = null;   // FileSystemFileHandle of last opened file (for startIn)
+// ═══════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════
+const patterns=[];              // {filename, twoTheta[], intensity[], y, legend, colour, nPts}
+let mode='stack';               // 'stack' | 'map'
+let plotMeta=null;              // geometry of last screen render (for hit-testing)
+let viewTt=null;               // [lo,hi] zoom in 2theta, or null
+let sourceFileHandle=null;
+let dragSrcIdx=null;           // sidebar row drag
+const legendPositions={};      // filename -> {xFrac,yFrac}
+let snapXFrac=null,prevSnapMode='left';
+let peakGuides=[];             // array of 2theta values (map annotations)
+let baseImage=null;            // ImageData snapshot without legends/guides (fast overlay redraw)
+let legendBounds=[];           // hit boxes for canvas legends
+let draggingLegend=null;
 
-// ═══════════════════════════════════════════════════
-//  Tab switching
-// ═══════════════════════════════════════════════════
-document.querySelectorAll('.tab').forEach(t => {
-  t.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
-    document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
-    t.classList.add('active');
-    document.getElementById('page-' + t.dataset.tab).classList.add('active');
-    // Trigger re-render when switching to a plot tab so canvas sizes itself
-    if (t.dataset.tab === 'map')   setTimeout(scheduleRender, 30);
-    if (t.dataset.tab === 'stack') setTimeout(scheduleStackRender, 30);
-  });
-});
+const $=id=>document.getElementById(id);
+const canvas=$('pc'),ctx=canvas.getContext('2d');
+const measCtx=document.createElement('canvas').getContext('2d');
 
-// ═══════════════════════════════════════════════════
-//  Collapsible groups
-// ═══════════════════════════════════════════════════
-document.querySelectorAll('.cp-head').forEach(h => {
-  h.addEventListener('click', () => h.parentElement.classList.toggle('open'));
-});
+const PALETTE=['#4A6FA5','#C0603A','#4E8367','#8A5A9E','#C79A2E','#546E7A','#A34E63','#7A7146'];
+let colorIdx=0;
+function nextColor(){return PALETTE[colorIdx++%PALETTE.length];}
 
-// ═══════════════════════════════════════════════════
-//  File drop / input
-// ═══════════════════════════════════════════════════
-const dropZone  = document.getElementById('dropZone');
-const fileInput = document.getElementById('fileInput');
-dropZone.addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', () => { loadFiles([...fileInput.files]); fileInput.value = ''; });
+function showToast(m){const t=$('toast');t.textContent=m;t.classList.add('show');
+  clearTimeout(showToast._t);showToast._t=setTimeout(()=>t.classList.remove('show'),1900);}
+function showError(m){const e=$('errorMsg');e.textContent=m;e.style.display='block';}
+function clearError(){$('errorMsg').style.display='none';}
+function setStatus(msg,cls){const sb=$('statusbar');$('statusEl').textContent=msg;
+  sb.classList.remove('ok','err');if(cls)sb.classList.add(cls);}
 
-// File drag-and-drop. We listen on the dropZone itself AND on document
-// so that files dragged over the table (which sits below the drop zone)
-// are still accepted. Row-reorder drags are ignored (dragSrcIdx is non-null).
-function isFileDrag(e) {
-  return e.dataTransfer && [...e.dataTransfer.types].includes('Files');
-}
-dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('over'); });
-dropZone.addEventListener('dragleave', e => { if (!dropZone.contains(e.relatedTarget)) dropZone.classList.remove('over'); });
-dropZone.addEventListener('drop', async e => {
-  e.preventDefault();
-  e.stopPropagation();
-  dropZone.classList.remove('over');
-  if (!isFileDrag(e)) return;
-  const items = [...e.dataTransfer.items];
-  const csvFiles = [], otherFiles = [];
-  for (const item of items) {
-    if (item.kind !== 'file') continue;
-    if (item.getAsFileSystemHandle) {
-      try {
-        const fh = await item.getAsFileSystemHandle();
-        const file = await fh.getFile();
-        sourceFileHandle = fh;
-        if (/\.csv$/i.test(file.name)) csvFiles.push(file);
-        else otherFiles.push(file);
-        continue;
-      } catch(_) {}
-    }
-    const file = item.getAsFile ? item.getAsFile() : null;
-    if (!file) continue;
-    if (/\.csv$/i.test(file.name)) csvFiles.push(file);
-    else otherFiles.push(file);
-  }
-  if (csvFiles.length)   importCsvFile(csvFiles[0]);
-  if (otherFiles.length) loadFiles(otherFiles);
-});
-// Also catch drops anywhere on the page (e.g. over the file table)
-document.addEventListener('dragover', e => {
-  if (dragSrcIdx !== null || !isFileDrag(e)) return;
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'copy';
-  dropZone.classList.add('over');
-});
-document.addEventListener('dragleave', e => {
-  if (e.relatedTarget === null) dropZone.classList.remove('over');
-});
-document.addEventListener('drop', async e => {
-  if (dragSrcIdx !== null || !isFileDrag(e)) return;
-  e.preventDefault();
-  dropZone.classList.remove('over');
-  const items = [...e.dataTransfer.items];
-  const csvFiles = [], otherFiles = [];
-  for (const item of items) {
-    if (item.kind !== 'file') continue;
-    // Try to get a FileSystemHandle so startIn works in save dialogs
-    if (item.getAsFileSystemHandle) {
-      try {
-        const fh = await item.getAsFileSystemHandle();
-        const file = await fh.getFile();
-        sourceFileHandle = fh;
-        if (/\.csv$/i.test(file.name)) csvFiles.push(file);
-        else otherFiles.push(file);
-        continue;
-      } catch(_) {}
-    }
-    // Fallback
-    const file = item.getAsFile ? item.getAsFile() : null;
-    if (!file) continue;
-    if (/\.csv$/i.test(file.name)) csvFiles.push(file);
-    else otherFiles.push(file);
-  }
-  if (csvFiles.length) importCsvFile(csvFiles[0]);
-  if (otherFiles.length) loadFiles(otherFiles);
-});
-
-document.getElementById('clearAllBtn').addEventListener('click', () => {
-  patterns.length = 0;
-  Object.keys(legendPositions).forEach(k => delete legendPositions[k]);
-  refreshTable();
-  clearMap();
-  setStackStatus('Load at least one diffractogram to begin.', '');
-});
-
-document.getElementById('sortByYBtn').addEventListener('click', () => {
-  if (!patterns.length) return;
-  sortPatterns();
-  refreshTable();
-  scheduleRender(); scheduleStackRender();
-});
-
-function extractYFromFilename(name) {
-  const stem = name.replace(/\.[^.]+$/, '');
-  const m = stem.match(/(?:_|-)(\d+(?:\.\d+)?)(?=[^0-9]|$)/g);
-  if (m && m.length) return parseFloat(m[m.length - 1].replace(/^[_-]/, ''));
-  const m2 = stem.match(/(\d+(?:\.\d+)?)$/);
-  if (m2) return parseFloat(m2[1]);
+// ═══════════════════════════════════════════════════════════
+// PARSERS  (preserved from v2.9, lightly tidied)
+// ═══════════════════════════════════════════════════════════
+function extractYFromFilename(name){
+  const stem=name.replace(/\.[^.]+$/,'');
+  const m=stem.match(/(?:_|-)(\d+(?:\.\d+)?)(?=[^0-9]|$)/g);
+  if(m&&m.length)return parseFloat(m[m.length-1].replace(/^[_-]/,''));
+  const m2=stem.match(/(\d+(?:\.\d+)?)$/);
+  if(m2)return parseFloat(m2[1]);
   return null;
 }
-
-function parseXY(text) {
-  const twoTheta = [], intensity = [];
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line[0] === '#' || line[0] === '!' || line[0] === ';') continue;
-    const parts = line.split(/[\s,;]+/).filter(Boolean);
-    // Skip header/metadata lines that have fewer than 2 tokens (e.g. a bare wavelength value)
-    if (parts.length < 2) continue;
-    const a = parseFloat(parts[0]), b = parseFloat(parts[1]);
-    // Accept rows where the first two tokens are both finite numbers;
-    // any additional columns (e.g. esd in .xye format) are silently ignored.
-    if (isFinite(a) && isFinite(b)) { twoTheta.push(a); intensity.push(b); }
+function parseXY(text){
+  const twoTheta=[],intensity=[];
+  for(const raw of text.split(/\r?\n/)){
+    const line=raw.trim();
+    if(!line||line[0]==='#'||line[0]==='!'||line[0]===';')continue;
+    const parts=line.split(/[\s,;]+/).filter(Boolean);
+    if(parts.length<2)continue;
+    const a=parseFloat(parts[0]),b=parseFloat(parts[1]);
+    if(isFinite(a)&&isFinite(b)){twoTheta.push(a);intensity.push(b);}
   }
-  return { twoTheta, intensity };
+  return{twoTheta,intensity};
+}
+function parseXRDML(text){
+  const doc=new DOMParser().parseFromString(text,'application/xml');
+  if(doc.querySelector('parsererror'))return{twoTheta:[],intensity:[],temperature:null};
+  const getVal=(el,tag)=>{const f=el.querySelector(tag);return f?f.textContent.trim():null;};
+  let startPos=null,endPos=null;
+  for(const pos of doc.querySelectorAll('positions')){
+    if(pos.getAttribute('axis')==='2Theta'){startPos=parseFloat(getVal(pos,'startPosition'));endPos=parseFloat(getVal(pos,'endPosition'));break;}
+  }
+  if(!isFinite(startPos)||!isFinite(endPos))return{twoTheta:[],intensity:[],temperature:null};
+  const intensEl=doc.querySelector('intensities');
+  if(!intensEl)return{twoTheta:[],intensity:[],temperature:null};
+  const rawInts=intensEl.textContent.trim().split(/\s+/).map(Number).filter(isFinite);
+  const n=rawInts.length;if(n<2)return{twoTheta:[],intensity:[],temperature:null};
+  const twoTheta=Array.from({length:n},(_,i)=>startPos+(i/(n-1))*(endPos-startPos));
+  let temperature=null;
+  const naEl=doc.querySelector('nonAmbientPoints');
+  if(naEl){const unit=naEl.getAttribute('unit')||'';const vals=getVal(naEl,'nonAmbientValues');
+    if(vals){const v=parseFloat(vals.split(/[\s,]+/)[0]);if(isFinite(v))temperature=(unit==='K')?+(v-273.15).toFixed(2):v;}}
+  return{twoTheta,intensity:rawInts,temperature};
 }
 
-
-// ═══════════════════════════════════════════════════
-//  XRDML parser (PANalytical XML format)
-// ═══════════════════════════════════════════════════
-function parseXRDML(text) {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(text, 'application/xml');
-  if (doc.querySelector('parsererror')) return { twoTheta: [], intensity: [], temperature: null };
-  const getVal = (el, tag) => { const f = el.querySelector(tag); return f ? f.textContent.trim() : null; };
-  let startPos = null, endPos = null;
-  for (const pos of doc.querySelectorAll('positions')) {
-    if (pos.getAttribute('axis') === '2Theta') {
-      startPos = parseFloat(getVal(pos, 'startPosition'));
-      endPos   = parseFloat(getVal(pos, 'endPosition'));
-      break;
+// ═══════════════════════════════════════════════════════════
+// FILE LOADING
+// ═══════════════════════════════════════════════════════════
+async function loadFiles(files){
+  if($('resetOnLoad').checked)resetToDefaults();
+  clearError();
+  let added=0;const entries=[];
+  for(const f of files){
+    if(/\.zip$/i.test(f.name)){
+      if(typeof JSZip==='undefined'){showError('JSZip not loaded.');continue;}
+      try{const zip=await JSZip.loadAsync(f);
+        zip.forEach((rel,ze)=>{if(!ze.dir&&/\.(xy|xye|dat|txt|xrdml)$/i.test(rel)){
+          entries.push({name:rel.split('/').pop(),getText:()=>ze.async('string')});}});
+      }catch(e){showError('Could not open '+f.name+': '+e.message);}
+    }else if(/\.(xy|xye|dat|txt|xrdml)$/i.test(f.name)){
+      entries.push({name:f.name,getText:()=>f.text()});
     }
   }
-  if (!isFinite(startPos) || !isFinite(endPos)) return { twoTheta: [], intensity: [], temperature: null };
-  const intensEl = doc.querySelector('intensities');
-  if (!intensEl) return { twoTheta: [], intensity: [], temperature: null };
-  const rawInts = intensEl.textContent.trim().split(/\s+/).map(Number).filter(isFinite);
-  const n = rawInts.length;
-  if (n < 2) return { twoTheta: [], intensity: [], temperature: null };
-  const twoTheta = Array.from({ length: n }, (_, i) => startPos + (i / (n - 1)) * (endPos - startPos));
-  let temperature = null;
-  const naEl = doc.querySelector('nonAmbientPoints');
-  if (naEl) {
-    const unit = naEl.getAttribute('unit') || '';
-    const vals = getVal(naEl, 'nonAmbientValues');
-    if (vals) {
-      const v = parseFloat(vals.split(/[\s,]+/)[0]);
-      if (isFinite(v)) temperature = (unit === 'K') ? +(v - 273.15).toFixed(2) : v;
-    }
-  }
-  return { twoTheta, intensity: rawInts, temperature };
-}
-
-async function loadFiles(files) {
-  // Reset all settings to defaults before processing — only if the user has opted in.
-  // Do this before touching `patterns` so any scroll/render state is already clean.
-  if (document.getElementById('resetOnLoad').checked) resetToDefaults();
-
-  let added = 0;
-  const entries = [];
-  for (const f of files) {
-    if (/\.zip$/i.test(f.name)) {
-      if (typeof JSZip === 'undefined') { setStatus('JSZip not loaded.', 'err'); continue; }
-      try {
-        const zip = await JSZip.loadAsync(f);
-        zip.forEach((rel, ze) => {
-          if (!ze.dir && /\.(xy|xye|dat|txt|xrdml)$/i.test(rel)) {
-            const basename = rel.split('/').pop();
-            entries.push({ name: basename, getText: () => ze.async('string') });
-          }
-        });
-      } catch (e) { setStatus(`Could not open ${f.name}: ${e.message}`, 'err'); }
-    } else if (/\.(xy|xye|dat|txt|xrdml)$/i.test(f.name)) {
-      entries.push({ name: f.name, getText: () => f.text() });
-    }
-  }
-  for (const entry of entries) {
-    if (patterns.find(p => p.filename === entry.name)) continue;
-    const text = await entry.getText();
-    let twoTheta, intensity, embeddedY = null;
-    if (/\.xrdml$/i.test(entry.name)) {
-      const parsed = parseXRDML(text);
-      twoTheta  = parsed.twoTheta;
-      intensity = parsed.intensity;
-      embeddedY = parsed.temperature;
-    } else {
-      ({ twoTheta, intensity } = parseXY(text));
-    }
-    if (twoTheta.length < 10) continue;
-    const y = embeddedY != null ? embeddedY : extractYFromFilename(entry.name);
-    const yUnit = (document.getElementById('yLabel').value.match(/\(([^)]+)\)/) || [, ''])[1].trim();
-    const legend = y != null && isFinite(y) ? (yUnit ? `${y} ${yUnit}` : `${y}`) : entry.name.replace(/\.[^.]+$/, '');
-    patterns.push({ filename: entry.name, twoTheta, intensity, y, legend, nPts: twoTheta.length });
+  for(const entry of entries){
+    if(patterns.find(p=>p.filename===entry.name))continue;
+    const text=await entry.getText();
+    let twoTheta,intensity,embeddedY=null;
+    if(/\.xrdml$/i.test(entry.name)){const parsed=parseXRDML(text);twoTheta=parsed.twoTheta;intensity=parsed.intensity;embeddedY=parsed.temperature;}
+    else({twoTheta,intensity}=parseXY(text));
+    if(twoTheta.length<10)continue;
+    const y=embeddedY!=null?embeddedY:extractYFromFilename(entry.name);
+    const yUnit=(($('cYLabel')&&$('cYLabel').value||'').match(/\(([^)]+)\)/)||[,''])[1].trim();
+    const legend=(y!=null&&isFinite(y))?(yUnit?`${y} ${yUnit}`:`${y}`):entry.name.replace(/\.[^.]+$/,'');
+    patterns.push({filename:entry.name,twoTheta,intensity,y,legend,colour:nextColor(),nPts:twoTheta.length});
     added++;
   }
-  if (added) {
-    sortPatterns();
-    refreshTable();
-    autoFillRange();
-    setStatus(`${patterns.length} pattern${patterns.length > 1 ? 's' : ''} loaded.`, '');
-    setStackStatus(`${patterns.length} pattern${patterns.length > 1 ? 's' : ''} loaded.`, '');
-  }
+  if(added){sortPatterns();renderDsList();autoFillRange();
+    setStatus(`${patterns.length} pattern${patterns.length>1?'s':''} loaded`,'ok');
+    scheduleRender();}
+}
+function sortPatterns(){
+  const allY=patterns.every(p=>p.y!=null&&isFinite(p.y));
+  if(allY)patterns.sort((a,b)=>a.y-b.y);
+  else patterns.sort((a,b)=>a.filename.localeCompare(b.filename,undefined,{numeric:true,sensitivity:'base'}));
+}
+function looksLikeCSVseries(text){const l=text.split(/\r?\n/);return l.length>3&&l[1].split(',').length>=2&&l[3].split(',').length>=2;}
+
+// ═══════════════════════════════════════════════════════════
+// DEMO SERIES (synthetic VT scan with a peak that shifts + one that appears)
+// ═══════════════════════════════════════════════════════════
+function loadDemo(){
+  if($('resetOnLoad').checked)resetToDefaults();
+  clearError();
+  const temps=[30,60,90,120,150,180,210,240,270,300];
+  const tt=[];for(let x=8;x<=40;x+=0.05)tt.push(+x.toFixed(2));
+  const gauss=(x,c,w,a)=>a*Math.exp(-0.5*((x-c)/w)**2);
+  temps.forEach((T,i)=>{
+    const shift=(T-30)/270*1.8;              // one peak marches right
+    const grow=Math.max(0,(T-150)/150);      // one peak appears above 150
+    const inten=tt.map(x=>{
+      let v=8+2*Math.sin(x)                    // wavy background
+        +gauss(x,12.5,0.13,100)
+        +gauss(x,18.2+shift,0.15,62)
+        +gauss(x,24.0,0.13,44)
+        +gauss(x,28.6,0.16,30)
+        +gauss(x,33.1,0.18,22)
+        +grow*gauss(x,21.4,0.15,55);
+      v+=(Math.random()-0.5)*3;                // noise
+      return +v.toFixed(2);
+    });
+    patterns.push({filename:`demoVT_${T}.xy`,twoTheta:tt.slice(),intensity:inten,
+      y:T,legend:`${T} °C`,colour:nextColor(),nPts:tt.length});
+  });
+  if($('cYLabel'))$('cYLabel').value='Temperature (°C)';
+  sortPatterns();renderDsList();autoFillRange();
+  setStatus(`${patterns.length} demo patterns loaded`,'ok');
+  scheduleRender();
 }
 
-// Sort by Y when every pattern has a value, otherwise by filename (so phase-name
-// series like "phaseA.xy", "phaseB.xy" land in a sensible order too).
-function sortPatterns() {
-  const allHaveY = patterns.every(p => p.y != null && isFinite(p.y));
-  if (allHaveY) {
-    patterns.sort((a, b) => a.y - b.y);
-  } else {
-    patterns.sort((a, b) => a.filename.localeCompare(b.filename, undefined, { numeric: true, sensitivity: 'base' }));
-  }
+// ═══════════════════════════════════════════════════════════
+// SIDEBAR — dataset cards with drag-reorder, y edit, colour, remove
+// ═══════════════════════════════════════════════════════════
+function escAttr(s){return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');}
+function renderDsList(){
+  const list=$('dsList');
+  $('dsCount').textContent=patterns.length?`(${patterns.length})`:'';
+  $('emptyState').style.display=patterns.length?'none':'flex';
+  if(!patterns.length){list.innerHTML='<div class="ds-empty">Nothing loaded yet.</div>';updateButtons();return;}
+  list.innerHTML='';
+  patterns.forEach((p,i)=>{
+    const card=document.createElement('div');
+    card.className='ds-card';card.draggable=true;card.dataset.i=i;
+    const yVal=(p.y!=null&&isFinite(p.y))?p.y:'';
+    const range=`${p.twoTheta[0].toFixed(1)}–${p.twoTheta[p.twoTheta.length-1].toFixed(1)}° · ${p.nPts} pts`;
+    card.innerHTML=
+      `<span class="ds-grip" title="Drag to reorder">⠿</span>`+
+      `<input type="color" value="${p.colour||'#4A6FA5'}" title="Pattern colour">`+
+      `<div class="ds-main"><input type="text" class="ds-name" value="${escAttr(p.legend||'')}" title="Legend label">`+
+      `<span class="ds-meta" title="${escAttr(p.filename)}">${escAttr(p.filename)} · ${range}</span></div>`+
+      `<input type="number" class="ds-y${yVal===''?' missing':''}" value="${yVal}" placeholder="Y" title="Stimulus value" step="any">`+
+      `<button class="ds-ico" title="Remove">✕</button>`;
+    const[grip,colorIn,mainDiv,yIn,rmBtn]=card.children;
+    const nameIn=mainDiv.querySelector('.ds-name');
+    colorIn.addEventListener('input',()=>{p.colour=colorIn.value;scheduleRender();});
+    nameIn.addEventListener('input',()=>{p.legend=nameIn.value;scheduleRender();});
+    yIn.addEventListener('input',()=>{const v=parseFloat(yIn.value);p.y=isFinite(v)?v:null;
+      yIn.classList.toggle('missing',!isFinite(v));scheduleRender();});
+    rmBtn.addEventListener('click',()=>{delete legendPositions[p.filename];patterns.splice(i,1);
+      renderDsList();scheduleRender();if(!patterns.length)clearCanvas();});
+    // drag reorder
+    card.addEventListener('dragstart',e=>{if(e.target!==card&&!e.target.classList.contains('ds-grip')){}
+      dragSrcIdx=i;card.classList.add('dragging');e.dataTransfer.effectAllowed='move';
+      try{e.dataTransfer.setData('text/plain',String(i));}catch(_){}});
+    card.addEventListener('dragend',()=>{list.querySelectorAll('.ds-card').forEach(c=>c.classList.remove('dragging','drag-over'));dragSrcIdx=null;});
+    card.addEventListener('dragover',e=>{if(dragSrcIdx===null)return;e.preventDefault();e.dataTransfer.dropEffect='move';
+      list.querySelectorAll('.ds-card').forEach(c=>c.classList.remove('drag-over'));if(i!==dragSrcIdx)card.classList.add('drag-over');});
+    card.addEventListener('dragleave',()=>card.classList.remove('drag-over'));
+    card.addEventListener('drop',e=>{if(dragSrcIdx===null)return;e.preventDefault();const dst=i;
+      if(dragSrcIdx===dst)return;const[m]=patterns.splice(dragSrcIdx,1);patterns.splice(dst,0,m);
+      renderDsList();scheduleRender();});
+    list.appendChild(card);
+  });
+  updateButtons();
+}
+function autoFillRange(){
+  if(!patterns.length)return;
+  const gMin=Math.min(...patterns.map(p=>p.twoTheta[0]));
+  const gMax=Math.max(...patterns.map(p=>p.twoTheta[p.twoTheta.length-1]));
+  if($('cTtMin')&&!$('cTtMin').value)$('cTtMin').value=gMin.toFixed(2);
+  if($('cTtMax')&&!$('cTtMax').value)$('cTtMax').value=gMax.toFixed(2);
+}
+function updateButtons(){
+  const any=patterns.length>0;
+  ['exportCsvBtn','autosortBtn','clearBtn'].forEach(id=>$(id).disabled=!any);
+  const svgB=$('cSaveSVG'),pngB=$('cSavePNG'),cpB=$('cCopy');
+  if(svgB)svgB.disabled=!any;if(pngB)pngB.disabled=!any;if(cpB)cpB.disabled=!any;
 }
 
-// ═══════════════════════════════════════════════════
-//  File table  (with drag-to-reorder)
-// ═══════════════════════════════════════════════════
-function refreshTable() {
-  const wrap   = document.getElementById('fileTableWrap');
-  const tbody  = document.getElementById('fileTableBody');
-  const rowAct = document.getElementById('rowActions');
-  const count  = document.getElementById('fileCount');
-  if (!patterns.length) {
-    wrap.style.display = 'none';
-    rowAct.style.display = 'none';
-    return;
-  }
-  wrap.style.display = 'block';
-  rowAct.style.display = 'flex';
-  count.textContent = `${patterns.length} pattern${patterns.length > 1 ? 's' : ''} loaded`;
-
-  document.getElementById('yColHead').textContent =
-    document.getElementById('yLabel').value || 'Y value';
-
-  tbody.innerHTML = '';
-  patterns.forEach((p, i) => {
-    const ttMin = p.twoTheta[0].toFixed(3);
-    const ttMax = p.twoTheta[p.twoTheta.length - 1].toFixed(3);
-    const yVal  = p.y != null && isFinite(p.y) ? p.y : '';
-    const tr = document.createElement('tr');
-    tr.draggable = true;
-    tr.dataset.i = i;
-    tr.innerHTML =
-      `<td style="width:28px;text-align:center"><span class="drag-handle" title="Drag to reorder">⠿</span></td>
-       <td class="fname" title="${p.filename}">${p.filename}</td>
-       <td class="num">${p.nPts}</td>
-       <td class="range">${ttMin} – ${ttMax}</td>
-       <td><input class="y-input${yVal === '' ? ' missing' : ''}" type="number"
-           value="${yVal}" placeholder="required" data-i="${i}"></td>
-       <td><input class="legend-input" type="text" value="${escAttr(p.legend || '')}" data-i="${i}"></td>
-       <td><input class="colour-input" type="color" value="${p.colour || '#000000'}" data-i="${i}" title="Pattern colour (used with Custom colour scheme)"></td>
-       <td><button class="del-btn" data-i="${i}" title="Remove">✕</button></td>`;
-    tbody.appendChild(tr);
-  });
-
-  // ── Drag-to-reorder events ──────────────────────
-  tbody.querySelectorAll('tr').forEach(tr => {
-    tr.addEventListener('dragstart', e => {
-      dragSrcIdx = +tr.dataset.i;
-      tr.classList.add('dragging');
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', dragSrcIdx); // required for Firefox
-    });
-    tr.addEventListener('dragend', () => {
-      tbody.querySelectorAll('tr').forEach(r => r.classList.remove('dragging', 'drag-over'));
-      dragSrcIdx = null;
-    });
-    tr.addEventListener('dragover', e => {
-      // Ignore OS file drops — let them fall through to the drop zone
-      if (dragSrcIdx === null) return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      // Highlight target only — clear others first
-      tbody.querySelectorAll('tr').forEach(r => r.classList.remove('drag-over'));
-      if (+tr.dataset.i !== dragSrcIdx) tr.classList.add('drag-over');
-    });
-    tr.addEventListener('dragleave', () => tr.classList.remove('drag-over'));
-    tr.addEventListener('drop', e => {
-      // Ignore OS file drops
-      if (dragSrcIdx === null) return;
-      e.preventDefault();
-      const dstIdx = +tr.dataset.i;
-      if (dragSrcIdx === dstIdx) return;
-      // Splice the dragged pattern out and insert at destination
-      const [moved] = patterns.splice(dragSrcIdx, 1);
-      patterns.splice(dstIdx, 0, moved);
-      refreshTable();
-      scheduleRender(); scheduleStackRender();
-    });
-  });
-
-  // ── Input event handlers ─────────────────────────
-  tbody.querySelectorAll('.y-input').forEach(el => {
-    el.addEventListener('input', e => {
-      const i = +e.target.dataset.i;
-      const v = parseFloat(e.target.value);
-      patterns[i].y = isFinite(v) ? v : null;
-      e.target.classList.toggle('missing', !isFinite(v));
-      scheduleRender(); scheduleStackRender();
-    });
-    el.addEventListener('change', () => {
-      scheduleRender(); scheduleStackRender();
-    });
-  });
-  tbody.querySelectorAll('.legend-input').forEach(el => {
-    el.addEventListener('input', e => {
-      const i = +e.target.dataset.i;
-      patterns[i].legend = e.target.value;
-      scheduleStackRender();
-    });
-  });
-  tbody.querySelectorAll('.colour-input').forEach(el => {
-    el.addEventListener('input', e => {
-      const i = +e.target.dataset.i;
-      patterns[i].colour = e.target.value;
-      scheduleStackRender();
-    });
-  });
-  tbody.querySelectorAll('.del-btn').forEach(el => {
-    el.addEventListener('click', e => {
-      const i = +e.target.dataset.i;
-      const f = patterns[i].filename;
-      delete legendPositions[f];
-      patterns.splice(i, 1);
-      refreshTable();
-      if (!patterns.length) {
-        clearMap();
-        setStackStatus('Load at least one diffractogram to begin.', '');
-      } else {
-        scheduleRender(); scheduleStackRender();
-      }
-    });
-  });
+// ═══════════════════════════════════════════════════════════
+// RESAMPLE / NORMALISE  (preserved)
+// ═══════════════════════════════════════════════════════════
+function resample(twoTheta,intensity,gMin,gMax,N){
+  const out=new Float32Array(N),step=(gMax-gMin)/(N-1),n=twoTheta.length;let j=0;
+  for(let i=0;i<N;i++){const tt=gMin+i*step;
+    while(j<n-2&&twoTheta[j+1]<tt)j++;
+    if(j>=n-1){out[i]=intensity[n-1];continue;}
+    const t=(twoTheta[j]===twoTheta[j+1])?0:(tt-twoTheta[j])/(twoTheta[j+1]-twoTheta[j]);
+    out[i]=intensity[j]*(1-t)+intensity[j+1]*t;}
+  return out;
 }
-
-function escAttr(s) { return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
-
-document.getElementById('yLabel').addEventListener('input', () => {
-  const head = document.getElementById('yColHead');
-  if (head) head.textContent = document.getElementById('yLabel').value || 'Y value';
-});
-
-function autoFillRange() {
-  const ranges = [
-    ['ttMin', 'ttMax'],
-    ['stkTtMin', 'stkTtMax']
-  ];
-  const gMin = Math.min(...patterns.map(p => p.twoTheta[0]));
-  const gMax = Math.max(...patterns.map(p => p.twoTheta[p.twoTheta.length - 1]));
-  ranges.forEach(([minId, maxId]) => {
-    const minEl = document.getElementById(minId);
-    const maxEl = document.getElementById(maxId);
-    if (minEl && !minEl.value) minEl.value = gMin.toFixed(3);
-    if (maxEl && !maxEl.value) maxEl.value = gMax.toFixed(3);
-  });
-}
-
-// ═══════════════════════════════════════════════════
-//  Slider value displays
-// ═══════════════════════════════════════════════════
-function bindSlider(sliderId, valId, digits) {
-  const el = document.getElementById(sliderId);
-  const v  = document.getElementById(valId);
-  if (!el || !v) return;
-  const upd = () => { v.textContent = parseFloat(el.value).toFixed(digits); };
-  el.addEventListener('input', upd); upd();
-}
-bindSlider('gammaSlider',     'gammaVal',     2);
-bindSlider('peakEmphasis',    'peakEmphasisVal', 1);
-// Noise floor: show "X.X%" rather than a unitless fraction
-(function(){
-  const el = document.getElementById('noiseFloor');
-  const v  = document.getElementById('noiseFloorVal');
-  const upd = () => { v.textContent = parseFloat(el.value).toFixed(1) + '%'; };
-  el.addEventListener('input', upd); upd();
-})();
-bindSlider('lwSlider',        'lwVal',        1);
-bindSlider('gridlineWeight',  'glwVal',       1);
-bindSlider('stkXPad',         'stkXPadVal',   0);
-bindSlider('stkLineWt',       'stkLineWtVal', 2);
-bindSlider('stkAxisWt',       'stkAxisWtVal', 2);
-
-// ═══════════════════════════════════════════════════
-//  Resampling & normalisation
-// ═══════════════════════════════════════════════════
-function resample(twoTheta, intensity, gMin, gMax, N) {
-  const out = new Float32Array(N);
-  const step = (gMax - gMin) / (N - 1);
-  const n = twoTheta.length;
-  let j = 0;
-  for (let i = 0; i < N; i++) {
-    const tt = gMin + i * step;
-    while (j < n - 2 && twoTheta[j + 1] < tt) j++;
-    if (j >= n - 1) { out[i] = intensity[n - 1]; continue; }
-    const t = (twoTheta[j] === twoTheta[j + 1]) ? 0
-      : (tt - twoTheta[j]) / (twoTheta[j + 1] - twoTheta[j]);
-    out[i] = intensity[j] * (1 - t) + intensity[j + 1] * t;
-  }
+function normalize(arr,mode,gMin,gMax){
+  const N=arr.length;let lo,hi;
+  if(mode==='global'){lo=gMin;hi=gMax;}
+  else{lo=Infinity;hi=-Infinity;for(let i=0;i<N;i++){if(arr[i]<lo)lo=arr[i];if(arr[i]>hi)hi=arr[i];}if(mode==='per')lo=0;}
+  const range=hi-lo,out=new Float32Array(N);if(range===0)return out;
+  for(let i=0;i<N;i++)out[i]=Math.max(0,Math.min(1,(arr[i]-lo)/range));
   return out;
 }
 
-function normalize(arr, mode, gMin, gMax) {
-  const N = arr.length;
-  let lo, hi;
-  if (mode === 'global') { lo = gMin; hi = gMax; }
-  else {
-    lo = Infinity; hi = -Infinity;
-    for (let i = 0; i < N; i++) {
-      if (arr[i] < lo) lo = arr[i];
-      if (arr[i] > hi) hi = arr[i];
-    }
-    if (mode === 'per') lo = 0;
-  }
-  const range = hi - lo;
-  const out = new Float32Array(N);
-  if (range === 0) return out;
-  for (let i = 0; i < N; i++) out[i] = Math.max(0, Math.min(1, (arr[i] - lo) / range));
-  return out;
-}
-
-// ═══════════════════════════════════════════════════
-//  Helpers
-// ═══════════════════════════════════════════════════
-function hexToRgb(hex) {
-  const n = parseInt((hex || '#000000').replace('#', ''), 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-function setStatus(msg, cls) {
-  const el = document.getElementById('statusMsg');
-  el.textContent = msg; el.className = 'status' + (cls ? ' ' + cls : '');
-}
-function setStackStatus(msg, cls) {
-  const el = document.getElementById('stackStatus');
-  const msgEl = document.getElementById('stackStatusMsg');
-  msgEl.textContent = msg;
-  el.className = 'status' + (cls ? ' ' + cls : '');
-}
-function niceStep(rough) {
-  if (rough <= 0) return 1;
-  const p = Math.pow(10, Math.floor(Math.log10(rough)));
-  const f = rough / p;
-  return f < 1.5 ? p : f < 3.5 ? 2 * p : f < 7.5 ? 5 * p : 10 * p;
-}
-function decimalsForStep(step) {
-  const s = Math.abs(step);
-  if (s >= 1 || s === 0) return 0;
-  return Math.max(0, -Math.floor(Math.log10(s)));
-}
-function fmtTick(v, decimals) {
-  if (!isFinite(v)) return '';
-  // Guard against -0 display
-  if (Object.is(v, -0)) v = 0;
-  return v.toFixed(decimals);
-}
-
-// ═══════════════════════════════════════════════════
-//  Colour ramps for stacked plot
-// ═══════════════════════════════════════════════════
-const COLOR_STOPS = {
-  viridis: ['#440154','#3b528b','#21918c','#5ec962','#fde725'],
-  plasma:  ['#0d0887','#7e03a8','#cb4778','#f89540','#f0f921'],
-  inferno: ['#000004','#420a68','#932667','#dd513a','#fcffa4'],
-  cool:    ['#0066cc','#3399ff','#66ccff','#99ffff','#ccffee'],
-  warm:    ['#660000','#cc3300','#ff6600','#ffcc00','#ffff66'],
-  rainbow: ['#ff0000','#ffff00','#00ff00','#00ffff','#0000ff','#ff00ff']
+// ═══════════════════════════════════════════════════════════
+// COLOUR RAMPS (+ cividis; used by stack ramp AND map)
+// ═══════════════════════════════════════════════════════════
+const COLOR_STOPS={
+  viridis:['#440154','#3b528b','#21918c','#5ec962','#fde725'],
+  plasma:['#0d0887','#7e03a8','#cb4778','#f89540','#f0f921'],
+  inferno:['#000004','#420a68','#932667','#dd513a','#fcffa4'],
+  cividis:['#00224e','#35456c','#666970','#97923f','#f9e721'],
+  cool:['#0066cc','#3399ff','#66ccff','#99ffff','#ccffee'],
+  warm:['#660000','#cc3300','#ff6600','#ffcc00','#ffff66'],
+  rainbow:['#ff0000','#ffff00','#00ff00','#00ffff','#0000ff','#ff00ff'],
 };
-function rampColor(scheme, t) {
-  const stops = COLOR_STOPS[scheme] || COLOR_STOPS.viridis;
-  if (t <= 0) return stops[0];
-  if (t >= 1) return stops[stops.length - 1];
-  const s = t * (stops.length - 1);
-  const i = Math.floor(s);
-  const f = s - i;
-  const [r1,g1,b1] = hexToRgb(stops[i]);
-  const [r2,g2,b2] = hexToRgb(stops[i + 1]);
-  return `rgb(${Math.round(r1+f*(r2-r1))},${Math.round(g1+f*(g2-g1))},${Math.round(b1+f*(b2-b1))})`;
+function hexToRgb(hex){const n=parseInt((hex||'#000000').replace('#',''),16);return[(n>>16)&255,(n>>8)&255,n&255];}
+function rampRGB(scheme,t){
+  const stops=COLOR_STOPS[scheme]||COLOR_STOPS.viridis;
+  if(t<=0)return hexToRgb(stops[0]);if(t>=1)return hexToRgb(stops[stops.length-1]);
+  const s=t*(stops.length-1),i=Math.floor(s),f=s-i;
+  const[r1,g1,b1]=hexToRgb(stops[i]),[r2,g2,b2]=hexToRgb(stops[i+1]);
+  return[Math.round(r1+f*(r2-r1)),Math.round(g1+f*(g2-g1)),Math.round(b1+f*(b2-b1))];
+}
+function rampColor(scheme,t){const[r,g,b]=rampRGB(scheme,t);return`rgb(${r},${g},${b})`;}
+
+// ═══════════════════════════════════════════════════════════
+// TICK HELPERS
+// ═══════════════════════════════════════════════════════════
+function niceStep(rough){if(rough<=0)return 1;const p=Math.pow(10,Math.floor(Math.log10(rough)));const f=rough/p;
+  return f<1.5?p:f<3.5?2*p:f<7.5?5*p:10*p;}
+function decimalsForStep(step){const s=Math.abs(step);if(s>=1||s===0)return 0;return Math.max(0,-Math.floor(Math.log10(s)));}
+function fmtTick(v,d){if(!isFinite(v))return'';if(Object.is(v,-0))v=0;return v.toFixed(d);}
+function measureText(s,size,font){measCtx.font=`${size}px ${font}`;return measCtx.measureText(s).width;}
+function hexAlpha(hex,a){const[r,g,b]=hexToRgb(hex);return`rgba(${r},${g},${b},${a})`;}
+
+// ═══════════════════════════════════════════════════════════
+// RENDER BACKENDS — canvas + SVG share drawing routines
+// ═══════════════════════════════════════════════════════════
+function canvasBackend(c){
+  return{
+    kind:'canvas',ctx:c,
+    rect(x,y,w,h,fill){c.fillStyle=fill;c.fillRect(x,y,w,h);},
+    box(x,y,w,h,stroke,lw){c.strokeStyle=stroke;c.lineWidth=lw;c.strokeRect(x,y,w,h);},
+    line(x1,y1,x2,y2,stroke,lw,dash){c.strokeStyle=stroke;c.lineWidth=lw;if(dash)c.setLineDash(dash);
+      c.beginPath();c.moveTo(x1,y1);c.lineTo(x2,y2);c.stroke();if(dash)c.setLineDash([]);},
+    poly(pts,stroke,lw){if(pts.length<4)return;c.strokeStyle=stroke;c.lineWidth=lw;c.lineJoin='round';c.lineCap='round';
+      c.beginPath();c.moveTo(pts[0],pts[1]);for(let i=2;i<pts.length;i+=2)c.lineTo(pts[i],pts[i+1]);c.stroke();},
+    fillPoly(pts,fill){if(pts.length<6)return;c.fillStyle=fill;c.beginPath();c.moveTo(pts[0],pts[1]);
+      for(let i=2;i<pts.length;i+=2)c.lineTo(pts[i],pts[i+1]);c.closePath();c.fill();},
+    text(s,x,y,o){c.font=`${o.bold?'bold ':''}${o.size}px ${o.font}`;c.fillStyle=o.color;
+      c.textAlign=o.align||'left';c.textBaseline=o.baseline||'alphabetic';
+      if(o.rotate){c.save();c.translate(x,y);c.rotate(o.rotate*Math.PI/180);c.fillText(s,0,0);c.restore();}else c.fillText(s,x,y);},
+    image(imgData,dx,dy){c.putImageData(imgData,dx,dy);},
+    imageSmooth(srcCanvas,dx,dy,dw,dh){c.imageSmoothingEnabled=false;c.drawImage(srcCanvas,dx,dy,dw,dh);},
+    pushClip(x,y,w,h){c.save();c.beginPath();c.rect(x,y,w,h);c.clip();},
+    popClip(){c.restore();},
+  };
+}
+function svgBackend(w,h){
+  const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const N=v=>+v.toFixed(2);let defs='',body='',clipN=0;
+  const BL={alphabetic:'',middle:' dominant-baseline="central"',top:' dominant-baseline="text-before-edge"',bottom:''};
+  const AN={left:'start',center:'middle',right:'end'};
+  return{
+    kind:'svg',
+    rect(x,y,ww,hh,fill){body+=`<rect x="${N(x)}" y="${N(y)}" width="${N(ww)}" height="${N(hh)}" fill="${fill}"/>`;},
+    box(x,y,ww,hh,stroke,lw){body+=`<rect x="${N(x)}" y="${N(y)}" width="${N(ww)}" height="${N(hh)}" fill="none" stroke="${stroke}" stroke-width="${lw}"/>`;},
+    line(x1,y1,x2,y2,stroke,lw,dash){body+=`<line x1="${N(x1)}" y1="${N(y1)}" x2="${N(x2)}" y2="${N(y2)}" stroke="${stroke}" stroke-width="${lw}"${dash?` stroke-dasharray="${dash.join(',')}"`:''}/>`;},
+    poly(pts,stroke,lw){if(pts.length<4)return;let s='';for(let i=0;i<pts.length;i+=2)s+=N(pts[i])+','+N(pts[i+1])+' ';
+      body+=`<polyline points="${s.trim()}" fill="none" stroke="${stroke}" stroke-width="${lw}" stroke-linejoin="round" stroke-linecap="round"/>`;},
+    fillPoly(pts,fill){if(pts.length<6)return;let s='';for(let i=0;i<pts.length;i+=2)s+=N(pts[i])+','+N(pts[i+1])+' ';
+      body+=`<polygon points="${s.trim()}" fill="${fill}"/>`;},
+    text(s,x,y,o){body+=`<text x="${o.rotate?0:N(x)}" y="${o.rotate?0:N(y)}" font-family="${esc(o.font)}" font-size="${o.size}"${o.bold?' font-weight="bold"':''} fill="${o.color}" text-anchor="${AN[o.align||'left']}"${BL[o.baseline||'alphabetic']||''}${o.rotate?` transform="translate(${N(x)},${N(y)}) rotate(${o.rotate})"`:''}>${esc(s)}</text>`;},
+    imageURL(dataURL,dx,dy,dw,dh){body+=`<image x="${N(dx)}" y="${N(dy)}" width="${N(dw)}" height="${N(dh)}" preserveAspectRatio="none" image-rendering="pixelated" xlink:href="${dataURL}" href="${dataURL}"/>`;},
+    pushClip(x,y,ww,hh){const id='clip'+(clipN++);defs+=`<clipPath id="${id}"><rect x="${N(x)}" y="${N(y)}" width="${N(ww)}" height="${N(hh)}"/></clipPath>`;body+=`<g clip-path="url(#${id})">`;},
+    popClip(){body+='</g>';},
+    toString(){return`<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><defs>${defs}</defs>${body}</svg>`;},
+  };
 }
 
-// ═══════════════════════════════════════════════════
-//  Margin layout — INTENSITY MAP
-// ═══════════════════════════════════════════════════
-function computeMargins(ttMin, ttMax, yMin, yMax, tickSize, labelSize, axisFont, tickLen, yTickVals) {
-  const tmp = document.createElement('canvas');
-  const tc  = tmp.getContext('2d');
-  tc.font   = `${tickSize}px ${axisFont}`;
-  let maxYTickW = 0;
-  if (yTickVals) {
-    // Sequence mode: measure the actual label at each pattern position
-    const yDec = decimalsForStep(niceStep(Math.abs(yMax - yMin) / (yTickVals.length || 1)));
-    for (const yv of yTickVals) {
-      const w = tc.measureText(fmtTick(yv, yDec)).width;
-      if (w > maxYTickW) maxYTickW = w;
-    }
-  } else {
-    const yRange = yMax - yMin;
-    const yStep  = niceStep(yRange / 6);
-    const yStart = Math.ceil(yMin / yStep) * yStep;
-    const yDec   = decimalsForStep(yStep);
-    for (let yv = yStart; yv <= yMax + 1e-9; yv = +(yv + yStep).toFixed(9)) {
-      const w = tc.measureText(fmtTick(yv, yDec)).width;
-      if (w > maxYTickW) maxYTickW = w;
-    }
-  }
-  maxYTickW = Math.ceil(maxYTickW);
-  const leftPad        = 4;
-  const rotLabelExtent = Math.ceil(labelSize * 1.4);
-  const afterLabelGap  = Math.max(5, Math.ceil(labelSize * 0.4));
-  const innerGap       = 3;
-  const left = leftPad + rotLabelExtent + afterLabelGap + maxYTickW + tickLen + innerGap;
-  const yLabelCenterX = leftPad + Math.ceil(rotLabelExtent / 2);
-  const tickTextH    = Math.ceil(tickSize  * 1.35);
-  const axisLabelH   = Math.ceil(labelSize * 1.35);
-  const afterTickGap = Math.max(5, Math.ceil(tickSize * 0.45));
-  const bottomPad    = 4;
-  const bottom = tickLen + innerGap + tickTextH + afterTickGap + axisLabelH + bottomPad;
-  return { top: 18, right: 22, bottom, left, yLabelCenterX };
+// ═══════════════════════════════════════════════════════════
+// CONTROL PANEL DEFINITIONS  (shared + per-mode)
+// ═══════════════════════════════════════════════════════════
+function C(id){return $(id);}
+function val(id,def){const el=$(id);if(!el)return def;return el.type==='checkbox'?el.checked:el.value;}
+function numv(id,def){const v=parseFloat(val(id));return isFinite(v)?v:def;}
+
+const PANEL_HTML=`
+<!-- shared: range -->
+<div class="cp-group open" data-modes="stack map">
+  <div class="cp-header">Range<span class="cp-chevron">›</span></div>
+  <div class="cp-body">
+    <div class="cp-row"><span class="cp-label">2θ min (°)</span><input type="number" id="cTtMin" step="0.1" placeholder="auto" style="width:66px;flex:none;"></div>
+    <div class="cp-row"><span class="cp-label">2θ max (°)</span><input type="number" id="cTtMax" step="0.1" placeholder="auto" style="width:66px;flex:none;"></div>
+    <div class="cp-note">Drag across the plot to zoom; double-click to reset.</div>
+  </div>
+</div>
+
+<!-- stack: layout -->
+<div class="cp-group open mode-only" data-modes="stack">
+  <div class="cp-header">Layout<span class="cp-chevron">›</span></div>
+  <div class="cp-body">
+    <div class="cp-row"><span class="cp-label">Presentation</span>
+      <select class="cp-sel" id="cStackStyle"><option value="line" selected>Line bands</option><option value="waterfall">Waterfall (filled)</option></select></div>
+    <div class="cp-row" id="rowBandH"><span class="cp-label">Band height (px)</span><input type="number" id="cBandH" value="80" min="24" max="400" step="4" style="width:66px;flex:none;"></div>
+    <div class="cp-row mode-wf" id="rowWfOffset" style="display:none"><span class="cp-label">Waterfall offset</span><input type="range" id="cWfOffset" min="0" max="100" value="34" step="1"><span class="cp-val" id="cWfOffsetV">34</span></div>
+    <div class="cp-row mode-wf" id="rowWfFill" style="display:none"><span class="cp-label">Fill opacity</span><input type="range" id="cWfFill" min="0" max="1" value="0.85" step="0.05"><span class="cp-val" id="cWfFillV">0.85</span></div>
+    <div class="cp-row"><span class="cp-label">Reverse order</span><input type="checkbox" id="cReverse"></div>
+    <div class="cp-row"><span class="cp-label">Side padding</span><input type="range" id="cXPad" min="0" max="40" value="14" step="2"><span class="cp-val" id="cXPadV">14</span></div>
+    <div class="cp-row"><span class="cp-label">Show plot box</span><input type="checkbox" id="cShowBox"></div>
+  </div>
+</div>
+
+<!-- map: data & scale -->
+<div class="cp-group open mode-only" data-modes="map">
+  <div class="cp-header">Data &amp; scale<span class="cp-chevron">›</span></div>
+  <div class="cp-body">
+    <div class="cp-row"><span class="cp-label">Y-axis label</span><input type="text" id="cYLabel" value="Temperature (°C)"></div>
+    <div class="cp-row"><span class="cp-label">Y-axis mode</span>
+      <select class="cp-sel" id="cYMode"><option value="stimulus" selected>By stimulus value</option><option value="sequence">By sequence order</option></select></div>
+    <div class="cp-row"><span class="cp-label">Normalisation</span>
+      <select class="cp-sel" id="cNorm"><option value="per_bl" selected>Per-pattern &amp; baseline</option><option value="per">Per-pattern (no baseline)</option><option value="global">Global</option></select></div>
+    <div class="cp-row"><span class="cp-label">Grid resolution</span>
+      <select class="cp-sel" id="cGridRes"><option value="1000">1000 (fast)</option><option value="2000" selected>2000</option><option value="4000">4000 (fine)</option></select></div>
+    <div class="cp-row"><span class="cp-label">Plot height (px)</span><input type="number" id="cMapH" min="200" max="4000" step="50" placeholder="auto" style="width:66px;flex:none;"></div>
+    <div class="cp-row"><span class="cp-label">Pattern markers</span><input type="checkbox" id="cMarkers"></div>
+  </div>
+</div>
+
+<!-- map: colour & contrast -->
+<div class="cp-group open mode-only" data-modes="map">
+  <div class="cp-header">Colour &amp; contrast<span class="cp-chevron">›</span></div>
+  <div class="cp-body">
+    <div class="cp-row"><span class="cp-label">Colour map</span>
+      <select class="cp-sel" id="cMapScheme">
+        <option value="mono" selected>Monochrome</option>
+        <option value="viridis">Viridis</option><option value="plasma">Plasma</option>
+        <option value="inferno">Inferno</option><option value="cividis">Cividis</option>
+        <option value="cool">Cool</option><option value="warm">Warm</option>
+      </select></div>
+    <div class="cp-row" id="rowMono"><span class="cp-label">Peak colour</span><input type="color" id="cPeakColor" value="#2C2416"></div>
+    <div class="cp-row"><span class="cp-label">Background</span><input type="color" id="cMapBg" value="#FFFFFF"></div>
+    <div class="cp-row"><span class="cp-label">Invert map</span><input type="checkbox" id="cInvert"></div>
+    <div class="cp-row"><span class="cp-label">Gamma</span><input type="range" id="cGamma" min="0.1" max="3" step="0.05" value="0.4"><span class="cp-val" id="cGammaV">0.40</span></div>
+    <div class="cp-row"><span class="cp-label">Peak emphasis</span><input type="range" id="cEmph" min="1" max="4" step="0.1" value="1"><span class="cp-val" id="cEmphV">1.0</span></div>
+    <div class="cp-row"><span class="cp-label">Noise floor</span><input type="range" id="cNoise" min="0" max="5" step="0.1" value="0"><span class="cp-val" id="cNoiseV">0.0%</span></div>
+    <div class="cp-row"><span class="cp-label">Show colourbar</span><input type="checkbox" id="cColorbar"></div>
+    <div class="cp-row"><span class="cp-label">Peak-track guides</span><input type="checkbox" id="cGuides"></div>
+    <div class="cp-note" id="guideNote" style="display:none">Click the map to drop a 2θ guide; click a guide's ▾ handle to remove it.</div>
+  </div>
+</div>
+
+<!-- stack: colour & lines -->
+<div class="cp-group open mode-only" data-modes="stack">
+  <div class="cp-header">Colour &amp; lines<span class="cp-chevron">›</span></div>
+  <div class="cp-body">
+    <div class="cp-row"><span class="cp-label">Colour scheme</span>
+      <select class="cp-sel" id="cStkScheme">
+        <option value="black" selected>All black</option>
+        <option value="custom">Per pattern (swatches)</option>
+        <option value="viridis">Viridis</option><option value="plasma">Plasma</option>
+        <option value="inferno">Inferno</option><option value="cividis">Cividis</option>
+        <option value="cool">Cool</option><option value="warm">Warm</option>
+      </select></div>
+    <div class="cp-row"><span class="cp-label">Line weight</span><input type="range" id="cStkLW" min="0.5" max="6" step="0.25" value="1.5"><span class="cp-val" id="cStkLWV">1.5</span></div>
+    <div class="cp-row"><span class="cp-label">Axis/box weight</span><input type="range" id="cStkAxisW" min="0.5" max="6" step="0.25" value="1.5"><span class="cp-val" id="cStkAxisWV">1.5</span></div>
+  </div>
+</div>
+
+<!-- stack: legends -->
+<div class="cp-group open mode-only" data-modes="stack">
+  <div class="cp-header">Legends<span class="cp-chevron">›</span></div>
+  <div class="cp-body">
+    <div class="cp-row"><span class="cp-label">Show legends</span><input type="checkbox" id="cStkLegends" checked></div>
+    <div class="cp-row"><span class="cp-label">Snap</span>
+      <select class="cp-sel" id="cStkSnap"><option value="none">Off</option><option value="left" selected>Left edge</option><option value="center">Centre</option><option value="right">Right edge</option></select></div>
+    <div class="cp-row"><span class="cp-label">Legend size (px)</span><input type="number" id="cStkLegSz" value="22" min="8" max="60" style="width:60px;flex:none;"></div>
+    <div class="cp-row"><span class="cp-label" style="flex:none;">Positions</span><button class="mini-btn" id="cResetLegends" style="margin-left:auto;">Reset positions</button></div>
+    <div class="cp-note">Legends are drawn on the canvas and draggable within each band.</div>
+  </div>
+</div>
+
+<!-- shared: axes & grid -->
+<div class="cp-group mode-only" data-modes="stack map">
+  <div class="cp-header">Axes &amp; Grid<span class="cp-chevron">›</span></div>
+  <div class="cp-body">
+    <div class="cp-row"><span class="cp-label">Show gridlines</span><input type="checkbox" id="cGrid"></div>
+    <div class="cp-row"><span class="cp-label">Grid colour</span><input type="color" id="cGridColor" value="#C9BFA6"></div>
+    <div class="cp-row"><span class="cp-label">Grid weight</span><input type="range" id="cGridW" min="0.5" max="4" step="0.5" value="1"><span class="cp-val" id="cGridWV">1.0</span></div>
+    <div class="cp-row mode-only" data-modes="map"><span class="cp-label">Axis weight</span><input type="range" id="cMapAxisW" min="0.5" max="8" step="0.5" value="3"><span class="cp-val" id="cMapAxisWV">3.0</span></div>
+  </div>
+</div>
+
+<!-- shared: typography -->
+<div class="cp-group mode-only" data-modes="stack map">
+  <div class="cp-header">Typography<span class="cp-chevron">›</span></div>
+  <div class="cp-body">
+    <div class="cp-row"><span class="cp-label">Font</span>
+      <select class="cp-sel" id="cFont">
+        <option value="Arial" selected>Arial</option><option value="Helvetica">Helvetica</option>
+        <option value="Times New Roman">Times NR</option><option value="Georgia">Georgia</option>
+        <option value="DM Sans">DM Sans</option><option value="DM Mono">DM Mono</option>
+      </select></div>
+    <div class="cp-row"><span class="cp-label">Tick labels (px)</span><input type="range" id="cTickSz" min="10" max="60" value="24" step="1"><span class="cp-val" id="cTickSzV">24</span></div>
+    <div class="cp-row"><span class="cp-label">Axis labels (px)</span><input type="range" id="cLabelSz" min="10" max="72" value="30" step="1"><span class="cp-val" id="cLabelSzV">30</span></div>
+  </div>
+</div>
+
+<!-- shared: figure size -->
+<div class="cp-group mode-only" data-modes="stack map">
+  <div class="cp-header">Figure Size<span class="cp-chevron">›</span></div>
+  <div class="cp-body">
+    <div class="cp-row"><span class="cp-label">Lock size</span><input type="checkbox" id="cLock"></div>
+    <div class="cp-row"><span class="cp-label">Width (px)</span><input type="number" id="cLockW" value="1200" min="300" max="6000" step="50" style="width:70px;flex:none;"></div>
+    <div class="cp-row mode-only" data-modes="map"><span class="cp-label">Height (px)</span><input type="number" id="cLockH" value="700" min="200" max="6000" step="50" style="width:70px;flex:none;"></div>
+    <div class="cp-note">Stacked height grows with pattern count &amp; band height; lock width for a fixed figure.</div>
+  </div>
+</div>
+
+<!-- shared: export -->
+<div class="cp-group open mode-only" data-modes="stack map">
+  <div class="cp-header">Export<span class="cp-chevron">›</span></div>
+  <div class="cp-body">
+    <div class="cp-row"><span class="cp-label">PNG scale</span>
+      <select class="cp-sel" id="cPngScale" style="flex:none;width:70px;"><option value="1">1×</option><option value="2" selected>2×</option><option value="3">3×</option><option value="4">4×</option></select></div>
+    <button class="btn" id="cSavePNG" disabled>Save PNG…</button>
+    <button class="btn ghost" id="cSaveSVG" disabled>Save SVG (vector)…</button>
+    <button class="btn ghost" id="cCopy" disabled>Copy to clipboard</button>
+    <button class="btn ghost" id="cSaveSettings">Save settings…</button>
+    <button class="btn ghost" id="cLoadSettings">Load settings…</button>
+  </div>
+</div>
+`;
+$('rightPanel').innerHTML=PANEL_HTML;
+
+// collapsible
+document.querySelectorAll('.cp-header').forEach(h=>h.addEventListener('click',()=>h.parentElement.classList.toggle('open')));
+
+// show/hide groups & rows by mode
+function applyModeVisibility(){
+  document.querySelectorAll('[data-modes]').forEach(el=>{
+    const modes=el.getAttribute('data-modes').split(' ');
+    const show=modes.includes(mode);
+    if(el.classList.contains('cp-group')){el.style.display=show?'block':'none';}
+    else if(el.classList.contains('cp-row')){el.style.display=show?'flex':'none';}
+  });
+  // waterfall sub-rows
+  const wf=val('cStackStyle')==='waterfall';
+  document.querySelectorAll('.mode-wf').forEach(r=>r.style.display=(mode==='stack'&&wf)?'flex':'none');
+  $('rowBandH').style.display=(mode==='stack'&&!wf)?'flex':'none';
+  // mono row only when monochrome
+  const mono=$('rowMono');if(mono)mono.style.display=(mode==='map'&&val('cMapScheme')==='mono')?'flex':'none';
+  const gn=$('guideNote');if(gn)gn.style.display=(mode==='map'&&val('cGuides'))?'block':'none';
 }
 
-// ═══════════════════════════════════════════════════
-//  INTENSITY MAP render
-// ═══════════════════════════════════════════════════
-document.getElementById('renderBtn').addEventListener('click', () => {
-  if (patterns.length < 2) { setStatus('Need at least two patterns.', 'err'); return; }
-  const mode = document.getElementById('yAxisMode').value;
-  if (mode === 'stimulus') {
-    const bad = patterns.filter(p => p.y == null || !isFinite(p.y));
-    if (bad.length) { setStatus(`Missing Y value: ${bad.map(p => p.filename).join(', ')}`, 'err'); return; }
-  }
-  setStatus('Rendering…', '');
-  setTimeout(doRender, 25);
-});
-function doRender() { try { _render(); } catch (e) { setStatus('Error: ' + e.message, 'err'); console.error(e); } }
-
-function clearMap() {
-  const canvas = document.getElementById('plotCanvas');
-  const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  canvas.width = 0; canvas.height = 0;   // collapse the canvas element to zero size
-  setStatus('Load at least two diffractograms to begin.', '');
+// ═══════════════════════════════════════════════════════════
+// EFFECTIVE 2θ RANGE (respects zoom + manual entry)
+// ═══════════════════════════════════════════════════════════
+function effRange(){
+  let lo=numv('cTtMin',NaN),hi=numv('cTtMax',NaN);
+  if(!isFinite(lo))lo=Math.min(...patterns.map(p=>p.twoTheta[0]));
+  if(!isFinite(hi))hi=Math.max(...patterns.map(p=>p.twoTheta[p.twoTheta.length-1]));
+  if(viewTt){lo=viewTt[0];hi=viewTt[1];}
+  return[lo,hi];
 }
 
-function _render() {
-  if (patterns.length < 2) { clearMap(); return; }
-  if (patterns.some(p => p.y == null || !isFinite(p.y))) { clearMap(); return; }
+// ═══════════════════════════════════════════════════════════
+// STACKED RENDER (line bands OR waterfall) — via backend
+// ═══════════════════════════════════════════════════════════
+function drawStack(be,W,H,forScreen,skipLegends){
+  const style=val('cStackStyle'),wf=style==='waterfall';
+  const reverse=val('cReverse');
+  const scheme=val('cStkScheme');
+  const lineWt=numv('cStkLW',1.5),axisWt=numv('cStkAxisW',1.5);
+  const font=val('cFont'),tickSz=numv('cTickSz',24),labelSz=numv('cLabelSz',30),legSz=numv('cStkLegSz',22);
+  const showLeg=val('cStkLegends'),showBox=val('cShowBox');
+  const bandH=Math.max(24,numv('cBandH',80));
+  const xPad=numv('cXPad',14);
+  const showGrid=val('cGrid'),gridColor=val('cGridColor'),gridW=numv('cGridW',1);
+  const[ttMin,ttMax]=effRange();
+  const INK='#2C2416';
+  const order=reverse?[...patterns]:[...patterns].reverse(); // index0 -> top unless reversed
+  const N=order.length;
 
-  const canvas    = document.getElementById('plotCanvas');
-  const ctx       = canvas.getContext('2d');
-  const yLabelTxt = document.getElementById('yLabel').value || 'Condition';
-  const yAxisMode = document.getElementById('yAxisMode').value; // 'stimulus' | 'sequence'
-  const normMode  = document.getElementById('normMode').value;
-  const gamma     = parseFloat(document.getElementById('gammaSlider').value);
-  const peakEmphasis = parseFloat(document.getElementById('peakEmphasis').value) || 1;
-  const noiseFloor = (parseFloat(document.getElementById('noiseFloor').value) || 0) / 100;
-  const noiseScale = noiseFloor > 0 ? 1 / (1 - noiseFloor) : 1;
-  const GRID_N    = parseInt(document.getElementById('gridRes').value);
-  const axisFont  = document.getElementById('axisFont').value;
-  const tickSize  = Math.max(7, parseInt(document.getElementById('tickSize').value)  || 25);
-  const labelSize = Math.max(8, parseInt(document.getElementById('labelSize').value) || 30);
-  const lineWeight    = parseFloat(document.getElementById('lwSlider').value) || 3.0;
-  const tickLen       = Math.round(3 + lineWeight * 1.5);
-  const showGridlines = document.getElementById('showGridlines').checked;
-  const gridlineWt    = parseFloat(document.getElementById('gridlineWeight').value) || 1.0;
-  const gridlineColor = document.getElementById('gridlineColor').value || '#000000';
-  const [pkR, pkG, pkB] = hexToRgb(document.getElementById('peakColor').value);
-  const [bgR, bgG, bgB] = hexToRgb(document.getElementById('bgColor').value);
-  const hIn = parseInt(document.getElementById('plotHeightPx').value);
-  const userHeight = isFinite(hIn) && hIn >= 200 ? hIn : null;
-  const lockSize = document.getElementById('lockSize').checked;
-  const lockW = parseInt(document.getElementById('lockWidth').value)  || 1200;
-  const lockH = parseInt(document.getElementById('lockHeight').value) || 700;
-  const showMarkers = document.getElementById('showPatternMarkers').checked;
+  const xStep=niceStep((ttMax-ttMin)/8),xDec=decimalsForStep(xStep);
+  const xTickMaxW=measureText(fmtTick(ttMax,xDec),tickSz,font);
+  const M={top:Math.round(14+labelSz*0.2),right:Math.round(18+xPad),
+    bottom:Math.ceil(tickSz*1.35)+Math.ceil(labelSz*1.35)+18,
+    left:Math.ceil(labelSz*1.6)+10+xPad};
+  const plotW=W-M.left-M.right;
+  const wfOffset=numv('cWfOffset',34)/100, wfFill=numv('cWfFill',0.85);
 
-  let ttMin = parseFloat(document.getElementById('ttMin').value);
-  let ttMax = parseFloat(document.getElementById('ttMax').value);
-  if (!isFinite(ttMin)) ttMin = Math.min(...patterns.map(p => p.twoTheta[0]));
-  if (!isFinite(ttMax)) ttMax = Math.max(...patterns.map(p => p.twoTheta[p.twoTheta.length - 1]));
+  // geometry: line = N bands; waterfall = single tall area with per-trace vertical offset
+  const bottomPad=Math.round(14+axisWt*1.5);
+  let plotH;
+  if(wf){plotH=Math.round(bandH*(1+(N-1)*Math.max(0.12,wfOffset)))+bottomPad;}
+  else{plotH=N*bandH+bottomPad;}
 
-  // ── Choose ordering & Y-axis representation ──────────────────────────────
-  // STIMULUS MODE: sort by Y value, axis shows real stimulus values (original behaviour).
-  // SEQUENCE MODE: preserve table order, axis runs 0…N-1 but TICK LABELS show the
-  //   actual stimulus value at each pattern position, following the zigzag.
-  let ordered;         // patterns in the order they appear top→bottom on the map
-  let rowFrac;         // rowFrac[i] = fractional Y position of pattern i (0=bottom,1=top)
-  let yMin, yMax;      // values shown on the Y axis (for margin calc)
+  be.rect(0,0,W,H,'#FFFFFF');
 
-  if (yAxisMode === 'stimulus') {
-    ordered  = [...patterns].sort((a, b) => a.y - b.y);
-    const yVals = ordered.map(p => p.y);
-    yMin = yVals[0]; yMax = yVals[yVals.length - 1];
-    const yRange = yMax - yMin || 1;
-    rowFrac = yVals.map(v => (v - yMin) / yRange);
-  } else {
-    // Sequence mode: table order (index 0 = bottom of map, last = top)
-    ordered = [...patterns];
-    yMin = ordered[0].y;
-    yMax = ordered[ordered.length - 1].y;
-    // rowFrac: evenly spaced 0…1 along the sequence
-    rowFrac = ordered.map((_, i) => i / (ordered.length - 1));
-  }
+  // resample + per-pattern normalise
+  const lines=order.map(p=>{const arr=resample(p.twoTheta,p.intensity,ttMin,ttMax,Math.max(400,Math.min(plotW*2,4000)));
+    let lo=Infinity,hi=-Infinity;for(let i=0;i<arr.length;i++){if(arr[i]<lo)lo=arr[i];if(arr[i]>hi)hi=arr[i];}
+    return{p,arr,lo,hi,range:(hi-lo)||1};});
 
-  // For margin computation we need the widest tick label.
-  // In sequence mode use the full set of y-values as tick candidates.
-  const yTickVals = yAxisMode === 'stimulus'
-    ? null   // computed inside computeMargins the usual way
-    : ordered.map(p => p.y);
-
-  const MARGIN = computeMargins(ttMin, ttMax, yMin, yMax, tickSize, labelSize, axisFont, tickLen, yTickVals);
-
-  // ── Resample & normalise ─────────────────────────────────────────────────
-  const rawArrays = ordered.map(p => resample(p.twoTheta, p.intensity, ttMin, ttMax, GRID_N));
-
-  if (peakEmphasis > 1) {
-    for (const arr of rawArrays) {
-      let lo = Infinity;
-      for (let i = 0; i < arr.length; i++) if (arr[i] < lo) lo = arr[i];
-      for (let i = 0; i < arr.length; i++) {
-        const v = arr[i] - lo;
-        arr[i] = v > 0 ? Math.pow(v, peakEmphasis) : 0;
-      }
-    }
-  }
-
-  let gMin = Infinity, gMax = -Infinity;
-  for (const arr of rawArrays) for (let i = 0; i < arr.length; i++) {
-    if (arr[i] < gMin) gMin = arr[i];
-    if (arr[i] > gMax) gMax = arr[i];
-  }
-  const normArrays = rawArrays.map(arr => normalize(arr, normMode, gMin, gMax));
-
-  if (noiseFloor > 0) {
-    for (const arr of normArrays) {
-      for (let i = 0; i < arr.length; i++) {
-        arr[i] = arr[i] <= noiseFloor ? 0 : (arr[i] - noiseFloor) * noiseScale;
-      }
-    }
-  }
-
-  const totalW = lockSize ? lockW : Math.max(canvas.parentElement.clientWidth, 400);
-  const totalH = lockSize ? lockH : (userHeight ?? Math.round(totalW * 0.58));
-  canvas.width = totalW; canvas.height = totalH;
-  const plotW = totalW - MARGIN.left - MARGIN.right;
-  const plotH = totalH - MARGIN.top  - MARGIN.bottom;
-  const nPat  = ordered.length;
-
-  // Background
-  ctx.fillStyle = `rgb(${bgR},${bgG},${bgB})`;
-  ctx.fillRect(MARGIN.left, MARGIN.top, plotW, plotH);
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, MARGIN.left, totalH);
-  ctx.fillRect(MARGIN.left, 0, plotW, MARGIN.top);
-  ctx.fillRect(MARGIN.left, MARGIN.top + plotH, plotW, MARGIN.bottom);
-  ctx.fillRect(MARGIN.left + plotW, 0, MARGIN.right, totalH);
-
-  // ── Pixel fill ───────────────────────────────────────────────────────────
-  // rowFrac[i] maps pattern i → fractional height (0=bottom,1=top of plot).
-  // For each pixel row, find the two bracketing patterns and lerp.
-  const imgData = ctx.createImageData(plotW, plotH);
-  const px4 = imgData.data;
-  for (let iy = 0; iy < plotH; iy++) {
-    // frac = 1 at top of plot (iy=0), 0 at bottom (iy=plotH-1)
-    const frac = 1 - iy / (plotH - 1);
-    // Find bracketing patterns by their rowFrac
-    let loI = 0, hiI = nPat - 1, t = 0;
-    if (frac <= rowFrac[0]) { loI = hiI = 0; }
-    else if (frac >= rowFrac[nPat - 1]) { loI = hiI = nPat - 1; }
-    else {
-      for (let k = 0; k < nPat - 1; k++) {
-        if (frac >= rowFrac[k] && frac <= rowFrac[k + 1]) {
-          loI = k; hiI = k + 1;
-          const span = rowFrac[k + 1] - rowFrac[k];
-          t = span > 0 ? (frac - rowFrac[k]) / span : 0;
-          break;
-        }
-      }
-    }
-    const arrLo = normArrays[loI], arrHi = normArrays[hiI];
-    for (let ix = 0; ix < plotW; ix++) {
-      const fIdx = (ix / (plotW - 1)) * (GRID_N - 1);
-      const g0 = Math.floor(fIdx), g1 = Math.min(g0 + 1, GRID_N - 1), gf = fIdx - g0;
-      const iLo = arrLo[g0] * (1 - gf) + arrLo[g1] * gf;
-      const iHi = arrHi[g0] * (1 - gf) + arrHi[g1] * gf;
-      let intv = iLo * (1 - t) + iHi * t;
-      intv = Math.min(1, Math.max(0, Math.pow(intv, gamma)));
-      const base = (iy * plotW + ix) * 4;
-      px4[base]     = Math.round(bgR + intv * (pkR - bgR));
-      px4[base + 1] = Math.round(bgG + intv * (pkG - bgG));
-      px4[base + 2] = Math.round(bgB + intv * (pkB - bgB));
-      px4[base + 3] = 255;
-    }
-  }
-  ctx.putImageData(imgData, MARGIN.left, MARGIN.top);
-
-  // ── Axes ─────────────────────────────────────────────────────────────────
-  const INK = '#0f0e0d';
-  // X axis
-  const xStep  = niceStep((ttMax - ttMin) / 8);
-  const xStart = Math.ceil(ttMin / xStep) * xStep;
-  const xDec   = decimalsForStep(xStep);
-  ctx.fillStyle = INK; ctx.strokeStyle = INK; ctx.lineWidth = lineWeight;
-  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-  ctx.font = `${tickSize}px ${axisFont}`;
-  for (let tt = xStart; tt <= ttMax + 1e-9; tt = +(tt + xStep).toFixed(9)) {
-    const px = MARGIN.left + ((tt - ttMin) / (ttMax - ttMin)) * plotW;
-    ctx.strokeStyle = INK; ctx.lineWidth = lineWeight;
-    ctx.beginPath(); ctx.moveTo(px, MARGIN.top + plotH); ctx.lineTo(px, MARGIN.top + plotH + tickLen); ctx.stroke();
-    if (showGridlines) {
-      ctx.strokeStyle = gridlineColor; ctx.lineWidth = gridlineWt;
-      ctx.setLineDash([3, 5]);
-      ctx.beginPath(); ctx.moveTo(px, MARGIN.top); ctx.lineTo(px, MARGIN.top + plotH); ctx.stroke();
-      ctx.setLineDash([]);
-    }
-    ctx.fillStyle = INK;
-    ctx.fillText(fmtTick(tt, xDec), px, MARGIN.top + plotH + tickLen + 2);
-  }
-  ctx.strokeStyle = INK; ctx.lineWidth = lineWeight;
-  ctx.strokeRect(MARGIN.left, MARGIN.top, plotW, plotH);
-  {
-    const tickLabelBottom = MARGIN.top + plotH + tickLen + 2 + Math.ceil(tickSize * 1.35);
-    const xLabelY = Math.round(tickLabelBottom + (totalH - tickLabelBottom) / 2);
-    ctx.font = `${labelSize}px ${axisFont}`;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = INK;
-    ctx.fillText('2\u03b8 (\u00b0)', MARGIN.left + plotW / 2, xLabelY);
-  }
-
-  // ── Y axis ticks ─────────────────────────────────────────────────────────
-  ctx.font = `${tickSize}px ${axisFont}`;
-  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-
-  if (yAxisMode === 'stimulus') {
-    // Standard: evenly-spaced nice ticks on the stimulus scale
-    const yRange  = yMax - yMin || 1;
-    const yStep   = niceStep(yRange / 6);
-    const yStart2 = Math.ceil(yMin / yStep) * yStep;
-    const yDec    = decimalsForStep(yStep);
-    for (let yv = yStart2; yv <= yMax + 1e-9; yv = +(yv + yStep).toFixed(9)) {
-      const py = MARGIN.top + (1 - (yv - yMin) / yRange) * plotH;
-      ctx.strokeStyle = INK; ctx.lineWidth = lineWeight;
-      ctx.beginPath(); ctx.moveTo(MARGIN.left - tickLen, py); ctx.lineTo(MARGIN.left, py); ctx.stroke();
-      if (showGridlines) {
-        ctx.strokeStyle = gridlineColor; ctx.lineWidth = gridlineWt;
-        ctx.setLineDash([3, 5]);
-        ctx.beginPath(); ctx.moveTo(MARGIN.left, py); ctx.lineTo(MARGIN.left + plotW, py); ctx.stroke();
-        ctx.setLineDash([]);
-      }
-      ctx.fillStyle = INK; ctx.font = `${tickSize}px ${axisFont}`;
-      ctx.fillText(fmtTick(yv, yDec), MARGIN.left - tickLen - 3, py);
-    }
-    if (showMarkers) {
-      ctx.strokeStyle = INK; ctx.lineWidth = lineWeight;
-      ordered.forEach(p => {
-        const frac = (p.y - yMin) / (yMax - yMin || 1);
-        const py = MARGIN.top + (1 - frac) * plotH;
-        ctx.beginPath(); ctx.moveTo(MARGIN.left + plotW, py); ctx.lineTo(MARGIN.left + plotW + tickLen, py); ctx.stroke();
-      });
-    }
-  } else {
-    // Sequence mode: one tick per pattern at its evenly-spaced row position,
-    // labelled with the actual stimulus value.
-    const yDec = decimalsForStep(niceStep(Math.abs(yMax - yMin) / (nPat || 1)));
-    ordered.forEach((p, i) => {
-      const py = MARGIN.top + (1 - rowFrac[i]) * plotH;
-      ctx.strokeStyle = INK; ctx.lineWidth = lineWeight;
-      ctx.beginPath(); ctx.moveTo(MARGIN.left - tickLen, py); ctx.lineTo(MARGIN.left, py); ctx.stroke();
-      if (showGridlines) {
-        ctx.strokeStyle = gridlineColor; ctx.lineWidth = gridlineWt;
-        ctx.setLineDash([3, 5]);
-        ctx.beginPath(); ctx.moveTo(MARGIN.left, py); ctx.lineTo(MARGIN.left + plotW, py); ctx.stroke();
-        ctx.setLineDash([]);
-      }
-      ctx.fillStyle = INK; ctx.font = `${tickSize}px ${axisFont}`;
-      ctx.fillText(fmtTick(p.y, yDec), MARGIN.left - tickLen - 3, py);
-      if (showMarkers) {
-        ctx.strokeStyle = INK; ctx.lineWidth = lineWeight;
-        ctx.beginPath(); ctx.moveTo(MARGIN.left + plotW, py); ctx.lineTo(MARGIN.left + plotW + tickLen, py); ctx.stroke();
-      }
-    });
-  }
-
-  ctx.save();
-  ctx.translate(MARGIN.yLabelCenterX, MARGIN.top + plotH / 2);
-  ctx.rotate(-Math.PI / 2);
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.font = `${labelSize}px ${axisFont}`;
-  ctx.fillStyle = INK;
-  ctx.fillText(yLabelTxt, 0, 0);
-  ctx.restore();
-
-  plotMeta = { ttMin, ttMax, yMin, yMax, MARGIN, plotW, plotH, yAxisMode, rowFrac, ordered };
-  setStatus(`Rendered ${ordered.length} patterns · 2\u03b8 ${ttMin.toFixed(2)}–${ttMax.toFixed(2)}° · γ = ${gamma.toFixed(2)}`, 'ok');
-}
-
-// ═══════════════════════════════════════════════════
-//  STACKED PLOT render
-// ═══════════════════════════════════════════════════
-document.getElementById('stackRenderBtn').addEventListener('click', () => {
-  if (!patterns.length) { setStackStatus('Need at least one pattern.', 'err'); return; }
-  setStackStatus('Rendering…', '');
-  setTimeout(doStackRender, 25);
-});
-function doStackRender() { try { _stackRender(); } catch (e) { setStackStatus('Error: ' + e.message, 'err'); console.error(e); } }
-
-function _stackRender() {
-  if (!patterns.length) return;
-  const canvas   = document.getElementById('stackCanvas');
-  const ctx      = canvas.getContext('2d');
-  const reverse  = document.getElementById('stkReverse').checked;
-  const allBlack = document.getElementById('stkAllBlack').checked;
-  const scheme   = document.getElementById('stkColorScheme').value;
-  const lineWt   = parseFloat(document.getElementById('stkLineWt').value) || 1.25;
-  const axisWt   = parseFloat(document.getElementById('stkAxisWt').value) || 1.5;
-  const font     = document.getElementById('stkFont').value;
-  const tickSize = Math.max(8, parseInt(document.getElementById('stkTickSize').value)  || 14);
-  const labelSz  = Math.max(10, parseInt(document.getElementById('stkLabelSize').value) || 18);
-  const legSz    = Math.max(8, parseInt(document.getElementById('stkLegendSize').value) || 13);
-  const showLeg  = document.getElementById('stkShowLegends').checked;
-  const showBox  = document.getElementById('stkShowBox').checked;
-  const bandH    = Math.max(30, parseInt(document.getElementById('stkBandHeight').value) || 80);
-  const xPad     = parseInt(document.getElementById('stkXPad').value) || 0;
-
-  let ttMin = parseFloat(document.getElementById('stkTtMin').value);
-  let ttMax = parseFloat(document.getElementById('stkTtMax').value);
-  if (!isFinite(ttMin)) ttMin = Math.min(...patterns.map(p => p.twoTheta[0]));
-  if (!isFinite(ttMax)) ttMax = Math.max(...patterns.map(p => p.twoTheta[p.twoTheta.length - 1]));
-
-  // Respect user's manual file order. Default: last in array at top of plot
-  // (so a Y-sorted list reads with highest Y at top, matching the intensity map).
-  // Reverse flips it: first in array at top.
-  const order = reverse ? [...patterns] : [...patterns].reverse();
-
-  // Layout
-  const N = order.length;
-  // X-axis step and decimals used everywhere below
-  const xStep = niceStep((ttMax - ttMin) / 8);
-  const xDec  = decimalsForStep(xStep);
-
-  // Compute margins
-  const tmp = document.createElement('canvas').getContext('2d');
-  tmp.font = `${tickSize}px ${font}`;
-  const xTickRoughMax = tmp.measureText(fmtTick(ttMax, xDec)).width;
-  const yLabelW = Math.ceil(labelSz * 1.6);
-  const M = {
-    top: 14,
-    right: 18 + xPad,
-    bottom: Math.ceil(tickSize * 1.35) + Math.ceil(labelSz * 1.35) + 18,
-    left: yLabelW + 10 + xPad
+  const strokeFor=(p,idx)=>{
+    if(scheme==='black')return '#000';
+    if(scheme==='custom')return p.colour||'#000';
+    return N>1?rampColor(scheme,idx/(N-1)):'#000';
   };
 
-  const totalW = (document.getElementById('stkLockWidth').checked)
-    ? (parseInt(document.getElementById('stkLockWidthVal').value) || 1200)
-    : Math.max(canvas.parentElement.clientWidth, 400);
-  const plotW  = totalW - M.left - M.right;
-  // Extra breathing space between the bottom diffractogram and the X axis line.
-  // Scales gently with axis weight so heavier axes don't look cramped.
-  const bottomPad = Math.round(14 + axisWt * 1.5);
-  const plotH  = N * bandH + bottomPad;
-  const totalH = M.top + plotH + M.bottom;
-  canvas.width = totalW; canvas.height = totalH;
+  be.pushClip(M.left,M.top,plotW,plotH);
+  // gridlines (vertical)
+  if(showGrid)for(let tt=Math.ceil(ttMin/xStep)*xStep;tt<=ttMax+1e-9;tt=+(tt+xStep).toFixed(9)){
+    const px=M.left+((tt-ttMin)/(ttMax-ttMin))*plotW;be.line(px,M.top,px,M.top+plotH,gridColor,gridW,[3,5]);}
 
-  // Background
-  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, totalW, totalH);
-  const INK = '#0f0e0d';
-
-  // Per-pattern intensity normalisation (per-pattern with baseline) for visual fit
-  const lines = order.map(p => {
-    // resample to plotW points for speed and consistency
-    const arr = resample(p.twoTheta, p.intensity, ttMin, ttMax, plotW);
-    let lo = Infinity, hi = -Infinity;
-    for (let i = 0; i < arr.length; i++) {
-      if (arr[i] < lo) lo = arr[i];
-      if (arr[i] > hi) hi = arr[i];
+  if(wf){
+    const traceH=bandH-8;const stepY=(plotH-bottomPad-traceH)/Math.max(1,N-1);
+    // draw far (top) to near (bottom) so nearer traces overlay
+    for(let idx=0;idx<N;idx++){
+      const L=lines[idx];
+      const baseY=M.top+traceH+idx*stepY; // baseline for this trace
+      const col=strokeFor(L.p,idx);
+      const pts=[];
+      for(let i=0;i<L.arr.length;i++){const x=M.left+(i/(L.arr.length-1))*plotW;
+        const norm=(L.arr[i]-L.lo)/L.range;pts.push(x,baseY-norm*traceH);}
+      if(wfFill>0){const fp=pts.slice();fp.push(M.left+plotW,baseY,M.left,baseY);
+        be.fillPoly(fp,hexAlpha('#FFFFFF',1));            // opaque white knockout first
+        be.fillPoly(fp,hexAlpha(col,wfFill*0.28));}
+      be.poly(pts,col,lineWt);
     }
-    const range = hi - lo || 1;
-    return { p, arr, lo, hi, range };
-  });
-
-  // Draw each band
-  lines.forEach((L, idx) => {
-    const bandTop    = M.top + idx * bandH;
-    const bandBottom = bandTop + bandH;
-    const drawTop    = bandTop + 4;        // small visual padding
-    const drawBottom = bandBottom - 4;
-    const usableH    = drawBottom - drawTop;
-
-    // Stroke colour
-    let stroke = '#000';
-    if (!allBlack) {
-      if (scheme === 'custom') {
-        stroke = L.p.colour || '#000000';
-      } else if (N > 1) {
-        stroke = rampColor(scheme, idx / (N - 1));
-      }
-    }
-    ctx.strokeStyle = stroke;
-    ctx.lineWidth = lineWt;
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-
-    ctx.beginPath();
-    for (let i = 0; i < L.arr.length; i++) {
-      const x = M.left + (i / (L.arr.length - 1)) * plotW;
-      const norm = (L.arr[i] - L.lo) / L.range;     // 0..1
-      const y = drawBottom - norm * usableH;
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-  });
-
-  // X axis (bottom always); full box optional. Uses its own weight (independent of line weight)
-  ctx.strokeStyle = INK;
-  ctx.lineWidth = Math.max(0.5, axisWt);
-  if (showBox) {
-    ctx.strokeRect(M.left, M.top, plotW, plotH);
-  } else {
-    ctx.beginPath();
-    ctx.moveTo(M.left, M.top + plotH);
-    ctx.lineTo(M.left + plotW, M.top + plotH);
-    ctx.stroke();
+  }else{
+    lines.forEach((L,idx)=>{
+      const bandTop=M.top+idx*bandH,drawTop=bandTop+4,drawBottom=bandTop+bandH-4,usableH=drawBottom-drawTop;
+      const col=strokeFor(L.p,idx);const pts=[];
+      for(let i=0;i<L.arr.length;i++){const x=M.left+(i/(L.arr.length-1))*plotW;
+        const norm=(L.arr[i]-L.lo)/L.range;pts.push(x,drawBottom-norm*usableH);}
+      be.poly(pts,col,lineWt);
+    });
   }
+  be.popClip();
 
-  // X ticks — share axis weight
-  const xStart = Math.ceil(ttMin / xStep) * xStep;
-  ctx.fillStyle = INK;
-  ctx.font = `${tickSize}px ${font}`;
-  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-  const tkLen = Math.round(4 + axisWt * 1.5);
-  ctx.lineWidth = Math.max(0.5, axisWt);
-  for (let tt = xStart; tt <= ttMax + 1e-9; tt = +(tt + xStep).toFixed(9)) {
-    const px = M.left + ((tt - ttMin) / (ttMax - ttMin)) * plotW;
-    ctx.beginPath();
-    ctx.moveTo(px, M.top + plotH);
-    ctx.lineTo(px, M.top + plotH + tkLen);
-    ctx.stroke();
-    ctx.fillText(fmtTick(tt, xDec), px, M.top + plotH + tkLen + 3);
+  // axis / box
+  if(showBox)be.box(M.left,M.top,plotW,plotH,INK,Math.max(0.5,axisWt));
+  else be.line(M.left,M.top+plotH,M.left+plotW,M.top+plotH,INK,Math.max(0.5,axisWt));
+  // x ticks
+  const tkLen=Math.round(4+axisWt*1.5);
+  for(let tt=Math.ceil(ttMin/xStep)*xStep;tt<=ttMax+1e-9;tt=+(tt+xStep).toFixed(9)){
+    const px=M.left+((tt-ttMin)/(ttMax-ttMin))*plotW;
+    be.line(px,M.top+plotH,px,M.top+plotH+tkLen,INK,Math.max(0.5,axisWt));
+    be.text(fmtTick(tt,xDec),px,M.top+plotH+tkLen+3,{size:tickSz,font,color:INK,align:'center',baseline:'top'});
   }
+  be.text('2θ (°)',M.left+plotW/2,H-4,{size:labelSz,font,color:INK,align:'center',baseline:'bottom'});
+  be.text('Intensity (offset)',Math.ceil(labelSz*0.7),M.top+plotH/2,{size:labelSz,font,color:INK,align:'center',baseline:'middle',rotate:-90});
 
-  // X axis label
-  ctx.font = `${labelSz}px ${font}`;
-  ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-  ctx.fillText('2\u03b8 (\u00b0)', M.left + plotW / 2, totalH - 4);
-
-  // Y axis label (no ticks, no scale)
-  ctx.save();
-  ctx.translate(Math.ceil(labelSz * 0.7), M.top + plotH / 2);
-  ctx.rotate(-Math.PI / 2);
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.font = `${labelSz}px ${font}`;
-  ctx.fillStyle = INK;
-  ctx.fillText('Intensity', 0, 0);
-  ctx.restore();
-
-  stackMeta = { M, plotW, plotH, bandH, order, font, legSz, totalW, totalH, ttMin, ttMax };
-
-  // Take a snapshot of the canvas WITHOUT legends drawn.
-  // We use this to quickly re-draw legends during drag (no expensive chart redraw).
-  baseStackImage = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-  // Now draw legends on top of the chart
-  drawStackLegends(null);
-
-  setStackStatus(`Rendered ${N} pattern${N>1?'s':''} · 2\u03b8 ${ttMin.toFixed(2)}–${ttMax.toFixed(2)}°`, 'ok');
+  // legends (skipped when building the clean snapshot base for interactive drag)
+  const geom={M,plotW,plotH,bandH,wf,bottomPad,N,order,scheme,legSz,font,INK};
+  let bounds=[];
+  if(showLeg&&!skipLegends)bounds=drawStackLegends(be,geom);
+  else if(showLeg)bounds=computeLegendBounds(geom);
+  if(forScreen)plotMeta={type:'stack',M,plotW,plotH,bandH,ttMin,ttMax,order,wf,bottomPad,N,scheme,legSz,font,geom,legendBounds:bounds};
 }
 
-// ═══════════════════════════════════════════════════
-//  Stacked plot — canvas-drawn legends with drag support
-//
-//  Legends are baked directly into the canvas so that right-click "Save image"
-//  and "Copy image" in the browser produce a complete figure. We snapshot the
-//  chart without legends in baseStackImage so dragging stays fast (no costly
-//  diffractogram redraw on every mousemove).
-// ═══════════════════════════════════════════════════
-function drawStackLegends(skipSet) {
-  if (!stackMeta || !baseStackImage) return;
-  const canvas = document.getElementById('stackCanvas');
-  const ctx    = canvas.getContext('2d');
-
-  // Restore chart-only state
-  ctx.putImageData(baseStackImage, 0, 0);
-  stackLegendBounds = [];
-
-  if (!document.getElementById('stkShowLegends').checked) return;
-
-  const { M, plotW, bandH, order, font, legSz } = stackMeta;
-  const snapMode = document.getElementById('stkSnapMode').value;
-  const snapActive = snapMode !== 'none';
-
-  // Pre-measure all legend widths
-  ctx.font = `${legSz}px ${font}`;
-  const widths = order.map(p => {
-    const txt = String(p.legend || (p.y != null ? p.y : p.filename));
-    return ctx.measureText(txt).width;
-  });
-  const widestW = widths.length ? Math.max(...widths) : 0;
-  const widestWFrac = widestW / plotW;
-  const RIGHT_BUFFER = 30;
-  // Default left-edge position so the widest legend ends RIGHT_BUFFER from plot right
-  const defaultLeftXFrac = Math.max(0, (plotW - widestW - RIGHT_BUFFER) / plotW);
-
-  // Initialise snapXFrac if needed so the widest legend lands at the default position
-  if (snapActive && snapXFrac == null) {
-    if (snapMode === 'left')        snapXFrac = defaultLeftXFrac;
-    else if (snapMode === 'center') snapXFrac = defaultLeftXFrac + widestWFrac / 2;
-    else                            snapXFrac = defaultLeftXFrac + widestWFrac;
-  }
-
-  const allBlack  = document.getElementById('stkAllBlack').checked;
-  const scheme    = document.getElementById('stkColorScheme').value;
-  const N         = order.length;
-
-  ctx.textBaseline = 'top';
-  ctx.textAlign    = 'left';
-
-  order.forEach((p, idx) => {
-    const key = p.filename;
-
-    // Ensure a position exists (initialise on first encounter)
-    if (!legendPositions[key]) legendPositions[key] = { xFrac: defaultLeftXFrac, yFrac: 0.35 };
-    // Legacy migration from earlier x-px storage
-    if (legendPositions[key].xFrac == null && legendPositions[key].x != null) {
-      legendPositions[key].xFrac = Math.max(0, Math.min(1, (legendPositions[key].x - M.left) / plotW));
-      delete legendPositions[key].x;
-    }
-    const pos = legendPositions[key];
-    const w   = widths[idx];
-    const wFrac = w / plotW;
-
-    // Compute the legend's actual left-edge xFrac for this draw
+// Shared legend placement — used for the full render, the export, and the drag overlay,
+// so every path positions legends identically.
+function legendGeometry(geom){
+  const{M,plotW,plotH,bandH,wf,bottomPad,N,order,legSz,font}=geom;
+  const showLeg=val('cStkLegends');if(!showLeg)return[];
+  const snapMode=val('cStkSnap');
+  const widths=order.map(p=>measureText(String(p.legend||p.filename),legSz,font));
+  const widest=widths.length?Math.max(...widths):0;const RIGHT=30;
+  const defaultLeft=Math.max(0,(plotW-widest-RIGHT)/plotW);
+  if(snapMode!=='none'&&snapXFrac==null){snapXFrac=snapMode==='left'?defaultLeft:snapMode==='center'?defaultLeft+widest/plotW/2:defaultLeft+widest/plotW;}
+  const out=[];
+  order.forEach((p,idx)=>{
+    const key=p.filename;
+    if(!legendPositions[key])legendPositions[key]={xFrac:defaultLeft,yFrac:wf?0.12:0.30};
+    const pos=legendPositions[key],w=widths[idx],wFrac=w/plotW;
     let leftXFrac;
-    if (snapActive) {
-      if (snapMode === 'left')        leftXFrac = snapXFrac;
-      else if (snapMode === 'center') leftXFrac = snapXFrac - wFrac / 2;
-      else                            leftXFrac = snapXFrac - wFrac;
-      // Sync stored position so toggling snap off keeps everything in place
-      pos.xFrac = leftXFrac;
-    } else {
-      leftXFrac = pos.xFrac;
-    }
-
-    const x = M.left + leftXFrac * plotW;
-    const y = M.top + idx * bandH + pos.yFrac * bandH;
-
-    // Always record bounds for hit-testing — even if we're skipping the draw,
-    // so the user can grab a "phantom" legend while dragging another in snap mode.
-    const txt = String(p.legend || (p.y != null ? p.y : p.filename));
-    stackLegendBounds.push({ key, idx, x, y, w, h: legSz });
-
-    if (skipSet && skipSet.has(key)) return;
-    // Match legend text colour to the pattern's stroke colour
-    if (allBlack || scheme !== 'custom') {
-      ctx.fillStyle = '#0f0e0d';
-    } else {
-      ctx.fillStyle = p.colour || '#000000';
-    }
-    ctx.fillText(txt, x, y);
+    if(snapMode!=='none'){leftXFrac=snapMode==='left'?snapXFrac:snapMode==='center'?snapXFrac-wFrac/2:snapXFrac-wFrac;pos.xFrac=leftXFrac;}
+    else leftXFrac=pos.xFrac;
+    const x=M.left+leftXFrac*plotW;
+    let y;
+    if(wf){const traceH=bandH-8;const stepY=(plotH-bottomPad-traceH)/Math.max(1,N-1);y=M.top+idx*stepY+pos.yFrac*traceH;}
+    else y=M.top+idx*bandH+pos.yFrac*bandH;
+    out.push({p,key,idx,x,y,w,h:legSz});
   });
+  return out;
+}
+function computeLegendBounds(geom){return legendGeometry(geom).map(b=>({key:b.key,idx:b.idx,x:b.x,y:b.y,w:b.w,h:b.h}));}
+function drawStackLegends(be,geom){
+  const{scheme,legSz,font,INK}=geom;
+  const items=legendGeometry(geom);const bounds=[];
+  for(const it of items){
+    be.text(String(it.p.legend||it.p.filename),it.x,it.y,
+      {size:legSz,font,color:(scheme==='custom')?(it.p.colour||INK):INK,align:'left',baseline:'top'});
+    bounds.push({key:it.key,idx:it.idx,x:it.x,y:it.y,w:it.w,h:it.h});
+  }
+  return bounds;
 }
 
-// ───── Mouse handling on the stack canvas for legend drag ─────
-(function attachStackInteractions() {
-  const canvas = document.getElementById('stackCanvas');
+// ═══════════════════════════════════════════════════════════
+// INTENSITY MAP RENDER — pixel image via offscreen canvas, framed via backend
+// ═══════════════════════════════════════════════════════════
+function computeMapArrays(ttMin,ttMax){
+  const yMode=val('cYMode'),norm=val('cNorm'),emph=numv('cEmph',1),
+    noise=(numv('cNoise',0))/100,GRID=parseInt(val('cGridRes'))||2000;
+  let ordered,rowFrac,yMin,yMax;
+  if(yMode==='stimulus'){ordered=[...patterns].sort((a,b)=>a.y-b.y);
+    const yv=ordered.map(p=>p.y);yMin=yv[0];yMax=yv[yv.length-1];const r=yMax-yMin||1;rowFrac=yv.map(v=>(v-yMin)/r);}
+  else{ordered=[...patterns];yMin=ordered[0].y;yMax=ordered[ordered.length-1].y;rowFrac=ordered.map((_,i)=>i/(ordered.length-1));}
+  const raw=ordered.map(p=>resample(p.twoTheta,p.intensity,ttMin,ttMax,GRID));
+  if(emph>1)for(const arr of raw){let lo=Infinity;for(let i=0;i<arr.length;i++)if(arr[i]<lo)lo=arr[i];
+    for(let i=0;i<arr.length;i++){const v=arr[i]-lo;arr[i]=v>0?Math.pow(v,emph):0;}}
+  let gMin=Infinity,gMax=-Infinity;for(const arr of raw)for(let i=0;i<arr.length;i++){if(arr[i]<gMin)gMin=arr[i];if(arr[i]>gMax)gMax=arr[i];}
+  const nrm=raw.map(arr=>normalize(arr,norm,gMin,gMax));
+  const nsc=noise>0?1/(1-noise):1;
+  if(noise>0)for(const arr of nrm)for(let i=0;i<arr.length;i++)arr[i]=arr[i]<=noise?0:(arr[i]-noise)*nsc;
+  return{ordered,rowFrac,yMin,yMax,normArrays:nrm,GRID,yMode};
+}
+function intensityToRGB(intv,scheme,invert,pk,bg){
+  if(invert)intv=1-intv;
+  if(scheme==='mono'){return[Math.round(bg[0]+intv*(pk[0]-bg[0])),Math.round(bg[1]+intv*(pk[1]-bg[1])),Math.round(bg[2]+intv*(pk[2]-bg[2]))];}
+  return rampRGB(scheme,intv);
+}
+function drawMap(be,W,H,forScreen){
+  const yLabelTxt=val('cYLabel')||'Condition';
+  const scheme=val('cMapScheme'),invert=val('cInvert');
+  const gamma=numv('cGamma',0.4);
+  const font=val('cFont'),tickSz=numv('cTickSz',24),labelSz=numv('cLabelSz',30);
+  const axisWt=numv('cMapAxisW',3),tickLen=Math.round(3+axisWt*1.5);
+  const showGrid=val('cGrid'),gridColor=val('cGridColor'),gridW=numv('cGridW',1);
+  const showMarkers=val('cMarkers'),showCbar=val('cColorbar');
+  const pk=hexToRgb(val('cPeakColor')),bg=hexToRgb(val('cMapBg'));
+  const INK='#2C2416';
+  const[ttMin,ttMax]=effRange();
+  const{ordered,rowFrac,yMin,yMax,normArrays,GRID,yMode}=computeMapArrays(ttMin,ttMax);
+  const nPat=ordered.length;
 
-  function getCanvasCoords(e) {
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width  / rect.width;
-    const scaleY = canvas.height / rect.height;
-    return {
-      cx: (e.clientX - rect.left) * scaleX,
-      cy: (e.clientY - rect.top)  * scaleY
-    };
-  }
-  function hitTest(cx, cy) {
-    // Iterate in reverse so the visually topmost (last drawn) wins
-    for (let i = stackLegendBounds.length - 1; i >= 0; i--) {
-      const b = stackLegendBounds[i];
-      if (cx >= b.x - 4 && cx <= b.x + b.w + 4 &&
-          cy >= b.y - 2 && cy <= b.y + b.h + 2) return b;
-    }
-    return null;
-  }
+  // margins
+  const yDecSeq=decimalsForStep(niceStep(Math.abs(yMax-yMin)/(nPat||1)));
+  let maxYTickW=0;
+  if(yMode==='stimulus'){const yStep=niceStep((yMax-yMin)/6),yDec=decimalsForStep(yStep);
+    for(let yv=Math.ceil(yMin/yStep)*yStep;yv<=yMax+1e-9;yv=+(yv+yStep).toFixed(9))maxYTickW=Math.max(maxYTickW,measureText(fmtTick(yv,yDec),tickSz,font));}
+  else for(const p of ordered)maxYTickW=Math.max(maxYTickW,measureText(fmtTick(p.y,yDecSeq),tickSz,font));
+  const rotExtent=Math.ceil(labelSz*1.4),afterLabel=Math.max(5,Math.ceil(labelSz*0.4));
+  const left=4+rotExtent+afterLabel+Math.ceil(maxYTickW)+tickLen+3;
+  const yLabelCX=4+Math.ceil(rotExtent/2);
+  const cbarW=showCbar?Math.round(26+labelSz*0.4):0;
+  const cbarGap=showCbar?Math.round(tickLen+6+measureText('0.0',tickSz,font)+labelSz*1.2):0;
+  const right=22+cbarW+cbarGap;
+  const bottom=tickLen+3+Math.ceil(tickSz*1.35)+Math.max(5,Math.ceil(tickSz*0.45))+Math.ceil(labelSz*1.35)+4;
+  // Reserve headroom for peak-track guide labels (drawn above the plot) so large tick sizes don't clip them.
+  const guideLabelSz=Math.max(11,tickSz*0.6);
+  const top=(val('cGuides')&&peakGuides.length)?Math.max(18,Math.ceil(guideLabelSz*1.25)+4):18;
+  const plotW=W-left-right,plotH=H-top-bottom;
 
-  canvas.addEventListener('mousedown', e => {
-    if (e.button !== 0) return;            // left-click only; right-click stays for context menu
-    if (!stackMeta) return;
-    const { cx, cy } = getCanvasCoords(e);
-    const hit = hitTest(cx, cy);
-    if (!hit) return;
-    e.preventDefault();
-    draggingLegend = {
-      key: hit.key, idx: hit.idx,
-      offsetX: cx - hit.x, offsetY: cy - hit.y,
-      legendW: hit.w         // width of this legend in canvas px, for snap-anchor math
-    };
-    canvas.style.cursor = 'grabbing';
-  });
+  be.rect(0,0,W,H,'#FFFFFF');
 
-  canvas.addEventListener('mousemove', e => {
-    if (!stackMeta) return;
-    const { cx, cy } = getCanvasCoords(e);
-    if (draggingLegend) {
-      const { key, idx, offsetX, offsetY, legendW } = draggingLegend;
-      const { M, plotW, bandH, legSz } = stackMeta;
-      const bandTop = M.top + idx * bandH;
-      let newX = cx - offsetX;
-      let newY = cy - offsetY;
-      newY = Math.max(bandTop, Math.min(bandTop + bandH - legSz, newY));
-      newX = Math.max(M.left, Math.min(M.left + plotW - 20, newX));
-      const newLeftXFrac = (newX - M.left) / plotW;
-      const newYFrac = (newY - bandTop) / bandH;
-      const wFrac = legendW / plotW;
-
-      const snapMode = document.getElementById('stkSnapMode').value;
-      if (snapMode !== 'none') {
-        // Update the shared snap reference based on the mode and this legend's width.
-        // Each legend's drawn left-edge xFrac is reconstructed in drawStackLegends.
-        if (snapMode === 'left')        snapXFrac = newLeftXFrac;
-        else if (snapMode === 'center') snapXFrac = newLeftXFrac + wFrac / 2;
-        else                            snapXFrac = newLeftXFrac + wFrac;
-        legendPositions[key].yFrac = newYFrac;     // y stays per-legend
-      } else {
-        legendPositions[key].xFrac = newLeftXFrac;
-        legendPositions[key].yFrac = newYFrac;
-      }
-      drawStackLegends(null);    // fast redraw — chart pixels come from baseStackImage
-    } else {
-      // Hover: change cursor when over a draggable legend
-      canvas.style.cursor = hitTest(cx, cy) ? 'grab' : 'crosshair';
-    }
-    // 2θ tooltip: follows the mouse cursor in viewport coordinates
-    const { M, plotW, ttMin, ttMax } = stackMeta;
-    const tooltip = document.getElementById('stackTooltip');
-    if (cx >= M.left && cx <= M.left + plotW) {
-      const tt = ttMin + (cx - M.left) / plotW * (ttMax - ttMin);
-      tooltip.textContent = `2θ ${tt.toFixed(3)}°`;
-      tooltip.style.display = 'block';
-      tooltip.style.left = (e.clientX + 14) + 'px';
-      tooltip.style.top  = (e.clientY - 22) + 'px';
-    } else {
-      tooltip.style.display = 'none';
-    }
-  });
-
-  window.addEventListener('mouseup', () => {
-    if (draggingLegend) {
-      draggingLegend = null;
-      canvas.style.cursor = 'crosshair';
-    }
-  });
-  canvas.addEventListener('mouseleave', () => {
-    if (!draggingLegend) canvas.style.cursor = 'crosshair';
-    document.getElementById('stackTooltip').style.display = 'none';
-  });
-})();
-
-document.getElementById('stkResetLegends').addEventListener('click', () => {
-  Object.keys(legendPositions).forEach(k => delete legendPositions[k]);
-  snapXFrac = null;
-  drawStackLegends(null);
-});
-document.getElementById('stkSnapMode').addEventListener('change', e => {
-  const newMode = e.target.value;
-  // Convert snapXFrac so the widest legend stays visually anchored across mode changes.
-  if (snapXFrac != null && stackMeta && prevSnapMode !== 'none' && newMode !== 'none') {
-    const { order, font, legSz, plotW } = stackMeta;
-    const meas = document.createElement('canvas').getContext('2d');
-    meas.font = `${legSz}px ${font}`;
-    let widestW = 0;
-    order.forEach(p => {
-      const w = meas.measureText(String(p.legend || (p.y != null ? p.y : p.filename))).width;
-      if (w > widestW) widestW = w;
-    });
-    const wF = widestW / plotW;
-    // Step 1: derive the widest legend's left-edge xFrac under the OLD mode
-    let widestLeft;
-    if (prevSnapMode === 'left')        widestLeft = snapXFrac;
-    else if (prevSnapMode === 'center') widestLeft = snapXFrac - wF / 2;
-    else                                widestLeft = snapXFrac - wF;
-    // Step 2: re-express as the NEW mode's reference
-    if (newMode === 'left')        snapXFrac = widestLeft;
-    else if (newMode === 'center') snapXFrac = widestLeft + wF / 2;
-    else                           snapXFrac = widestLeft + wF;
-  }
-  // For 'none' → snap or snap → 'none': leave snapXFrac alone; drawStackLegends initialises
-  // a sensible default if needed, and 'none' mode reads each legend's stored xFrac
-  // (which has been kept in sync by drawStackLegends).
-  prevSnapMode = newMode;
-  drawStackLegends(null);
-});
-
-
-// ═══════════════════════════════════════════════════
-//  CSV series export / import
-// ═══════════════════════════════════════════════════
-document.getElementById('exportCsvBtn').addEventListener('click', async () => {
-  if (!patterns.length) return;
-  const yLabel = document.getElementById('yLabel').value || 'Condition';
-  const nPat = patterns.length;
-
-  // Find the maximum number of data points across all patterns
-  const maxPts = Math.max(...patterns.map(p => p.twoTheta.length));
-
-  // Row 0: Y-axis label (single cell)
-  // Row 1: stimulus values, one per pattern pair of columns
-  // Row 2: legend labels, one per pattern pair of columns
-  // Row 3+: 2theta, intensity pairs
-  const rows = [];
-
-  // Row 0: axis label
-  rows.push([yLabel]);
-
-  // Row 1: stimulus values  (col 0 = stim for pat 0, col 2 = stim for pat 1, …)
-  const stimRow = [];
-  patterns.forEach(p => { stimRow.push(p.y != null ? p.y : ''); stimRow.push(''); });
-  rows.push(stimRow);
-
-  // Row 2: legend labels
-  const legRow = [];
-  patterns.forEach(p => { legRow.push(p.legend || ''); legRow.push(''); });
-  rows.push(legRow);
-
-  // Rows 3+: 2theta | intensity per pattern
-  for (let r = 0; r < maxPts; r++) {
-    const row = [];
-    patterns.forEach(p => {
-      if (r < p.twoTheta.length) {
-        row.push(p.twoTheta[r].toFixed(5));
-        row.push(p.intensity[r].toFixed(2));
-      } else {
-        row.push(''); row.push('');
-      }
-    });
-    rows.push(row);
-  }
-
-  const csv = rows.map(r => r.join(',')).join('\n');
-  const defaultName = 'Vx-PXRD_series.csv';
-  if (window.showSaveFilePicker) {
-    try {
-      const handle = await window.showSaveFilePicker({
-        suggestedName: defaultName,
-        startIn: sourceFileHandle,
-        types: [{ description: 'CSV file', accept: { 'text/csv': ['.csv'] } }]
-      });
-      const writable = await handle.createWritable();
-      await writable.write(csv);
-      await writable.close();
-      setStatus('Series saved.', 'ok');
-      return;
-    } catch (e) {
-      if (e && e.name === 'AbortError') return;
-      // fall through to download
+  // build pixel image on an offscreen canvas
+  const off=document.createElement('canvas');off.width=Math.max(1,Math.round(plotW));off.height=Math.max(1,Math.round(plotH));
+  const oc=off.getContext('2d');const img=oc.createImageData(off.width,off.height);const px4=img.data;
+  const PW=off.width,PH=off.height;
+  for(let iy=0;iy<PH;iy++){
+    const frac=1-iy/(PH-1);
+    let loI=0,hiI=nPat-1,t=0;
+    if(frac<=rowFrac[0]){loI=hiI=0;}else if(frac>=rowFrac[nPat-1]){loI=hiI=nPat-1;}
+    else for(let k=0;k<nPat-1;k++){if(frac>=rowFrac[k]&&frac<=rowFrac[k+1]){loI=k;hiI=k+1;const span=rowFrac[k+1]-rowFrac[k];t=span>0?(frac-rowFrac[k])/span:0;break;}}
+    const aLo=normArrays[loI],aHi=normArrays[hiI];
+    for(let ix=0;ix<PW;ix++){
+      const fIdx=(ix/(PW-1))*(GRID-1),g0=Math.floor(fIdx),g1=Math.min(g0+1,GRID-1),gf=fIdx-g0;
+      const iLo=aLo[g0]*(1-gf)+aLo[g1]*gf,iHi=aHi[g0]*(1-gf)+aHi[g1]*gf;
+      let intv=Math.min(1,Math.max(0,Math.pow(iLo*(1-t)+iHi*t,gamma)));
+      const[r,g,b]=intensityToRGB(intv,scheme,invert,pk,bg);
+      const base=(iy*PW+ix)*4;px4[base]=r;px4[base+1]=g;px4[base+2]=b;px4[base+3]=255;
     }
   }
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href = url; a.download = defaultName;
-  document.body.appendChild(a); a.click(); a.remove();
-  URL.revokeObjectURL(url);
-  setStatus('Series downloaded.', 'ok');
-});
+  oc.putImageData(img,0,0);
+  if(be.kind==='canvas'){be.ctx.imageSmoothingEnabled=false;be.ctx.drawImage(off,left,top,plotW,plotH);}
+  else be.imageURL(off.toDataURL('image/png'),left,top,plotW,plotH);
 
-document.getElementById('importCsvBtn').addEventListener('click', async () => {
-  if (window.showOpenFilePicker) {
-    try {
-      const [fh] = await window.showOpenFilePicker({
-        startIn: sourceFileHandle,
-        types: [{ description: 'CSV series file', accept: { 'text/csv': ['.csv'] } }],
-        multiple: false
-      });
-      sourceFileHandle = fh;
-      const f = await fh.getFile();
-      await importCsvFile(f);
-      return;
-    } catch (e) {
-      if (e && e.name === 'AbortError') return;
-      // fall through to input
-    }
+  // gridlines over image
+  const xStep=niceStep((ttMax-ttMin)/8),xDec=decimalsForStep(xStep);
+  if(showGrid){be.pushClip(left,top,plotW,plotH);
+    for(let tt=Math.ceil(ttMin/xStep)*xStep;tt<=ttMax+1e-9;tt=+(tt+xStep).toFixed(9)){const px=left+((tt-ttMin)/(ttMax-ttMin))*plotW;be.line(px,top,px,top+plotH,gridColor,gridW,[3,5]);}
+    be.popClip();}
+
+  // frame + x axis
+  be.box(left,top,plotW,plotH,INK,axisWt);
+  for(let tt=Math.ceil(ttMin/xStep)*xStep;tt<=ttMax+1e-9;tt=+(tt+xStep).toFixed(9)){
+    const px=left+((tt-ttMin)/(ttMax-ttMin))*plotW;
+    be.line(px,top+plotH,px,top+plotH+tickLen,INK,axisWt);
+    be.text(fmtTick(tt,xDec),px,top+plotH+tickLen+2,{size:tickSz,font,color:INK,align:'center',baseline:'top'});
   }
-  document.getElementById('csvFileInput').click();
-});
+  be.text('2θ (°)',left+plotW/2,H-4,{size:labelSz,font,color:INK,align:'center',baseline:'bottom'});
 
-document.getElementById('csvFileInput').addEventListener('change', async e => {
-  const f = e.target.files[0];
-  if (!f) return;
-  e.target.value = '';
-  await importCsvFile(f);
-});
-
-async function importCsvFile(f) {
-  try {
-    const text = await f.text();
-    const lines = text.split(/\r?\n/);
-    if (lines.length < 4) throw new Error('File too short to be a valid series CSV.');
-
-    // Row 0: Y-axis label
-    const yLabel = lines[0].split(',')[0].trim();
-    if (yLabel) document.getElementById('yLabel').value = yLabel;
-
-    // Row 1: stimulus values (even columns)
-    const stimCells = lines[1].split(',');
-    // Row 2: legend labels (even columns)
-    const legCells  = lines[2].split(',');
-
-    const nPat = Math.floor(stimCells.length / 2);
-    if (nPat < 1) throw new Error('No patterns found in CSV.');
-
-    // Parse data rows
-    const twoThetaArr = Array.from({ length: nPat }, () => []);
-    const intensArr   = Array.from({ length: nPat }, () => []);
-    for (let r = 3; r < lines.length; r++) {
-      const cells = lines[r].split(',');
-      for (let p = 0; p < nPat; p++) {
-        const tt = parseFloat(cells[p * 2]);
-        const ii = parseFloat(cells[p * 2 + 1]);
-        if (isFinite(tt) && isFinite(ii)) {
-          twoThetaArr[p].push(tt);
-          intensArr[p].push(ii);
-        }
-      }
+  // y axis
+  if(yMode==='stimulus'){const yRange=yMax-yMin||1,yStep=niceStep(yRange/6),yDec=decimalsForStep(yStep);
+    for(let yv=Math.ceil(yMin/yStep)*yStep;yv<=yMax+1e-9;yv=+(yv+yStep).toFixed(9)){
+      const py=top+(1-(yv-yMin)/yRange)*plotH;
+      be.line(left-tickLen,py,left,py,INK,axisWt);
+      if(showGrid)be.line(left,py,left+plotW,py,gridColor,gridW,[3,5]);
+      be.text(fmtTick(yv,yDec),left-tickLen-3,py,{size:tickSz,font,color:INK,align:'right',baseline:'middle'});
     }
-
-    // Rebuild patterns array preserving CSV order
-    patterns.length = 0;
-    Object.keys(legendPositions).forEach(k => delete legendPositions[k]);
-    for (let p = 0; p < nPat; p++) {
-      if (twoThetaArr[p].length < 2) continue;
-      const y = parseFloat(stimCells[p * 2]);
-      const legend = legCells[p * 2] ? legCells[p * 2].trim() : '';
-      patterns.push({
-        filename: `pattern_${p + 1}${legend ? '_' + legend : ''}`,
-        twoTheta: twoThetaArr[p],
-        intensity: intensArr[p],
-        y: isFinite(y) ? y : null,
-        legend: legend,
-        nPts: twoThetaArr[p].length
-      });
-    }
-
-    refreshTable();
-    autoFillRange();
-    scheduleRender(); scheduleStackRender();
-    setStatus(`Imported ${patterns.length} patterns from CSV.`, 'ok');
-    setStackStatus(`Imported ${patterns.length} patterns from CSV.`, 'ok');
-  } catch (err) {
-    setStatus('CSV import failed: ' + err.message, 'err');
+    if(showMarkers)ordered.forEach(p=>{const py=top+(1-(p.y-yMin)/(yMax-yMin||1))*plotH;be.line(left+plotW,py,left+plotW+tickLen,py,INK,axisWt);});
+  }else{
+    ordered.forEach((p,i)=>{const py=top+(1-rowFrac[i])*plotH;
+      be.line(left-tickLen,py,left,py,INK,axisWt);
+      if(showGrid)be.line(left,py,left+plotW,py,gridColor,gridW,[3,5]);
+      be.text(fmtTick(p.y,yDecSeq),left-tickLen-3,py,{size:tickSz,font,color:INK,align:'right',baseline:'middle'});
+      if(showMarkers)be.line(left+plotW,py,left+plotW+tickLen,py,INK,axisWt);});
   }
+  be.text(yLabelTxt,yLabelCX,top+plotH/2,{size:labelSz,font,color:INK,align:'center',baseline:'middle',rotate:-90});
+
+  // colourbar
+  if(showCbar){
+    const cbX=left+plotW+cbarGap-Math.round(labelSz*1.2),cbY=top,cbH=plotH;
+    const cb=document.createElement('canvas');cb.width=1;cb.height=Math.max(2,Math.round(cbH));
+    const cc=cb.getContext('2d');const cbi=cc.createImageData(1,cb.height);
+    for(let iy=0;iy<cb.height;iy++){const intv=1-iy/(cb.height-1);const[r,g,b]=intensityToRGB(intv,scheme,invert,pk,bg);
+      const base=iy*4;cbi.data[base]=r;cbi.data[base+1]=g;cbi.data[base+2]=b;cbi.data[base+3]=255;}
+    cc.putImageData(cbi,0,0);
+    if(be.kind==='canvas'){be.ctx.imageSmoothingEnabled=false;be.ctx.drawImage(cb,cbX,cbY,cbarW,cbH);}
+    else be.imageURL(cb.toDataURL('image/png'),cbX,cbY,cbarW,cbH);
+    be.box(cbX,cbY,cbarW,cbH,INK,axisWt);
+    be.text('1',cbX+cbarW+4,cbY+2,{size:tickSz,font,color:INK,align:'left',baseline:'top'});
+    be.text('0',cbX+cbarW+4,cbY+cbH-2,{size:tickSz,font,color:INK,align:'left',baseline:'bottom'});
+    be.text('Norm. intensity',cbX+cbarW+labelSz*1.1,cbY+cbH/2,{size:labelSz*0.72,font,color:INK,align:'center',baseline:'middle',rotate:-90});
+  }
+
+  // peak-track guides
+  if(val('cGuides')&&peakGuides.length){
+    be.pushClip(left,top,plotW,plotH);
+    for(const g of peakGuides){if(g<ttMin||g>ttMax)continue;const px=left+((g-ttMin)/(ttMax-ttMin))*plotW;
+      be.line(px,top,px,top+plotH,hexAlpha('#4A6FA5',0.9),1.5,[6,4]);}
+    be.popClip();
+    for(const g of peakGuides){if(g<ttMin||g>ttMax)continue;const px=left+((g-ttMin)/(ttMax-ttMin))*plotW;
+      be.text('▾ '+g.toFixed(2)+'°',px,top-2,{size:Math.max(11,tickSz*0.6),font,color:'#4A6FA5',align:'center',baseline:'bottom'});}
+  }
+
+  if(forScreen)plotMeta={type:'map',left,top,plotW,plotH,ttMin,ttMax,yMin,yMax,yMode,rowFrac,ordered};
 }
 
-// ═══════════════════════════════════════════════════
-//  Auto-render (debounced)
-// ═══════════════════════════════════════════════════
-let mapTimer = null, stackTimer = null;
-function scheduleRender() {
-  clearTimeout(mapTimer); mapTimer = setTimeout(doRender, 300);
-}
-function scheduleStackRender() {
-  if (!patterns.length) return;
-  clearTimeout(stackTimer); stackTimer = setTimeout(doStackRender, 300);
-}
-
-// ═══════════════════════════════════════════════════
-//  Default settings — mirrors every control's initial HTML value.
-//  Used by "Reset on load" and the Reset button.
-// ═══════════════════════════════════════════════════
-const DEFAULTS = {
-  map: {
-    yAxisMode:        'stimulus',
-    yLabel:           'Temperature (°C)',
-    ttMin:            '',
-    ttMax:            '',
-    normMode:         'per_bl',
-    gridRes:          '2000',
-    peakColor:        '#000000',
-    bgColor:          '#ffffff',
-    plotHeightPx:     '',
-    peakEmphasis:     '1',
-    gammaSlider:      '0.40',
-    noiseFloor:       '0',
-    axisFont:         'Arial, sans-serif',
-    tickSize:         '25',
-    labelSize:        '30',
-    lwSlider:         '3',
-    showGridlines:    false,
-    gridlineWeight:   '1',
-    gridlineColor:    '#000000',
-    showPatternMarkers: false,
-    lockSize:         false,
-    lockWidth:        '1200',
-    lockHeight:       '700'
-  },
-  stack: {
-    stkTtMin:         '',
-    stkTtMax:         '',
-    stkReverse:       false,
-    stkBandHeight:    '80',
-    stkXPad:          '14',
-    stkAllBlack:      true,
-    stkColorScheme:   'viridis',
-    stkLineWt:        '1.25',
-    stkAxisWt:        '1.5',
-    stkShowBox:       false,
-    stkFont:          'Arial, sans-serif',
-    stkTickSize:      '25',
-    stkLabelSize:     '30',
-    stkLegendSize:    '25',
-    stkShowLegends:   true,
-    stkSnapMode:      'left',
-    stkLockWidth:     false,
-    stkLockWidthVal:  '1200'
+// ═══════════════════════════════════════════════════════════
+// SCREEN RENDER + SCHEDULING
+// ═══════════════════════════════════════════════════════════
+function figureSize(){
+  const wrap=$('plotWrap');
+  if(mode==='stack'){
+    const lockW=val('cLock')?numv('cLockW',1200):Math.max(400,wrap.clientWidth-28);
+    // height computed inside drawStack via layout; measure by a dry run is overkill — recompute here:
+    const N=patterns.length||1;const bandH=Math.max(24,numv('cBandH',80));
+    const wf=val('cStackStyle')==='waterfall';const wfOffset=numv('cWfOffset',34)/100;
+    const axisWt=numv('cStkAxisW',1.5);const font=val('cFont'),tickSz=numv('cTickSz',24),labelSz=numv('cLabelSz',30);
+    const bottomPad=Math.round(14+axisWt*1.5);
+    const plotH=wf?Math.round(bandH*(1+(N-1)*Math.max(0.12,wfOffset)))+bottomPad:N*bandH+bottomPad;
+    const top=Math.round(14+labelSz*0.2),bottom=Math.ceil(tickSz*1.35)+Math.ceil(labelSz*1.35)+18;
+    return[lockW,top+plotH+bottom];
+  }else{
+    const lockW=val('cLock')?numv('cLockW',1200):Math.max(400,wrap.clientWidth-28);
+    const h=val('cLock')?numv('cLockH',700):(numv('cMapH',NaN)||Math.round(lockW*0.58));
+    return[lockW,h];
   }
-};
-
-function resetToDefaults() {
-  applySettings(JSON.parse(JSON.stringify(DEFAULTS)));   // deep-clone to avoid mutation
-  // Reset internal legend/snap state
-  Object.keys(legendPositions).forEach(k => delete legendPositions[k]);
-  snapXFrac   = null;
-  prevSnapMode = 'left';
-  // Slider value displays update via the 'input' events fired by applyControlValue,
-  // but applyControlValue uses dispatchEvent for ranges — no extra calls needed.
 }
-
-// Map controls
-const MAP_CONTROLS = [
-  'yAxisMode','yLabel','ttMin','ttMax','normMode','gridRes','peakColor','bgColor','plotHeightPx',
-  'peakEmphasis','gammaSlider','noiseFloor','axisFont','tickSize','labelSize','lwSlider',
-  'showGridlines','gridlineWeight','gridlineColor','showPatternMarkers',
-  'lockSize','lockWidth','lockHeight'
-];
-MAP_CONTROLS.forEach(id => {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.addEventListener('input', scheduleRender);
-  el.addEventListener('change', scheduleRender);
-});
-
-// Stack controls
-const STACK_CONTROLS = [
-  'stkTtMin','stkTtMax','stkReverse','stkBandHeight','stkXPad',
-  'stkAllBlack','stkColorScheme','stkLineWt','stkAxisWt','stkShowBox',
-  'stkFont','stkTickSize','stkLabelSize','stkLegendSize',
-  'stkShowLegends','stkSnapMode',
-  'stkLockWidth','stkLockWidthVal'
-];
-STACK_CONTROLS.forEach(id => {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.addEventListener('input', scheduleStackRender);
-  el.addEventListener('change', scheduleStackRender);
-});
-
-// ═══════════════════════════════════════════════════
-//  Save / Load settings as JSON
-// ═══════════════════════════════════════════════════
-function gatherControlValue(id) {
-  const el = document.getElementById(id);
-  if (!el) return undefined;
-  if (el.type === 'checkbox') return el.checked;
-  return el.value;
-}
-function applyControlValue(id, val) {
-  const el = document.getElementById(id);
-  if (!el || val == null) return;
-  if (el.type === 'checkbox') el.checked = !!val;
-  else el.value = val;
-  // Update slider value displays
-  if (el.type === 'range') el.dispatchEvent(new Event('input', { bubbles: true }));
-}
-
-function collectSettings() {
-  const settings = { map: {}, stack: {}, _meta: { app: 'Vx-PXRD_Viewer', version: 1 } };
-  MAP_CONTROLS.forEach(id => { settings.map[id] = gatherControlValue(id); });
-  STACK_CONTROLS.forEach(id => { settings.stack[id] = gatherControlValue(id); });
-  return settings;
-}
-
-function applySettings(settings) {
-  if (!settings || typeof settings !== 'object') throw new Error('Invalid file');
-  // Legacy migration: stkSnapLeft (boolean) → stkSnapMode ('left' or 'none')
-  if (settings.stack && 'stkSnapLeft' in settings.stack && !('stkSnapMode' in settings.stack)) {
-    settings.stack.stkSnapMode = settings.stack.stkSnapLeft ? 'left' : 'none';
-    delete settings.stack.stkSnapLeft;
+let rafPending=false,renderTimer=null;
+function scheduleRender(){clearTimeout(renderTimer);renderTimer=setTimeout(()=>{if(rafPending)return;rafPending=true;requestAnimationFrame(()=>{rafPending=false;doRender();});},60);}
+function clearCanvas(){ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,canvas.width,canvas.height);canvas.width=0;canvas.height=0;plotMeta=null;baseImage=null;}
+function doRender(){
+  if(!patterns.length){clearCanvas();$('emptyState').style.display='flex';updateButtons();return;}
+  $('emptyState').style.display='none';
+  if(mode==='map'){
+    if(patterns.length<2){clearCanvas();setStatus('Intensity map needs ≥2 patterns.','err');return;}
+    if(val('cYMode')==='stimulus'){const bad=patterns.filter(p=>p.y==null||!isFinite(p.y));
+      if(bad.length){clearCanvas();setStatus('Missing Y value: '+bad.map(p=>p.filename).join(', '),'err');return;}}
   }
-  if (settings.map)   MAP_CONTROLS.forEach(id => applyControlValue(id, settings.map[id]));
-  if (settings.stack) STACK_CONTROLS.forEach(id => applyControlValue(id, settings.stack[id]));
-}
-
-document.getElementById('saveSettingsBtn').addEventListener('click', async () => {
-  const data = JSON.stringify(collectSettings(), null, 2);
-  const defaultName = 'Vx-PXRD_settings.json';
-  // Prefer the modern Save File picker where supported (Chrome/Edge); fall back to
-  // a download link otherwise (Firefox/Safari).
-  if (window.showSaveFilePicker) {
-    try {
-      const handle = await window.showSaveFilePicker({
-        suggestedName: defaultName,
-        startIn: sourceFileHandle,
-        types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }]
-      });
-      const writable = await handle.createWritable();
-      await writable.write(data);
-      await writable.close();
-      setStatus('Settings saved.', 'ok');
-      setStackStatus('Settings saved.', 'ok');
-      return;
-    } catch (e) {
-      if (e && e.name === 'AbortError') return; // user cancelled
-      // fall through to download
+  let[W,H]=figureSize();
+  const wrap=$('plotWrap');const availW=wrap.clientWidth-28,availH=wrap.clientHeight-28;
+  let scale=Math.min(1,availW/W,mode==='map'?availH/H:1);if(!isFinite(scale)||scale<=0)scale=1;
+  const dpr=(window.devicePixelRatio||1);
+  canvas.style.width=Math.round(W*scale)+'px';canvas.style.height=Math.round(H*scale)+'px';
+  canvas.width=Math.round(W*scale*dpr);canvas.height=Math.round(H*scale*dpr);
+  ctx.setTransform(scale*dpr,0,0,scale*dpr,0,0);
+  try{
+    if(mode==='stack'){
+      // Draw the chart WITHOUT legends first, snapshot that clean base for fast drag,
+      // then draw legends on top. This keeps the drag overlay ghost-free.
+      drawStack(canvasBackend(ctx),W,H,true,true);
+      if(plotMeta){plotMeta.cssScale=scale;plotMeta.W=W;plotMeta.H=H;}
+      baseImage=null;
+      try{baseImage=ctx.getImageData(0,0,canvas.width,canvas.height);}catch(_){}
+      if(plotMeta&&val('cStkLegends'))legendBounds=drawStackLegends(canvasBackend(ctx),plotMeta.geom);
+      else legendBounds=[];
+    }else{
+      drawMap(canvasBackend(ctx),W,H,true);
+      if(plotMeta){plotMeta.cssScale=scale;plotMeta.W=W;plotMeta.H=H;}
+      baseImage=null;
     }
-  }
-  const blob = new Blob([data], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = defaultName;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-  setStatus('Settings downloaded.', 'ok');
-  setStackStatus('Settings downloaded.', 'ok');
-});
-
-document.getElementById('loadSettingsBtn').addEventListener('click', async () => {
-  if (window.showOpenFilePicker) {
-    try {
-      const [fh] = await window.showOpenFilePicker({
-        startIn: sourceFileHandle,
-        types: [{ description: 'JSON settings', accept: { 'application/json': ['.json'] } }],
-        multiple: false
-      });
-      sourceFileHandle = fh;
-      const f = await fh.getFile();
-      const text = await f.text();
-      const obj = JSON.parse(text);
-      applySettings(obj);
-      scheduleRender(); scheduleStackRender();
-      setStatus('Settings loaded.', 'ok');
-      setStackStatus('Settings loaded.', 'ok');
-      return;
-    } catch (e) {
-      if (e && e.name === 'AbortError') return;
-      // fall through to input
-    }
-  }
-  document.getElementById('settingsFileInput').click();
-});
-document.getElementById('settingsFileInput').addEventListener('change', async e => {
-  const f = e.target.files[0];
-  if (!f) return;
-  try {
-    const text = await f.text();
-    const obj  = JSON.parse(text);
-    applySettings(obj);
-    scheduleRender();
-    scheduleStackRender();
-    setStatus('Settings loaded.', 'ok');
-    setStackStatus('Settings loaded.', 'ok');
-  } catch (err) {
-    setStatus('Could not load settings: ' + err.message, 'err');
-    setStackStatus('Could not load settings: ' + err.message, 'err');
-  }
-  e.target.value = '';
-});
-
-// ═══════════════════════════════════════════════════
-//  Cursor readout — intensity map
-// ═══════════════════════════════════════════════════
-const mapCanvas = document.getElementById('plotCanvas');
-const mapTooltip = document.getElementById('mapTooltip');
-mapCanvas.addEventListener('mousemove', e => {
-  if (!plotMeta) { mapTooltip.style.display = 'none'; return; }
-  const rect = mapCanvas.getBoundingClientRect();
-  const sx = mapCanvas.width / rect.width, sy = mapCanvas.height / rect.height;
-  const cx = (e.clientX - rect.left) * sx, cy = (e.clientY - rect.top) * sy;
-  const { ttMin, ttMax, yMin, yMax, MARGIN, plotW, plotH, yAxisMode, rowFrac, ordered } = plotMeta;
-  const fx = (cx - MARGIN.left) / plotW, fy = (cy - MARGIN.top) / plotH;
-  if (fx < 0 || fx > 1 || fy < 0 || fy > 1) { mapTooltip.style.display = 'none'; return; }
-  const tt = ttMin + fx * (ttMax - ttMin);
-  const lbl = document.getElementById('yLabel').value || 'Y';
-  const lblShort = lbl.replace(/\s*\(.*\)/, '');
-  let yv;
-  if (yAxisMode === 'sequence') {
-    const frac = 1 - fy;
-    const n = rowFrac.length;
-    if (frac <= rowFrac[0]) {
-      yv = ordered[0].y;
-    } else if (frac >= rowFrac[n - 1]) {
-      yv = ordered[n - 1].y;
-    } else {
-      yv = ordered[0].y;
-      for (let k = 0; k < n - 1; k++) {
-        if (frac >= rowFrac[k] && frac <= rowFrac[k + 1]) {
-          const span = rowFrac[k + 1] - rowFrac[k];
-          const t = span > 0 ? (frac - rowFrac[k]) / span : 0;
-          yv = ordered[k].y * (1 - t) + ordered[k + 1].y * t;
-          break;
-        }
-      }
-    }
-  } else {
-    yv = yMax - fy * (yMax - yMin);
-  }
-  mapTooltip.textContent = `2θ ${tt.toFixed(3)}°  •  ${lblShort} ${yv.toFixed(1)}`;
-  mapTooltip.style.display = 'block';
-  mapTooltip.style.left = (e.clientX + 14) + 'px';
-  mapTooltip.style.top  = (e.clientY - 22) + 'px';
-});
-mapCanvas.addEventListener('mouseleave', () => { mapTooltip.style.display = 'none'; });
-
-// ═══════════════════════════════════════════════════
-//  Copy to clipboard
-// ═══════════════════════════════════════════════════
-async function copyCanvasToClipboard(canvas, statusFn) {
-  if (!canvas.width) { statusFn('Render first.', 'err'); return; }
-  try {
-    const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
-    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-    statusFn('Copied to clipboard.', 'ok');
-  } catch (e) { statusFn('Copy failed: ' + e.message, 'err'); }
+    const[lo,hi]=effRange();
+    setStatus(`${mode==='stack'?'Stacked':'Intensity map'} · ${patterns.length} patterns · 2θ ${lo.toFixed(2)}–${hi.toFixed(2)}°`,'ok');
+  }catch(e){setStatus('Error: '+e.message,'err');console.error(e);}
+  $('zoomResetBtn').style.display=viewTt?'inline-block':'none';
+  updateButtons();
 }
-document.getElementById('copyBtn').addEventListener('click', () =>
-  copyCanvasToClipboard(document.getElementById('plotCanvas'), setStatus));
-// For the stacked plot we no longer need a special-case copy function:
-// legends are now drawn directly on the canvas, so the standard
-// copyCanvasToClipboard captures them automatically. Right-click "Copy image"
-// and "Save image as" in the browser also produce the complete figure.
-document.getElementById('stackCopyBtn').addEventListener('click', () =>
-  copyCanvasToClipboard(document.getElementById('stackCanvas'), setStackStatus));
+new ResizeObserver(()=>{if(!val('cLock'))scheduleRender();}).observe($('plotWrap'));
 
-// ═══════════════════════════════════════════════════
-//  Resize
-// ═══════════════════════════════════════════════════
-let resizeTimer;
-window.addEventListener('resize', () => {
-  clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => {
-    if (document.getElementById('page-map').classList.contains('active')) scheduleRender();
-    if (document.getElementById('page-stack').classList.contains('active')) scheduleStackRender();
-  }, 200);
+// fast legend overlay redraw during drag (stack only) — base image is legend-free
+function redrawLegendsOverlay(){
+  if(mode!=='stack'||!plotMeta||!baseImage)return;
+  ctx.putImageData(baseImage,0,0);
+  if(!val('cStkLegends'))return;
+  const s=(plotMeta.cssScale||1)*(window.devicePixelRatio||1);
+  ctx.save();ctx.setTransform(s,0,0,s,0,0);
+  legendBounds=drawStackLegends(canvasBackend(ctx),plotMeta.geom);
+  ctx.restore();
+}
+
+// ═══════════════════════════════════════════════════════════
+// EXPORT
+// ═══════════════════════════════════════════════════════════
+async function saveBlob(blob,fname,desc,ext,mime){
+  if(window.showSaveFilePicker){try{const opts={suggestedName:fname,types:[{description:desc,accept:{[mime]:[ext]}}]};
+    if(sourceFileHandle)opts.startIn=sourceFileHandle;const fh=await window.showSaveFilePicker(opts);
+    const w=await fh.createWritable();await w.write(blob);await w.close();showToast('Saved '+fh.name);return true;}
+    catch(e){if(e.name==='AbortError')return false;}}
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fname;a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),4000);showToast('Saved '+fname);return true;
+}
+function baseName(){return mode==='stack'?'Vx-PXRD_stacked':'Vx-PXRD_map';}
+function renderOffscreenPNG(scale){
+  const[W,H]=figureSize();const off=document.createElement('canvas');off.width=Math.round(W*scale);off.height=Math.round(H*scale);
+  const oc=off.getContext('2d');oc.scale(scale,scale);
+  if(mode==='stack')drawStack(canvasBackend(oc),W,H,false);else drawMap(canvasBackend(oc),W,H,false);
+  return off;
+}
+async function savePNG(){const scale=parseInt(val('cPngScale'))||2;
+  renderOffscreenPNG(scale).toBlob(b=>saveBlob(b,baseName()+'.png','PNG image','.png','image/png'),'image/png');}
+async function saveSVG(){const[W,H]=figureSize();const be=svgBackend(W,H);
+  if(mode==='stack')drawStack(be,W,H,false);else drawMap(be,W,H,false);
+  await saveBlob(new Blob([be.toString()],{type:'image/svg+xml'}),baseName()+'.svg','SVG vector image','.svg','image/svg+xml');}
+async function copyPNG(){try{const off=renderOffscreenPNG(2);const blob=await new Promise(r=>off.toBlob(r,'image/png'));
+  await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);showToast('Figure copied to clipboard');}
+  catch(e){showToast('Clipboard blocked — use Save PNG');}}
+
+// ═══════════════════════════════════════════════════════════
+// CSV SERIES EXPORT / IMPORT  (preserved format)
+// ═══════════════════════════════════════════════════════════
+async function exportCSV(){
+  if(!patterns.length)return;
+  const yLabel=val('cYLabel')||'Condition';const maxPts=Math.max(...patterns.map(p=>p.twoTheta.length));
+  const rows=[[yLabel]];const stim=[],leg=[];
+  patterns.forEach(p=>{stim.push(p.y!=null?p.y:'');stim.push('');leg.push(p.legend||'');leg.push('');});
+  rows.push(stim);rows.push(leg);
+  for(let r=0;r<maxPts;r++){const row=[];patterns.forEach(p=>{if(r<p.twoTheta.length){row.push(p.twoTheta[r].toFixed(5));row.push(p.intensity[r].toFixed(2));}else{row.push('');row.push('');}});rows.push(row);}
+  const csv=rows.map(r=>r.join(',')).join('\n');
+  await saveBlob(new Blob([csv],{type:'text/csv'}),'Vx-PXRD_series.csv','CSV series','.csv','text/csv');
+}
+async function importCSV(file){
+  try{const text=await file.text();const lines=text.split(/\r?\n/);
+    if(lines.length<4)throw new Error('File too short to be a series CSV.');
+    const yLabel=lines[0].split(',')[0].trim();if(yLabel&&$('cYLabel'))$('cYLabel').value=yLabel;
+    const stim=lines[1].split(','),leg=lines[2].split(',');const nPat=Math.floor(stim.length/2);
+    if(nPat<1)throw new Error('No patterns found in CSV.');
+    const tts=Array.from({length:nPat},()=>[]),ins=Array.from({length:nPat},()=>[]);
+    for(let r=3;r<lines.length;r++){const c=lines[r].split(',');for(let p=0;p<nPat;p++){const tt=parseFloat(c[p*2]),ii=parseFloat(c[p*2+1]);if(isFinite(tt)&&isFinite(ii)){tts[p].push(tt);ins[p].push(ii);}}}
+    patterns.length=0;Object.keys(legendPositions).forEach(k=>delete legendPositions[k]);colorIdx=0;
+    for(let p=0;p<nPat;p++){if(tts[p].length<2)continue;const y=parseFloat(stim[p*2]);const legend=leg[p*2]?leg[p*2].trim():'';
+      patterns.push({filename:`pattern_${p+1}${legend?'_'+legend:''}`,twoTheta:tts[p],intensity:ins[p],y:isFinite(y)?y:null,legend,colour:nextColor(),nPts:tts[p].length});}
+    renderDsList();autoFillRange();scheduleRender();setStatus(`Imported ${patterns.length} patterns from CSV`,'ok');
+  }catch(e){showError('CSV import failed: '+e.message);}
+}
+
+// ═══════════════════════════════════════════════════════════
+// SETTINGS SAVE / LOAD
+// ═══════════════════════════════════════════════════════════
+const SETTING_IDS=['cTtMin','cTtMax','cStackStyle','cBandH','cWfOffset','cWfFill','cReverse','cXPad','cShowBox',
+ 'cYLabel','cYMode','cNorm','cGridRes','cMapH','cMarkers','cMapScheme','cPeakColor','cMapBg','cInvert',
+ 'cGamma','cEmph','cNoise','cColorbar','cGuides','cStkScheme','cStkLW','cStkAxisW','cStkLegends','cStkSnap',
+ 'cStkLegSz','cGrid','cGridColor','cGridW','cMapAxisW','cFont','cTickSz','cLabelSz','cLock','cLockW','cLockH','cPngScale'];
+function collectSettings(){const o={_app:'Vx-PXRD_Viewer',_version:3};
+  for(const id of SETTING_IDS){const el=$(id);if(el)o[id]=el.type==='checkbox'?el.checked:el.value;}return o;}
+function applySettings(o){if(!o||typeof o!=='object')throw new Error('Invalid file');
+  for(const id of SETTING_IDS){const el=$(id);if(el&&o[id]!==undefined){if(el.type==='checkbox')el.checked=!!o[id];else el.value=o[id];}}
+  syncLabels();applyModeVisibility();}
+const DEFAULTS=(()=>{const d={};SETTING_IDS.forEach(id=>{const el=$(id);if(el)d[id]=el.type==='checkbox'?el.checked:el.value;});return JSON.stringify(d);})();
+function resetToDefaults(){applySettings(JSON.parse(DEFAULTS));Object.keys(legendPositions).forEach(k=>delete legendPositions[k]);snapXFrac=null;prevSnapMode='left';peakGuides=[];}
+async function saveSettings(){await saveBlob(new Blob([JSON.stringify(collectSettings(),null,2)],{type:'application/json'}),'Vx-PXRD_settings.json','JSON settings','.json','application/json');}
+async function loadSettings(){
+  const apply=t=>{applySettings(JSON.parse(t));scheduleRender();showToast('Settings loaded');};
+  if(window.showOpenFilePicker){try{const[fh]=await window.showOpenFilePicker({types:[{description:'JSON',accept:{'application/json':['.json']}}],multiple:false});apply(await(await fh.getFile()).text());return;}catch(e){if(e.name==='AbortError')return;}}
+  const inp=document.createElement('input');inp.type='file';inp.accept='.json';
+  inp.onchange=async()=>{if(inp.files[0])try{apply(await inp.files[0].text());}catch(e){showError('Bad settings: '+e.message);}};inp.click();
+}
+
+// ═══════════════════════════════════════════════════════════
+// LABEL SYNC + WIRING
+// ═══════════════════════════════════════════════════════════
+function syncLabels(){
+  const sl=[['cWfOffset','cWfOffsetV',v=>v],['cWfFill','cWfFillV',v=>(+v).toFixed(2)],
+   ['cXPad','cXPadV',v=>v],['cStkLW','cStkLWV',v=>(+v).toFixed(1)],['cStkAxisW','cStkAxisWV',v=>(+v).toFixed(1)],
+   ['cGamma','cGammaV',v=>(+v).toFixed(2)],['cEmph','cEmphV',v=>(+v).toFixed(1)],['cNoise','cNoiseV',v=>(+v).toFixed(1)+'%'],
+   ['cGrid W','',null],['cGridW','cGridWV',v=>(+v).toFixed(1)],['cMapAxisW','cMapAxisWV',v=>(+v).toFixed(1)],
+   ['cTickSz','cTickSzV',v=>v],['cLabelSz','cLabelSzV',v=>v]];
+  for(const[a,b,f] of sl){if(!f)continue;const el=$(a),lb=$(b);if(el&&lb)lb.textContent=f(el.value);}
+}
+// wire every control: label sync + re-render; some also affect visibility
+document.querySelectorAll('#rightPanel input, #rightPanel select').forEach(el=>{
+  const ev=(el.type==='range'||el.type==='text'||el.type==='number')?'input':'change';
+  el.addEventListener(ev,()=>{syncLabels();
+    if(['cStackStyle','cMapScheme','cGuides'].includes(el.id))applyModeVisibility();
+    if(el.id==='cStkSnap'){/* keep snapXFrac; recompute default on next render */}
+    if(el.id==='cTtMin'||el.id==='cTtMax')viewTt=null;
+    scheduleRender();});
+  if(el.type==='color')el.addEventListener('input',scheduleRender);
 });
+$('cResetLegends')&&$('cResetLegends').addEventListener('click',()=>{Object.keys(legendPositions).forEach(k=>delete legendPositions[k]);snapXFrac=null;scheduleRender();});
+$('cSavePNG').addEventListener('click',savePNG);
+$('cSaveSVG').addEventListener('click',saveSVG);
+$('cCopy').addEventListener('click',copyPNG);
+$('cSaveSettings').addEventListener('click',saveSettings);
+$('cLoadSettings').addEventListener('click',loadSettings);
+
+// mode switch
+$('modeSeg').querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+  mode=b.dataset.mode;$('modeSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+  applyModeVisibility();scheduleRender();}));
+
+// sidebar buttons
+$('autosortBtn').addEventListener('click',()=>{if(!patterns.length)return;sortPatterns();renderDsList();scheduleRender();});
+$('clearBtn').addEventListener('click',()=>{patterns.length=0;Object.keys(legendPositions).forEach(k=>delete legendPositions[k]);
+  colorIdx=0;peakGuides=[];viewTt=null;renderDsList();clearCanvas();setStatus('Ready','');});
+$('exportCsvBtn').addEventListener('click',exportCSV);
+$('importCsvBtn').addEventListener('click',async()=>{
+  if(window.showOpenFilePicker){try{const[fh]=await window.showOpenFilePicker({types:[{description:'CSV',accept:{'text/csv':['.csv']}}],multiple:false});sourceFileHandle=fh;await importCSV(await fh.getFile());return;}catch(e){if(e.name==='AbortError')return;}}
+  const inp=document.createElement('input');inp.type='file';inp.accept='.csv';inp.onchange=()=>{if(inp.files[0])importCSV(inp.files[0]);};inp.click();});
+$('exampleBtn').addEventListener('click',loadDemo);
+
+// file input + drag/drop
+$('dropZone').addEventListener('click',()=>$('fileInput').click());
+$('fileInput').addEventListener('change',e=>{routeFiles([...e.target.files]);e.target.value='';});
+function routeFiles(files){const csv=files.filter(f=>/\.csv$/i.test(f.name)),other=files.filter(f=>!/\.csv$/i.test(f.name));
+  if(csv.length)importCSV(csv[0]);if(other.length)loadFiles(other);}
+function isFileDrag(e){return e.dataTransfer&&[...e.dataTransfer.types].includes('Files');}
+const dz=$('dropZone');
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag-over');});
+dz.addEventListener('dragleave',e=>{if(!dz.contains(e.relatedTarget))dz.classList.remove('drag-over');});
+document.addEventListener('dragover',e=>{if(dragSrcIdx!==null||!isFileDrag(e))return;e.preventDefault();e.dataTransfer.dropEffect='copy';dz.classList.add('drag-over');});
+document.addEventListener('dragleave',e=>{if(e.relatedTarget===null)dz.classList.remove('drag-over');});
+document.addEventListener('drop',async e=>{if(dragSrcIdx!==null||!isFileDrag(e))return;e.preventDefault();dz.classList.remove('drag-over');
+  const items=[...e.dataTransfer.items];const files=[];
+  for(const it of items){if(it.kind!=='file')continue;
+    if(it.getAsFileSystemHandle){try{const fh=await it.getAsFileSystemHandle();sourceFileHandle=fh;files.push(await fh.getFile());continue;}catch(_){}}
+    const f=it.getAsFile&&it.getAsFile();if(f)files.push(f);}
+  routeFiles(files);});
+
+// guide modal
+$('guideBtn').addEventListener('click',()=>$('guideVeil').classList.add('show'));
+$('guideClose').addEventListener('click',()=>$('guideVeil').classList.remove('show'));
+$('guideVeil').addEventListener('click',e=>{if(e.target===$('guideVeil'))$('guideVeil').classList.remove('show');});
+window.addEventListener('keydown',e=>{if(e.key==='Escape')$('guideVeil').classList.remove('show');});
+
+// ═══════════════════════════════════════════════════════════
+// CANVAS INTERACTION: zoom, tooltip, legend drag, peak guides
+// ═══════════════════════════════════════════════════════════
+let dragX0=null,dragMode=null; // dragMode: 'zoom' | 'legend'
+function evtXY(e){const r=canvas.getBoundingClientRect();const s=plotMeta?plotMeta.cssScale:1;
+  return{x:(e.clientX-r.left)/s,y:(e.clientY-r.top)/s,rawX:e.clientX-r.left,rawY:e.clientY-r.top};}
+function plotXtoTt(px){if(mode==='stack'){const{M,plotW,ttMin,ttMax}=plotMeta;const f=(px-M.left)/plotW;return ttMin+Math.max(0,Math.min(1,f))*(ttMax-ttMin);}
+  else{const{left,plotW,ttMin,ttMax}=plotMeta;const f=(px-left)/plotW;return ttMin+Math.max(0,Math.min(1,f))*(ttMax-ttMin);}}
+function inPlotX(px){if(!plotMeta)return false;if(mode==='stack')return px>=plotMeta.M.left&&px<=plotMeta.M.left+plotMeta.plotW;return px>=plotMeta.left&&px<=plotMeta.left+plotMeta.plotW;}
+function plotLeft(){return mode==='stack'?plotMeta.M.left:plotMeta.left;}
+function plotTop(){return mode==='stack'?plotMeta.M.top:plotMeta.top;}
+
+function legendHit(x,y){for(let i=legendBounds.length-1;i>=0;i--){const b=legendBounds[i];
+  if(x>=b.x-4&&x<=b.x+b.w+4&&y>=b.y-2&&y<=b.y+b.h+2)return b;}return null;}
+
+canvas.addEventListener('mousedown',e=>{if(!plotMeta||e.button!==0)return;const{x,y}=evtXY(e);
+  if(mode==='stack'&&val('cStkLegends')){const hit=legendHit(x,y);
+    if(hit){draggingLegend={key:hit.key,idx:hit.idx,offX:x-hit.x,offY:y-hit.y,w:hit.w};dragMode='legend';canvas.style.cursor='grabbing';e.preventDefault();return;}}
+  if(mode==='map'&&val('cGuides')){const tt=plotXtoTt(x);
+    // click near existing guide handle removes it
+    const hitIdx=peakGuides.findIndex(g=>Math.abs(((g-plotMeta.ttMin)/(plotMeta.ttMax-plotMeta.ttMin))-((tt-plotMeta.ttMin)/(plotMeta.ttMax-plotMeta.ttMin)))*plotMeta.plotW<8&&y<plotTop()+16);
+    if(hitIdx>=0){peakGuides.splice(hitIdx,1);scheduleRender();return;}
+    if(inPlotX(x)){peakGuides.push(+tt.toFixed(3));scheduleRender();return;}}
+  dragX0=x;dragMode='zoom';});
+
+canvas.addEventListener('mousemove',e=>{if(!plotMeta)return;const{x,y}=evtXY(e);
+  if(dragMode==='legend'&&draggingLegend){
+    const{key,idx,offX,offY,w}=draggingLegend;const{M,plotW,plotH,bandH,wf,bottomPad,N}=plotMeta;
+    let nx=x-offX,ny=y-offY;const wFrac=w/plotW;
+    let bandTop,bandSpan;
+    if(wf){const traceH=bandH-8;const stepY=(plotH-bottomPad-traceH)/Math.max(1,N-1);bandTop=M.top+idx*stepY;bandSpan=traceH;}
+    else{bandTop=M.top+idx*bandH;bandSpan=bandH;}
+    ny=Math.max(bandTop,Math.min(bandTop+bandSpan-numv('cStkLegSz',22),ny));
+    nx=Math.max(M.left,Math.min(M.left+plotW-20,nx));
+    const leftXFrac=(nx-M.left)/plotW,yFrac=(ny-bandTop)/bandSpan;
+    const snapMode=val('cStkSnap');
+    if(snapMode!=='none'){snapXFrac=snapMode==='left'?leftXFrac:snapMode==='center'?leftXFrac+wFrac/2:leftXFrac+wFrac;
+      if(legendPositions[key])legendPositions[key].yFrac=yFrac;}
+    else{legendPositions[key]={xFrac:leftXFrac,yFrac};}
+    redrawLegendsOverlay();return;
+  }
+  if(dragMode==='zoom'&&dragX0!=null&&Math.abs(x-dragX0)>3){
+    const zr=$('zoomRect'),cr=canvas.getBoundingClientRect(),wr=$('plotWrap').getBoundingClientRect(),s=plotMeta.cssScale||1;
+    const x0=Math.min(dragX0,x)*s+(cr.left-wr.left),x1=Math.max(dragX0,x)*s+(cr.left-wr.left);
+    zr.style.display='block';zr.style.left=x0+'px';zr.style.width=(x1-x0)+'px';
+    zr.style.top=(plotTop()*s+(cr.top-wr.top))+'px';zr.style.height=((mode==='stack'?plotMeta.plotH:plotMeta.plotH)*s)+'px';
+  }
+  // tooltip + cursor
+  const tip=$('floatTip');
+  if(inPlotX(x)){const tt=plotXtoTt(x);let txt=`2θ ${tt.toFixed(3)}°`;
+    if(mode==='map'){const{yMode,yMin,yMax,rowFrac,ordered,top,plotH}=plotMeta;const fy=(y-top)/plotH;
+      if(fy>=0&&fy<=1){let yv;if(yMode==='sequence'){const frac=1-fy;const n=rowFrac.length;
+        if(frac<=rowFrac[0])yv=ordered[0].y;else if(frac>=rowFrac[n-1])yv=ordered[n-1].y;
+        else{yv=ordered[0].y;for(let k=0;k<n-1;k++)if(frac>=rowFrac[k]&&frac<=rowFrac[k+1]){const sp=rowFrac[k+1]-rowFrac[k];const t=sp>0?(frac-rowFrac[k])/sp:0;yv=ordered[k].y*(1-t)+ordered[k+1].y*t;break;}}}
+        else yv=yMax-fy*(yMax-yMin);
+        const lbl=(val('cYLabel')||'Y').replace(/\s*\(.*\)/,'');txt+=`  ·  ${lbl} ${yv.toFixed(1)}`;}}
+    tip.textContent=txt;tip.style.display='block';tip.style.left=(e.clientX+14)+'px';tip.style.top=(e.clientY-24)+'px';
+    $('cursorEl').textContent=txt;
+    if(dragMode!=='zoom')canvas.style.cursor=(mode==='stack'&&legendHit(x,y))?'grab':(mode==='map'&&val('cGuides'))?'copy':'crosshair';
+  }else{tip.style.display='none';$('cursorEl').textContent='';}
+});
+window.addEventListener('mouseup',e=>{
+  if(dragMode==='zoom'&&dragX0!=null&&plotMeta){const{x}=evtXY(e);$('zoomRect').style.display='none';
+    if(Math.abs(x-dragX0)>8){const t0=plotXtoTt(dragX0),t1=plotXtoTt(x);viewTt=[Math.min(t0,t1),Math.max(t0,t1)];scheduleRender();}}
+  dragX0=null;dragMode=null;draggingLegend=null;if(canvas.style.cursor==='grabbing')canvas.style.cursor='crosshair';});
+canvas.addEventListener('dblclick',()=>{viewTt=null;scheduleRender();});
+canvas.addEventListener('mouseleave',()=>{$('floatTip').style.display='none';$('cursorEl').textContent='';});
+$('zoomResetBtn').addEventListener('click',()=>{viewTt=null;scheduleRender();});
+
+// init
+syncLabels();applyModeVisibility();updateButtons();
 </script>
 </body>
 </html>
