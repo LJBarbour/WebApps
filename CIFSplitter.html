@@ -5,466 +5,325 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CIF Splitter</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&family=Fraunces:ital,opsz,wght@0,9..144,300;1,9..144,300&display=swap">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@300;600&family=DM+Sans:wght@400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-:root {
-  --bg:      #FAF6EE;
-  --paper:   #F2EBE0;
-  --ink:     #2C2825;
-  --ink-mid: #6B5E52;
-  --ink-lt:  #A8998C;
-  --accent:  #8B5E3C;
-  --border:  #DDD5C8;
-  --ok-bg:   #EFF7EE; --ok-ink: #2A6A2A; --ok-bd: #A8D0A8;
-  --no-bg:   #F5F2EE; --no-ink: #A8998C;
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#FAF6EE;--paper:#F3EDE0;--paper2:#EDE6D4;--ink:#2C2416;--ink-mid:#6B5C3E;
+  --ink-faint:#B8A98A;--accent:#4A6FA5;--accent-soft:#EEF3FA;--line:#DDD5C0;--border:#CEC3AA;
+  --ok:#4E8367;--ok-bg:#EBF4EE;--ok-bd:#B0D4BB;
+  --mono:'DM Mono',monospace;--sans:'DM Sans',sans-serif;--display:'Fraunces',serif;
 }
-body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--ink); min-height:100vh; padding:0 0 4rem; }
+html,body{min-height:100%;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:13px}
+body{display:flex;flex-direction:column;overflow-x:hidden}
+::-webkit-scrollbar{width:7px;height:7px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
 
-/* ── Header ── */
-header { text-align:center; padding:2.5rem 1rem 1.5rem; }
-h1 { font-family:'Fraunces',serif; font-weight:300; font-size:2rem; letter-spacing:-0.01em; }
-header p { font-size:12.5px; color:var(--ink-mid); margin-top:0.3rem; max-width:500px; margin-inline:auto; }
+/* -- Header -- */
+header{flex-shrink:0;padding:10px 18px 9px;border-bottom:1.5px solid var(--line);
+       display:flex;align-items:baseline;gap:12px}
+header h1{font-family:var(--display);font-weight:600;font-size:19px;color:var(--ink)}
+header .sub{font-size:10px;color:var(--ink-mid);font-family:var(--mono);letter-spacing:.5px}
 
-/* ── Drop zone ── */
-.drop-zone {
-  max-width:620px; margin:0 auto 1.5rem;
-  border:2px dashed var(--border); border-radius:8px;
-  background:var(--paper); padding:2.5rem 1.5rem;
-  text-align:center; cursor:pointer;
-  transition:border-color .15s, background .15s;
-}
-.drop-zone:hover, .drop-zone.drag { border-color:var(--accent); background:var(--bg); }
-.drop-icon { font-size:2rem; margin-bottom:0.5rem; color:var(--ink-lt); }
-.drop-zone p { font-size:13px; color:var(--ink-mid); margin-top:0.25rem; }
-.drop-zone strong { color:var(--accent); }
-.drop-zone .formats { font-family:'DM Mono',monospace; font-size:11px; color:var(--ink-lt); margin-top:0.5rem; }
+/* -- Main content -- */
+main{flex:1;display:flex;flex-direction:column;align-items:center;padding:2.5rem 1.5rem 4rem;gap:1.5rem}
+.content{width:100%;max-width:600px;display:flex;flex-direction:column;gap:1.25rem}
 
-/* ── Results ── */
-#results { max-width:620px; margin:0 auto; display:none; flex-direction:column; gap:1rem; }
-#results.vis { display:flex; }
+/* -- Drop zone -- */
+.drop-zone{border:1.5px dashed var(--border);border-radius:6px;background:var(--paper);
+  padding:2.5rem 1.5rem;text-align:center;cursor:pointer;
+  transition:border-color .15s,background .15s}
+.drop-zone:hover,.drop-zone.drag{border-color:var(--accent);background:var(--accent-soft)}
+.drop-zone .dz-icon{font-size:2rem;margin-bottom:.5rem;color:var(--ink-faint)}
+.drop-zone p{font-size:12.5px;color:var(--ink-mid);margin-top:.25rem}
+.drop-zone strong{color:var(--ink)}
+.drop-zone .dz-fmt{font-family:var(--mono);font-size:10.5px;color:var(--ink-faint);margin-top:.4rem}
 
-/* file info bar */
-.file-bar {
-  display:flex; align-items:center; justify-content:space-between;
-  background:var(--paper); border:1px solid var(--border); border-radius:6px;
-  padding:0.6rem 0.9rem; font-size:12.5px;
-}
-.file-bar .name { font-family:'DM Mono',monospace; font-weight:500; color:var(--ink); }
-.file-bar .meta { font-family:'DM Mono',monospace; font-size:11px; color:var(--ink-mid); }
+/* -- File bar -- */
+.file-bar{display:flex;align-items:center;justify-content:space-between;
+  background:var(--paper);border:1px solid var(--line);border-radius:5px;padding:7px 10px}
+.file-bar .fname{font-family:var(--mono);font-size:11.5px;font-weight:500;color:var(--ink)}
+.file-bar .fmeta{font-family:var(--mono);font-size:10.5px;color:var(--ink-faint)}
 
-/* summary + select-all row */
-.list-header { display:flex; align-items:center; justify-content:space-between; }
-.btn-select-all {
-  font-family:'DM Mono',monospace; font-size:11px; color:var(--accent);
-  background:transparent; border:none; cursor:pointer; padding:0;
-  text-decoration:underline; text-underline-offset:2px;
-}
-.btn-select-all:hover { opacity:0.7; }
+/* -- List header -- */
+.list-header{display:flex;align-items:center;justify-content:space-between}
+.summary-lbl{font-family:var(--mono);font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:var(--ink-faint)}
+.btn-sel-all{font-family:var(--mono);font-size:10px;color:var(--accent);background:transparent;
+  border:none;cursor:pointer;text-decoration:underline;text-underline-offset:2px;padding:0}
+.btn-sel-all:hover{opacity:.7}
 
-/* summary label */
-.summary-label {
-  font-family:'DM Mono',monospace; font-size:11px; font-weight:500;
-  letter-spacing:0.07em; text-transform:uppercase; color:var(--ink-mid);
-}
+/* -- Block cards -- */
+.block-list{display:flex;flex-direction:column;gap:6px}
+.block-card{background:var(--paper);border:1px solid var(--line);border-radius:5px;
+  padding:9px 11px;transition:opacity .18s,border-color .18s}
+.block-card.excluded{opacity:.35}
 
-/* block list */
-.block-list { display:flex; flex-direction:column; gap:6px; }
+.block-header-row{display:flex;align-items:center;gap:7px;cursor:pointer;user-select:none;margin-bottom:6px}
+.block-cb{accent-color:var(--accent);width:13px;height:13px;cursor:pointer;flex-shrink:0}
+.block-name{font-family:var(--mono);font-size:12px;font-weight:500;color:var(--accent)}
 
-.block-card {
-  background:var(--paper); border:1px solid var(--border); border-radius:6px;
-  padding:0.75rem 0.9rem;
-  transition: opacity .18s, border-color .18s;
-}
-.block-card.excluded { opacity:0.38; border-color:var(--border); }
+.file-chips{display:flex;gap:5px;flex-wrap:wrap}
+.chip{font-family:var(--mono);font-size:10.5px;font-weight:500;padding:2px 8px;border-radius:10px}
+.chip-yes{background:var(--ok-bg);color:var(--ok);border:1px solid var(--ok-bd)}
+.chip-no{background:var(--paper2);color:var(--ink-faint);border:1px solid var(--line)}
 
-.block-header-row {
-  display:flex; align-items:center; gap:0.5rem;
-  cursor:pointer; user-select:none; margin-bottom:0.45rem;
-}
-.block-cb {
-  accent-color:var(--accent); width:14px; height:14px;
-  cursor:pointer; flex-shrink:0;
-}
-.block-name {
-  font-family:'DM Mono',monospace; font-size:12.5px; font-weight:500;
-  color:var(--accent);
-}
-.file-chips { display:flex; gap:6px; flex-wrap:wrap; }
-.chip {
-  font-family:'DM Mono',monospace; font-size:11px; font-weight:500;
-  padding:2px 9px; border-radius:10px;
-}
-.chip-yes { background:var(--ok-bg); color:var(--ok-ink); border:1px solid var(--ok-bd); }
-.chip-no  { background:var(--no-bg); color:var(--no-ink); border:1px solid var(--border); }
+/* -- Notice -- */
+.notice{background:var(--paper2);border:1px solid var(--line);border-radius:5px;
+  padding:9px 11px;font-size:11.5px;color:var(--ink-mid);font-family:var(--mono)}
 
-/* no-embed notice */
-.notice {
-  background:var(--paper); border:1px solid var(--border); border-radius:6px;
-  padding:0.75rem 0.9rem; font-size:12.5px; color:var(--ink-mid);
-  font-family:'DM Mono',monospace;
-}
+/* -- Options row -- */
+.opt-row{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;
+  color:var(--ink-mid);cursor:pointer;user-select:none}
+.opt-row input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;cursor:pointer}
 
-/* extract button */
-.extract-btn {
-  display:block; width:100%;
-  background:var(--accent); color:#fff;
-  border:none; border-radius:6px;
-  padding:0.85rem; font-family:'DM Sans',sans-serif;
-  font-size:0.95rem; font-weight:600; cursor:pointer;
-  transition:opacity .15s;
-}
-.extract-btn:hover { opacity:0.88; }
-.extract-btn:disabled { opacity:0.4; cursor:default; }
+/* -- Extract button -- */
+.extract-btn{display:block;width:100%;background:var(--accent);color:#fff;
+  border:none;border-radius:5px;padding:10px;font-family:var(--sans);
+  font-size:13px;font-weight:500;cursor:pointer;transition:opacity .15s}
+.extract-btn:hover{opacity:.88}
+.extract-btn:disabled{opacity:.38;cursor:default}
 
-/* folder toggle */
-.opt-row {
-  display:flex; align-items:center; gap:0.5rem;
-  font-family:'DM Mono',monospace; font-size:12px; color:var(--ink-mid);
-  cursor:pointer; user-select:none;
-}
-.opt-row input[type=checkbox] { accent-color:var(--accent); width:14px; height:14px; cursor:pointer; }
+/* -- Status -- */
+.status-msg{text-align:center;font-family:var(--mono);font-size:11px;
+  color:var(--accent);min-height:1.4em;transition:opacity .3s}
 
-/* status message */
-.status-msg {
-  text-align:center; font-family:'DM Mono',monospace;
-  font-size:12px; color:var(--accent); min-height:1.4em;
-  transition:opacity .3s;
-}
+#results{display:none;flex-direction:column;gap:1rem}
+#results.vis{display:flex}
 </style>
 </head>
 <body>
 
 <header>
   <h1>CIF Splitter</h1>
-  <p>Splits multi-structure CIF files and extracts embedded SHELX files (RES, HKL, FAB) — similar to Sheldrick's SHREDCIF</p>
+  <span class="sub">split multi-structure CIFs &middot; extract embedded SHELX files (RES, HKL, FAB)</span>
 </header>
 
-<div class="drop-zone" id="dropZone">
-  <div class="drop-icon">⬆</div>
-  <p>Drop a <strong>CIF file</strong> here, or <strong>click to browse</strong></p>
-  <p class="formats">Extracts: .cif per block · .res · .hkl · .fab</p>
-</div>
-<input type="file" id="fileInput" accept=".cif,.fcf" style="display:none">
+<main>
+<div class="content">
 
-<div id="results">
-  <div class="file-bar">
-    <span class="name" id="fileName"></span>
-    <span class="meta" id="fileMeta"></span>
+  <div class="drop-zone" id="dropZone">
+    <div class="dz-icon">&#x2B06;</div>
+    <p>Drop a <strong>CIF file</strong> here, or <strong>click to browse</strong></p>
+    <p class="dz-fmt">.cif &middot; .fcf &nbsp;&mdash;&nbsp; extracts: .cif per block &middot; .res &middot; .hkl &middot; .fab</p>
   </div>
-  <div class="list-header">
-    <div class="summary-label" id="summaryLabel"></div>
-    <button class="btn-select-all" id="selectAllBtn" style="display:none">Deselect all</button>
-  </div>
-  <div class="block-list" id="blockList"></div>
-  <label class="opt-row" id="folderOptRow" style="display:none">
-    <input type="checkbox" id="useFolders"> Use a separate folder per structure
-  </label>
-  <button class="extract-btn" id="extractBtn">Extract to ZIP</button>
-  <div class="status-msg" id="statusMsg"></div>
-</div>
+  <input type="file" id="fileInput" accept=".cif,.fcf" style="display:none">
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <div id="results">
+    <div class="file-bar">
+      <span class="fname" id="fileName"></span>
+      <span class="fmeta" id="fileMeta"></span>
+    </div>
+    <div class="list-header">
+      <div class="summary-lbl" id="summaryLabel"></div>
+      <button class="btn-sel-all" id="selectAllBtn" style="display:none">Deselect all</button>
+    </div>
+    <div class="block-list" id="blockList"></div>
+    <label class="opt-row" id="folderOptRow" style="display:none">
+      <input type="checkbox" id="useFolders" checked> Use a separate folder per structure
+    </label>
+    <button class="extract-btn" id="extractBtn">Extract to ZIP</button>
+    <div class="status-msg" id="statusMsg"></div>
+  </div>
+
+</div>
+</main>
+
 <script>
 'use strict';
 
-// ── Embedded file definitions ─────────────────────────────────────────
-// Each entry: label shown in UI, output extension, CIF key variants to try
-const EMBEDDED = [
-  { label:'RES', ext:'res', keys:['_shelx_res_file',  '_shelxl_res_file']  },
-  { label:'HKL', ext:'hkl', keys:['_shelx_hkl_file',  '_shelxl_hkl_file']  },
-  { label:'FAB', ext:'fab', keys:['_shelx_fab_file',  '_shelxl_fab_file']  },
+// -- Embedded file definitions ------------------------------------------
+const EMBEDDED=[
+  {label:'RES',ext:'res',keys:['_shelx_res_file','_shelxl_res_file']},
+  {label:'HKL',ext:'hkl',keys:['_shelx_hkl_file','_shelxl_hkl_file']},
+  {label:'FAB',ext:'fab',keys:['_shelx_fab_file','_shelxl_fab_file']},
 ];
 
-// ── CIF block splitter ────────────────────────────────────────────────
-// Splits on data_ headers; returns [{name, text, embedded:{ext->content}}]
-function splitCIF(text) {
-  const norm = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  const lines = norm.split('\n');
-  const blocks = [];
-  let curName = null, curLines = [];
-
-  for (const line of lines) {
-    const m = line.match(/^(data_\S*)/i);
-    if (m) {
-      if (curName !== null) blocks.push(buildBlock(curName, curLines));
-      curName = m[1].slice(5); // strip 'data_'
-      curLines = [line];
-    } else if (curName !== null) {
-      curLines.push(line);
-    }
-    // text before first data_ (comments, global_) is silently skipped
+// -- CIF block splitter ------------------------------------------------
+function splitCIF(text){
+  const norm=text.replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+  const lines=norm.split('\n');
+  const blocks=[];let curName=null,curLines=[];
+  for(const line of lines){
+    const m=line.match(/^(data_\S*)/i);
+    if(m){if(curName!==null)blocks.push(buildBlock(curName,curLines));curName=m[1].slice(5);curLines=[line];}
+    else if(curName!==null)curLines.push(line);
   }
-  if (curName !== null && curLines.length) blocks.push(buildBlock(curName, curLines));
+  if(curName!==null&&curLines.length)blocks.push(buildBlock(curName,curLines));
   return blocks;
 }
-
-function buildBlock(name, lines) {
-  // Trim trailing blank lines but keep a single trailing newline
-  while (lines.length > 1 && lines[lines.length - 1].trim() === '') lines.pop();
-  const text = lines.join('\n') + '\n';
-  const embedded = {};
-  for (const e of EMBEDDED) {
-    const content = extractSemiField(text, e.keys);
-    if (content !== null) embedded[e.ext] = content;
-  }
-  return { name, text, embedded };
+function buildBlock(name,lines){
+  while(lines.length>1&&lines[lines.length-1].trim()==='')lines.pop();
+  const text=lines.join('\n')+'\n';
+  const embedded={};
+  for(const e of EMBEDDED){const c=extractSemiField(text,e.keys);if(c!==null)embedded[e.ext]=c;}
+  return{name,text,embedded};
 }
-
-// ── Semicolon-delimited text field extractor ──────────────────────────
-// Handles: _key\n;\ncontent\n;
-function extractSemiField(text, keys) {
-  for (const key of keys) {
-    // Consume the \r?\n after the opening ; so content never starts with a blank line
-    const re = new RegExp(
-      `(?:^|\\n)[ \\t]*${key.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}[ \\t]*\\n;\\r?\\n([\\s\\S]*?)\\n;`,
-      'i'
-    );
-    const m = text.match(re);
-    if (m) return m[1];
+function extractSemiField(text,keys){
+  for(const key of keys){
+    const re=new RegExp(`(?:^|\\n)[ \\t]*${key.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}[ \\t]*\\n;\\r?\\n([\\s\\S]*?)\\n;`,'i');
+    const m=text.match(re);if(m)return m[1];
   }
   return null;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────
-function safeName(s) {
-  // Strip/replace characters not safe in filenames
-  return s.replace(/[/\\:*?"<>|]/g, '_').replace(/\s+/g, '_');
-}
-function fmtSize(b) {
-  return b < 1024 ? `${b} B` : b < 1048576 ? `${(b/1024).toFixed(1)} KB` : `${(b/1048576).toFixed(2)} MB`;
-}
-function toCRLF(s) {
-  return s.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
-}
-// For HKL and FAB: stop at the first line where H K L are all 0 (the SHELX terminator record).
-// This guards against CIF files where the closing semicolon is malformed and the regex
-// sweeps past the terminator into the next embedded field.
-function truncateAtZeroRecord(content) {
-  const lines = content.split('\n');
-  for (let i = 0; i < lines.length; i++) {
-    const fields = lines[i].trim().split(/\s+/);
-    if (fields.length >= 3 && fields[0] === '0' && fields[1] === '0' && fields[2] === '0') {
-      return lines.slice(0, i + 1).join('\n');
-    }
+// -- Helpers -----------------------------------------------------------
+function safeName(s){return s.replace(/[/\\:*?"<>|]/g,'_').replace(/\s+/g,'_');}
+function fmtSize(b){return b<1024?b+' B':b<1048576?(b/1024).toFixed(1)+' KB':(b/1048576).toFixed(2)+' MB';}
+function toCRLF(s){return s.replace(/\r\n/g,'\n').replace(/\n/g,'\r\n');}
+function truncateAtZeroRecord(content){
+  const lines=content.split('\n');
+  for(let i=0;i<lines.length;i++){
+    const f=lines[i].trim().split(/\s+/);
+    if(f.length>=3&&f[0]==='0'&&f[1]==='0'&&f[2]==='0')return lines.slice(0,i+1).join('\n');
   }
-  return content; // no terminator found — return as-is
+  return content;
 }
-function esc(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
-// ── State ─────────────────────────────────────────────────────────────
-let currentBlocks = [];
-let sourceFileName = '';
-let sourceFileHandle = null;
+// -- State -------------------------------------------------------------
+let currentBlocks=[],sourceFileName='',sourceFileHandle=null;
 
-// ── Render results ────────────────────────────────────────────────────
-function renderResults(blocks, fileName, fileSize) {
-  sourceFileName = fileName;
-  currentBlocks = blocks;
-
-  document.getElementById('fileName').textContent = fileName;
-  document.getElementById('fileMeta').textContent =
-    `${fmtSize(fileSize)} · ${blocks.length} data block${blocks.length !== 1 ? 's' : ''}`;
-
-  const hasAnyEmbedded = blocks.some(b => Object.keys(b.embedded).length > 0);
-  const multiBlock = blocks.length > 1;
-
-  let summaryParts = [];
-  if (multiBlock)      summaryParts.push(`${blocks.length} structures`);
-  if (hasAnyEmbedded)  summaryParts.push('embedded SHELX files detected');
-  document.getElementById('summaryLabel').textContent = summaryParts.join(' · ');
-
-  const list = document.getElementById('blockList');
-  list.innerHTML = '';
-
-  for (let i = 0; i < blocks.length; i++) {
-    const block = blocks[i];
-    const chips = EMBEDDED.map(e => {
-      const has = block.embedded[e.ext] !== undefined;
-      return `<span class="chip ${has ? 'chip-yes' : 'chip-no'}">${has ? '✓' : '—'} ${e.label}</span>`;
+// -- Render results ----------------------------------------------------
+function renderResults(blocks,fileName,fileSize){
+  sourceFileName=fileName;currentBlocks=blocks;
+  document.getElementById('fileName').textContent=fileName;
+  document.getElementById('fileMeta').textContent=
+    fmtSize(fileSize)+' \u00B7 '+blocks.length+' data block'+(blocks.length!==1?'s':'');
+  const hasAnyEmb=blocks.some(b=>Object.keys(b.embedded).length>0);
+  const multi=blocks.length>1;
+  const parts=[];
+  if(multi)parts.push(blocks.length+' structures');
+  if(hasAnyEmb)parts.push('embedded SHELX files detected');
+  document.getElementById('summaryLabel').textContent=parts.join(' \u00B7 ');
+  const list=document.getElementById('blockList');list.innerHTML='';
+  for(let i=0;i<blocks.length;i++){
+    const block=blocks[i];
+    const chips=EMBEDDED.map(e=>{
+      const has=block.embedded[e.ext]!==undefined;
+      return '<span class="chip '+(has?'chip-yes':'chip-no')+'">'+(has?'\u2713':'\u2014')+' '+e.label+'</span>';
     }).join('');
-
-    const card = document.createElement('div');
-    card.className = 'block-card';
-    card.innerHTML = `
-      <label class="block-header-row">
-        <input type="checkbox" class="block-cb" data-idx="${i}" checked>
-        <span class="block-name">data_${esc(block.name)}</span>
-      </label>
-      <div class="file-chips">
-        <span class="chip chip-yes">✓ CIF</span>
-        ${chips}
-      </div>`;
-    card.querySelector('.block-cb').addEventListener('change', e => {
-      card.classList.toggle('excluded', !e.target.checked);
-      updateExtractBtn();
-    });
+    const card=document.createElement('div');card.className='block-card';
+    card.innerHTML=
+      '<label class="block-header-row">'+
+      '<input type="checkbox" class="block-cb" data-idx="'+i+'" checked>'+
+      '<span class="block-name">data_'+esc(block.name)+'</span></label>'+
+      '<div class="file-chips"><span class="chip chip-yes">\u2713 CIF</span>'+chips+'</div>';
+    card.querySelector('.block-cb').addEventListener('change',function(e){
+      card.classList.toggle('excluded',!e.target.checked);updateExtractBtn();});
     list.appendChild(card);
   }
-
-  // Show notice if single block with nothing embedded
-  if (!multiBlock && !hasAnyEmbedded) {
-    const n = document.createElement('div');
-    n.className = 'notice';
-    n.textContent = 'Single block · no embedded SHELX files found. Only a .cif will be extracted.';
+  if(!multi&&!hasAnyEmb){
+    const n=document.createElement('div');n.className='notice';
+    n.textContent='Single block \u00B7 no embedded SHELX files found. Only a .cif will be extracted.';
     list.appendChild(n);
   }
-
-  document.getElementById('extractBtn').disabled = false;
-  document.getElementById('statusMsg').textContent = '';
-  // Only offer folder/select-all options when there are multiple blocks
-  document.getElementById('folderOptRow').style.display = multiBlock ? 'flex' : 'none';
-  document.getElementById('selectAllBtn').style.display = multiBlock ? 'inline' : 'none';
+  document.getElementById('extractBtn').disabled=false;
+  document.getElementById('statusMsg').textContent='';
+  document.getElementById('folderOptRow').style.display=multi?'flex':'none';
+  document.getElementById('selectAllBtn').style.display=multi?'inline':'none';
   updateExtractBtn();
   document.getElementById('results').classList.add('vis');
 }
 
-function updateExtractBtn() {
-  const cbs = [...document.querySelectorAll('.block-cb')];
-  const nSelected = cbs.filter(cb => cb.checked).length;
-  const btn = document.getElementById('extractBtn');
-  btn.disabled = nSelected === 0;
-  btn.textContent = nSelected === currentBlocks.length
-    ? 'Extract to ZIP'
-    : `Extract ${nSelected} of ${currentBlocks.length} to ZIP`;
-  // Update select-all button label
-  const saBtn = document.getElementById('selectAllBtn');
-  saBtn.textContent = nSelected === 0 ? 'Select all' : 'Deselect all';
+function updateExtractBtn(){
+  const cbs=[...document.querySelectorAll('.block-cb')];
+  const n=cbs.filter(cb=>cb.checked).length;
+  const btn=document.getElementById('extractBtn');
+  btn.disabled=n===0;
+  btn.textContent=n===currentBlocks.length?'Extract to ZIP':'Extract '+n+' of '+currentBlocks.length+' to ZIP';
+  const sa=document.getElementById('selectAllBtn');
+  sa.textContent=n===0?'Select all':'Deselect all';
 }
 
-document.getElementById('selectAllBtn').addEventListener('click', () => {
-  const cbs = [...document.querySelectorAll('.block-cb')];
-  const anyChecked = cbs.some(cb => cb.checked);
-  cbs.forEach(cb => {
-    cb.checked = !anyChecked;
-    cb.closest('.block-card').classList.toggle('excluded', anyChecked);
-  });
+document.getElementById('selectAllBtn').addEventListener('click',()=>{
+  const cbs=[...document.querySelectorAll('.block-cb')];
+  const any=cbs.some(cb=>cb.checked);
+  cbs.forEach(cb=>{cb.checked=!any;cb.closest('.block-card').classList.toggle('excluded',any);});
   updateExtractBtn();
 });
 
-// ── Extract to ZIP ────────────────────────────────────────────────────
-document.getElementById('extractBtn').addEventListener('click', async () => {
-  if (!currentBlocks.length) return;
-  const btn = document.getElementById('extractBtn');
-  const status = document.getElementById('statusMsg');
-  btn.disabled = true;
-  status.textContent = 'Building ZIP…';
-
-  try {
-    const zip = new JSZip();
-
-    const useFolders = document.getElementById('useFolders').checked;
-
-    for (let idx = 0; idx < currentBlocks.length; idx++) {
-      const cb = document.querySelector(`.block-cb[data-idx="${idx}"]`);
-      if (!cb || !cb.checked) continue;
-      const block = currentBlocks[idx];
-      const stem = safeName(block.name);
-      const prefix = useFolders ? `${stem}/` : '';
-      zip.file(`${prefix}${stem}.cif`, toCRLF(block.text));
-      for (const e of EMBEDDED) {
-        if (block.embedded[e.ext] !== undefined) {
-          let raw = block.embedded[e.ext];
-          // HKL and FAB must end at their zero-record terminator
-          if (e.ext === 'hkl' || e.ext === 'fab') raw = truncateAtZeroRecord(raw);
-          const content = raw.replace(/[\r\n]+$/, '') + '\n';
-          zip.file(`${prefix}${stem}.${e.ext}`, toCRLF(content));
+// -- Extract to ZIP ----------------------------------------------------
+document.getElementById('extractBtn').addEventListener('click',async()=>{
+  if(!currentBlocks.length)return;
+  const btn=document.getElementById('extractBtn');
+  const status=document.getElementById('statusMsg');
+  btn.disabled=true;status.textContent='Building ZIP\u2026';
+  try{
+    const zip=new JSZip();
+    const useFolders=document.getElementById('useFolders').checked;
+    for(let idx=0;idx<currentBlocks.length;idx++){
+      const cb=document.querySelector('.block-cb[data-idx="'+idx+'"]');
+      if(!cb||!cb.checked)continue;
+      const block=currentBlocks[idx];
+      const stem=safeName(block.name);
+      const prefix=useFolders?stem+'/':'';
+      zip.file(prefix+stem+'.cif',toCRLF(block.text));
+      for(const e of EMBEDDED){
+        if(block.embedded[e.ext]!==undefined){
+          let raw=block.embedded[e.ext];
+          if(e.ext==='hkl'||e.ext==='fab')raw=truncateAtZeroRecord(raw);
+          const content=raw.replace(/[\r\n]+$/,'')+'\n';
+          zip.file(prefix+stem+'.'+e.ext,toCRLF(content));
         }
       }
     }
-
-    const zipBlob = await zip.generateAsync({
-      type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 }
-    });
-
-    const zipName = sourceFileName.replace(/\.cif$/i, '') + '_split.zip';
-
-    if (window.showSaveFilePicker) {
-      try {
-        const fh = await window.showSaveFilePicker({
-          suggestedName: zipName,
-          startIn: sourceFileHandle ?? 'downloads',
-          types: [{ description: 'ZIP archive', accept: { 'application/zip': ['.zip'] } }]
-        });
-        const w = await fh.createWritable();
-        await w.write(zipBlob);
-        await w.close();
-        status.textContent = `Saved ${zipName}`;
-      } catch (e) {
-        if (e.name === 'AbortError') { status.textContent = ''; btn.disabled = false; return; }
-        triggerDownload(zipBlob, zipName); // fallback
-        status.textContent = `Downloaded ${zipName}`;
+    const zipBlob=await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:6}});
+    const zipName=sourceFileName.replace(/\.cif$/i,'')+'_split.zip';
+    if(window.showSaveFilePicker){
+      try{
+        const fh=await window.showSaveFilePicker({suggestedName:zipName,
+          startIn:sourceFileHandle??'downloads',
+          types:[{description:'ZIP archive',accept:{'application/zip':['.zip']}}]});
+        const w=await fh.createWritable();await w.write(zipBlob);await w.close();
+        status.textContent='Saved '+zipName;
+      }catch(e){
+        if(e.name==='AbortError'){status.textContent='';btn.disabled=false;return;}
+        triggerDownload(zipBlob,zipName);status.textContent='Downloaded '+zipName;
       }
-    } else {
-      triggerDownload(zipBlob, zipName);
-      status.textContent = `Downloaded ${zipName}`;
-    }
-  } catch (err) {
-    status.textContent = 'Error: ' + err.message;
-  }
-
-  btn.disabled = false;
+    }else{triggerDownload(zipBlob,zipName);status.textContent='Downloaded '+zipName;}
+  }catch(err){status.textContent='Error: '+err.message;}
+  btn.disabled=false;
 });
 
-function triggerDownload(blob, name) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = name;
-  document.body.appendChild(a); a.click();
-  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 2000);
+function triggerDownload(blob,name){
+  const url=URL.createObjectURL(blob);const a=document.createElement('a');
+  a.href=url;a.download=name;document.body.appendChild(a);a.click();
+  setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},2000);
 }
 
-// ── File handling ─────────────────────────────────────────────────────
-async function loadFile(file, handle) {
-  sourceFileHandle = handle ?? null;
-  const text = await file.text();
-  const blocks = splitCIF(text);
-  if (!blocks.length) {
-    alert('No data_ blocks found — is this a valid CIF file?');
-    return;
-  }
-  renderResults(blocks, file.name, file.size);
+// -- File handling -----------------------------------------------------
+async function loadFile(file,handle){
+  sourceFileHandle=handle??null;
+  const text=await file.text();
+  const blocks=splitCIF(text);
+  if(!blocks.length){alert('No data_ blocks found \u2014 is this a valid CIF file?');return;}
+  renderResults(blocks,file.name,file.size);
 }
 
-// Drop zone
-const dz = document.getElementById('dropZone');
-const fi = document.getElementById('fileInput');
+const dz=document.getElementById('dropZone');
+const fi=document.getElementById('fileInput');
 
-dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
-['dragleave','dragend'].forEach(ev => dz.addEventListener(ev, () => dz.classList.remove('drag')));
-
-dz.addEventListener('drop', async e => {
-  e.preventDefault();
-  dz.classList.remove('drag');
-  const items = [...e.dataTransfer.items].filter(i => i.kind === 'file');
-  if (!items.length) return;
-
-  // Grab all handles synchronously before any await
-  const handlePromises = items.map(i =>
-    i.getAsFileSystemHandle ? i.getAsFileSystemHandle().catch(() => null) : Promise.resolve(null)
-  );
-  const plainFiles = items.map(i => i.getAsFile ? i.getAsFile() : null);
-
-  const handles = await Promise.all(handlePromises);
-  // Use the first CIF file dropped
-  for (let i = 0; i < handles.length; i++) {
-    const fh = handles[i];
-    if (fh && fh.kind === 'file') {
-      const file = await fh.getFile();
-      if (file.name.match(/\.(cif|fcf)$/i)) { await loadFile(file, fh); return; }
-    } else if (plainFiles[i]) {
-      if (plainFiles[i].name.match(/\.(cif|fcf)$/i)) { await loadFile(plainFiles[i], null); return; }
-    }
+// Drop anywhere on the page
+document.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag');});
+document.addEventListener('dragleave',e=>{if(e.relatedTarget===null)dz.classList.remove('drag');});
+document.addEventListener('drop',async e=>{
+  e.preventDefault();dz.classList.remove('drag');
+  const items=[...(e.dataTransfer?e.dataTransfer.items:[])].filter(i=>i.kind==='file');
+  if(!items.length)return;
+  const handles=await Promise.all(items.map(i=>i.getAsFileSystemHandle?i.getAsFileSystemHandle().catch(()=>null):Promise.resolve(null)));
+  const plain=items.map(i=>i.getAsFile?i.getAsFile():null);
+  for(let i=0;i<handles.length;i++){
+    const fh=handles[i];
+    if(fh&&fh.kind==='file'){const f=await fh.getFile();if(/\.(cif|fcf)$/i.test(f.name)){await loadFile(f,fh);return;}}
+    else if(plain[i]&&/\.(cif|fcf)$/i.test(plain[i].name)){await loadFile(plain[i],null);return;}
   }
   alert('Please drop a .cif file.');
 });
 
-dz.addEventListener('click', () => fi.click());
-fi.addEventListener('change', async () => {
-  if (fi.files[0]) { await loadFile(fi.files[0], null); fi.value = ''; }
-});
+dz.addEventListener('click',()=>fi.click());
+fi.addEventListener('change',async()=>{if(fi.files[0]){await loadFile(fi.files[0],null);fi.value='';}});
 </script>
 </body>
 </html>
