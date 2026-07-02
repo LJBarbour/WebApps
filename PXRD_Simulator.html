@@ -147,7 +147,7 @@ select.cp-sel{flex:1;padding:3px 4px;border:1px solid var(--border);border-radiu
   font-family:var(--sans);font-size:11px;background:var(--bg);color:var(--ink);outline:none;}
 select.cp-sel:focus{border-color:var(--accent);}
 input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;}
-.hkl-in{width:34px !important;flex:none !important;text-align:center;}
+.hkl-in{width:52px !important;flex:none !important;text-align:center;}
 
 /* peak table */
 .peak-wrap{margin-top:0;border:1px solid var(--line);border-radius:3px;background:var(--bg);overflow-y:auto;}
@@ -203,8 +203,8 @@ input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;}
 <div class="left">
   <div class="drop-zone" id="dropZone">
     <div class="dz-icon">&#x1F5C2;</div>
-    <div class="dz-lbl"><strong>Drop CIF or .xy data</strong><br>anywhere -- or click to browse</div>
-    <input type="file" id="fileInput" accept=".cif,.xy,.xye,.dat,.txt,.csv" multiple style="display:none">
+    <div class="dz-lbl"><strong>Drop CIF, .xy or .xrdml data</strong><br>anywhere -- or click to browse</div>
+    <input type="file" id="fileInput" accept=".cif,.xy,.xye,.dat,.txt,.csv,.xrdml" multiple style="display:none">
   </div>
   <div class="mini-row">
     <button class="mini-btn" id="exampleBtn">Load example</button>
@@ -1129,6 +1129,30 @@ function updateButtons(){
 // ===========================================================
 // 8. FILE LOADING
 // ===========================================================
+function parseXRDML(text){
+  const doc=new DOMParser().parseFromString(text,'application/xml');
+  if(doc.querySelector('parsererror'))throw new Error('XRDML: XML parse error');
+  const getVal=(el,tag)=>{const f=el.querySelector(tag);return f?f.textContent.trim():null;};
+  let startPos=null,endPos=null;
+  for(const pos of doc.querySelectorAll('positions')){
+    if(pos.getAttribute('axis')==='2Theta'){
+      startPos=parseFloat(getVal(pos,'startPosition'));
+      endPos=parseFloat(getVal(pos,'endPosition'));
+      break;
+    }
+  }
+  if(!isFinite(startPos)||!isFinite(endPos))throw new Error('XRDML: could not find 2Theta positions');
+  const intensEl=doc.querySelector('intensities');
+  if(!intensEl)throw new Error('XRDML: no intensities element found');
+  const rawInts=intensEl.textContent.trim().split(/\s+/).map(Number).filter(isFinite);
+  const n=rawInts.length;
+  if(n<5)throw new Error('XRDML: fewer than 5 intensity points');
+  const xs=Array.from({length:n},(_,i)=>startPos+(i/(n-1))*(endPos-startPos));
+  const ys=rawInts.slice();
+  const m=arrMax(ys)||1;
+  for(let i=0;i<ys.length;i++)ys[i]*=100/m;
+  return{ex:xs,ey:ys};
+}
 function parseXY(text){
   const xs=[],ys=[];let first=true;
   for(let ln of text.split(/\r?\n/)){
@@ -1173,6 +1197,8 @@ function handleFiles(files){
           if(isNaN(parsed.cell.a))throw new Error('Could not read unit cell in '+f.name);
           sourceName=base;
           addSimDataset(parsed,base);
+        }else if(/\.xrdml$/i.test(f.name)){
+          addExpDataset(parseXRDML(text),base);
         }else{
           addExpDataset(parseXY(text),base);
         }
