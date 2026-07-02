@@ -264,7 +264,7 @@ input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;}
 <div class="right" id="rightPanel">
 
   <!-- Radiation -->
-  <div class="cp-group open" id="grp-radiation">
+  <div class="cp-group" id="grp-radiation">
     <div class="cp-header" onclick="toggleGrp('grp-radiation')">Radiation<span class="cp-chevron">›</span></div>
     <div class="cp-body">
       <div class="cp-row">
@@ -296,7 +296,7 @@ input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;}
   </div>
 
   <!-- Pattern -->
-  <div class="cp-group open" id="grp-pattern">
+  <div class="cp-group" id="grp-pattern">
     <div class="cp-header" onclick="toggleGrp('grp-pattern')">Pattern<span class="cp-chevron">›</span></div>
     <div class="cp-body">
       <div class="cp-row">
@@ -342,7 +342,7 @@ input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;}
   </div>
 
   <!-- Display -->
-  <div class="cp-group open" id="grp-display">
+  <div class="cp-group" id="grp-display">
     <div class="cp-header" onclick="toggleGrp('grp-display')">Display<span class="cp-chevron">›</span></div>
     <div class="cp-body">
       <div class="cp-row">
@@ -363,12 +363,12 @@ input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;}
       </div>
       <div class="cp-row">
         <span class="cp-label">Stack offset (%)</span>
-        <input type="range" id="stackOffset" min="0" max="120" value="0" step="5">
+        <input type="range" id="stackOffset" min="0" max="120" value="120" step="5">
         <span class="cp-val" id="stackOffsetVal">0</span>
       </div>
       <div class="cp-row">
         <span class="cp-label">Baseline (%)</span>
-        <input type="range" id="baseOffset" min="0" max="8" value="0" step="0.5">
+        <input type="range" id="baseOffset" min="0" max="8" value="1" step="0.5">
         <span class="cp-val" id="baseOffsetVal">0</span>
       </div>
       <div class="cp-row">
@@ -555,7 +555,7 @@ input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;}
   </div>
 
   <!-- Export -->
-  <div class="cp-group open" id="grp-export">
+  <div class="cp-group" id="grp-export">
     <div class="cp-header" onclick="toggleGrp('grp-export')">Export<span class="cp-chevron">›</span></div>
     <div class="cp-body">
       <div class="cp-row">
@@ -1514,11 +1514,14 @@ function drawFigure(be,cw,ch,forScreen,skipLegends){
   legendBoxes=[];
   if((S.legendPos==='tr'||S.legendPos==='tl')&&vis.length){
     const asz=S.annotSize,lh=asz*1.5,sw=22,pad=9;
-    let wMax=0;for(const d of vis)wMax=Math.max(wMax,measureText(d.name,asz,S.font));
-    const bw=sw+8+wMax+pad*2,bh=vis.length*lh+pad*1.4;
+    // Reverse so legend reads top-to-bottom matching the plot's visual top-to-bottom order.
+    // vis[0] is drawn at the bottom of the plot (lowest stack offset); vis[N-1] is at the top.
+    const legOrder=[...vis].reverse();
+    let wMax=0;for(const d of legOrder)wMax=Math.max(wMax,measureText(d.name,asz,S.font));
+    const bw=sw+8+wMax+pad*2,bh=legOrder.length*lh+pad*1.4;
     const bx=S.legendPos==='tl'?pl+10:pl+pw-10-bw, by=pt+10;
     be.rect(bx,by,bw,bh,hexAlpha(S.bgColor,0.85));
-    vis.forEach((d,i)=>{
+    legOrder.forEach((d,i)=>{
       const yy=by+pad*0.7+i*lh+lh/2;
       be.line(bx+pad,yy,bx+pad+sw,yy,d.color,Math.max(2,S.lineWeight+0.5));
       be.text(d.name,bx+pad+sw+8,yy,{size:asz,font:S.font,color:S.axisColor,align:'left',baseline:'middle'});
@@ -1529,12 +1532,24 @@ function drawFigure(be,cw,ch,forScreen,skipLegends){
     legendBoxes=eachLegendGeometry({vis,pl,pt,pw,ph,S}).map(b=>({id:b.id,x:b.x,y:b.y,w:b.w,h:b.h}));
   }
 
-  if(forScreen)plotMeta={pl,pt,pw,ph,patH,uLo,uHi,vt,unit:S.xUnit,lam,zero,inv,fwd,legendBoxes};
+  // ── per-dataset band pixel boundaries (for legend drag clamping) ──
+  // Each dataset's band runs from its baseline up to just below the next dataset's baseline.
+  // vis[0] is the bottom dataset (off=0), vis[N-1] is the top.
+  const bands=vis.map((d,i)=>{
+    const off=offs.get(d.id);
+    const nextOff=i<vis.length-1?offs.get(vis[i+1].id):off+100+S.stackOffset;
+    const yBot=Math.min(Y(off)+floorPx, pt+patH);            // baseline pixel
+    const yTop=Math.max(Y(nextOff), pt);                      // top of this band
+    return{id:d.id,yTop,yBot};
+  });
+
+  if(forScreen)plotMeta={pl,pt,pw,ph,patH,uLo,uHi,vt,unit:S.xUnit,lam,zero,inv,fwd,legendBoxes,bands,vis:[...vis]};
 }
 
-// Per-pattern legend geometry (a swatch + label per visible dataset), with alignment.
+// Per-pattern legend geometry — each label is positioned within its dataset's own pixel band.
+// legendPos[id].yBandFrac (0..1) is relative to the band top..bottom, not the whole plot.
 function eachLegendGeometry(g){
-  const{vis,pl,pt,pw,S}=g;const asz=S.annotSize;
+  const{vis,pl,pt,pw,ph,S}=g;const asz=S.annotSize;
   const align=S.legendAlign||'left';
   const widths=vis.map(d=>measureText(d.name,asz,S.font));
   const widest=widths.length?Math.max(...widths):0;
@@ -1542,15 +1557,27 @@ function eachLegendGeometry(g){
   if(align!=='none'&&legendSnapXFrac==null){
     legendSnapXFrac=align==='left'?defaultLeft:align==='center'?defaultLeft+widest/pw/2:defaultLeft+widest/pw;
   }
+  // Use band boundaries from plotMeta when available, else fall back to whole-plot fractions.
+  const bandsMap=plotMeta&&plotMeta.bands?new Map(plotMeta.bands.map(b=>[b.id,b])):null;
   const out=[];
   vis.forEach((d,i)=>{
-    if(!legendPos[d.id])legendPos[d.id]={xFrac:defaultLeft,yFrac:0.06+i*0.09};
+    if(!legendPos[d.id])legendPos[d.id]={xFrac:defaultLeft,yBandFrac:0.30};
     const p=legendPos[d.id],w=widths[i],wFrac=w/pw;
     let leftXFrac;
     if(align!=='none'){leftXFrac=align==='left'?legendSnapXFrac:align==='center'?legendSnapXFrac-wFrac/2:legendSnapXFrac-wFrac;p.xFrac=leftXFrac;}
     else leftXFrac=p.xFrac;
-    const x=pl+leftXFrac*pw, y=pt+p.yFrac*g.ph;
-    out.push({d,id:d.id,x,y,w,h:asz,asz});
+    const x=pl+leftXFrac*pw;
+    let y;
+    const band=bandsMap&&bandsMap.get(d.id);
+    if(band){
+      const bandH=Math.max(1,band.yBot-band.yTop);
+      y=band.yTop+p.yBandFrac*bandH;
+    }else{
+      // fallback: spread across plot height in reverse order (top plot near top)
+      const N=vis.length;
+      y=pt+(N>1?(1-(i/(N-1)))*0.85+0.04:0.10)*ph;
+    }
+    out.push({d,id:d.id,x,y,w,h:asz,asz,band});
   });
   return out;
 }
@@ -1558,7 +1585,7 @@ function drawEachLegends(be,g){
   const{S}=g;const items=eachLegendGeometry(g);const boxes=[];
   for(const it of items){
     be.text(it.d.name,it.x,it.y+it.asz*0.5,{size:it.asz,font:S.font,color:it.d.color,align:'left',baseline:'middle'});
-    boxes.push({id:it.id,x:it.x,y:it.y,w:it.w,h:it.asz});
+    boxes.push({id:it.id,x:it.x,y:it.y,w:it.w,h:it.asz,band:it.band});
   }
   return boxes;
 }
@@ -1632,7 +1659,7 @@ function redrawEachOverlay(){
 canvas.addEventListener('mousedown',e=>{if(!plotMeta)return;
   const x=evtX(e),y=evtY(e);
   if($('legendPos').value==='each'){const hit=legendHit(x,y);
-    if(hit){draggingLegend={id:hit.id,offX:x-hit.x,offY:y-hit.y,w:hit.w};canvas.style.cursor='grabbing';e.preventDefault();return;}}
+    if(hit){draggingLegend={id:hit.id,offX:x-hit.x,offY:y-hit.y,w:hit.w,band:hit.band};canvas.style.cursor='grabbing';e.preventDefault();return;}}
   dragX0=x;});
 canvas.addEventListener('mousemove',e=>{
   if(!plotMeta)return;
@@ -1642,12 +1669,25 @@ canvas.addEventListener('mousemove',e=>{
     const{pl,pt,pw,ph}=plotMeta;const S=getSettings();
     let nx=px-draggingLegend.offX,ny=py-draggingLegend.offY;
     const wFrac=draggingLegend.w/pw;
-    nx=Math.max(pl,Math.min(pl+pw-16,nx));ny=Math.max(pt,Math.min(pt+ph-S.annotSize,ny));
-    const leftXFrac=(nx-pl)/pw,yFrac=(ny-pt)/ph;
+    nx=Math.max(pl,Math.min(pl+pw-16,nx));
+    // Clamp y to this dataset's band
+    const band=draggingLegend.band;
+    if(band){
+      const bandH=Math.max(1,band.yBot-band.yTop);
+      ny=Math.max(band.yTop,Math.min(band.yBot-S.annotSize,ny));
+      const yBandFrac=Math.max(0,Math.min(1,(ny-band.yTop)/bandH));
+      if(!legendPos[draggingLegend.id])legendPos[draggingLegend.id]={};
+      legendPos[draggingLegend.id].yBandFrac=yBandFrac;
+    }else{
+      ny=Math.max(pt,Math.min(pt+ph-S.annotSize,ny));
+      if(!legendPos[draggingLegend.id])legendPos[draggingLegend.id]={};
+      legendPos[draggingLegend.id].yBandFrac=Math.max(0,Math.min(1,(ny-pt)/ph));
+    }
+    const leftXFrac=(nx-pl)/pw;
     const align=S.legendAlign||'left';
     if(align!=='none'){legendSnapXFrac=align==='left'?leftXFrac:align==='center'?leftXFrac+wFrac/2:leftXFrac+wFrac;
-      if(legendPos[draggingLegend.id])legendPos[draggingLegend.id].yFrac=yFrac;else legendPos[draggingLegend.id]={xFrac:leftXFrac,yFrac};}
-    else legendPos[draggingLegend.id]={xFrac:leftXFrac,yFrac};
+      legendPos[draggingLegend.id].xFrac=legendPos[draggingLegend.id].xFrac;} // keep x via snap
+    else legendPos[draggingLegend.id].xFrac=leftXFrac;
     redrawEachOverlay();return;
   }
   if(dragX0!=null&&Math.abs(px-dragX0)>3){
