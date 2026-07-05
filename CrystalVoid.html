@@ -86,6 +86,7 @@ main{flex:1 1 auto;display:flex;min-height:0}
 .btn:hover{opacity:.88}
 .btnrow .btn{width:auto;flex:1 1 auto}
 .btn.ghost{background:transparent;color:var(--accent);border:1.5px solid var(--accent);padding:5.5px 10px}
+.btn:disabled{opacity:.35;cursor:default;pointer-events:none}
 .btn.mini{width:auto;font-family:var(--mono);font-size:9.5px;letter-spacing:.5px;text-transform:uppercase;
   color:var(--accent);background:transparent;border:1px solid var(--border);border-radius:3px;
   padding:4px 9px;font-weight:400;transition:background .15s,border-color .15s}
@@ -2410,6 +2411,21 @@ select.sel:focus{border-color:var(--accent)}
     if (orthoCam) { orthoCam.position.copy(pos); orthoCam.quaternion.copy(camOrient); }
     updateOrthoFrustum();
   }
+  function setViewDirection(v) {
+    /* reorients the camera to look along world-space direction v, without
+       moving the target or changing zoom. v needs an "up" hint to fully
+       determine the result (looking along a direction alone leaves rotation
+       about that direction, i.e. roll, undefined) -- world Y-up is used
+       unless v is nearly vertical, in which case X is used instead to avoid
+       a degenerate, unstable result */
+    var up = new THREE.Vector3(0, 1, 0);
+    if (Math.abs(v.dot(up)) > 0.98) up = new THREE.Vector3(1, 0, 0);
+    var m = new THREE.Matrix4();
+    m.lookAt(new THREE.Vector3(0, 0, 0), v, up);
+    camOrient.setFromRotationMatrix(m);
+    camOrient.normalize();
+    applyController();
+  }
   var lassoPoints = [], lassoFragMode = false;
   var clickMods = { shift: false, ctrl: false, alt: false };
   function onCanvasPointerDown(e) {
@@ -3088,9 +3104,36 @@ select.sel:focus{border-color:var(--accent)}
     if (state.guestAtoms) for (i = 0; i < state.guestAtoms.length; i++) if (state.guestAtoms[i].selected) g++;
     return { host: h, guest: g };
   }
+  function getSelectedAtomObjects() {
+    var out = [];
+    if (state.atoms) for (var i = 0; i < state.atoms.length; i++) if (state.atoms[i].selected) out.push(state.atoms[i]);
+    if (state.guestAtoms) for (var j = 0; j < state.guestAtoms.length; j++) if (state.guestAtoms[j].selected) out.push(state.guestAtoms[j]);
+    return out;
+  }
+  function viewAlongTwoAtoms() {
+    var sel = getSelectedAtomObjects();
+    if (sel.length !== 2) { setStatus("Select exactly two atoms first.", true); return; }
+    var v = new THREE.Vector3(sel[1].x - sel[0].x, sel[1].y - sel[0].y, sel[1].z - sel[0].z);
+    if (v.lengthSq() < 1e-8) { setStatus("The two selected atoms are coincident.", true); return; }
+    setViewDirection(v.normalize());
+    setStatus("Viewing along the selected atom-atom vector.", false);
+  }
+  function viewPerpendicularToPlane() {
+    var sel = getSelectedAtomObjects();
+    if (sel.length !== 3) { setStatus("Select exactly three atoms first.", true); return; }
+    var v1 = new THREE.Vector3(sel[1].x - sel[0].x, sel[1].y - sel[0].y, sel[1].z - sel[0].z);
+    var v2 = new THREE.Vector3(sel[2].x - sel[0].x, sel[2].y - sel[0].y, sel[2].z - sel[0].z);
+    var n = new THREE.Vector3().crossVectors(v1, v2);
+    if (n.lengthSq() < 1e-8) { setStatus("The three selected atoms are collinear -- they don't define a plane.", true); return; }
+    setViewDirection(n.normalize());
+    setStatus("Viewing perpendicular to the plane defined by the selected atoms.", false);
+  }
   function updateSelectionInfo() {
     var el2 = document.getElementById("selInfo"); if (!el2) return;
     var c = countSelected();
+    var vecBtn = document.getElementById("viewVecBtn"), planeBtn = document.getElementById("viewPlaneBtn");
+    if (vecBtn) vecBtn.disabled = (c.host + c.guest !== 2);
+    if (planeBtn) planeBtn.disabled = (c.host + c.guest !== 3);
     if (c.host + c.guest === 0) { el2.innerHTML = "<div class='dim'>No atoms selected.</div>"; return; }
     el2.innerHTML = "<div>" + c.host + " host, " + c.guest + " guest atom" + (c.host + c.guest === 1 ? "" : "s") + " selected.</div>";
   }
@@ -3756,6 +3799,10 @@ select.sel:focus{border-color:var(--accent)}
 
     var ec = section(left, "Edit atoms and bonds");
     var selInfo = el("div", "readout"); selInfo.id = "selInfo"; selInfo.innerHTML = "<div class='dim'>No atoms selected.</div>"; ec.appendChild(selInfo);
+    var viewRow = el("div", "btnrow");
+    var viewVecBtn = button(viewRow, "View along vector", "ghost", viewAlongTwoAtoms); viewVecBtn.id = "viewVecBtn"; viewVecBtn.disabled = true;
+    var viewPlaneBtn = button(viewRow, "View perpendicular to plane", "ghost", viewPerpendicularToPlane); viewPlaneBtn.id = "viewPlaneBtn"; viewPlaneBtn.disabled = true;
+    ec.appendChild(viewRow);
     var erow = el("div", "btnrow");
     button(erow, "Clear selection", "ghost", clearSelection);
     button(erow, "Delete selected atoms", "ghost", deleteSelectedAtoms);
@@ -3867,14 +3914,25 @@ select.sel:focus{border-color:var(--accent)}
   }
   function wireIO() {
     window.addEventListener("keydown", function (e) {
-      if (e.code !== "Space" && e.key !== " ") return;
-      /* only treat spacebar as select/deselect-all when focus isn't in a
-         control (a text box, dropdown, etc.) -- otherwise let it behave
-         normally, e.g. typing a space into a field or activating a button */
+      /* spacebar and the rotation keys only act when focus isn't in a control
+         (a text box, dropdown, button, etc.) -- otherwise let them behave
+         normally, e.g. typing a space, or paging/tabbing through a control */
       var ae = document.activeElement, tag = ae ? ae.tagName : "";
       if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || tag === "BUTTON" || (ae && ae.isContentEditable)) return;
-      e.preventDefault();
-      toggleSelectAll();
+      if (e.code === "Space" || e.key === " ") { e.preventDefault(); toggleSelectAll(); return; }
+      var deg = 5 * Math.PI / 180, axis = null, angle = 0;
+      if (e.code === "ArrowLeft") { axis = new THREE.Vector3(0, 1, 0); angle = deg; }
+      else if (e.code === "ArrowRight") { axis = new THREE.Vector3(0, 1, 0); angle = -deg; }
+      else if (e.code === "ArrowUp") { axis = new THREE.Vector3(1, 0, 0); angle = deg; }
+      else if (e.code === "ArrowDown") { axis = new THREE.Vector3(1, 0, 0); angle = -deg; }
+      else if (e.code === "PageUp") { axis = new THREE.Vector3(0, 0, 1); angle = -deg; }
+      else if (e.code === "PageDown") { axis = new THREE.Vector3(0, 0, 1); angle = deg; }
+      if (axis) {
+        e.preventDefault();
+        camOrient.multiply(new THREE.Quaternion().setFromAxisAngle(axis, angle));
+        camOrient.normalize();
+        applyController();
+      }
     });
     var input = document.getElementById("pdbInput");
     input.addEventListener("change", function (e) { var f = e.target.files[0]; if (!f) return; var rd = new FileReader(); rd.onload = function () { loadPDBText(rd.result, f.name); }; rd.readAsText(f); });
@@ -3921,6 +3979,7 @@ select.sel:focus{border-color:var(--accent)}
       "<li><b>Ctrl + Alt + left drag</b> &mdash; lasso select whole fragments: the same outline, but each atom it touches brings its entire bonded fragment into the selection, the same rule ctrl-click uses for a single atom.</li>" +
       "<li>Lasso selection works on screen position only, not true depth: an atom behind another one, as long as its projected position falls inside the outline, is selected too, even though it's hidden from view. Rotating to a clearer angle before lassoing avoids surprises in a dense structure.</li>" +
       "<li><b>Right drag, vertical</b> &mdash; zoom (up = in, down = out). The mouse wheel is disabled.</li>" +
+      "<li><b>Arrow keys</b> &mdash; rotate in fixed 5&deg; steps: left/right about the vertical axis, up/down about the horizontal axis. <b>Page Up / Page Down</b> roll in 5&deg; steps. These only respond while focus isn't in a text box, dropdown, or button.</li>" +
       "<li><b>Depth scaling</b> (Display panel) &mdash; switches between perspective and orthographic projection. Off is often better for a figure meant for precise alignment or measurement, since distance no longer shrinks apparent size.</li>" +
       "</ul>" +
       "<h3>Display, Lighting, Material, and Export</h3>" +
@@ -3957,6 +4016,8 @@ select.sel:focus{border-color:var(--accent)}
       "<p>\"Delete matching bonds\" does the same thing in bulk: choose two elements, a distance range, and whether to cut bonds outside or inside that range, and every current bond between an atom of each chosen element (across host and guest together) meeting that criterion is cut in one action. This needs care -- it's easy to remove bonds you meant to keep if the range is too narrow, or miss the ones you meant to cut if it's too wide. \"Undo\" reverses it like any other edit if the result isn't what was intended.</p>" +
       "<h3>Undo</h3>" +
       "<p>\"Undo\" steps back through moving atoms, deleting atoms, and cutting bonds, in that order, one step at a time. It does not cover loading files or changing element/display settings, which have their own separate reset controls.</p>" +
+      "<h3>Viewing along a vector or a plane</h3>" +
+      "<p>Select exactly two atoms and \"View along vector\" (in Edit atoms and bonds) becomes available, orienting the camera to look straight along the line through them. Select exactly three and \"View perpendicular to plane\" becomes available instead, orienting the camera face-on to the plane they define. Both only ever rotate the view -- they never move the zoom level or what the camera is centred on -- and each is disabled again the moment the selection count isn't exactly right for it.</p>" +
       "<h3>Results panel</h3>" +
       "<p>Only the swept volume and its extrapolation uncertainty are shown, since that's the number that matters day to day. The accessible volume, cavity surface area, and compute time are still calculated every time and held internally for a possible future report -- they're just not displayed.</p>";
     document.getElementById("guideBtn").addEventListener("click", function () { document.getElementById("guideModal").classList.add("open"); });
