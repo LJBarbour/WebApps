@@ -76,7 +76,7 @@ main{flex:1 1 auto;display:flex;min-height:0}
 .sechead:hover{filter:brightness(1.08)}
 .tri{font-size:11px;transition:transform .2s;color:rgba(255,255,255,.8)}
 .section.open .tri{transform:rotate(90deg)}
-.sbody{padding:9px 14px 14px;display:flex;flex-direction:column;gap:9px;display:none}
+.sbody{padding:9px 14px 14px;display:flex;flex-direction:column;gap:13px;display:none}
 .section.open .sbody{display:flex}
 
 /* -- buttons -- */
@@ -93,6 +93,21 @@ main{flex:1 1 auto;display:flex;min-height:0}
 .btn.mini:hover{background:var(--accent-soft);border-color:var(--accent);opacity:1}
 
 .hint{font-size:11px;color:var(--ink-faint);line-height:1.55}
+.subtabs{display:flex;border-bottom:1px solid var(--border);margin-bottom:10px}
+.subtabs button{flex:1;font-family:var(--mono);font-size:10px;letter-spacing:.5px;text-transform:uppercase;
+  padding:6px 4px;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--ink-light);cursor:pointer}
+.subtabs button.on{color:var(--accent);border-bottom-color:var(--accent)}
+.subtabs button:not(.on):hover{color:var(--ink-mid)}
+.subtab-body{display:none}
+.subtab-body.active{display:flex;flex-direction:column;gap:13px}
+.ctl-inline{display:flex;align-items:center;gap:8px}
+.ctl-inline .toggle{flex-shrink:0}
+.ctl-inline .inline-label{font-size:11.5px;color:var(--ink-mid);flex-shrink:0}
+.ctl-inline label.plain{font-size:11.5px;color:var(--ink-mid);flex-shrink:0}
+.ctl-inline input[type=range]{flex:1}
+.ctl-color{display:flex;align-items:center;gap:8px}
+.ctl-color label{font-size:12px;color:var(--ink)}
+.resettop{margin-top:9px}
 .readout{font-family:var(--mono);font-size:11.5px;background:var(--paper2);border:1px solid var(--line);
   border-radius:6px;padding:9px;line-height:1.65}
 .formula{font-family:var(--display);font-weight:600;font-size:14px;letter-spacing:.2px}
@@ -114,6 +129,8 @@ input.swatch{width:28px;height:22px;padding:1px 2px;border:1px solid var(--borde
   background:none;cursor:pointer}
 select.sel{font-family:var(--sans);font-size:11.5px;border:1px solid var(--border);border-radius:3px;
   padding:4px 5px;background:var(--bg);color:var(--ink);outline:none;min-width:120px}
+select.sel.sel-narrow{min-width:50px}
+.divider{border:none;border-top:1px solid var(--border);margin:2px 0}
 select.sel:focus{border-color:var(--accent)}
 .toggle{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--ink-mid);cursor:pointer}
 .toggle input{accent-color:var(--accent);width:13px;height:13px;cursor:pointer}
@@ -175,7 +192,7 @@ select.sel:focus{border-color:var(--accent)}
 </main>
 <div id="elementsPage" class="page"></div>
 <div id="guideModal"><div class="guidebox"><button class="close" id="guideClose">&times;</button><div id="guideBody"></div></div></div>
-<input type="file" id="pdbInput" accept=".pdb,.ent,.txt" style="display:none">
+<input type="file" id="pdbInput" accept=".pdb,.ent,.cif,.txt" style="display:none">
 <input type="file" id="guestPdbInput" accept=".pdb,.ent,.txt" style="display:none">
 <input type="file" id="elementCsvInput" accept=".csv,.txt" style="display:none">
 <script>
@@ -1998,6 +2015,7 @@ select.sel:focus{border-color:var(--accent)}
       for (var t = 0; t < nb.length; t++) {
         j = nb[t]; if (j <= i) continue;
         var a = atoms[i], b = atoms[j];
+        if (a.isCentroid || b.isCentroid) continue;
         var d2 = (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z);
         var lim = a.cr + b.cr + tol;
         var minD = (a.el === "H" || b.el === "H") ? 0.4 : 1.0;
@@ -2318,11 +2336,291 @@ select.sel:focus{border-color:var(--accent)}
     return { positions: new Float32Array(allPos), normals: new Float32Array(allNorm), count: allPos.length / 3, area: totalArea, hasCavity: allPos.length > 0 };
   }
 
+  function stripEsd(s) {
+      /* "1.234(5)" -> 1.234 ; also handles bare numbers and leading +/- */
+      var m = /^[\s]*([+-]?[0-9.]+)/.exec(s);
+      return m ? parseFloat(m[1]) : NaN;
+    }
+
+    function tokenizeLine(line) {
+      /* whitespace-separated tokens, respecting ' and " quoting (CIF style) */
+      var out = [], i = 0, n = line.length;
+      while (i < n) {
+        while (i < n && /\s/.test(line[i])) i++;
+        if (i >= n) break;
+        if (line[i] === "'" || line[i] === '"') {
+          var q = line[i], j = i + 1;
+          while (j < n && line[j] !== q) j++;
+          out.push(line.slice(i + 1, j));
+          i = j + 1;
+        } else if (line[i] === "#") {
+          break; /* rest of line is a comment */
+        } else {
+          var j2 = i;
+          while (j2 < n && !/\s/.test(line[j2])) j2++;
+          out.push(line.slice(i, j2));
+          i = j2;
+        }
+      }
+      return out;
+    }
+
+    function parseCIF(text) {
+      var lines = text.split(/\r?\n/);
+      var tags = {}, loops = [];
+      var i = 0, n = lines.length;
+      function isBlank(l) { return /^\s*$/.test(l); }
+      function isComment(l) { return /^\s*#/.test(l); }
+      while (i < n) {
+        var line = lines[i];
+        if (isBlank(line) || isComment(line)) { i++; continue; }
+        if (/^\s*;/.test(line)) {
+          /* semicolon-delimited multi-line text field with no preceding tag on
+             this line -- shouldn't normally happen at top level, skip block */
+          i++;
+          while (i < n && !/^\s*;/.test(lines[i])) i++;
+          i++;
+          continue;
+        }
+        var trimmed = line.trim();
+        if (/^loop_/i.test(trimmed)) {
+          i++;
+          var headers = [];
+          while (i < n && /^\s*_/.test(lines[i])) { headers.push(lines[i].trim().split(/\s+/)[0]); i++; }
+          var rows = [], cur = [];
+          while (i < n) {
+            var l2 = lines[i];
+            if (isBlank(l2) || isComment(l2)) { i++; continue; }
+            if (/^\s*_/.test(l2) || /^loop_/i.test(l2.trim()) || /^\s*data_/i.test(l2)) break;
+            if (/^\s*;/.test(l2)) {
+              var textVal = "";
+              i++;
+              while (i < n && !/^\s*;/.test(lines[i])) { textVal += lines[i] + "\n"; i++; }
+              i++;
+              cur.push(textVal.trim());
+            } else {
+              var toks = tokenizeLine(l2);
+              for (var t = 0; t < toks.length; t++) {
+                cur.push(toks[t]);
+                if (cur.length === headers.length) { rows.push(cur); cur = []; }
+              }
+              i++;
+            }
+            if (cur.length === 0 && rows.length && headers.length && i < n) { /* row boundary handled above */ }
+          }
+          loops.push({ headers: headers, rows: rows });
+          continue;
+        }
+        if (/^_/.test(trimmed)) {
+          var parts = tokenizeLine(line);
+          var tag = parts[0];
+          if (parts.length > 1) {
+            tags[tag] = parts.slice(1).join(" ");
+            i++;
+          } else {
+            i++;
+            while (i < n && (isBlank(lines[i]) || isComment(lines[i]))) i++;
+            if (i < n && /^\s*;/.test(lines[i])) {
+              var val = ""; i++;
+              while (i < n && !/^\s*;/.test(lines[i])) { val += lines[i] + "\n"; i++; }
+              i++;
+              tags[tag] = val.trim();
+            } else if (i < n) {
+              var toks2 = tokenizeLine(lines[i]);
+              tags[tag] = toks2.join(" ");
+              i++;
+            }
+          }
+          continue;
+        }
+        i++;
+      }
+
+      var cell = {
+        a: stripEsd(tags["_cell_length_a"] || "0"),
+        b: stripEsd(tags["_cell_length_b"] || "0"),
+        c: stripEsd(tags["_cell_length_c"] || "0"),
+        alpha: stripEsd(tags["_cell_angle_alpha"] || "90"),
+        beta: stripEsd(tags["_cell_angle_beta"] || "90"),
+        gamma: stripEsd(tags["_cell_angle_gamma"] || "90")
+      };
+
+      var symopLoop = null;
+      for (var li = 0; li < loops.length; li++) {
+        var h = loops[li].headers;
+        if (h.indexOf("_space_group_symop_operation_xyz") >= 0 || h.indexOf("_symmetry_equiv_pos_as_xyz") >= 0) { symopLoop = loops[li]; break; }
+      }
+      var symops = [];
+      if (symopLoop) {
+        var col = symopLoop.headers.indexOf("_space_group_symop_operation_xyz");
+        if (col < 0) col = symopLoop.headers.indexOf("_symmetry_equiv_pos_as_xyz");
+        for (var r = 0; r < symopLoop.rows.length; r++) {
+          var op = parseSymop(symopLoop.rows[r][col]);
+          if (op) symops.push(op);
+        }
+      }
+      if (!symops.length) symops.push(parseSymop("x,y,z"));
+
+      var atomLoop = null;
+      for (var lj = 0; lj < loops.length; lj++) {
+        var h2 = loops[lj].headers;
+        if (h2.indexOf("_atom_site_fract_x") >= 0) { atomLoop = loops[lj]; break; }
+      }
+      var atoms = [];
+      if (atomLoop) {
+        var hh = atomLoop.headers;
+        var iLabel = hh.indexOf("_atom_site_label");
+        var iType = hh.indexOf("_atom_site_type_symbol");
+        var iX = hh.indexOf("_atom_site_fract_x");
+        var iY = hh.indexOf("_atom_site_fract_y");
+        var iZ = hh.indexOf("_atom_site_fract_z");
+        var iOcc = hh.indexOf("_atom_site_occupancy");
+        for (var ar = 0; ar < atomLoop.rows.length; ar++) {
+          var row = atomLoop.rows[ar];
+          var label = iLabel >= 0 ? row[iLabel] : ("A" + ar);
+          var el = iType >= 0 ? row[iType] : labelToElement(label);
+          el = cleanElementSymbol(el);
+          var occ = iOcc >= 0 ? stripEsd(row[iOcc]) : 1.0;
+          if (!isFinite(occ)) occ = 1.0;
+          atoms.push({
+            label: label, el: el,
+            fx: stripEsd(row[iX]), fy: stripEsd(row[iY]), fz: stripEsd(row[iZ]),
+            occ: occ
+          });
+        }
+      }
+
+      return { cell: cell, symops: symops, atoms: atoms };
+    }
+
+    function labelToElement(label) {
+      var m = /^([A-Za-z]{1,2})/.exec(label || "");
+      return m ? cleanElementSymbol(m[1]) : "C";
+    }
+    function cleanElementSymbol(s) {
+      if (!s) return "C";
+      s = s.replace(/[0-9+\-.].*$/, "");
+      if (!s) return "C";
+      return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+    }
+
+    function parseFracNumber(tok) {
+      /* handles "1/2", "-1/2", "0.5", "1/3" etc */
+      var m = /^([+-]?\d+)\/(\d+)$/.exec(tok);
+      if (m) return parseInt(m[1], 10) / parseInt(m[2], 10);
+      return parseFloat(tok);
+    }
+
+    function parseSymop(s) {
+      /* "x,y,z" / "-x+1/2,y+1/2,-z" / "1/2-x,-y,1/2+z" -> {rot:[[..3]x3], trans:[tx,ty,tz]} */
+      if (!s) return null;
+      var comps = s.split(",");
+      if (comps.length !== 3) return null;
+      var rot = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], trans = [0, 0, 0];
+      var varIndex = { x: 0, y: 1, z: 2 };
+      for (var i = 0; i < 3; i++) {
+        var expr = comps[i].toLowerCase().replace(/\s+/g, "");
+        /* split into signed terms: matches +x, -x, +1/2, -0.5, x, etc */
+        var terms = expr.match(/[+-]?[^+-]+/g) || [];
+        for (var t = 0; t < terms.length; t++) {
+          var term = terms[t];
+          var sign = 1;
+          if (term[0] === "+") { term = term.slice(1); }
+          else if (term[0] === "-") { sign = -1; term = term.slice(1); }
+          if (term === "") continue;
+          var vm = /^([xyz])$/.exec(term);
+          var vcm = /^([0-9./]+)\*?([xyz])$/.exec(term);
+          if (vm) {
+            rot[i][varIndex[vm[1]]] += sign;
+          } else if (vcm) {
+            rot[i][varIndex[vcm[2]]] += sign * parseFracNumber(vcm[1]);
+          } else {
+            trans[i] += sign * parseFracNumber(term);
+          }
+        }
+      }
+      return { rot: rot, trans: trans };
+    }
+
+    function applySymop(op, f) {
+      var r = op.rot, t = op.trans;
+      return [
+        r[0][0] * f[0] + r[0][1] * f[1] + r[0][2] * f[2] + t[0],
+        r[1][0] * f[0] + r[1][1] * f[1] + r[1][2] * f[2] + t[1],
+        r[2][0] * f[0] + r[2][1] * f[1] + r[2][2] * f[2] + t[2]
+      ];
+    }
+
+    function fracToCartMatrix(cell) {
+      var d2r = Math.PI / 180;
+      var al = cell.alpha * d2r, be = cell.beta * d2r, ga = cell.gamma * d2r;
+      var ca = Math.cos(al), cb = Math.cos(be), cg = Math.cos(ga), sg = Math.sin(ga);
+      var vTerm = 1 - ca * ca - cb * cb - cg * cg + 2 * ca * cb * cg;
+      if (vTerm < 0) vTerm = 0;
+      var v = Math.sqrt(vTerm);
+      var a = cell.a, b = cell.b, c = cell.c;
+      return [
+        [a, b * cg, c * cb],
+        [0, b * sg, c * (ca - cb * cg) / sg],
+        [0, 0, c * v / sg]
+      ];
+    }
+
+    function fracToCart(M, f) {
+      return [
+        M[0][0] * f[0] + M[0][1] * f[1] + M[0][2] * f[2],
+        M[1][0] * f[0] + M[1][1] * f[1] + M[1][2] * f[2],
+        M[2][0] * f[0] + M[2][1] * f[1] + M[2][2] * f[2]
+      ];
+    }
+
+    function wrapFrac(x) {
+      var y = x - Math.floor(x);
+      if (y > 1 - 1e-6) y -= 1;
+      return y;
+    }
+
+    function fracEqual(a, b, tol) {
+      for (var i = 0; i < 3; i++) {
+        var d = a[i] - b[i];
+        d -= Math.round(d);
+        if (Math.abs(d) > tol) return false;
+      }
+      return true;
+    }
+
+    function reduceToAsymmetricUnit(atoms, symops, tol) {
+      /* Handles CIFs that already contain more than the true asymmetric unit
+         (e.g. Mercury sometimes writes a whole completed molecule): an atom is
+         dropped if it is symmetry-equivalent to one already accepted. A CIF
+         that is already a correct asymmetric unit passes through unchanged. */
+      tol = tol || 0.01;
+      var kept = [], keptFrac = [];
+      for (var i = 0; i < atoms.length; i++) {
+        var a = atoms[i];
+        var f = [wrapFrac(a.fx), wrapFrac(a.fy), wrapFrac(a.fz)];
+        var isDup = false;
+        for (var k = 0; k < keptFrac.length && !isDup; k++) {
+          if (kept[k].el !== a.el) continue;
+          for (var s = 0; s < symops.length; s++) {
+            var g = applySymop(symops[s], keptFrac[k]);
+            if (fracEqual(g, f, tol)) { isDup = true; break; }
+          }
+        }
+        if (!isDup) { kept.push(a); keptFrac.push(f); }
+      }
+      return kept;
+    }
+
+
   var API = {
     VDW: VDW, COV: COV, CPK: CPK, vdw: vdw, cov: cov, cpk: cpk, cleanElement: cleanElement,
     ELEMENTS: ELEMENTS, BONDI: BONDI, ALVAREZ: ALVAREZ,
     parsePDB: parsePDB, buildSurface: buildSurface, classifyInterior: classifyInterior,
-    monteCarloVolume: monteCarloVolume, gridVolume: gridVolume, cavityMesh: cavityMesh, bonds: bonds
+    monteCarloVolume: monteCarloVolume, gridVolume: gridVolume, cavityMesh: cavityMesh, bonds: bonds,
+    parseCIF: parseCIF, parseSymop: parseSymop, applySymop: applySymop,
+    fracToCartMatrix: fracToCartMatrix, fracToCart: fracToCart,
+    reduceToAsymmetricUnit: reduceToAsymmetricUnit, wrapFrac: wrapFrac, fracEqual: fracEqual
   };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   root.Connolly = API;
@@ -2339,7 +2637,7 @@ select.sel:focus{border-color:var(--accent)}
   var U = { ang: "\u00C5", cube: "\u00B3", sq: "\u00B2" };
 
   var scene, camera, orthoCam, activeCam, renderer;
-  var atomsGroup, bondsGroup, surfaceGroup, guestAtomsGroup, guestBondsGroup, selectionGroup;
+  var atomsGroup, bondsGroup, surfaceGroup, guestAtomsGroup, guestBondsGroup, selectionGroup, unitCellGroup;
   var lightRig, keyLight, fillLight, rimLight;
   var sphereGeo = null, highlightCylGeo = null, matCache = {};
   var state = {
@@ -2351,10 +2649,13 @@ select.sel:focus{border-color:var(--accent)}
     keyEnabled: true, keyIntensity: 0.95, fillEnabled: true, fillIntensity: 0.40, rimEnabled: true, rimIntensity: 0.35,
     highDetail: false, fogOn: false, fogDensity: 0.018, exportScale: 2, rotateSensitivity: 1.0,
     lastSourceHandle: null, exportTransparent: false,
+    isCif: false, cifCell: null, cifSymops: null, cifAsymUnit: null, cifFracToCart: null,
+    showUnitCell: true, growMode: false, growByAtom: false, growBySphere: false, sphereRadius: 4.0,
+    unitCellColor: 0x8a7a5c, unitCellThickness: 0.04, unitCellAxisColors: false,
     saveDisplay: true, saveLighting: true, saveMaterial: true,
     atomRoughness: 0.42, atomMetalness: 0.15, atomReflectivity: 0.9,
     guestAtoms: null, guestName: "", guestStyle: "spacefill", guestScale: 1.0, guestBatch: 0, showGuest: true,
-    guestGroups: [], cutBonds: {}, undoStack: [], selectedBonds: {}, guestColorMode: "element",
+    guestGroups: [], cutBonds: {}, cutBondSignatures: {}, undoStack: [], selectedBonds: {}, guestColorMode: "element",
     hostBondRadius: 0.12, guestBondRadius: 0.12,
     hostColors: {}, guestColors: {}, defaultColors: {}, page: "model",
     radii: {}
@@ -2535,6 +2836,7 @@ select.sel:focus{border-color:var(--accent)}
     guestAtomsGroup = new THREE.Group(); scene.add(guestAtomsGroup);
     guestBondsGroup = new THREE.Group(); scene.add(guestBondsGroup);
     selectionGroup = new THREE.Group(); scene.add(selectionGroup);
+    unitCellGroup = new THREE.Group(); scene.add(unitCellGroup);
     surfaceGroup = new THREE.Group(); scene.add(surfaceGroup);
     window.addEventListener("resize", onResize); onResize(); animate();
   }
@@ -2687,6 +2989,8 @@ select.sel:focus{border-color:var(--accent)}
       matCache[key].envMapIntensity = state.atomReflectivity;
     }
   }
+  function sensPosFromValue(v) { return Math.round(1 + (v - 0.2) / 0.8 * 9); }
+  function sensValueFromPos(p) { return 0.2 + (p - 1) / 9 * 0.8; }
   var DISPLAY_DEFAULTS = {
     bgColor: 0xe9edf2, surfaceColor: 0x4A6FA5, depthScaling: false, highDetail: false,
     fogOn: false, fogDensity: 0.018, lightHeadlight: true, lightAngle: 0,
@@ -2701,16 +3005,15 @@ select.sel:focus{border-color:var(--accent)}
     var sw2 = document.getElementById("dispSurfaceColor"); if (sw2) sw2.value = hexToCss(s.surfaceColor);
     setChecked("dispDepthScaling", s.depthScaling);
     setChecked("dispHighDetail", s.highDetail);
-    setChecked("dispFogOn", s.fogOn);
-    setVal("dispFogNum", s.fogDensity); setVal("dispFogRange", s.fogDensity);
+    setChecked("dispFogTg", s.fogOn); setVal("dispFogRange", s.fogDensity);
     setChecked("lightHeadlightTg", s.lightHeadlight);
-    setVal("lightAngleNum", s.lightAngle); setVal("lightAngleRange", s.lightAngle);
-    setChecked("keyEnabledTg", s.keyEnabled); setVal("keyIntensityNum", s.keyIntensity); setVal("keyIntensityRange", s.keyIntensity);
-    setChecked("fillEnabledTg", s.fillEnabled); setVal("fillIntensityNum", s.fillIntensity); setVal("fillIntensityRange", s.fillIntensity);
-    setChecked("rimEnabledTg", s.rimEnabled); setVal("rimIntensityNum", s.rimIntensity); setVal("rimIntensityRange", s.rimIntensity);
-    setVal("matRoughNum", s.atomRoughness); setVal("matRoughRange", s.atomRoughness);
-    setVal("matMetalNum", s.atomMetalness); setVal("matMetalRange", s.atomMetalness);
-    setVal("matReflNum", s.atomReflectivity); setVal("matReflRange", s.atomReflectivity);
+    setVal("lightAngleRange", s.lightAngle);
+    setChecked("keyEnabledTg", s.keyEnabled); setVal("keyIntensityRange", s.keyIntensity);
+    setChecked("fillEnabledTg", s.fillEnabled); setVal("fillIntensityRange", s.fillIntensity);
+    setChecked("rimEnabledTg", s.rimEnabled); setVal("rimIntensityRange", s.rimIntensity);
+    setVal("matRoughRange", s.atomRoughness);
+    setVal("matMetalRange", s.atomMetalness);
+    setVal("matReflRange", s.atomReflectivity);
   }
   function resetDisplaySettings() {
     var d = DISPLAY_DEFAULTS;
@@ -2743,7 +3046,7 @@ select.sel:focus{border-color:var(--accent)}
 
   function centroid() { return state.viewOffset; }
   function recomputeViewOffset() {
-    var a = state.atoms;
+    var a = state.isCif ? (state.atoms || []).concat(state.guestAtoms || []) : state.atoms;
     if (!a || !a.length) return; /* keep the last offset -- e.g. after removeHost(), so the guest and any calculated cavity don't jump */
     var x = 0, y = 0, z = 0;
     for (var i = 0; i < a.length; i++) { x += a[i].x; y += a[i].y; z += a[i].z; }
@@ -2775,6 +3078,16 @@ select.sel:focus{border-color:var(--accent)}
     return Math.max((elem === "H" ? 0.15 : 0.2) * r, bondRadius) * scaleMult;
   }
   function bondKey(uidA, uidB) { return uidA < uidB ? (uidA + ":" + uidB) : (uidB + ":" + uidA); }
+  function bondSignature(A, B) {
+    /* identifies a bond by which two asymmetric unit atoms it connects and at
+       what distance -- unlike a uid pair, this still matches atoms grown
+       later, since a genuine symmetry copy of a cut bond always connects the
+       same pair of asymmetric unit atoms at exactly the same distance */
+    if (A.auIndex === undefined || B.auIndex === undefined) return null;
+    var d = Math.sqrt((A.x - B.x) * (A.x - B.x) + (A.y - B.y) * (A.y - B.y) + (A.z - B.z) * (A.z - B.z));
+    var i1 = A.auIndex, i2 = B.auIndex;
+    return (i1 < i2 ? i1 + ":" + i2 : i2 + ":" + i1) + ":" + d.toFixed(3);
+  }
   function filterCutBonds(atoms, bondList) {
     /* removes connections the user has manually severed -- the only real
        remedy for a bond that is geometrically plausible but chemically wrong
@@ -2784,6 +3097,8 @@ select.sel:focus{border-color:var(--accent)}
     for (var i = 0; i < bondList.length; i++) {
       var b = bondList[i], a1 = atoms[b[0]], a2 = atoms[b[1]];
       if (state.cutBonds.hasOwnProperty(bondKey(a1.uid, a2.uid))) continue;
+      var sig = bondSignature(a1, a2);
+      if (sig && state.cutBondSignatures.hasOwnProperty(sig)) continue;
       out.push(b);
     }
     return out;
@@ -2814,7 +3129,7 @@ select.sel:focus{border-color:var(--accent)}
         im.userData.atoms = arr; im.userData.isGuest = !!isGuest; /* for click-to-select raycasting */
         var m = new THREE.Matrix4();
         for (i = 0; i < arr.length; i++) {
-          var sc = atomDisplayRadius(style, arr[i].r, arr[i].el, bondRadius, scaleMult);
+          var sc = arr[i].isCentroid ? 0.2 : atomDisplayRadius(style, arr[i].r, arr[i].el, bondRadius, scaleMult);
           m.makeScale(sc, sc, sc);
           m.setPosition(arr[i].x + off[0], arr[i].y + off[1], arr[i].z + off[2]);
           im.setMatrixAt(i, m);
@@ -3071,10 +3386,24 @@ select.sel:focus{border-color:var(--accent)}
     if (hit.bond) {
       var key = bondKey(hit.bond[0], hit.bond[1]);
       if (state.selectedBonds.hasOwnProperty(key)) delete state.selectedBonds[key]; else state.selectedBonds[key] = true;
-      renderSelection(); updateSelectionInfo();
+      renderSelection(); updateBondSelectionInfo();
       return;
     }
-    if (mods.ctrl && mods.alt) return; /* undefined combination, deliberately a no-op */
+    if (mods.ctrl && mods.alt) {
+      if (state.isCif && hit.atom.auIndex !== undefined) selectSymmetryRelated(hit.atom);
+      else if (state.isCif) setStatus("This atom has no symmetry information to select by.", true);
+      return;
+    }
+    if (state.isCif && state.growMode) {
+      if (state.growBySphere) {
+        var r = state.sphereRadius;
+        if (!isFinite(r) || r <= 0) { setStatus("Enter a valid sphere radius first.", true); return; }
+        growSphereOfInclusion([hit.atom.x, hit.atom.y, hit.atom.z], r);
+      } else {
+        growFromSeed(hit.atom);
+      }
+      return;
+    }
     var atom = hit.atom, atoms = hit.atoms, scope, i;
     /* ctrl and alt each pick a spatial scope (this atom's fragment, or this
        atom's whole component); shift adds an element-type filter on top of
@@ -3104,6 +3433,62 @@ select.sel:focus{border-color:var(--accent)}
     if (state.guestAtoms) for (i = 0; i < state.guestAtoms.length; i++) if (state.guestAtoms[i].selected) g++;
     return { host: h, guest: g };
   }
+  function selectSymmetryRelated(clickedAtom) {
+    var allAtoms = (state.atoms || []).concat(state.guestAtoms || []);
+    var makeSelected = !clickedAtom.selected, count = 0;
+    for (var i = 0; i < allAtoms.length; i++) {
+      if (allAtoms[i].auIndex === clickedAtom.auIndex) { allAtoms[i].selected = makeSelected; if (makeSelected) count++; }
+    }
+    renderSelection(); updateSelectionInfo();
+    setStatus(makeSelected ? ("Selected " + count + " symmetry-related atom" + (count === 1 ? "" : "s") + ".") : "Deselected symmetry-related atoms.", false);
+  }
+  function generateCentroid() {
+    var sel = getSelectedAtomObjects();
+    if (sel.length < 2) { setStatus("Select at least two atoms to generate a centroid.", true); return; }
+    var x = 0, y = 0, z = 0, i;
+    for (i = 0; i < sel.length; i++) { x += sel[i].x; y += sel[i].y; z += sel[i].z; }
+    x /= sel.length; y /= sel.length; z /= sel.length;
+    pushUndo();
+    var centroid = { el: "Xx", x: x, y: y, z: z, r: 0.2, cr: 0, color: 0xffffff, isCentroid: true, selected: false };
+    if (state.isCif) {
+      var fx = 0, fy = 0, fz = 0, allHaveFrac = true;
+      for (i = 0; i < sel.length; i++) {
+        if (sel[i].fx === undefined) { allHaveFrac = false; break; }
+        fx += sel[i].fx; fy += sel[i].fy; fz += sel[i].fz;
+      }
+      if (allHaveFrac) {
+        fx /= sel.length; fy /= sel.length; fz /= sel.length;
+        var auIndex = state.cifAsymUnit.length;
+        state.cifAsymUnit.push({ label: "Ct" + (auIndex + 1), el: "Xx", fx: fx, fy: fy, fz: fz, occ: 1.0 });
+        centroid.auIndex = auIndex; centroid.opIndex = 0; centroid.cellI = 0; centroid.cellJ = 0; centroid.cellK = 0;
+        centroid.fx = fx; centroid.fy = fy; centroid.fz = fz;
+      }
+    }
+    assignUids([centroid]);
+    state.atoms = (state.atoms || []).concat([centroid]);
+    for (i = 0; i < sel.length; i++) sel[i].selected = false;
+    renderSelection();
+    renderStructure(); updateHostInfo(); buildRadiiEditor(); buildHostColorEditor(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
+    setStatus("Generated a centroid from " + sel.length + " selected atoms.", false);
+  }
+  function reassignSelectedElement(newEl) {
+    if (!newEl) return;
+    var hostSel = state.atoms ? state.atoms.filter(function (a) { return a.selected; }) : [];
+    var guestSel = state.guestAtoms ? state.guestAtoms.filter(function (a) { return a.selected; }) : [];
+    if (!hostSel.length && !guestSel.length) { setStatus("No atoms selected to reassign.", true); return; }
+    pushUndo();
+    function reassign(a) {
+      a.el = newEl; a.isCentroid = false; a.selected = false;
+      a.cr = K.cov(newEl);
+    }
+    hostSel.forEach(reassign); guestSel.forEach(reassign);
+    applyRadii(hostSel); applyColors(hostSel, state.hostColors);
+    applyRadii(guestSel); applyColors(guestSel, state.guestColors); refreshGuestAtomColors();
+    renderSelection();
+    renderStructure(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); refreshBondCleanupElements(); updateSelectionInfo();
+    var n = hostSel.length + guestSel.length;
+    setStatus("Reassigned " + n + " atom" + (n === 1 ? "" : "s") + " to " + newEl + ".", false);
+  }
   function getSelectedAtomObjects() {
     var out = [];
     if (state.atoms) for (var i = 0; i < state.atoms.length; i++) if (state.atoms[i].selected) out.push(state.atoms[i]);
@@ -3132,15 +3517,26 @@ select.sel:focus{border-color:var(--accent)}
     var el2 = document.getElementById("selInfo"); if (!el2) return;
     var c = countSelected();
     var vecBtn = document.getElementById("viewVecBtn"), planeBtn = document.getElementById("viewPlaneBtn");
+    var centroidBtn = document.getElementById("centroidBtn");
     if (vecBtn) vecBtn.disabled = (c.host + c.guest !== 2);
     if (planeBtn) planeBtn.disabled = (c.host + c.guest !== 3);
+    if (centroidBtn) centroidBtn.disabled = (c.host + c.guest < 2);
     if (c.host + c.guest === 0) { el2.innerHTML = "<div class='dim'>No atoms selected.</div>"; return; }
     el2.innerHTML = "<div>" + c.host + " host, " + c.guest + " guest atom" + (c.host + c.guest === 1 ? "" : "s") + " selected.</div>";
+  }
+  function updateBondSelectionInfo() {
+    var el3 = document.getElementById("bondSelInfo"); if (!el3) return;
+    var n = Object.keys(state.selectedBonds).length;
+    el3.innerHTML = n === 0 ? "<div class='dim'>No bonds selected.</div>" : ("<div>" + n + " bond" + (n === 1 ? "" : "s") + " selected.</div>");
   }
   function clearSelection() {
     if (state.atoms) for (var i = 0; i < state.atoms.length; i++) state.atoms[i].selected = false;
     if (state.guestAtoms) for (var j = 0; j < state.guestAtoms.length; j++) state.guestAtoms[j].selected = false;
     renderSelection(); updateSelectionInfo();
+  }
+  function clearBondSelection() {
+    state.selectedBonds = {};
+    renderSelection(); updateBondSelectionInfo();
   }
   function toggleSelectAll() {
     var c = countSelected(), target = (c.host + c.guest) === 0;
@@ -3162,8 +3558,237 @@ select.sel:focus{border-color:var(--accent)}
     var snap = state.undoStack.pop();
     state.atoms = snap.atoms; state.guestAtoms = snap.guestAtoms; state.guestGroups = snap.guestGroups;
     state.cutBonds = snap.cutBonds; state.guestBatch = snap.guestBatch; state.selectedBonds = {};
-    renderStructure(); updateHostInfo(); updateGuestInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); buildGuestGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo();
-    setStatus("Undid last edit.", false);
+    if (state.isCif) { recomputeViewOffset(); renderUnitCell(); }
+    renderStructure(); updateHostInfo(); updateGuestInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); buildGuestGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo(); updateBondSelectionInfo(); refreshSymmetryUI();
+  }
+  /* ---------------- CIF symmetry growth ----------------
+   * Every displayed CIF-derived atom is tagged with which asymmetric unit
+   * atom it came from (auIndex), which symmetry operator was applied
+   * (opIndex), and which unit cell translation on top of that (cellI/J/K).
+   * That triple is what "already displayed" is checked against, so growth
+   * never creates a duplicate of an atom already on screen. */
+  function existingCifKeySet() {
+    var seen = {};
+    function scan(arr) {
+      if (!arr) return;
+      for (var i = 0; i < arr.length; i++) {
+        var a = arr[i];
+        if (a.auIndex !== undefined) seen[a.auIndex + ":" + a.opIndex + ":" + a.cellI + ":" + a.cellJ + ":" + a.cellK] = true;
+      }
+    }
+    scan(state.atoms); scan(state.guestAtoms);
+    return seen;
+  }
+  function generateSymmetryAtom(auIndex, opIndex, ci, cj, ck) {
+    var au = state.cifAsymUnit[auIndex];
+    var f0 = K.applySymop(state.cifSymops[opIndex], [au.fx, au.fy, au.fz]);
+    var f = [f0[0] + ci, f0[1] + cj, f0[2] + ck];
+    var c = K.fracToCart(state.cifFracToCart, f);
+    return {
+      el: au.el, x: c[0], y: c[1], z: c[2], r: K.vdw(au.el), cr: K.cov(au.el), color: K.cpk(au.el),
+      auIndex: auIndex, opIndex: opIndex, cellI: ci, cellJ: cj, cellK: ck, fx: f[0], fy: f[1], fz: f[2]
+    };
+  }
+  function findGrowthCandidates(seedAtom, cellRange) {
+    /* every not-yet-displayed symmetry image, of every asymmetric unit atom,
+       within covalent bonding distance of the seed -- same distance test
+       K.bonds() uses, so "connected" means the same thing everywhere in the app */
+    cellRange = cellRange || 5;
+    var existing = existingCifKeySet(), out = [];
+    var au = state.cifAsymUnit, symops = state.cifSymops;
+    for (var auI = 0; auI < au.length; auI++) {
+      for (var opI = 0; opI < symops.length; opI++) {
+        for (var ci = -cellRange; ci <= cellRange; ci++) for (var cj = -cellRange; cj <= cellRange; cj++) for (var ck = -cellRange; ck <= cellRange; ck++) {
+          var key = auI + ":" + opI + ":" + ci + ":" + cj + ":" + ck;
+          if (existing[key]) continue;
+          var cand = generateSymmetryAtom(auI, opI, ci, cj, ck);
+          var dx = cand.x - seedAtom.x, dy = cand.y - seedAtom.y, dz = cand.z - seedAtom.z;
+          var d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 < 1e-6) continue; /* coincides with the seed itself */
+          var lim = cand.cr + seedAtom.cr + 0.45;
+          var minD = (cand.el === "H" || seedAtom.el === "H") ? 0.4 : 1.0;
+          if (d2 > minD * minD && d2 < lim * lim) out.push(cand);
+        }
+      }
+    }
+    /* two different (auIndex, op, cell) triples occasionally generate the
+       same physical position (special positions) -- keep one */
+    var deduped = [];
+    for (var i = 0; i < out.length; i++) {
+      var dup = false;
+      for (var j = 0; j < deduped.length; j++) {
+        var a = out[i], b = deduped[j];
+        if (Math.abs(a.x - b.x) < 0.01 && Math.abs(a.y - b.y) < 0.01 && Math.abs(a.z - b.z) < 0.01) { dup = true; break; }
+      }
+      if (!dup) deduped.push(out[i]);
+    }
+    return deduped;
+  }
+  function expandToFragments(candidates) {
+    /* for each distinct (op, cell) among the candidates, generate the whole
+       asymmetric unit under that same transform, not just the one atom that
+       happened to be within bonding distance */
+    var existing = existingCifKeySet(), seenOpCell = {}, out = [];
+    for (var i = 0; i < candidates.length; i++) {
+      var c = candidates[i], ockey = c.opIndex + ":" + c.cellI + ":" + c.cellJ + ":" + c.cellK;
+      if (seenOpCell[ockey]) continue;
+      seenOpCell[ockey] = true;
+      for (var auI = 0; auI < state.cifAsymUnit.length; auI++) {
+        var key = auI + ":" + c.opIndex + ":" + c.cellI + ":" + c.cellJ + ":" + c.cellK;
+        if (existing[key]) continue;
+        var newAtom = generateSymmetryAtom(auI, c.opIndex, c.cellI, c.cellJ, c.cellK);
+        /* special-position check within this fragment: skip if it lands on
+           top of an atom already added in this same batch */
+        var dup = false;
+        for (var k = 0; k < out.length; k++) {
+          if (Math.abs(out[k].x - newAtom.x) < 0.01 && Math.abs(out[k].y - newAtom.y) < 0.01 && Math.abs(out[k].z - newAtom.z) < 0.01) { dup = true; break; }
+        }
+        if (!dup) { out.push(newAtom); existing[key] = true; }
+      }
+    }
+    return out;
+  }
+  function commitGrownAtoms(newAtoms) {
+    if (!newAtoms.length) return 0;
+    pushUndo();
+    assignUids(newAtoms);
+    /* if the asymmetric unit atom a grown atom derives from has already been
+       designated as guest (by moving it to a guest group earlier), every
+       future symmetry copy of it is grown as guest too, not host -- e.g.
+       mark a CO2 in the asymmetric unit as guest once, and every CO2 that
+       growth generates afterwards is automatically a guest as well */
+    var guestAuGroup = {};
+    if (state.guestAtoms) for (var gi = 0; gi < state.guestAtoms.length; gi++) {
+      var ga = state.guestAtoms[gi];
+      if (ga.auIndex !== undefined && !(ga.auIndex in guestAuGroup)) guestAuGroup[ga.auIndex] = ga.batch;
+    }
+    var hostNew = [], guestNew = [];
+    for (var i = 0; i < newAtoms.length; i++) ((newAtoms[i].auIndex in guestAuGroup) ? guestNew : hostNew).push(newAtoms[i]);
+    if (hostNew.length) {
+      applyRadii(hostNew); applyColors(hostNew, state.hostColors);
+      state.atoms = (state.atoms || []).concat(hostNew);
+    }
+    if (guestNew.length) {
+      /* each newly-grown atom joins whichever existing guest component its
+         own asymmetric unit atom already belongs to, rather than starting a
+         new component -- growing more of an already-designated guest adds
+         to that same guest, it doesn't create new ones */
+      for (var k = 0; k < guestNew.length; k++) guestNew[k].batch = guestAuGroup[guestNew[k].auIndex];
+      applyRadii(guestNew); applyColors(guestNew, state.guestColors); refreshGuestAtomColors();
+      state.guestAtoms = (state.guestAtoms || []).concat(guestNew);
+      updateGuestInfo(); buildGuestColorEditor(); buildGuestGroupsUI();
+    }
+    recomputeViewOffset();
+    renderStructure(); renderUnitCell(); updateHostInfo(); buildRadiiEditor(); buildHostColorEditor(); refreshBondCleanupElements(); refreshSymmetryUI();
+    return newAtoms.length;
+  }
+  function deleteSymmetryGeneratedAtoms() {
+    if (!state.isCif) { setStatus("This is only meaningful for a CIF-based structure.", true); return; }
+    var isOriginal = function (a) { return a.opIndex === 0 && a.cellI === 0 && a.cellJ === 0 && a.cellK === 0; };
+    var before = (state.atoms ? state.atoms.length : 0) + (state.guestAtoms ? state.guestAtoms.length : 0);
+    pushUndo();
+    if (state.atoms) state.atoms = state.atoms.filter(isOriginal);
+    if (state.guestAtoms) state.guestAtoms = state.guestAtoms.filter(isOriginal);
+    pruneEmptyGuestGroups();
+    recomputeViewOffset();
+    renderStructure(); renderUnitCell(); updateHostInfo(); updateGuestInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); buildGuestGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
+    var after = (state.atoms ? state.atoms.length : 0) + (state.guestAtoms ? state.guestAtoms.length : 0);
+    setStatus("Removed " + (before - after) + " symmetry-generated atom" + ((before - after) === 1 ? "" : "s") + ", back to the original asymmetric unit.", false);
+  }
+  function growFromSeed(seedAtom) {
+    var candidates = findGrowthCandidates(seedAtom);
+    if (!candidates.length) { setStatus("No new symmetry-connected atoms found from this atom.", true); return; }
+    var added = state.growByAtom ? candidates : expandToFragments(candidates);
+    var n = commitGrownAtoms(added);
+    setStatus("Grew " + n + " atom" + (n === 1 ? "" : "s") + (state.growByAtom ? "" : " (whole asymmetric unit)") + ".", false);
+  }
+  function growSphereOfInclusion(center, radius) {
+    if (!state.isCif) { setStatus("Sphere of inclusion needs a CIF-based host.", true); return; }
+    var au = state.cifAsymUnit, symops = state.cifSymops;
+    var minCell = Math.min(state.cifCell.a, state.cifCell.b, state.cifCell.c);
+    var cellRange = Math.max(5, Math.ceil(radius / minCell) + 1);
+    var existing = existingCifKeySet(), out = [];
+    for (var auI = 0; auI < au.length; auI++) for (var opI = 0; opI < symops.length; opI++)
+      for (var ci = -cellRange; ci <= cellRange; ci++) for (var cj = -cellRange; cj <= cellRange; cj++) for (var ck = -cellRange; ck <= cellRange; ck++) {
+        var key = auI + ":" + opI + ":" + ci + ":" + cj + ":" + ck;
+        if (existing[key]) continue;
+        var cand = generateSymmetryAtom(auI, opI, ci, cj, ck);
+        var dx = cand.x - center[0], dy = cand.y - center[1], dz = cand.z - center[2];
+        if (dx * dx + dy * dy + dz * dz <= radius * radius) out.push(cand);
+      }
+    var deduped = [];
+    for (var i = 0; i < out.length; i++) {
+      var dup = false;
+      for (var j = 0; j < deduped.length; j++) {
+        var a = out[i], b = deduped[j];
+        if (Math.abs(a.x - b.x) < 0.01 && Math.abs(a.y - b.y) < 0.01 && Math.abs(a.z - b.z) < 0.01) { dup = true; break; }
+      }
+      if (!dup) deduped.push(out[i]);
+    }
+    var toAdd = state.growByAtom ? deduped : expandToFragments(deduped);
+    var n = commitGrownAtoms(toAdd);
+    setStatus("Sphere of inclusion added " + n + " atom" + (n === 1 ? "" : "s") + " within " + radius.toFixed(2) + " " + U.ang + (state.growByAtom ? "" : " (whole asymmetric units)") + ".", false);
+  }
+  var unitCellCylGeo = null;
+  function addUnitCellEdge(p0, p1, color) {
+    var dir = new THREE.Vector3(p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]);
+    var len = dir.length(); if (len < 1e-5) return;
+    var mesh = new THREE.Mesh(unitCellCylGeo, elMaterial(color)); /* same lit material as bonds, so edges shade with the scene instead of looking flat */
+    mesh.scale.set(state.unitCellThickness, len, state.unitCellThickness);
+    mesh.quaternion.setFromUnitVectors(YAXIS, dir.normalize());
+    mesh.position.set((p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2, (p0[2] + p1[2]) / 2);
+    unitCellGroup.add(mesh);
+  }
+  function makeTextSprite(text, worldSize, italic) {
+    var canvas = document.createElement("canvas");
+    canvas.width = 128; canvas.height = 128;
+    var ctx = canvas.getContext("2d");
+    ctx.font = (italic ? "italic " : "") + "bold 92px serif";
+    ctx.fillStyle = contrastColorFor(state.bgColor);
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(text, 64, 68);
+    var tex = new THREE.CanvasTexture(canvas);
+    var mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+    var sprite = new THREE.Sprite(mat);
+    sprite.scale.set(worldSize, worldSize, worldSize);
+    sprite.renderOrder = 20; /* always readable, like a reference overlay rather than a physical object */
+    return sprite;
+  }
+  function renderUnitCell() {
+    clearGroup(unitCellGroup);
+    if (!state.isCif || !state.showUnitCell || !state.cifFracToCart) return;
+    if (!unitCellCylGeo) unitCellCylGeo = new THREE.CylinderGeometry(1, 1, 1, 8, 1, true);
+    var M = state.cifFracToCart, off = centroid(), cell = state.cifCell;
+    var corners = [];
+    for (var i = 0; i < 8; i++) {
+      var c = K.fracToCart(M, [(i & 1) ? 1 : 0, (i & 2) ? 1 : 0, (i & 4) ? 1 : 0]);
+      corners.push([c[0] + off[0], c[1] + off[1], c[2] + off[2]]);
+    }
+    var edges = [[0, 1], [0, 2], [0, 4], [1, 3], [1, 5], [2, 3], [2, 6], [3, 7], [4, 5], [4, 6], [5, 7], [6, 7]];
+    var axisColor = { "0,1": 0xff0000, "0,2": 0x00ff00, "0,4": 0x0000ff }; /* a=red, b=green, c=blue -- deepest possible saturation */
+    for (var e = 0; e < edges.length; e++) {
+      var key = edges[e][0] + "," + edges[e][1];
+      var color = (state.unitCellAxisColors && axisColor.hasOwnProperty(key)) ? axisColor[key] : state.unitCellColor;
+      addUnitCellEdge(corners[edges[e][0]], corners[edges[e][1]], color);
+    }
+    var labelSize = 0.09 * (cell.a + cell.b + cell.c) / 3;
+    unitCellGroup.add(labelAt(corners[1], "a", labelSize, true));
+    unitCellGroup.add(labelAt(corners[2], "b", labelSize, true));
+    unitCellGroup.add(labelAt(corners[4], "c", labelSize, true));
+    function labelAt(corner, text, size, italic) {
+      var sprite = makeTextSprite(text, size, italic);
+      sprite.position.set(corner[0], corner[1], corner[2]);
+      return sprite;
+    }
+  }
+  function refreshSymmetryUI() {
+    var sec = document.getElementById("symmetrySection");
+    if (sec) sec.style.display = state.isCif ? "" : "none";
+    var auInfo = document.getElementById("auInfo");
+    if (auInfo && state.isCif) {
+      auInfo.innerHTML = "<div>Asymmetric unit: " + state.cifAsymUnit.length + " atom" + (state.cifAsymUnit.length === 1 ? "" : "s") +
+        "</div><div>Currently displayed: " + (state.atoms ? state.atoms.length : 0) + " atoms</div>";
+    }
   }
   function pruneEmptyGuestGroups() {
     /* group names/numbers are purely cosmetic labels, never referenced by
@@ -3182,7 +3807,8 @@ select.sel:focus{border-color:var(--accent)}
     if (state.atoms) state.atoms = state.atoms.filter(function (a) { return !a.selected; });
     if (state.guestAtoms) state.guestAtoms = state.guestAtoms.filter(function (a) { return !a.selected; });
     pruneEmptyGuestGroups();
-    renderStructure(); updateHostInfo(); updateGuestInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); buildGuestGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo();
+    if (state.isCif) { recomputeViewOffset(); renderUnitCell(); }
+    renderStructure(); updateHostInfo(); updateGuestInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); buildGuestGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
     setStatus("Deleted " + c.host + " host and " + c.guest + " guest atom" + (c.host + c.guest === 1 ? "" : "s") +
       ". Any already-calculated cavity is unaffected until you recalculate.", false);
   }
@@ -3213,23 +3839,36 @@ select.sel:focus{border-color:var(--accent)}
       refreshGuestAtomColors();
     }
     pruneEmptyGuestGroups();
-    renderStructure(); updateHostInfo(); updateGuestInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); buildGuestGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo();
+    if (state.isCif) { recomputeViewOffset(); renderUnitCell(); }
+    renderStructure(); updateHostInfo(); updateGuestInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); buildGuestGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
     setStatus("Moved " + moved.length + " atom" + (moved.length === 1 ? "" : "s") + ". Any already-calculated cavity is unaffected until you recalculate.", false);
   }
   function cutSelectedBonds() {
     var keys = Object.keys(state.selectedBonds);
     if (!keys.length) { setStatus("No bond selected to cut.", true); return; }
     pushUndo();
-    for (var i = 0; i < keys.length; i++) state.cutBonds[keys[i]] = true;
+    var allAtoms = (state.atoms || []).concat(state.guestAtoms || []);
+    var byUid = {}, i;
+    for (i = 0; i < allAtoms.length; i++) byUid[allAtoms[i].uid] = allAtoms[i];
+    var cutCount = 0;
+    for (i = 0; i < keys.length; i++) {
+      if (!state.cutBonds[keys[i]]) cutCount++;
+      state.cutBonds[keys[i]] = true;
+      if (state.isCif) {
+        var uids = keys[i].split(":");
+        var A = byUid[uids[0]], B = byUid[uids[1]];
+        if (A && B) { var sig = bondSignature(A, B); if (sig) state.cutBondSignatures[sig] = true; }
+      }
+    }
     state.selectedBonds = {};
-    renderStructure();
-    setStatus("Cut " + keys.length + " bond" + (keys.length === 1 ? "" : "s") + ". This only affects display and fragment selection -- the cavity calculation never used bonds.", false);
+    renderStructure(); updateBondSelectionInfo();
+    setStatus("Cut " + cutCount + " bond" + (cutCount === 1 ? "" : "s") + (state.isCif ? " (and any symmetry-related copies, including ones grown later)" : "") + ". This only affects display and fragment selection -- the cavity calculation never used bonds.", false);
   }
   function reinstateAllBonds() {
     var n = Object.keys(state.cutBonds).length;
     if (!n) { setStatus("No bonds have been cut.", true); return; }
     pushUndo();
-    state.cutBonds = {};
+    state.cutBonds = {}; state.cutBondSignatures = {};
     renderStructure();
     setStatus("Reinstated " + n + " cut bond" + (n === 1 ? "" : "s") + ".", false);
   }
@@ -3237,9 +3876,10 @@ select.sel:focus{border-color:var(--accent)}
     var a1 = document.getElementById("cbA1"), a2 = document.getElementById("cbA2"); if (!a1 || !a2) return;
     var els = state.atoms ? elementsOf(state.atoms) : [];
     if (state.guestAtoms) { var seen = {}; els.forEach(function (e) { seen[e] = 1; }); elementsOf(state.guestAtoms).forEach(function (e) { if (!seen[e]) els.push(e); }); els.sort(); }
+    els.unshift("Any");
     var hasC = els.indexOf("C") >= 0;
-    var default1 = hasC ? "C" : (els[0] || "");
-    var default2 = hasC ? "C" : (els.length > 1 ? els[1] : (els[0] || ""));
+    var default1 = hasC ? "C" : (els[1] || els[0]);
+    var default2 = hasC ? "C" : (els.length > 2 ? els[2] : (els[1] || els[0]));
     var prev1 = a1.value, prev2 = a2.value;
     function fill(sel, prev, fallback) {
       sel.innerHTML = "";
@@ -3249,25 +3889,49 @@ select.sel:focus{border-color:var(--accent)}
     fill(a1, prev1, default1); fill(a2, prev2, default2);
   }
   function cleanupBondsByDistance(el1, el2, lower, upper, mode) {
-    var candidates = [];
+    var candidates = [], allMatchingDistances = [];
+    function elMatch(a, b) {
+      if (el1 === "Any" && el2 === "Any") return true;
+      if (el1 === "Any") return a === el2 || b === el2;
+      if (el2 === "Any") return a === el1 || b === el1;
+      return (a === el1 && b === el2) || (a === el2 && b === el1);
+    }
     function collect(atoms) {
       if (!atoms) return;
       var bonds = filterCutBonds(atoms, crossBatchBonds(atoms, K.bonds(atoms, 0.45)));
       for (var i = 0; i < bonds.length; i++) {
         var A = atoms[bonds[i][0]], B = atoms[bonds[i][1]];
-        var matches = (A.el === el1 && B.el === el2) || (A.el === el2 && B.el === el1);
-        if (!matches) continue;
+        if (!elMatch(A.el, B.el)) continue;
+        var d = Math.sqrt((A.x - B.x) * (A.x - B.x) + (A.y - B.y) * (A.y - B.y) + (A.z - B.z) * (A.z - B.z));
+        allMatchingDistances.push(d);
         var key = bondKey(A.uid, B.uid);
         if (state.cutBonds.hasOwnProperty(key)) continue;
-        var d = Math.sqrt((A.x - B.x) * (A.x - B.x) + (A.y - B.y) * (A.y - B.y) + (A.z - B.z) * (A.z - B.z));
         var inRange = d >= lower && d <= upper;
         if ((mode === "outside" && !inRange) || (mode === "inside" && inRange)) candidates.push(key);
       }
     }
     collect(state.atoms); collect(state.guestAtoms);
-    if (!candidates.length) { setStatus("No " + el1 + "-" + el2 + " bonds found " + mode + " that range.", true); return; }
+    if (!candidates.length) {
+      if (allMatchingDistances.length) {
+        var lo = Math.min.apply(null, allMatchingDistances), hi = Math.max.apply(null, allMatchingDistances);
+        setStatus("Found " + allMatchingDistances.length + " " + el1 + "-" + el2 + " bond" + (allMatchingDistances.length === 1 ? "" : "s") +
+          ", but none " + mode + " " + lower.toFixed(2) + "-" + upper.toFixed(2) + " " + U.ang +
+          " (existing distance" + (allMatchingDistances.length === 1 ? " is " : "s range from ") + lo.toFixed(2) + (lo === hi ? "" : " to " + hi.toFixed(2)) + " " + U.ang + ").", true);
+      } else {
+        setStatus("No " + el1 + "-" + el2 + " bonds exist at all -- a minimum realistic bond length is always enforced, so two atoms closer together than that are never counted as bonded in the first place.", true);
+      }
+      return;
+    }
     pushUndo();
-    for (var i = 0; i < candidates.length; i++) state.cutBonds[candidates[i]] = true;
+    var allAtoms = (state.atoms || []).concat(state.guestAtoms || []), byUid = {};
+    if (state.isCif) for (var a = 0; a < allAtoms.length; a++) byUid[allAtoms[a].uid] = allAtoms[a];
+    for (var i = 0; i < candidates.length; i++) {
+      state.cutBonds[candidates[i]] = true;
+      if (state.isCif) {
+        var uids = candidates[i].split(":"), A = byUid[uids[0]], B = byUid[uids[1]];
+        if (A && B) { var sig = bondSignature(A, B); if (sig) state.cutBondSignatures[sig] = true; }
+      }
+    }
     renderStructure();
     setStatus("Cut " + candidates.length + " " + el1 + "-" + el2 + " bond" + (candidates.length === 1 ? "" : "s") +
       " " + mode + " " + lower.toFixed(2) + "-" + upper.toFixed(2) + " " + U.ang + ". This only affects display and fragment selection.", false);
@@ -3290,6 +3954,7 @@ select.sel:focus{border-color:var(--accent)}
        [Host/Guest] Colours, or loading that element for the first time, ever
        pulls from the current default again. */
     for (var i = 0; i < atoms.length; i++) {
+      if (atoms[i].isCentroid) continue;
       var elem = atoms[i].el;
       if (!colorMap.hasOwnProperty(elem)) colorMap[elem] = defaultColorFor(elem);
       atoms[i].color = colorMap[elem];
@@ -3297,11 +3962,16 @@ select.sel:focus{border-color:var(--accent)}
   }
   var nextUid = 1;
   function assignUids(atoms) { for (var i = 0; i < atoms.length; i++) atoms[i].uid = nextUid++; }
-  function loadAtoms(atoms, name) {
+  function loadAtoms(atoms, name, cifMeta) {
     if (!atoms || !atoms.length) { setStatus("No atoms found.", true); return; }
     assignUids(atoms);
     var firstEver = !state.atoms && !state.everLoaded; state.everLoaded = true;
     state.atoms = atoms; state.name = name || "structure";
+    state.isCif = !!cifMeta;
+    state.cifCell = cifMeta ? cifMeta.cell : null;
+    state.cifSymops = cifMeta ? cifMeta.symops : null;
+    state.cifAsymUnit = cifMeta ? cifMeta.asymUnit : null;
+    state.cifFracToCart = cifMeta ? cifMeta.M : null;
     recomputeViewOffset();
     /* host, guest, and cavity are independent layers: loading a new host replaces
        only the host atoms. Any previously calculated cavity (and the guest) stay
@@ -3311,8 +3981,36 @@ select.sel:focus{border-color:var(--accent)}
        cavity mesh here keeps it aligned with the new host's centring offset. */
     applyRadii(atoms);
     applyColors(atoms, state.hostColors);
-    renderStructure(); renderSurface(); if (firstEver) frameCamera(); updateHostInfo(); buildRadiiEditor(); buildHostColorEditor(); refreshBondCleanupElements(); updateSelectionInfo();
-    setStatus("Loaded " + state.name + ": " + atoms.length + " atoms. Set the probe radius and click Calculate.", false);
+    renderStructure(); renderSurface(); renderUnitCell(); if (firstEver) frameCamera(); updateHostInfo(); buildRadiiEditor(); buildHostColorEditor(); refreshBondCleanupElements(); updateSelectionInfo();
+    refreshSymmetryUI();
+    if (!cifMeta) setStatus("Loaded " + state.name + ": " + atoms.length + " atoms. Set the probe radius and click Calculate.", false);
+  }
+  function loadHostFile(text, name) {
+    /* CIF vs PDB is told apart by extension first, falling back to sniffing
+       the first couple of KB for CIF-specific tags if the extension is
+       ambiguous (e.g. a bare .txt) */
+    var isCif = /\.cif$/i.test(name || "") || /_cell_length_a|_atom_site_fract_x/im.test(text.slice(0, 4000));
+    if (isCif) loadCIFText(text, name); else loadPDBText(text, name);
+  }
+  function loadCIFText(text, name) {
+    var cif;
+    try { cif = K.parseCIF(text); } catch (e) { setStatus("Could not parse this CIF file.", true); return; }
+    if (!cif.atoms.length) { setStatus("No atom coordinates found in the CIF (expected an _atom_site_fract_x loop).", true); return; }
+    if (!(cif.cell.a > 0 && cif.cell.b > 0 && cif.cell.c > 0)) { setStatus("No usable unit cell parameters found in the CIF.", true); return; }
+    var reduced = K.reduceToAsymmetricUnit(cif.atoms, cif.symops, 0.01);
+    var M = K.fracToCartMatrix(cif.cell);
+    var atoms = [];
+    for (var i = 0; i < reduced.length; i++) {
+      var a = reduced[i];
+      var c = K.fracToCart(M, [a.fx, a.fy, a.fz]);
+      atoms.push({
+        el: a.el, x: c[0], y: c[1], z: c[2], r: K.vdw(a.el), cr: K.cov(a.el), color: K.cpk(a.el),
+        auIndex: i, opIndex: 0, cellI: 0, cellJ: 0, cellK: 0, fx: a.fx, fy: a.fy, fz: a.fz
+      });
+    }
+    var reducedNote = reduced.length < cif.atoms.length ? (" (reduced from " + cif.atoms.length + " atoms in the file to " + reduced.length + " symmetry-independent ones)") : "";
+    loadAtoms(atoms, name, { cell: cif.cell, symops: cif.symops, asymUnit: reduced, M: M });
+    setStatus("Loaded " + (name || "structure") + ": asymmetric unit, " + atoms.length + " atom" + (atoms.length === 1 ? "" : "s") + reducedNote + ". Use Grow mode (Symmetry panel) to build out the structure.", false);
   }
   function loadPDBText(text, name) {
     var atoms = K.parsePDB(text);
@@ -3340,6 +4038,7 @@ select.sel:focus{border-color:var(--accent)}
     }
   }
   function loadGuestAtoms(atoms, name) {
+    if (state.isCif) { setStatus("Guest loading isn't available yet for CIF-based (symmetry-grown) structures.", true); return; }
     if (!atoms || !atoms.length) { setStatus("No atoms found in guest file.", true); return; }
     assignUids(atoms);
     /* guests append rather than replace, since a disordered guest is often built
@@ -3431,15 +4130,17 @@ select.sel:focus{border-color:var(--accent)}
   }
   function calculate() {
     if (!state.atoms) { setStatus("Load a PDB file first.", true); return; }
+    var calcAtoms = state.atoms.filter(function (a) { return !a.isCentroid; });
+    if (!calcAtoms.length) { setStatus("No real atoms to calculate from -- only centroid markers are present.", true); return; }
     showOverlay(true, "Building cavity surface...");
     setTimeout(function () {
       var t0 = performance.now();
-      var mesh = K.cavityMesh(state.atoms, state.probe, { spacing: surfSpacing(state.density) });
+      var mesh = K.cavityMesh(calcAtoms, state.probe, { spacing: surfSpacing(state.density) });
       showOverlay(true, "Integrating volume (grid + h\u21920 extrapolation)...");
       setTimeout(function () {
-        var vols = K.gridVolume(state.atoms, state.probe, gridOpts(state.volAcc));
+        var vols = K.gridVolume(calcAtoms, state.probe, gridOpts(state.volAcc));
         state.interior = mesh; state.vols = vols;
-        state.calcInfo = { hostName: state.name, atomCount: state.atoms.length, probe: state.probe };
+        state.calcInfo = { hostName: state.name, atomCount: calcAtoms.length, probe: state.probe };
         renderSurface();
         updateResults({ interior: mesh, vols: vols, ms: performance.now() - t0, calcInfo: state.calcInfo });
         showOverlay(false);
@@ -3459,12 +4160,12 @@ select.sel:focus{border-color:var(--accent)}
   }
   function updateGuestInfo() {
     var e = document.getElementById("guestInfo"); if (!e) return;
-    if (!state.guestAtoms) { e.innerHTML = "<div class='dim'>No guest loaded.</div>"; return; }
+    if (!state.guestAtoms) { e.innerHTML = "<div class='dim'>No guest defined.</div>"; return; }
     var comp = state.guestGroups.length > 1 ? " (" + state.guestGroups.length + " components)" : "";
     e.innerHTML = "<div class='formula'>" + formula(state.guestAtoms) + "</div><div>" + state.guestAtoms.length + " atoms (display only)" + comp + "</div>";
   }
   function elementsOf(atoms) {
-    var seen = {}, els = []; for (var i = 0; i < atoms.length; i++) if (!seen[atoms[i].el]) { seen[atoms[i].el] = 1; els.push(atoms[i].el); }
+    var seen = {}, els = []; for (var i = 0; i < atoms.length; i++) if (!atoms[i].isCentroid && !seen[atoms[i].el]) { seen[atoms[i].el] = 1; els.push(atoms[i].el); }
     els.sort(); return els;
   }
   function buildRadiiEditor() {
@@ -3487,7 +4188,7 @@ select.sel:focus{border-color:var(--accent)}
        export resolution are deliberately excluded -- the former always
        resets to full speed on reopening, the latter is a one-off export
        choice rather than a look-and-feel preference. Display, Lighting, and
-       Material are each saved only if their own "save these settings" box is
+       Material are each saved only if their own "retain these settings" box is
        checked; unchecking one drops its saved values immediately, rather
        than leaving them sitting in storage to reappear if re-checked later. */
     try {
@@ -3683,7 +4384,7 @@ select.sel:focus{border-color:var(--accent)}
   }
   function updateResults(p) {
     var el = document.getElementById("resultBox"); if (!el) return;
-    if (!p) { el.innerHTML = "<div class='dim'>Run a calculation to measure the cavity.</div>"; return; }
+    if (!p) { el.innerHTML = ""; return; }
     var v = p.vols, u = " " + U.ang + U.cube, i, ci = p.calcInfo;
     function stat(label, value) { return "<div class='stat'><div class='statlabel'>" + label + "</div><div class='statvalue'>" + value + "</div></div>"; }
     var html = "";
@@ -3740,6 +4441,60 @@ select.sel:focus{border-color:var(--accent)}
     sel.addEventListener("change", function () { on(sel.value); }); top.appendChild(sel); w.appendChild(top); p.appendChild(w); return sel;
   }
   function button(p, label, cls, on) { var b = el("button", "btn " + (cls || ""), label); b.addEventListener("click", on); p.appendChild(b); return b; }
+  function numberOnly(p, label, min, max, step, val, unit, on) {
+    var w = el("div", "ctl-top"); w.appendChild(el("label", null, label));
+    var num = document.createElement("input"); num.type = "number"; num.className = "num";
+    num.min = min; num.max = max; num.step = step; num.value = val.toFixed(2);
+    num.addEventListener("input", function () { var v = parseFloat(num.value); if (isFinite(v)) on(v); });
+    num.addEventListener("change", function () { var v = parseFloat(num.value); if (isFinite(v)) num.value = v.toFixed(2); });
+    w.appendChild(num); if (unit) w.appendChild(el("span", "unit", unit));
+    p.appendChild(w);
+    return num;
+  }
+  function tabbedPanel(parent, tabNames) {
+    var bar = el("div", "subtabs");
+    var bodies = [];
+    for (var i = 0; i < tabNames.length; i++) {
+      var btn = el("button", i === 0 ? "on" : ""); btn.textContent = tabNames[i];
+      (function (idx) { btn.addEventListener("click", function () { select(idx); }); })(i);
+      bar.appendChild(btn);
+    }
+    parent.appendChild(bar);
+    var wrap = el("div", "subtab-wrap");
+    for (var j = 0; j < tabNames.length; j++) {
+      var body = el("div", "subtab-body" + (j === 0 ? " active" : ""));
+      wrap.appendChild(body); bodies.push(body);
+    }
+    parent.appendChild(wrap);
+    function select(idx) {
+      var btns = bar.querySelectorAll("button");
+      for (var k = 0; k < btns.length; k++) btns[k].classList.toggle("on", k === idx);
+      for (var k2 = 0; k2 < bodies.length; k2++) bodies[k2].classList.toggle("active", k2 === idx);
+    }
+    return bodies;
+  }
+  function checkboxSlider(p, checkLabel, checkVal, onCheck, min, max, step, sliderVal, onSlide, extraLabel) {
+    /* one compact row: a checkbox (with its own label) plus a bare slider,
+       optionally with a small text label between them -- no numeric readout */
+    var w = el("div", "ctl-inline");
+    var lbl = el("label", "toggle"); var cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = checkVal;
+    cb.addEventListener("change", function () { onCheck(cb.checked); });
+    lbl.appendChild(cb); lbl.appendChild(el("span", null, checkLabel)); w.appendChild(lbl);
+    if (extraLabel) w.appendChild(el("span", "inline-label", extraLabel));
+    var rng = document.createElement("input"); rng.type = "range"; rng.min = min; rng.max = max; rng.step = step; rng.value = sliderVal;
+    rng.addEventListener("input", function () { onSlide(parseFloat(rng.value)); });
+    w.appendChild(rng); p.appendChild(w);
+    return { checkbox: cb, range: rng };
+  }
+  function labelSlider(p, label, min, max, step, val, onSlide) {
+    /* text label plus a bare slider, no numeric readout */
+    var w = el("div", "ctl-inline");
+    w.appendChild(el("label", "plain", label));
+    var rng = document.createElement("input"); rng.type = "range"; rng.min = min; rng.max = max; rng.step = step; rng.value = val;
+    rng.addEventListener("input", function () { onSlide(parseFloat(rng.value)); });
+    w.appendChild(rng); p.appendChild(w);
+    return rng;
+  }
   function hexToCss(n) { return "#" + ("000000" + (n >>> 0).toString(16)).slice(-6); }
   function cssToHex(s) { return parseInt(s.replace("#", ""), 16); }
   function colorSwatch(hexInt, on) {
@@ -3749,7 +4504,7 @@ select.sel:focus{border-color:var(--accent)}
     return inp;
   }
   function colorControl(p, label, hexInt, on) {
-    var w = el("div", "ctl-top"); w.appendChild(el("label", null, label));
+    var w = el("div", "ctl-color"); w.appendChild(el("label", null, label));
     var sw = colorSwatch(hexInt, on);
     w.appendChild(sw); p.appendChild(w);
     return sw;
@@ -3782,7 +4537,7 @@ select.sel:focus{border-color:var(--accent)}
     var grow = el("div", "btnrow");
     button(grow, "Remove all guests", "ghost", removeGuest);
     gc.appendChild(grow);
-    var ginfo = el("div", "readout"); ginfo.id = "guestInfo"; ginfo.innerHTML = "<div class='dim'>No guest loaded.</div>"; gc.appendChild(ginfo);
+    var ginfo = el("div", "readout"); ginfo.id = "guestInfo"; ginfo.innerHTML = "<div class='dim'>No guest defined.</div>"; gc.appendChild(ginfo);
     toggle(gc, "show guest", state.showGuest, function (b) { state.showGuest = b; renderStructure(); });
     select(gc, "atom style", [["spacefill", "Spacefill"], ["ballstick", "Ball & stick"], ["stick", "Stick"], ["none", "Hide atoms"]], state.guestStyle, function (v) { state.guestStyle = v; renderStructure(); });
     slider(gc, "bond thickness", 0.02, 0.35, 0.01, state.guestBondRadius, U.ang, function (v) { state.guestBondRadius = v; renderStructure(); });
@@ -3797,44 +4552,86 @@ select.sel:focus{border-color:var(--accent)}
     gc.appendChild(el("div", "hint", "Guest components:"));
     var ggbox = el("div", "sbody"); ggbox.id = "guestGroupsBox"; ggbox.innerHTML = "<div class='dim'>No guest components yet.</div>"; gc.appendChild(ggbox);
 
+    var symC = section(left, "Symmetry");
+    symC.parentElement.id = "symmetrySection"; symC.parentElement.style.display = "none";
+    var auInfo = el("div", "readout"); auInfo.id = "auInfo"; auInfo.innerHTML = "<div class='dim'>No CIF loaded.</div>"; symC.appendChild(auInfo);
+    toggle(symC, "grow mode (click an atom to grow)", state.growMode, function (b) {
+      state.growMode = b;
+      var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = b ? "crosshair" : "";
+    });
+    toggle(symC, "grow whole asymmetric unit (off = single atom)", !state.growByAtom, function (b) { state.growByAtom = !b; });
+    toggle(symC, "grow by sphere of inclusion (off = covalent connection)", state.growBySphere, function (b) { state.growBySphere = b; });
+    var sphRow = el("div", "ctl-top"); sphRow.appendChild(el("label", null, "sphere radius"));
+    var sphInp = document.createElement("input"); sphInp.type = "number"; sphInp.className = "num"; sphInp.id = "sphRadius"; sphInp.step = "0.1"; sphInp.value = state.sphereRadius;
+    sphInp.addEventListener("input", function () { var v = parseFloat(sphInp.value); if (isFinite(v) && v > 0) state.sphereRadius = v; });
+    sphRow.appendChild(sphInp); sphRow.appendChild(el("span", "unit", U.ang)); symC.appendChild(sphRow);
+    symC.appendChild(el("div", "hint", "Unit cell:"));
+    toggle(symC, "show unit cell", state.showUnitCell, function (b) { state.showUnitCell = b; renderUnitCell(); });
+    var ucColorSw = colorControl(symC, "unit cell colour", state.unitCellColor, function (hex) { state.unitCellColor = hex; renderUnitCell(); });
+    var ucThickSl = slider(symC, "unit cell thickness", 0.01, 0.15, 0.005, state.unitCellThickness, U.ang, function (v) { state.unitCellThickness = v; renderUnitCell(); });
+    toggle(symC, "colour a/b/c axes red/green/blue", state.unitCellAxisColors, function (b) { state.unitCellAxisColors = b; renderUnitCell(); });
+    var resetGrowRow = el("div", "btnrow");
+    button(resetGrowRow, "Delete all symmetry-generated atoms", "ghost", deleteSymmetryGeneratedAtoms);
+    symC.appendChild(resetGrowRow);
+    symC.appendChild(el("div", "hint", "Removes everything added by growth, back to just the original asymmetric unit. A guest designation on an asymmetric unit atom is kept."));
+
     var ec = section(left, "Edit atoms and bonds");
-    var selInfo = el("div", "readout"); selInfo.id = "selInfo"; selInfo.innerHTML = "<div class='dim'>No atoms selected.</div>"; ec.appendChild(selInfo);
+    var ebTabs = tabbedPanel(ec, ["Atoms", "Bonds"]);
+    var atomsTab = ebTabs[0], bondsTab = ebTabs[1];
+
+    var selInfo = el("div", "readout"); selInfo.id = "selInfo"; selInfo.innerHTML = "<div class='dim'>No atoms selected.</div>"; atomsTab.appendChild(selInfo);
+    var erow = el("div", "btnrow");
+    button(erow, "Delete selection", "ghost", deleteSelectedAtoms);
+    button(erow, "Undo", "ghost", undoEdit);
+    button(erow, "Clear selection", "ghost", clearSelection);
+    atomsTab.appendChild(erow);
+    var moveRow = el("div", "ctl-inline");
+    moveRow.appendChild(el("label", "plain", "move selection to"));
+    var moveSel = document.createElement("select"); moveSel.className = "sel"; moveSel.id = "moveDest";
+    moveRow.appendChild(moveSel);
+    button(moveRow, "Move", "ghost", function () { moveSelectionTo(parseDest(document.getElementById("moveDest").value)); });
+    atomsTab.appendChild(moveRow);
+    var reassignRow = el("div", "ctl-inline");
+    reassignRow.appendChild(el("label", "plain", "reassign element to"));
+    var reassignSel = document.createElement("select"); reassignSel.className = "sel sel-narrow"; reassignSel.id = "reassignEl";
+    for (var ei = 1; ei < K.ELEMENTS.length; ei++) { var eo = document.createElement("option"); eo.value = K.ELEMENTS[ei]; eo.textContent = K.ELEMENTS[ei]; reassignSel.appendChild(eo); }
+    reassignRow.appendChild(reassignSel);
+    button(reassignRow, "Assign", "ghost", function () { reassignSelectedElement(document.getElementById("reassignEl").value); });
+    atomsTab.appendChild(reassignRow);
+    atomsTab.appendChild(el("hr", "divider"));
+    var centroidRow = el("div", "btnrow");
+    var centroidBtn = button(centroidRow, "Generate centroid", "ghost", generateCentroid); centroidBtn.id = "centroidBtn"; centroidBtn.disabled = true;
+    atomsTab.appendChild(centroidRow);
     var viewRow = el("div", "btnrow");
     var viewVecBtn = button(viewRow, "View along vector", "ghost", viewAlongTwoAtoms); viewVecBtn.id = "viewVecBtn"; viewVecBtn.disabled = true;
     var viewPlaneBtn = button(viewRow, "View perpendicular to plane", "ghost", viewPerpendicularToPlane); viewPlaneBtn.id = "viewPlaneBtn"; viewPlaneBtn.disabled = true;
-    ec.appendChild(viewRow);
-    var erow = el("div", "btnrow");
-    button(erow, "Clear selection", "ghost", clearSelection);
-    button(erow, "Delete selected atoms", "ghost", deleteSelectedAtoms);
-    ec.appendChild(erow);
-    var moveRow = el("div", "ctl-top");
-    moveRow.appendChild(el("label", null, "move selection to"));
-    var moveSel = document.createElement("select"); moveSel.className = "sel"; moveSel.id = "moveDest";
-    moveRow.appendChild(moveSel);
-    ec.appendChild(moveRow);
-    var moveBtnRow = el("div", "btnrow");
-    button(moveBtnRow, "Move selection", "ghost", function () { moveSelectionTo(parseDest(document.getElementById("moveDest").value)); });
-    ec.appendChild(moveBtnRow);
-    var bondRow = el("div", "btnrow");
-    button(bondRow, "Cut selected bond", "ghost", cutSelectedBonds);
-    button(bondRow, "Undo", "ghost", undoEdit);
-    ec.appendChild(bondRow);
+    atomsTab.appendChild(viewRow);
 
-    ec.appendChild(el("div", "hint", "Clean up bonds by distance (requires care -- applies across host and guest):"));
-    var a1row = el("div", "ctl-top"); a1row.appendChild(el("label", null, "element 1"));
-    var a1sel = document.createElement("select"); a1sel.className = "sel"; a1sel.id = "cbA1";
-    a1row.appendChild(a1sel); ec.appendChild(a1row);
-    var a2row = el("div", "ctl-top"); a2row.appendChild(el("label", null, "element 2"));
-    var a2sel = document.createElement("select"); a2sel.className = "sel"; a2sel.id = "cbA2";
-    a2row.appendChild(a2sel); ec.appendChild(a2row);
-    var modeSel = select(ec, "delete bonds", [["outside", "Outside range"], ["inside", "Inside range"]], "outside", function () {});
+    var bondSelInfo = el("div", "readout"); bondSelInfo.id = "bondSelInfo"; bondSelInfo.innerHTML = "<div class='dim'>No bonds selected.</div>"; bondsTab.appendChild(bondSelInfo);
+    var bondRow = el("div", "btnrow");
+    button(bondRow, "Cut selected", "ghost", cutSelectedBonds);
+    button(bondRow, "Undo", "ghost", undoEdit);
+    button(bondRow, "Clear selection", "ghost", clearBondSelection);
+    bondsTab.appendChild(bondRow);
+    var elRow = el("div", "ctl-inline");
+    elRow.appendChild(el("label", "plain", "element 1"));
+    var a1sel = document.createElement("select"); a1sel.className = "sel sel-narrow"; a1sel.id = "cbA1";
+    elRow.appendChild(a1sel);
+    elRow.appendChild(el("label", "plain", "element 2"));
+    var a2sel = document.createElement("select"); a2sel.className = "sel sel-narrow"; a2sel.id = "cbA2";
+    elRow.appendChild(a2sel);
+    bondsTab.appendChild(elRow);
+    var modeSel = select(bondsTab, "delete bonds", [["outside", "Outside range"], ["inside", "Inside range"]], "outside", function () {});
     modeSel.id = "cbMode";
-    var loRow = el("div", "ctl-top"); loRow.appendChild(el("label", null, "lower limit"));
+    var limRow = el("div", "ctl-inline");
+    limRow.appendChild(el("label", "plain", "lower"));
     var loInp = document.createElement("input"); loInp.type = "number"; loInp.className = "num"; loInp.id = "cbLo"; loInp.step = "0.05"; loInp.value = "0.00";
-    loRow.appendChild(loInp); loRow.appendChild(el("span", "unit", U.ang)); ec.appendChild(loRow);
-    var hiRow = el("div", "ctl-top"); hiRow.appendChild(el("label", null, "upper limit"));
+    limRow.appendChild(loInp);
+    limRow.appendChild(el("label", "plain", "upper"));
     var hiInp = document.createElement("input"); hiInp.type = "number"; hiInp.className = "num"; hiInp.id = "cbHi"; hiInp.step = "0.05"; hiInp.value = "1.80";
-    hiRow.appendChild(hiInp); hiRow.appendChild(el("span", "unit", U.ang)); ec.appendChild(hiRow);
+    limRow.appendChild(hiInp);
+    limRow.appendChild(el("span", "unit", U.ang));
+    bondsTab.appendChild(limRow);
     var cbRow = el("div", "btnrow");
     button(cbRow, "Delete matching bonds", "ghost", function () {
       var el1 = document.getElementById("cbA1").value, el2 = document.getElementById("cbA2").value;
@@ -3844,67 +4641,62 @@ select.sel:focus{border-color:var(--accent)}
       cleanupBondsByDistance(el1, el2, lo, hi, mode);
     });
     button(cbRow, "Reinstate all bonds", "ghost", reinstateAllBonds);
-    ec.appendChild(cbRow);
+    bondsTab.appendChild(cbRow);
 
     var pc = section(left, "Probe & cavity");
-    slider(pc, "probe radius", 0.5, 3.0, 0.05, state.probe, U.ang, function (v) { state.probe = v; }, true);
-    var crow = el("div", "btnrow"); button(crow, "Calculate", null, calculate); button(crow, "Remove cavity", "ghost", removeCavity); pc.appendChild(crow);
+    numberOnly(pc, "probe radius", 0.5, 3.0, 0.01, state.probe, U.ang, function (v) { state.probe = v; });
     toggle(pc, "show cavity surface", state.showSurface, function (b) { state.showSurface = b; renderSurface(); });
-    slider(pc, "surface opacity", 0.1, 1.0, 0.05, state.surfaceOpacity, "", function (v) { state.surfaceOpacity = v; renderSurface(); });
+    labelSlider(pc, "surface opacity", 0.1, 1.0, 0.05, state.surfaceOpacity, function (v) { state.surfaceOpacity = v; renderSurface(); });
     var surfSw = colorControl(pc, "surface colour", state.surfaceColor, function (hex) { state.surfaceColor = hex; renderSurface(); persistPreferences(); });
     surfSw.id = "dispSurfaceColor";
-    var rb = el("div"); rb.id = "resultBox"; rb.innerHTML = "<div class='dim'>Run a calculation to measure the cavity.</div>"; pc.appendChild(rb);
+    var rb = el("div"); rb.id = "resultBox"; pc.appendChild(rb);
+    var crow = el("div", "btnrow"); button(crow, "Calculate", null, calculate); button(crow, "Remove cavity", "ghost", removeCavity); pc.appendChild(crow);
 
-    var lc = section(left, "Lighting");
-    var hlTg = toggle(lc, "light follows view", state.lightHeadlight, function (b) { setLightMode(b); persistPreferences(); });
-    hlTg.id = "lightHeadlightTg";
-    var laSl = slider(lc, "light angle", 0, 360, 5, state.lightAngle, "\u00b0", function (v) { setLightAngle(v); persistPreferences(); });
-    laSl.num.id = "lightAngleNum"; laSl.range.id = "lightAngleRange";
-    lc.appendChild(el("div", "hint", "Key light:"));
-    var keyTg = toggle(lc, "on", state.keyEnabled, function (b) { setKeyLight(b, undefined); persistPreferences(); });
-    keyTg.id = "keyEnabledTg";
-    var keySl = slider(lc, "intensity", 0, 1.5, 0.05, state.keyIntensity, "", function (v) { setKeyLight(undefined, v); persistPreferences(); });
-    keySl.num.id = "keyIntensityNum"; keySl.range.id = "keyIntensityRange";
-    lc.appendChild(el("div", "hint", "Fill light:"));
-    var fillTg = toggle(lc, "on", state.fillEnabled, function (b) { setFillLight(b, undefined); persistPreferences(); });
-    fillTg.id = "fillEnabledTg";
-    var fillSl = slider(lc, "intensity", 0, 1.5, 0.05, state.fillIntensity, "", function (v) { setFillLight(undefined, v); persistPreferences(); });
-    fillSl.num.id = "fillIntensityNum"; fillSl.range.id = "fillIntensityRange";
-    lc.appendChild(el("div", "hint", "Rim light:"));
-    var rimTg = toggle(lc, "on", state.rimEnabled, function (b) { setRimLight(b, undefined); persistPreferences(); });
-    rimTg.id = "rimEnabledTg";
-    var rimSl = slider(lc, "intensity", 0, 1.5, 0.05, state.rimIntensity, "", function (v) { setRimLight(undefined, v); persistPreferences(); });
-    rimSl.num.id = "rimIntensityNum"; rimSl.range.id = "rimIntensityRange";
-    var lightSaveTg = toggle(lc, "save these settings", state.saveLighting, function (b) { state.saveLighting = b; persistPreferences(); });
-    lightSaveTg.id = "saveLightingTg";
-    var lightResetRow = el("div", "btnrow"); button(lightResetRow, "Restore lighting defaults", "ghost", resetLightingSettings); lc.appendChild(lightResetRow);
+    var dispC = section(left, "Display");
+    var tabs = tabbedPanel(dispC, ["Scene", "Material", "Lighting"]);
+    var sceneTab = tabs[0], materialTab = tabs[1], lightingTab = tabs[2];
 
-    var mc = section(left, "Material");
-    var roughSl = slider(mc, "atom roughness", 0.0, 1.0, 0.05, state.atomRoughness, "", function (v) { state.atomRoughness = v; updateMaterialAppearance(); persistPreferences(); });
-    roughSl.num.id = "matRoughNum"; roughSl.range.id = "matRoughRange";
-    var metalSl = slider(mc, "atom metalness", 0.0, 1.0, 0.05, state.atomMetalness, "", function (v) { state.atomMetalness = v; updateMaterialAppearance(); persistPreferences(); });
-    metalSl.num.id = "matMetalNum"; metalSl.range.id = "matMetalRange";
-    var reflSl = slider(mc, "reflection strength", 0.0, 2.0, 0.1, state.atomReflectivity, "", function (v) { state.atomReflectivity = v; updateMaterialAppearance(); persistPreferences(); });
-    reflSl.num.id = "matReflNum"; reflSl.range.id = "matReflRange";
-    var matSaveTg = toggle(mc, "save these settings", state.saveMaterial, function (b) { state.saveMaterial = b; persistPreferences(); });
-    matSaveTg.id = "saveMaterialTg";
-    var matResetRow = el("div", "btnrow"); button(matResetRow, "Restore material defaults", "ghost", resetMaterialSettings); mc.appendChild(matResetRow);
-
-    var dc = section(left, "Display");
-    var bgSw = colorControl(dc, "background colour", state.bgColor, function (hex) { state.bgColor = hex; scene.background = new THREE.Color(hex); updateFog(); persistPreferences(); });
+    var bgSw = colorControl(sceneTab, "background colour", state.bgColor, function (hex) { state.bgColor = hex; scene.background = new THREE.Color(hex); updateFog(); renderUnitCell(); persistPreferences(); });
     bgSw.id = "dispBg";
-    var depthTg = toggle(dc, "depth scaling", state.depthScaling, function (b) { state.depthScaling = b; setDepthScaling(b); persistPreferences(); });
-    depthTg.id = "dispDepthScaling";
-    var hdTg = toggle(dc, "high detail spheres & tubes", state.highDetail, function (b) { setHighDetail(b); persistPreferences(); });
+    var hdTg = toggle(sceneTab, "high detail spheres & tubes", state.highDetail, function (b) { setHighDetail(b); persistPreferences(); });
     hdTg.id = "dispHighDetail";
-    var fogTg = toggle(dc, "depth cueing (fog)", state.fogOn, function (b) { state.fogOn = b; updateFog(); persistPreferences(); });
-    fogTg.id = "dispFogOn";
-    var fogSl = slider(dc, "fog amount", 0.005, 0.05, 0.005, state.fogDensity, "", function (v) { state.fogDensity = v; updateFog(); persistPreferences(); });
-    fogSl.num.id = "dispFogNum"; fogSl.range.id = "dispFogRange";
-    slider(dc, "rotation sensitivity", 0.2, 1.0, 0.05, state.rotateSensitivity, "", function (v) { state.rotateSensitivity = v; });
-    var dispSaveTg = toggle(dc, "save these settings", state.saveDisplay, function (b) { state.saveDisplay = b; persistPreferences(); });
+    var depthTg = toggle(sceneTab, "depth scaling", state.depthScaling, function (b) { state.depthScaling = b; setDepthScaling(b); persistPreferences(); });
+    depthTg.id = "dispDepthScaling";
+    var fogCtl = checkboxSlider(sceneTab, "fog", state.fogOn, function (b) { state.fogOn = b; updateFog(); persistPreferences(); },
+      0.005, 0.05, 0.005, state.fogDensity, function (v) { state.fogDensity = v; updateFog(); persistPreferences(); });
+    fogCtl.checkbox.id = "dispFogTg"; fogCtl.range.id = "dispFogRange";
+    var rotSl = labelSlider(sceneTab, "rotation sensitivity", 1, 10, 1, sensPosFromValue(state.rotateSensitivity), function (pos) { state.rotateSensitivity = sensValueFromPos(pos); });
+    rotSl.id = "dispRotSensRange";
+    var dispSaveTg = toggle(sceneTab, "retain these settings", state.saveDisplay, function (b) { state.saveDisplay = b; persistPreferences(); });
     dispSaveTg.id = "saveDisplayTg";
-    var dispResetRow = el("div", "btnrow"); button(dispResetRow, "Restore display defaults", "ghost", resetDisplaySettings); dc.appendChild(dispResetRow);
+    var dispResetRow = el("div", "btnrow resettop"); button(dispResetRow, "Restore Scene defaults", "ghost", resetDisplaySettings); sceneTab.appendChild(dispResetRow);
+
+    var roughSl = labelSlider(materialTab, "atom roughness", 0.0, 1.0, 0.05, state.atomRoughness, function (v) { state.atomRoughness = v; updateMaterialAppearance(); persistPreferences(); });
+    roughSl.id = "matRoughRange";
+    var metalSl = labelSlider(materialTab, "atom metalness", 0.0, 1.0, 0.05, state.atomMetalness, function (v) { state.atomMetalness = v; updateMaterialAppearance(); persistPreferences(); });
+    metalSl.id = "matMetalRange";
+    var reflSl = labelSlider(materialTab, "reflection strength", 0.0, 2.0, 0.1, state.atomReflectivity, function (v) { state.atomReflectivity = v; updateMaterialAppearance(); persistPreferences(); });
+    reflSl.id = "matReflRange";
+    var matSaveTg = toggle(materialTab, "retain these settings", state.saveMaterial, function (b) { state.saveMaterial = b; persistPreferences(); });
+    matSaveTg.id = "saveMaterialTg";
+    var matResetRow = el("div", "btnrow resettop"); button(matResetRow, "Restore Material defaults", "ghost", resetMaterialSettings); materialTab.appendChild(matResetRow);
+
+    var hlTg = toggle(lightingTab, "light follows view", state.lightHeadlight, function (b) { setLightMode(b); persistPreferences(); });
+    hlTg.id = "lightHeadlightTg";
+    var laSl = labelSlider(lightingTab, "light angle", 0, 360, 5, state.lightAngle, function (v) { setLightAngle(v); persistPreferences(); });
+    laSl.id = "lightAngleRange";
+    var keyCtl = checkboxSlider(lightingTab, "key light", state.keyEnabled, function (b) { setKeyLight(b, undefined); persistPreferences(); },
+      0, 1.5, 0.05, state.keyIntensity, function (v) { setKeyLight(undefined, v); persistPreferences(); }, "Intensity");
+    keyCtl.checkbox.id = "keyEnabledTg"; keyCtl.range.id = "keyIntensityRange";
+    var fillCtl = checkboxSlider(lightingTab, "fill light", state.fillEnabled, function (b) { setFillLight(b, undefined); persistPreferences(); },
+      0, 1.5, 0.05, state.fillIntensity, function (v) { setFillLight(undefined, v); persistPreferences(); }, "Intensity");
+    fillCtl.checkbox.id = "fillEnabledTg"; fillCtl.range.id = "fillIntensityRange";
+    var rimCtl = checkboxSlider(lightingTab, "rim light", state.rimEnabled, function (b) { setRimLight(b, undefined); persistPreferences(); },
+      0, 1.5, 0.05, state.rimIntensity, function (v) { setRimLight(undefined, v); persistPreferences(); }, "Intensity");
+    rimCtl.checkbox.id = "rimEnabledTg"; rimCtl.range.id = "rimIntensityRange";
+    var lightSaveTg = toggle(lightingTab, "retain these settings", state.saveLighting, function (b) { state.saveLighting = b; persistPreferences(); });
+    lightSaveTg.id = "saveLightingTg";
+    var lightResetRow = el("div", "btnrow resettop"); button(lightResetRow, "Restore Lighting defaults", "ghost", resetLightingSettings); lightingTab.appendChild(lightResetRow);
 
     var xc = section(left, "Export");
     select(xc, "export resolution", [["1", "Current size"], ["2", "2x"], ["4", "4x"]], "2", function (v) { state.exportScale = parseInt(v, 10); });
@@ -3920,6 +4712,18 @@ select.sel:focus{border-color:var(--accent)}
       var ae = document.activeElement, tag = ae ? ae.tagName : "";
       if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || tag === "BUTTON" || (ae && ae.isContentEditable)) return;
       if (e.code === "Space" || e.key === " ") { e.preventDefault(); toggleSelectAll(); return; }
+      if (e.code === "Delete" || e.code === "Backspace") {
+        e.preventDefault();
+        var c = countSelected();
+        if (c.host + c.guest > 0) deleteSelectedAtoms();
+        else if (Object.keys(state.selectedBonds).length > 0) cutSelectedBonds();
+        return;
+      }
+      if (e.ctrlKey && e.code === "KeyC") {
+        e.preventDefault();
+        generateCentroid();
+        return;
+      }
       var deg = 5 * Math.PI / 180, axis = null, angle = 0;
       if (e.code === "ArrowLeft") { axis = new THREE.Vector3(0, 1, 0); angle = deg; }
       else if (e.code === "ArrowRight") { axis = new THREE.Vector3(0, 1, 0); angle = -deg; }
@@ -3935,7 +4739,7 @@ select.sel:focus{border-color:var(--accent)}
       }
     });
     var input = document.getElementById("pdbInput");
-    input.addEventListener("change", function (e) { var f = e.target.files[0]; if (!f) return; var rd = new FileReader(); rd.onload = function () { loadPDBText(rd.result, f.name); }; rd.readAsText(f); });
+    input.addEventListener("change", function (e) { var f = e.target.files[0]; if (!f) return; var rd = new FileReader(); rd.onload = function () { loadHostFile(rd.result, f.name); }; rd.readAsText(f); });
     var guestInput = document.getElementById("guestPdbInput");
     guestInput.addEventListener("change", function (e) { var f = e.target.files[0]; if (!f) return; var rd = new FileReader(); rd.onload = function () { loadGuestPDBText(rd.result, f.name); }; rd.readAsText(f); });
     var vp = document.getElementById("viewport");
@@ -3947,7 +4751,7 @@ select.sel:focus{border-color:var(--accent)}
       if (item && item.getAsFileSystemHandle) item.getAsFileSystemHandle().then(function (h) { state.lastSourceHandle = h; }).catch(function () {});
       var f = e.dataTransfer.files[0]; if (!f) return;
       var rd = new FileReader();
-      rd.onload = function () { loadPDBText(rd.result, f.name); };
+      rd.onload = function () { loadHostFile(rd.result, f.name); };
       rd.readAsText(f);
     });
     var gbox = document.getElementById("guestDropbox");
@@ -3973,17 +4777,17 @@ select.sel:focus{border-color:var(--accent)}
       "<h2>Guide</h2>" +
       "<h3>View controls</h3>" +
       "<ul>" +
-      "<li><b>Left drag</b> &mdash; rotate. Free rotation about the camera's own axes; there is no limit, and it stops the instant the mouse does. \"Rotation sensitivity\" (Display panel) can slow this down for lining up a precise view -- it only ever slows down, never speeds up past the default, and resets to full speed the next time the file is opened rather than being remembered.</li>" +
+      "<li><b>Left drag</b> &mdash; rotate. Free rotation about the camera's own axes; there is no limit, and it stops the instant the mouse does. \"Rotation sensitivity\" (Display panel, Scene tab) can slow this down for lining up a precise view -- it only ever slows down, never speeds up past the default, and resets to full speed the next time the file is opened rather than being remembered.</li>" +
       "<li><b>Shift + left drag</b> &mdash; roll (rotate in the screen plane), for straightening a figure without changing what you're looking at.</li>" +
       "<li><b>Alt + left drag</b> &mdash; lasso select: draw a freeform outline and every atom projected inside it (host and guest together, whichever are currently shown) is added to the selection.</li>" +
       "<li><b>Ctrl + Alt + left drag</b> &mdash; lasso select whole fragments: the same outline, but each atom it touches brings its entire bonded fragment into the selection, the same rule ctrl-click uses for a single atom.</li>" +
       "<li>Lasso selection works on screen position only, not true depth: an atom behind another one, as long as its projected position falls inside the outline, is selected too, even though it's hidden from view. Rotating to a clearer angle before lassoing avoids surprises in a dense structure.</li>" +
       "<li><b>Right drag, vertical</b> &mdash; zoom (up = in, down = out). The mouse wheel is disabled.</li>" +
-      "<li><b>Arrow keys</b> &mdash; rotate in fixed 5&deg; steps: left/right about the vertical axis, up/down about the horizontal axis. <b>Page Up / Page Down</b> roll in 5&deg; steps. These only respond while focus isn't in a text box, dropdown, or button.</li>" +
+      "<li><b>Arrow keys</b> &mdash; rotate in fixed 5&deg; steps: left/right about the vertical axis, up/down about the horizontal axis. <b>Page Up / Page Down</b> roll in 5&deg; steps. <b>Delete</b> (or Backspace) deletes the selected atoms, or cuts the selected bond(s) if no atoms are selected. These only respond while focus isn't in a text box, dropdown, or button.</li>" +
       "<li><b>Depth scaling</b> (Display panel) &mdash; switches between perspective and orthographic projection. Off is often better for a figure meant for precise alignment or measurement, since distance no longer shrinks apparent size.</li>" +
       "</ul>" +
-      "<h3>Display, Lighting, Material, and Export</h3>" +
-      "<p><b>Display</b> covers background, projection, detail level, and fog; <b>Lighting</b> covers the three light sources; <b>Material</b> covers how atoms respond to that lighting; <b>Export</b> covers everything about producing an image and isn't a look-and-feel setting in the same sense as the other three, so it has no \"save\" box of its own -- export resolution and transparent background are export-time choices, always starting fresh (current size, opaque) each time this file is reopened. Display, Lighting, and Material each have their own \"restore defaults\" button, scoped to just that panel, and its own \"save these settings\" box. With that box checked (the default), the panel's settings are remembered and restored the next time this file is opened, the same way element radii and colours already are. Unchecked, that panel quietly goes back to using the built-in defaults every time the file is opened instead, and whatever was saved for it before is forgotten immediately -- there's no partial memory of it lying around to reappear if the box is checked again later.</p>" +
+      "<h3>Display and Export</h3>" +
+      "<p><b>Display</b> gathers everything about how the scene looks into one panel, split into three tabs: <b>Scene</b> (background, projection, detail level, fog, rotation sensitivity), <b>Material</b> (how atoms respond to light), and <b>Lighting</b> (the three light sources). <b>Export</b> covers producing an image and isn't a look-and-feel setting in the same sense as the other three, so it has no \"retain\" box of its own -- export resolution and transparent background are export-time choices, always starting fresh (current size, opaque) each time this file is reopened. Each of the three Display tabs has its own \"restore defaults\" button, scoped to just that tab, and its own \"retain these settings\" box. With that box checked (the default), the tab's settings are remembered and restored the next time this file is opened, the same way element radii and colours already are. Unchecked, that tab quietly goes back to using the built-in defaults every time the file is opened instead, and whatever was saved for it before is forgotten immediately -- there's no partial memory of it lying around to reappear if the box is checked again later. Several sliders here (fog, rotation sensitivity, material, light angle and intensity) show no number -- the slider position is the control, without a readout to fuss over.</p>" +
       "<p><b>Light follows view</b> is on by default: the lights are attached to the camera, so they always illuminate from the same relative direction no matter how the view is rotated. Turning it off fixes the lights in the scene instead, like a lit room, which can shift shading as you rotate. <b>Light angle</b> spins the whole lighting rig around the view direction (most meaningful with \"light follows view\" on). The key, fill, and rim lights -- the three light sources responsible for the reflections visible on a glossy atom -- each have their own on/off switch and intensity, so any one of them can be turned down or off entirely rather than only scaling all three together.</p>" +
       "<p><b>High detail spheres &amp; tubes</b> swaps in much finer sphere and cylinder tessellation, at some cost to rotation smoothness for large structures -- useful for previewing exactly how a figure will look before exporting. <b>Depth cueing</b> fades distant atoms toward the background colour, which can help read depth in a crowded structure; <b>fog amount</b> controls how aggressively.</p>" +
       "<p>Atoms don't emit any light themselves -- <b>atom roughness</b>, <b>atom metalness</b>, and <b>reflection strength</b> (Material panel) control how they respond to the scene's lighting instead. Lower roughness gives a glossier, more reflective surface; higher metalness moves it from a plastic-like look toward bare metal (useful for a striking cover-art render, less so for a conventional scientific figure); reflection strength scales how much the environment map contributes, which mainly shows up once metalness is raised. If a selected atom's highlight is hard to make out, a glossy, brightly lit atom is usually why -- the highlight itself doesn't respond to lighting at all, but a very bright, reflective atom underneath it can still make thin highlight lines harder to see by contrast.</p>" +
@@ -3991,9 +4795,17 @@ select.sel:focus{border-color:var(--accent)}
       "<p><b>Transparent background</b> drops the background colour (and briefly suspends fog, which would otherwise leave a visible tint) for that one exported frame, then restores both immediately afterward -- normal interactive display is never affected. It applies to both Export image and <b>Copy image to clipboard</b>, which renders the same way but places the PNG directly on the system clipboard for pasting into another document instead of saving a file; transparency survives that route too; wherever it lands, whether it stays transparent from there depends on the receiving application. Clipboard copying needs a recent click to work (this triggers it) and isn't available in every browser -- Export image (PNG) always works as the fallback.</p>" +
       "<h3>Loading structures</h3>" +
       "<ul>" +
-      "<li>Dropping a .pdb onto the 3D view always loads it as the <b>host</b>, clearing anything already there.</li>" +
-      "<li>A <b>guest</b> (e.g. an included gas molecule) is loaded separately, from its own drop box or file picker, and is shown in the figure but never included in the cavity calculation &mdash; only the host atoms are used for that. Each guest file you load is added to the guests already there, rather than replacing them, which is useful for building up a disordered guest from separately-loaded components; atoms from different guest loads are never inferred as bonded to each other, however close they sit. \"Remove all guests\" clears them all so you can start over.</li>" +
+      "<li>Dropping a .pdb onto the 3D view always loads it as the <b>host</b>, clearing anything already there. Dropping a <b>.cif</b> instead starts symmetry mode, described below -- a host loaded this way isn't a fixed set of coordinates but a starting point you build outward from.</li>" +
+      "<li>A <b>guest</b> (e.g. an included gas molecule) is loaded separately, from its own drop box or file picker, and is shown in the figure but never included in the cavity calculation &mdash; only the host atoms are used for that. Each guest file you load is added to the guests already there, rather than replacing them, which is useful for building up a disordered guest from separately-loaded components; atoms from different guest loads are never inferred as bonded to each other, however close they sit. \"Remove all guests\" clears them all so you can start over. Guest loading isn't available yet while a CIF-based host is active.</li>" +
       "</ul>" +
+      "<h3>CIF and symmetry (Symmetry panel)</h3>" +
+      "<p>Dropping a CIF reads the unit cell, the symmetry operators (from the file's own symmetry loop), and the asymmetric unit, then displays just the asymmetric unit -- not a complete molecule -- as the starting point. If the file actually contains more atoms than the true asymmetric unit (Mercury sometimes exports a whole completed molecule this way), the extra symmetry-equivalent copies are automatically detected and removed first, so what's displayed is always just the independent set. An atom sitting exactly on a special position (a mirror plane, an inversion centre, a rotation axis) is never duplicated when a symmetry operation maps it onto itself or onto another copy already present -- this is handled automatically throughout, not something to manage by hand.</p>" +
+      "<p><b>Grow mode</b>, once switched on, changes what a plain click on an atom does: instead of selecting it, it grows the structure from that atom, whether it's a host or a guest atom -- there's no distinction between them for growth. The cursor turns into a crosshair while grow mode is on, as a reminder that clicking will grow rather than select. Two independent choices control how: <b>grow whole asymmetric unit</b> (on by default) adds every atom of the asymmetric unit the newly-found atom belongs to, generated under whatever symmetry operation connects it, rather than just that one atom; switching it off adds only the single connected atom. Separately, <b>grow by sphere of inclusion</b> changes what \"connected\" means -- off (the default), a new atom must be covalently bonded to the one clicked, searched for up to 5 unit cells away in every direction; on, every symmetry-equivalent atom within the given radius of the clicked atom is added regardless of bonding, which is useful for filling out a coordination sphere or a solvent shell that isn't covalently continuous. Either way, with whole asymmetric unit switched on, finding one atom of a unit pulls in the rest of that same unit too, generated under the same symmetry operation. All of this only ever adds atoms; nothing is removed automatically, and everything added this way can be deleted, selected, or undone exactly like any other atom in the app. \"Delete all symmetry-generated atoms\" removes everything growth has added in one step, back to just the original asymmetric unit -- a guest designation on an asymmetric unit atom survives this, only the grown copies are removed.</p>" +
+      "<p>Ctrl-Alt-click selects every currently-displayed atom that shares the same asymmetric unit origin as the one clicked -- every symmetry copy of that specific atom, across host and guest alike -- which is otherwise not something to find by hand once a structure has been grown out. This takes priority over grow mode, so it works the same way whether or not grow mode happens to be switched on.</p>" +
+      "<p>If part of the asymmetric unit has been moved to a guest (e.g. an included CO<sub>2</sub>, moved there via \"move selection to\" in Edit atoms and bonds, the same way as in Mode 1), growth remembers that: every future symmetry-generated copy of that same asymmetric unit atom is added as a guest too, not host, from then on -- joining the same guest component it was already part of, rather than starting a new one each time. Clicking a guest atom in grow mode works exactly like clicking a host atom; there's no distinction between them for growth purposes.</p>" +
+      "<p>The unit cell's colour and line thickness are both adjustable; edges are drawn the same way bonds are (as shaded cylinders, not flat lines), so they respond to lighting rather than looking flat. Its three edges from the origin can optionally be coloured in the deepest possible red/green/blue for a, b, c respectively, following the usual crystallographic convention, instead of the single default colour. The a, b, c edges are always labelled in italic, in whichever of black or white contrasts better with the current background (the same approach the lasso outline uses), so the labels stay readable regardless of colour scheme. All of this is purely visual and has no effect on growth or the cavity calculation.</p>" +
+      "<p><b>Show unit cell</b> draws the cell edges for reference. The Symmetry panel, sitting just below Guest, only appears once a CIF has been loaded -- it stays hidden for ordinary PDB-based hosts, which have no unit cell or symmetry to work with.</p>" +
+      "<p>This first version covers growing by clicking (atom or fragment) and by sphere of inclusion. Growing by a specific chosen symmetry operation or translation, and specifying an explicit packing range, are planned but not yet implemented. Only CIFs with an explicit list of symmetry operators are supported -- one that gives only a space group name or number, with no operator list, is read as P1 (no symmetry) since looking up operators from thousands of possible space group settings isn't implemented.</p>" +
       "<h3>How the cavity volume is calculated</h3>" +
       "<p>The swept (solvent-excluded) volume is computed on a grid at several spacings and extrapolated to zero spacing &mdash; the limit MSRoll reports, and the limit a fixed-resolution grid (such as Mercury's) cannot reach. The &plusmn; value is the extrapolation uncertainty, not an arbitrary error bar. Enclosure is decided by flood-fill connectivity, so only cavities fully enclosed by the host are reported; pockets open to the outside are excluded by design. Structures with more than one enclosed cavity report each one separately as well as the total. Grid spacing and jitter averaging are always fixed at their most precise setting -- there is no accuracy control to adjust.</p>" +
       "<h3>How the cavity surface is rendered</h3>" +
@@ -4007,15 +4819,18 @@ select.sel:focus{border-color:var(--accent)}
       "<h3>Bond thickness</h3>" +
       "<p>Set directly in " + U.ang + " (default 0.12), independently for host and guest, and applies to Stick and Ball &amp; stick only -- Spacefill has no visible bonds. In Stick, the joint spheres are sized to match the bond radius exactly. In Ball &amp; stick, each ball is sized from its own element's van der Waals radius (0.2&times;, or 0.15&times; for hydrogen); if a bond is set thick enough that it would be wider than a small ball (typically a hydrogen), that ball is widened to match the bond so it is never narrower than what feeds into it.</p>" +
       "<h3>Selecting and deleting atoms</h3>" +
-      "<p>Click an atom to select it (shown with a yellow wire highlight); click a selected atom again to deselect it. The modifier keys compose: <b>Shift</b> restricts to atoms of the same element, <b>Ctrl</b> restricts to the clicked atom's bonded fragment, and <b>Alt</b> restricts to the clicked atom's whole component (the host, or one specific guest group) -- \"component\" here means host, guest 1, guest 2, and so on are all counted separately. Ctrl-click selects the whole fragment regardless of element; Alt-click selects the whole component regardless of element; Shift-click selects that element everywhere, host and guest together; Shift+Ctrl-click narrows that down to just that element within the clicked atom's fragment; Shift+Alt-click narrows it to just that element within the clicked atom's component. Ctrl+Alt (with or without Shift) isn't currently defined and does nothing. Every one of these toggles based on whether the clicked atom is currently selected, so clicking the same way again on an already-selected atom deselects the matching set instead. This all works the same way on host and guest atoms. Pressing spacebar, while focus isn't in a text box or other control, selects every atom if none are currently selected, or clears the selection entirely if any are. \"Delete selected atoms\" removes them from whichever layer they belong to -- typically used to build a host generous enough that the probe can't escape, calculate the cavity, then delete the atoms that were only needed to close it off, without touching the cavity itself. Deleting never retroactively changes a cavity you've already calculated; it only affects what's used the next time you press Calculate.</p>" +
+      "<p>Click an atom to select it (shown with a yellow wire highlight); click a selected atom again to deselect it. The modifier keys compose: <b>Shift</b> restricts to atoms of the same element, <b>Ctrl</b> restricts to the clicked atom's bonded fragment, and <b>Alt</b> restricts to the clicked atom's whole component (the host, or one specific guest group) -- \"component\" here means host, guest 1, guest 2, and so on are all counted separately. Ctrl-click selects the whole fragment regardless of element; Alt-click selects the whole component regardless of element; Shift-click selects that element everywhere, host and guest together; Shift+Ctrl-click narrows that down to just that element within the clicked atom's fragment; Shift+Alt-click narrows it to just that element within the clicked atom's component. Ctrl+Alt (with or without Shift) isn't currently defined and does nothing. Every one of these toggles based on whether the clicked atom is currently selected, so clicking the same way again on an already-selected atom deselects the matching set instead. This all works the same way on host and guest atoms. Pressing spacebar, while focus isn't in a text box or other control, selects every atom if none are currently selected, or clears the selection entirely if any are. \"Delete selection\" removes them from whichever layer they belong to -- typically used to build a host generous enough that the probe can't escape, calculate the cavity, then delete the atoms that were only needed to close it off, without touching the cavity itself. Deleting never retroactively changes a cavity you've already calculated; it only affects what's used the next time you press Calculate.</p>" +
       "<h3>Moving atoms between host and guest</h3>" +
-      "<p>A structure can be loaded as a single combined file and split afterwards, instead of always requiring separate host and guest files: select the atoms that belong on the other side, choose a destination from \"move selection to\" (Host, an existing guest component, or \"New guest group\"), and press \"Move selection\". This is exactly the same selection mechanism used for deletion, so the same click and ctrl-click rules apply. A moved atom keeps its radius but takes on its new layer's colour rules, snapshotting whatever the current host or guest default is at the moment it arrives.</p>" +
+      "<p>A structure can be loaded as a single combined file and split afterwards, instead of always requiring separate host and guest files: select the atoms that belong on the other side, choose a destination from \"move selection to\" (Host, an existing guest component, or \"New guest group\"), and press \"Move\". This is exactly the same selection mechanism used for deletion, so the same click and ctrl-click rules apply. A moved atom keeps its radius but takes on its new layer's colour rules, snapshotting whatever the current host or guest default is at the moment it arrives.</p>" +
       "<p>This is also how disordered guests with more than one component are separated when working from a plain PDB (which, unlike a SHELX file, has no PART numbers to do this automatically): select one component's atoms and move them to a new guest group, then repeat for each remaining component. Guest components are listed in the Guest panel with an atom count and their own show/hide checkbox, and \"Select\" there re-selects all of a component's atoms at once -- useful for correcting a mistake by moving atoms out of the wrong group. If deleting or moving atoms empties a component completely, it disappears from the list and the remaining ones are renumbered so there's no gap -- the numbers are just labels and aren't used for anything else, so this has no other effect. Ctrl-click's whole-fragment shortcut can mis-select across two disorder components that happen to sit close together, since that's indistinguishable from a real bond by geometry alone; when that happens, select atom by atom instead.</p>" +
       "<h3>Cutting a bond</h3>" +
-      "<p>Click directly on a bond (rather than an atom) to select it, then \"Cut selected bond\" to sever it. This only ever affects what's drawn and what ctrl-click's fragment selection follows -- the cavity calculation never used bonds and is unaffected. It exists for the one case nothing automatic can fix: two atoms that happen to sit a normal bond-length apart even though they shouldn't be connected (most often two disorder components overlapping), which is otherwise indistinguishable from a real bond. Bonds shorter than a physically reasonable minimum are already excluded automatically and never need cutting.</p>" +
-      "<p>\"Delete matching bonds\" does the same thing in bulk: choose two elements, a distance range, and whether to cut bonds outside or inside that range, and every current bond between an atom of each chosen element (across host and guest together) meeting that criterion is cut in one action. This needs care -- it's easy to remove bonds you meant to keep if the range is too narrow, or miss the ones you meant to cut if it's too wide. \"Undo\" reverses it like any other edit if the result isn't what was intended.</p>" +
+      "<p>Click directly on a bond (rather than an atom) to select it, then \"Cut selected\" to sever it. This only ever affects what's drawn and what ctrl-click's fragment selection follows -- the cavity calculation never used bonds and is unaffected. It exists for the one case nothing automatic can fix: two atoms that happen to sit a normal bond-length apart even though they shouldn't be connected (most often two disorder components overlapping), which is otherwise indistinguishable from a real bond. Bonds shorter than a physically reasonable minimum are already excluded automatically and never need cutting. For a CIF-based structure, cutting a bond also cuts every symmetry-equivalent copy of it -- the same pair of asymmetric unit atoms at exactly the same distance elsewhere in the structure -- rather than just the one instance clicked.</p>" +
+      "<p>\"Delete matching bonds\" does the same thing in bulk: choose two elements (either can be \"Any\" to match regardless of what it's bonded to), a distance range, and whether to cut bonds outside or inside that range, and every current bond between an atom of each chosen element (across host and guest together) meeting that criterion is cut in one action. This needs care -- it's easy to remove bonds you meant to keep if the range is too narrow, or miss the ones you meant to cut if it's too wide. If nothing gets cut, the status message says why: either matching bonds exist but sit outside the range given (showing their actual distance), or no such bond exists at all -- which can happen even when two atoms look close enough, since a minimum realistic bond length is always enforced and anything closer than that is never treated as a bond in the first place, in rendering or in this cleanup, consistently. \"Undo\" reverses a cut like any other edit if the result isn't what was intended.</p>" +
       "<h3>Undo</h3>" +
       "<p>\"Undo\" steps back through moving atoms, deleting atoms, and cutting bonds, in that order, one step at a time. It does not cover loading files or changing element/display settings, which have their own separate reset controls.</p>" +
+      "<h3>Centroids and reassigning elements</h3>" +
+      "<p>Select two or more atoms and \"Generate centroid\" (or Ctrl-C) adds a marker at their average position -- useful as a reference point for measuring or for defining a plane or vector that isn't sitting on a real atom. A centroid always renders as a small white sphere, regardless of the current display style, and doesn't affect the cavity calculation or bonding in any way -- it's a geometric reference, not a real atom. It can be selected, moved between host and guest, and deleted exactly like any other atom. For a CIF-based structure, a centroid becomes part of the asymmetric unit, so it can be grown by symmetry the same way as everything else.</p>" +
+      "<p>\"Reassign element to\" (under \"move selection to\") changes the element of the selected atom(s) to any element in the periodic table, whether or not that element was already present in the structure -- a new one is picked up automatically, with its own colour and radius, the moment it's assigned. Reassigning a centroid turns it into a real atom of that element from then on: it stops being a fixed white marker and starts looking and behaving like any other atom in whichever layer it belongs to.</p>" +
       "<h3>Viewing along a vector or a plane</h3>" +
       "<p>Select exactly two atoms and \"View along vector\" (in Edit atoms and bonds) becomes available, orienting the camera to look straight along the line through them. Select exactly three and \"View perpendicular to plane\" becomes available instead, orienting the camera face-on to the plane they define. Both only ever rotate the view -- they never move the zoom level or what the camera is centred on -- and each is disabled again the moment the selection count isn't exactly right for it.</p>" +
       "<h3>Results panel</h3>" +
