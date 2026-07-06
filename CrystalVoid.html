@@ -3116,6 +3116,7 @@ select.sel:focus{border-color:var(--accent)}
     }
     return out;
   }
+  var centroidHitMat = null;
   function renderMoleculeInto(a, style, scaleMult, bondRadius, atomsGrp, bondsGrp, off, isGuest) {
     if (!a || !a.length || style === "none") return;
     var showSph = (style === "spacefill" || style === "ballstick" || style === "stick");
@@ -3135,6 +3136,21 @@ select.sel:focus{border-color:var(--accent)}
           im.setMatrixAt(i, m);
         }
         im.instanceMatrix.needsUpdate = true; atomsGrp.add(im);
+      }
+      /* a 0.2 A visible sphere is a very small raycasting target at normal
+         zoom -- an invisible, larger sphere at the same position makes a
+         centroid reliably clickable without changing how big it looks */
+      for (i = 0; i < a.length; i++) {
+        if (!a[i].isCentroid) continue;
+        if (!centroidHitMat) centroidHitMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false, depthTest: false });
+        var hitMesh = new THREE.InstancedMesh(sphereGeo, centroidHitMat, 1);
+        var hm = new THREE.Matrix4();
+        hm.makeScale(0.5, 0.5, 0.5);
+        hm.setPosition(a[i].x + off[0], a[i].y + off[1], a[i].z + off[2]);
+        hitMesh.setMatrixAt(0, hm);
+        hitMesh.instanceMatrix.needsUpdate = true;
+        hitMesh.userData.atoms = [a[i]]; hitMesh.userData.isGuest = !!isGuest;
+        atomsGrp.add(hitMesh);
       }
     }
     if (style === "ballstick" || style === "stick") {
@@ -3236,7 +3252,7 @@ select.sel:focus{border-color:var(--accent)}
       if (!atoms) return;
       for (var i = 0; i < atoms.length; i++) {
         var a = atoms[i]; if (!a.selected) continue;
-        var dispR = atomDisplayRadius(style, a.r, a.el, bondRadius, scaleMult);
+        var dispR = a.isCentroid ? 0.2 : atomDisplayRadius(style, a.r, a.el, bondRadius, scaleMult);
         /* mostly a small percentage (~6%), plus a small fixed floor (0.025 A)
            so the margin stays visible on the smallest spheres (e.g. Stick's
            joint caps) without ballooning into a loose halo on large ones */
@@ -4829,7 +4845,7 @@ select.sel:focus{border-color:var(--accent)}
       "<h3>Undo</h3>" +
       "<p>\"Undo\" steps back through moving atoms, deleting atoms, and cutting bonds, in that order, one step at a time. It does not cover loading files or changing element/display settings, which have their own separate reset controls.</p>" +
       "<h3>Centroids and reassigning elements</h3>" +
-      "<p>Select two or more atoms and \"Generate centroid\" (or Ctrl-C) adds a marker at their average position -- useful as a reference point for measuring or for defining a plane or vector that isn't sitting on a real atom. A centroid always renders as a small white sphere, regardless of the current display style, and doesn't affect the cavity calculation or bonding in any way -- it's a geometric reference, not a real atom. It can be selected, moved between host and guest, and deleted exactly like any other atom. For a CIF-based structure, a centroid becomes part of the asymmetric unit, so it can be grown by symmetry the same way as everything else.</p>" +
+      "<p>Select two or more atoms and \"Generate centroid\" (or Ctrl-C) adds a marker at their average position -- useful as a reference point for measuring or for defining a plane or vector that isn't sitting on a real atom. A centroid always renders as a small white sphere (0.2 &Aring; radius), regardless of the current display style, and doesn't affect the cavity calculation or bonding in any way -- it's a geometric reference, not a real atom. Its clickable area is a bit larger than it looks, since a sphere that small would otherwise be hard to hit precisely; this doesn't change how big it appears. It can be selected, moved between host and guest, and deleted exactly like any other atom. For a CIF-based structure, a centroid becomes part of the asymmetric unit, so it can be grown by symmetry the same way as everything else.</p>" +
       "<p>\"Reassign element to\" (under \"move selection to\") changes the element of the selected atom(s) to any element in the periodic table, whether or not that element was already present in the structure -- a new one is picked up automatically, with its own colour and radius, the moment it's assigned. Reassigning a centroid turns it into a real atom of that element from then on: it stops being a fixed white marker and starts looking and behaving like any other atom in whichever layer it belongs to.</p>" +
       "<h3>Viewing along a vector or a plane</h3>" +
       "<p>Select exactly two atoms and \"View along vector\" (in Edit atoms and bonds) becomes available, orienting the camera to look straight along the line through them. Select exactly three and \"View perpendicular to plane\" becomes available instead, orienting the camera face-on to the plane they define. Both only ever rotate the view -- they never move the zoom level or what the camera is centred on -- and each is disabled again the moment the selection count isn't exactly right for it.</p>" +
