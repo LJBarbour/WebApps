@@ -2714,7 +2714,7 @@ select.sel:focus{border-color:var(--accent)}
     depthScaling: false, bgColor: 0xe9edf2,
     lightHeadlight: true, lightAngle: 0,
     keyEnabled: true, keyIntensity: 0.95, fillEnabled: true, fillIntensity: 0.40, rimEnabled: true, rimIntensity: 0.35,
-    highDetail: false, fogOn: false, fogDensity: 0.018, exportScale: 2, rotateSensitivity: 1.0,
+    highDetail: false, fogOn: false, fogDensity: 0.8, exportScale: 2, rotateSensitivity: 1.0,
     lastSourceHandle: null, exportTransparent: false,
     isCif: false, cifCell: null, cifSymops: null, cifAsymUnit: null, cifFracToCart: null,
     showUnitCell: true, growMode: false, growByAtom: false, growBySphere: false, sphereRadius: 4.0,
@@ -2778,6 +2778,7 @@ select.sel:focus{border-color:var(--accent)}
     camera.position.copy(pos); camera.quaternion.copy(camOrient);
     if (orthoCam) { orthoCam.position.copy(pos); orthoCam.quaternion.copy(camOrient); }
     updateOrthoFrustum();
+    if (state.fogOn) updateFog();
   }
   function setViewDirection(v) {
     /* reorients the camera to look along world-space direction v, without
@@ -2954,7 +2955,16 @@ select.sel:focus{border-color:var(--accent)}
     rimLight.intensity = state.rimEnabled ? state.rimIntensity : 0;
   }
   function updateFog() {
-    scene.fog = state.fogOn ? new THREE.FogExp2(state.bgColor, state.fogDensity) : null;
+    /* state.fogDensity is a dimensionless "amount", not the raw THREE.FogExp2
+       density -- that parameter is applied per unit distance, so a fixed
+       value is devastating for a large structure (viewed from far away) and
+       barely noticeable for a small one (viewed up close). Dividing by the
+       current camera distance keeps the visual effect -- roughly, visibility
+       fraction exp(-amount^2) at the structure itself -- consistent no
+       matter how big the structure is or how zoomed in the view currently
+       is. Recomputed on every camera move (see applyController) so zooming
+       in or out doesn't suddenly intensify or relax the fog. */
+    scene.fog = state.fogOn ? new THREE.FogExp2(state.bgColor, state.fogDensity / Math.max(camDist, 1)) : null;
   }
   function renderExportBlob(callback) {
     var vp = document.getElementById("viewport"); if (!vp) { callback(null); return; }
@@ -3060,7 +3070,7 @@ select.sel:focus{border-color:var(--accent)}
   function sensValueFromPos(p) { return 0.2 + (p - 1) / 9 * 0.8; }
   var DISPLAY_DEFAULTS = {
     bgColor: 0xe9edf2, surfaceColor: 0x4A6FA5, depthScaling: false, highDetail: false,
-    fogOn: false, fogDensity: 0.018, lightHeadlight: true, lightAngle: 0,
+    fogOn: false, fogDensity: 0.8, lightHeadlight: true, lightAngle: 0,
     keyEnabled: true, keyIntensity: 0.95, fillEnabled: true, fillIntensity: 0.40, rimEnabled: true, rimIntensity: 0.35,
     atomRoughness: 0.42, atomMetalness: 0.15, atomReflectivity: 0.9
   };
@@ -3100,6 +3110,11 @@ select.sel:focus{border-color:var(--accent)}
     syncDisplayControlsUI();
     persistPreferences();
     setStatus("Lighting settings restored to defaults.", false);
+  }
+  function resetAllVisualSettings() {
+    resetDisplaySettings(); resetLightingSettings(); resetMaterialSettings(); restoreElementDefaults();
+    persistPreferences();
+    setStatus("All display, lighting, material, and element settings restored to defaults.", false);
   }
   function resetMaterialSettings() {
     var d = DISPLAY_DEFAULTS;
@@ -4411,6 +4426,7 @@ select.sel:focus{border-color:var(--accent)}
     } catch (e) { /* localStorage unavailable or full -- settings just won't persist this session */ }
   }
   function loadPersistedPreferences() {
+    function clamp(v, lo, hi, fallback) { return (typeof v === "number" && isFinite(v)) ? Math.max(lo, Math.min(hi, v)) : fallback; }
     try {
       var raw = localStorage.getItem(SETTINGS_KEY); if (!raw) return false;
       var data = JSON.parse(raw); if (!data) return false;
@@ -4424,18 +4440,24 @@ select.sel:focus{border-color:var(--accent)}
       if (typeof data.depthScaling === "boolean") state.depthScaling = data.depthScaling;
       if (typeof data.highDetail === "boolean") state.highDetail = data.highDetail;
       if (typeof data.fogOn === "boolean") state.fogOn = data.fogOn;
-      if (typeof data.fogDensity === "number") state.fogDensity = data.fogDensity;
+      if (data.hasOwnProperty("fogDensity")) state.fogDensity = clamp(data.fogDensity, 0, 2.5, state.fogDensity);
       if (typeof data.lightHeadlight === "boolean") state.lightHeadlight = data.lightHeadlight;
-      if (typeof data.lightAngle === "number") state.lightAngle = data.lightAngle;
+      if (data.hasOwnProperty("lightAngle")) state.lightAngle = clamp(data.lightAngle, 0, 360, state.lightAngle);
       if (typeof data.keyEnabled === "boolean") state.keyEnabled = data.keyEnabled;
-      if (typeof data.keyIntensity === "number") state.keyIntensity = data.keyIntensity;
+      if (data.hasOwnProperty("keyIntensity")) state.keyIntensity = clamp(data.keyIntensity, 0, 1.5, state.keyIntensity);
       if (typeof data.fillEnabled === "boolean") state.fillEnabled = data.fillEnabled;
-      if (typeof data.fillIntensity === "number") state.fillIntensity = data.fillIntensity;
+      if (data.hasOwnProperty("fillIntensity")) state.fillIntensity = clamp(data.fillIntensity, 0, 1.5, state.fillIntensity);
       if (typeof data.rimEnabled === "boolean") state.rimEnabled = data.rimEnabled;
-      if (typeof data.rimIntensity === "number") state.rimIntensity = data.rimIntensity;
-      if (typeof data.atomRoughness === "number") state.atomRoughness = data.atomRoughness;
-      if (typeof data.atomMetalness === "number") state.atomMetalness = data.atomMetalness;
-      if (typeof data.atomReflectivity === "number") state.atomReflectivity = data.atomReflectivity;
+      if (data.hasOwnProperty("rimIntensity")) state.rimIntensity = clamp(data.rimIntensity, 0, 1.5, state.rimIntensity);
+      if (data.hasOwnProperty("atomRoughness")) state.atomRoughness = clamp(data.atomRoughness, 0, 1, state.atomRoughness);
+      if (data.hasOwnProperty("atomMetalness")) state.atomMetalness = clamp(data.atomMetalness, 0, 0.9, state.atomMetalness);
+      if (data.hasOwnProperty("atomReflectivity")) state.atomReflectivity = clamp(data.atomReflectivity, 0, 2, state.atomReflectivity);
+      /* every light effectively off would leave only the fixed 0.6-intensity
+         hemisphere light -- not literally invisible, but dim enough on some
+         monitors to look like nothing loaded. Force at least one real light
+         source back on rather than let a fully-dark rig persist silently. */
+      var anyLight = (state.keyEnabled && state.keyIntensity > 0.02) || (state.fillEnabled && state.fillIntensity > 0.02) || (state.rimEnabled && state.rimIntensity > 0.02);
+      if (!anyLight) { state.keyEnabled = true; state.keyIntensity = Math.max(state.keyIntensity, 0.9); }
       return true;
     } catch (e) { return false; /* corrupted entry -- fall back to built-in defaults */ }
   }
@@ -4910,6 +4932,10 @@ select.sel:focus{border-color:var(--accent)}
     var crow = el("div", "btnrow"); button(crow, "Calculate", null, calculate); button(crow, "Remove cavity", "ghost", removeCavity); pc.appendChild(crow);
 
     var dispC = section(left, "Visual Effects");
+    var resetAllRow = el("div", "btnrow");
+    button(resetAllRow, "Reset all visual settings", "ghost", resetAllVisualSettings);
+    dispC.appendChild(resetAllRow);
+    dispC.appendChild(el("div", "hint", "If a structure ever loads but nothing appears, this is the fastest way to rule out a display, lighting, or material setting as the cause."));
     var tabs = tabbedPanel(dispC, ["Scene", "Material", "Lighting"]);
     var sceneTab = tabs[0], materialTab = tabs[1], lightingTab = tabs[2];
 
@@ -4920,7 +4946,7 @@ select.sel:focus{border-color:var(--accent)}
     var depthTg = toggle(sceneTab, "depth scaling", state.depthScaling, function (b) { state.depthScaling = b; setDepthScaling(b); persistPreferences(); });
     depthTg.id = "dispDepthScaling";
     var fogCtl = checkboxSlider(sceneTab, "fog", state.fogOn, function (b) { state.fogOn = b; updateFog(); persistPreferences(); },
-      0.005, 0.05, 0.005, state.fogDensity, function (v) { state.fogDensity = v; updateFog(); persistPreferences(); });
+      0, 2.5, 0.05, state.fogDensity, function (v) { state.fogDensity = v; updateFog(); persistPreferences(); });
     fogCtl.checkbox.id = "dispFogTg"; fogCtl.range.id = "dispFogRange";
     var rotSl = labelSlider(sceneTab, "rotation sensitivity", 1, 10, 1, sensPosFromValue(state.rotateSensitivity), function (pos) { state.rotateSensitivity = sensValueFromPos(pos); });
     rotSl.id = "dispRotSensRange";
