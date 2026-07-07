@@ -133,6 +133,8 @@ select.sel.sel-narrow{min-width:50px}
 .divider{border:none;border-top:1px solid var(--border);margin:2px 0}
 select.sel:focus{border-color:var(--accent)}
 .toggle{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--ink-mid);cursor:pointer}
+.radio{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink-mid);cursor:pointer;flex-shrink:0}
+.btn.prominent{width:100%;padding:10px 12px;font-size:12px;font-weight:600;letter-spacing:.2px}
 .toggle input{accent-color:var(--accent);width:13px;height:13px;cursor:pointer}
 .rrow{display:flex;justify-content:space-between;align-items:baseline;gap:10px;
   font-family:var(--mono);font-size:12px;padding:2px 0}
@@ -2125,14 +2127,26 @@ select.sel:focus{border-color:var(--accent)}
      extrapolate to h->0. Enclosure at the fine level uses a fresh flood-fill (thin
      channels the coarse grid cannot resolve are retained); voxels that map to a
      DIFFERENT significant coarse cavity are rejected to avoid double counting. */
-  /* Merge coarse components whose (margin-expanded) bounding boxes are close,
-     i.e. within one probe-scale gap of each other. A cavity that is a tight fit
-     for the probe can be split by the coarse grid into several small disconnected
-     fragments (it cannot resolve the probe-scale neck between them); those
-     fragments are almost certainly one true cavity and must be integrated as a
-     single region, not summed separately (which double-counts the shared dilated
-     volume) or discarded individually (each fragment's raw volume alone can look
-     negligible even though the true swept cavity is not). */
+  /* A cavity that is a tight fit for the probe can be split by the coarse grid
+     into several small disconnected fragments (it cannot resolve the probe-scale
+     neck between them); those fragments are almost certainly one true cavity and
+     must be integrated as a single region, not summed separately (which double-
+     counts the shared dilated volume) or discarded individually (each fragment's
+     raw volume alone can look negligible even though the true swept cavity is
+     not). Whether two fragments are really one cavity is a question of whether
+     the probe can physically pass between them -- not how far apart their coarse
+     bounding boxes happen to be. A fixed distance threshold cannot answer this:
+     the true gap between fragments of a single tight-necked cavity grows sharply
+     and non-linearly as the probe size crosses the real aperture threshold, so
+     any fixed multiple of the probe radius is guaranteed to fail for some probe
+     size near that threshold. This tests connectivity directly instead, with a
+     real flood-fill between the two regions at a resolution fine enough to
+     answer the question, repeated over several grid phases: an aperture the
+     probe can pass through can occasionally still appear sealed at one unlucky
+     phase (the same voxel-quantization effect that motivated best-of-N in the
+     integration loop below), but a genuinely sealed aperture essentially never
+     appears open by chance, so majority vote across phases is robust to the
+     former without being fooled by the latter. */
   function boxesClose(a, b, m) {
     for (var d = 0; d < 3; d++) {
       var gap = Math.max(0, Math.max(b.bmin[d] - a.bmax[d], a.bmin[d] - b.bmax[d]));
@@ -2140,20 +2154,69 @@ select.sel:focus{border-color:var(--accent)}
     }
     return true;
   }
-  function mergeCavities(list, margin) {
+  function regionsConnected(atoms, probe, boxA, boxB, h, samples) {
+    var pad = probe + 0.6;
+    var fmin = [Math.min(boxA.bmin[0], boxB.bmin[0]) - pad, Math.min(boxA.bmin[1], boxB.bmin[1]) - pad, Math.min(boxA.bmin[2], boxB.bmin[2]) - pad];
+    var fmax = [Math.max(boxA.bmax[0], boxB.bmax[0]) + pad, Math.max(boxA.bmax[1], boxB.bmax[1]) + pad, Math.max(boxA.bmax[2], boxB.bmax[2]) + pad];
+    var centA = [(boxA.bmin[0] + boxA.bmax[0]) / 2, (boxA.bmin[1] + boxA.bmax[1]) / 2, (boxA.bmin[2] + boxA.bmax[2]) / 2];
+    var centB = [(boxB.bmin[0] + boxB.bmax[0]) / 2, (boxB.bmin[1] + boxB.bmax[1]) / 2, (boxB.bmin[2] + boxB.bmax[2]) / 2];
+    var hits = 0, valid = 0;
+    for (var s = 0; s < samples; s++) {
+      var origin = [fmin[0] - Math.random() * h, fmin[1] - Math.random() * h, fmin[2] - Math.random() * h];
+      var nx = Math.ceil((fmax[0] - origin[0]) / h) + 1, ny = Math.ceil((fmax[1] - origin[1]) / h) + 1, nz = Math.ceil((fmax[2] - origin[2]) / h) + 1;
+      var fm = stampMasks(atoms, probe, origin, h, nx, ny, nz, false), fext = floodExterior(fm.notFree, nx, ny, nz);
+      function idx(x, y, z) { return (z * ny + y) * nx + x; }
+      function nearestFree(p) {
+        var g = [Math.round((p[0] - origin[0]) / h), Math.round((p[1] - origin[1]) / h), Math.round((p[2] - origin[2]) / h)];
+        var seen = {}, q = [g], key0 = g.join(","), iter = 0; seen[key0] = true;
+        while (q.length && iter < 20000) {
+          iter++;
+          var c = q.shift();
+          if (c[0] < 0 || c[1] < 0 || c[2] < 0 || c[0] >= nx || c[1] >= ny || c[2] >= nz) continue;
+          var id = idx(c[0], c[1], c[2]);
+          if (!fm.notFree[id] && !fext[id]) return id;
+          var nb = [[c[0] - 1, c[1], c[2]], [c[0] + 1, c[1], c[2]], [c[0], c[1] - 1, c[2]], [c[0], c[1] + 1, c[2]], [c[0], c[1], c[2] - 1], [c[0], c[1], c[2] + 1]];
+          for (var k = 0; k < 6; k++) { var key = nb[k].join(","); if (!seen[key]) { seen[key] = true; q.push(nb[k]); } }
+        }
+        return -1;
+      }
+      var startA = nearestFree(centA), startB = nearestFree(centB);
+      if (startA < 0 || startB < 0) continue;
+      valid++;
+      var visited = new Uint8Array(nx * ny * nz), stack = [startA]; visited[startA] = 1;
+      var found = false;
+      while (stack.length) {
+        var cur = stack.pop();
+        if (cur === startB) { found = true; break; }
+        var z = (cur / (nx * ny)) | 0, r = cur - z * nx * ny, y = (r / nx) | 0, x = r - y * nx;
+        var nb2 = [[x - 1, y, z], [x + 1, y, z], [x, y - 1, z], [x, y + 1, z], [x, y, z - 1], [x, y, z + 1]];
+        for (var k2 = 0; k2 < 6; k2++) {
+          var b2 = nb2[k2];
+          if (b2[0] < 0 || b2[1] < 0 || b2[2] < 0 || b2[0] >= nx || b2[1] >= ny || b2[2] >= nz) continue;
+          var nid = idx(b2[0], b2[1], b2[2]);
+          if (visited[nid] || fm.notFree[nid] || fext[nid]) continue;
+          visited[nid] = 1; stack.push(nid);
+        }
+      }
+      if (found) hits++;
+    }
+    return valid > 0 && hits / valid >= 0.5;
+  }
+  function mergeCavities(atoms, probe, list) {
     var groups = [], i;
     for (i = 0; i < list.length; i++) groups.push({ ids: [list[i].id], coarseVac: list[i].coarseVac, bmin: list[i].bmin.slice(), bmax: list[i].bmax.slice() });
+    var candidateMargin = probe * 4, testH = 0.084375, testSamples = 5;
     var changed = true;
     while (changed) {
       changed = false;
       merge: for (var a = 0; a < groups.length; a++) {
         for (var b = a + 1; b < groups.length; b++) {
-          if (boxesClose(groups[a], groups[b], margin)) {
-            var ga = groups[a], gb = groups[b];
-            ga.ids = ga.ids.concat(gb.ids); ga.coarseVac += gb.coarseVac;
-            for (var d = 0; d < 3; d++) { ga.bmin[d] = Math.min(ga.bmin[d], gb.bmin[d]); ga.bmax[d] = Math.max(ga.bmax[d], gb.bmax[d]); }
-            groups.splice(b, 1); changed = true; break merge;
-          }
+          if (!boxesClose(groups[a], groups[b], candidateMargin)) continue;
+          if (!regionsConnected(atoms, probe, groups[a], groups[b], testH, testSamples)) continue;
+          var ga = groups[a], gb = groups[b];
+          ga.ids = ga.ids.concat(gb.ids); ga.coarseVac += gb.coarseVac;
+          for (var d = 0; d < 3; d++) { ga.bmin[d] = Math.min(ga.bmin[d], gb.bmin[d]); ga.bmax[d] = Math.max(ga.bmax[d], gb.bmax[d]); }
+          groups.splice(b, 1); changed = true; break merge;
         }
       }
     }
@@ -2162,17 +2225,20 @@ select.sel:focus{border-color:var(--accent)}
   }
   function gridVolume(atoms, probe, opts, onprogress) {
     opts = opts || {};
-    var hs = opts.spacings || [0.20, 0.15, 0.1125, 0.084375], jit = opts.jitter || 5;
-    /* minCavity is deliberately small: for a cavity that is a snug fit for the
-       probe, the raw (undilated) coarse volume can be a tiny fraction of the
-       true swept volume MSRoll reports, so filtering hard on it discards real
-       cavities. It exists only to drop single/few-voxel grid-quantization
-       artifacts, not to judge whether a cavity is "big enough" to matter. */
-    var minCav = opts.hasOwnProperty("minCavity") ? opts.minCavity : 0.05;
-    var mergeMargin = opts.mergeMargin || probe;
-    var L = labelCavities(atoms, probe, opts.coarse || 0.30);
+    var hs = opts.spacings || [0.20, 0.15, 0.1125, 0.084375], jit = opts.jitter || 9;
+    var hc = opts.coarse || 0.30;
+    /* deliberately small: for a cavity that is a snug fit for the probe, the
+       raw (undilated) coarse volume can be a tiny fraction of the true swept
+       volume MSRoll reports, so filtering hard on it discards real cavities.
+       Scaled from the coarse voxel size (not a bare constant) so it reliably
+       drops single/double-voxel grid-quantization artifacts -- a stray
+       "cavity" of one or two coarse voxels is never a real feature, but a
+       fixed absolute threshold can sit right at that boundary and let one
+       through, which then integrates to a spurious zero-volume "cavity". */
+    var minCav = opts.hasOwnProperty("minCavity") ? opts.minCavity : 8 * hc * hc * hc;
+    var L = labelCavities(atoms, probe, hc);
     var lab = L.lab, cmn = L.mn, chc = L.hc, cnx = L.nx, cny = L.ny, cnz = L.nz;
-    var groups = mergeCavities(L.list, mergeMargin), i;
+    var groups = mergeCavities(atoms, probe, L.list), i;
     var sig = []; for (i = 0; i < groups.length; i++) if (groups[i].coarseVac >= minCav) sig.push(groups[i]);
     if (sig.length === 0) return { Vswept: 0, seSwept: 0, Vac: 0, seAc: 0, hasCavity: false, cavities: [] };
     var otherId = {}; for (i = 0; i < sig.length; i++) for (var k = 0; k < sig[i].ids.length; k++) otherId[sig[i].ids[k]] = i;
@@ -2187,7 +2253,7 @@ select.sel:focus{border-color:var(--accent)}
       var fmin = [grp.bmin[0] - mf, grp.bmin[1] - mf, grp.bmin[2] - mf], fmax = [grp.bmax[0] + mf, grp.bmax[1] + mf, grp.bmax[2] + mf];
       var pts = [];
       for (var hi = 0; hi < hs.length; hi++) {
-        var h = hs[hi], accSw = 0, accAc = 0;
+        var h = hs[hi], bestSw = -1, bestAc = 0;
         for (var j = 0; j < jit; j++) {
           var origin = [fmin[0] - Math.random() * h, fmin[1] - Math.random() * h, fmin[2] - Math.random() * h];
           var nx = Math.ceil((fmax[0] - origin[0]) / h) + 1, ny = Math.ceil((fmax[1] - origin[1]) / h) + 1, nz = Math.ceil((fmax[2] - origin[2]) / h) + 1;
@@ -2201,10 +2267,11 @@ select.sel:focus{border-color:var(--accent)}
           }
           var d2 = edt3d(enc, nx, ny, nz), pr2 = (probe / h) * (probe / h), nsw = 0;
           for (kk = 0; kk < N2; kk++) { if (fm.inAt[kk]) continue; if (d2[kk] <= pr2) nsw++; }
-          accSw += nsw * h * h * h; accAc += nac * h * h * h;
+          var sw = nsw * h * h * h, ac = nac * h * h * h;
+          if (sw > bestSw) { bestSw = sw; bestAc = ac; }
           done++; if (onprogress && (done % 2 === 0)) onprogress("integrating", done / work);
         }
-        pts.push([h, accSw / jit, accAc / jit]);
+        pts.push([h, bestSw, bestAc]);
       }
       var fv = linFit(pts, 1), fa = linFit(pts, 2);
       var centroid = [(grp.bmin[0] + grp.bmax[0]) / 2, (grp.bmin[1] + grp.bmax[1]) / 2, (grp.bmin[2] + grp.bmax[2]) / 2];
@@ -2294,11 +2361,11 @@ select.sel:focus{border-color:var(--accent)}
   function cavityMesh(atoms, probe, opts) {
     opts = opts || {};
     var h = opts.spacing || 0.18;
-    var minCav = opts.hasOwnProperty("minCavity") ? opts.minCavity : 0.05;
-    var mergeMargin = opts.mergeMargin || probe;
+    var hc = opts.coarse || 0.30;
+    var minCav = opts.hasOwnProperty("minCavity") ? opts.minCavity : 8 * hc * hc * hc;
     var MAXPTS = opts.maxGridPoints || 6000000;
-    var L = labelCavities(atoms, probe, opts.coarse || 0.30);
-    var groups = mergeCavities(L.list, mergeMargin), i;
+    var L = labelCavities(atoms, probe, hc);
+    var groups = mergeCavities(atoms, probe, L.list), i;
     var sig = []; for (i = 0; i < groups.length; i++) if (groups[i].coarseVac >= minCav) sig.push(groups[i]);
     if (sig.length === 0) return { positions: new Float32Array(0), normals: new Float32Array(0), count: 0, area: 0, hasCavity: false };
     var allPos = [], allNorm = [], totalArea = 0;
@@ -2651,7 +2718,7 @@ select.sel:focus{border-color:var(--accent)}
     lastSourceHandle: null, exportTransparent: false,
     isCif: false, cifCell: null, cifSymops: null, cifAsymUnit: null, cifFracToCart: null,
     showUnitCell: true, growMode: false, growByAtom: false, growBySphere: false, sphereRadius: 4.0,
-    unitCellColor: 0x8a7a5c, unitCellThickness: 0.04, unitCellAxisColors: false,
+    unitCellColor: 0x8a7a5c, unitCellThickness: 0.04, unitCellAxisColors: true, showOnlyAsu: false, symmetryForgotten: false,
     saveDisplay: true, saveLighting: true, saveMaterial: true,
     atomRoughness: 0.42, atomMetalness: 0.15, atomReflectivity: 0.9,
     guestAtoms: null, guestName: "", guestStyle: "spacefill", guestScale: 1.0, guestBatch: 0, showGuest: true,
@@ -3061,12 +3128,16 @@ select.sel:focus{border-color:var(--accent)}
     if (!any) return state.guestAtoms;
     return state.guestAtoms.filter(function (a) { return !hidden[a.batch]; });
   }
+  function asuFilter(atoms) {
+    if (!state.isCif || !state.showOnlyAsu || !atoms) return atoms;
+    return atoms.filter(function (a) { return a.opIndex === 0 && a.cellI === 0 && a.cellJ === 0 && a.cellK === 0; });
+  }
   function renderStructure() {
     clearGroup(atomsGroup); clearGroup(bondsGroup); clearGroup(guestAtomsGroup); clearGroup(guestBondsGroup);
     if (!sphereGeo) sphereGeo = new THREE.SphereGeometry(1, state.highDetail ? 48 : 20, state.highDetail ? 36 : 16);
     var off = centroid(); /* host-based offset, applied to guest too so their relative geometry stays correct */
-    if (state.showHost) renderMoleculeInto(state.atoms, state.style, state.atomScale, state.hostBondRadius, atomsGroup, bondsGroup, off, false);
-    if (state.showGuest) renderMoleculeInto(visibleGuestAtoms(), state.guestStyle, state.guestScale, state.guestBondRadius, guestAtomsGroup, guestBondsGroup, off, true);
+    if (state.showHost) renderMoleculeInto(asuFilter(state.atoms), state.style, state.atomScale, state.hostBondRadius, atomsGroup, bondsGroup, off, false);
+    if (state.showGuest) renderMoleculeInto(asuFilter(visibleGuestAtoms()), state.guestStyle, state.guestScale, state.guestBondRadius, guestAtomsGroup, guestBondsGroup, off, true);
     renderSelection();
   }
   function atomDisplayRadius(style, r, elem, bondRadius, scaleMult) {
@@ -3271,8 +3342,8 @@ select.sel:focus{border-color:var(--accent)}
         selectionGroup.add(mesh);
       }
     }
-    if (state.showHost) addHighlights(state.atoms, state.style, state.atomScale, state.hostBondRadius);
-    if (state.showGuest) addHighlights(visibleGuestAtoms(), state.guestStyle, state.guestScale, state.guestBondRadius);
+    if (state.showHost) addHighlights(asuFilter(state.atoms), state.style, state.atomScale, state.hostBondRadius);
+    if (state.showGuest) addHighlights(asuFilter(visibleGuestAtoms()), state.guestStyle, state.guestScale, state.guestBondRadius);
     if (!highlightCylGeo) highlightCylGeo = new THREE.CylinderGeometry(1, 1, 1, 12, 1, true);
     function addBondHighlights(atoms, style, bondRadius) {
       if (!atoms || (style !== "ballstick" && style !== "stick")) return;
@@ -3410,7 +3481,7 @@ select.sel:focus{border-color:var(--accent)}
       else if (state.isCif) setStatus("This atom has no symmetry information to select by.", true);
       return;
     }
-    if (state.isCif && state.growMode) {
+    if (state.isCif && state.growMode && !state.symmetryForgotten) {
       if (state.growBySphere) {
         var r = state.sphereRadius;
         if (!isFinite(r) || r <= 0) { setStatus("Enter a valid sphere radius first.", true); return; }
@@ -3466,7 +3537,7 @@ select.sel:focus{border-color:var(--accent)}
     x /= sel.length; y /= sel.length; z /= sel.length;
     pushUndo();
     var centroid = { el: "Xx", x: x, y: y, z: z, r: 0.2, cr: 0, color: 0xffffff, isCentroid: true, selected: false };
-    if (state.isCif) {
+    if (state.isCif && !state.symmetryForgotten) {
       var fx = 0, fy = 0, fz = 0, allHaveFrac = true;
       for (i = 0; i < sel.length; i++) {
         if (sel[i].fx === undefined) { allHaveFrac = false; break; }
@@ -3489,13 +3560,25 @@ select.sel:focus{border-color:var(--accent)}
   }
   function reassignSelectedElement(newEl) {
     if (!newEl) return;
-    var hostSel = state.atoms ? state.atoms.filter(function (a) { return a.selected; }) : [];
-    var guestSel = state.guestAtoms ? state.guestAtoms.filter(function (a) { return a.selected; }) : [];
-    if (!hostSel.length && !guestSel.length) { setStatus("No atoms selected to reassign.", true); return; }
+    var selected = (state.atoms || []).concat(state.guestAtoms || []).filter(function (a) { return a.selected; });
+    if (!selected.length) { setStatus("No atoms selected to reassign.", true); return; }
     pushUndo();
+    var toReassignUids = {}, cascadeCount = 0;
+    function mark(a) { if (!toReassignUids[a.uid]) { toReassignUids[a.uid] = true; return true; } return false; }
+    selected.forEach(function (a) {
+      mark(a);
+      /* an element is a property of the asymmetric unit position itself, not
+         of one particular symmetry image -- every copy has to match */
+      if (state.isCif && a.auIndex !== undefined) {
+        atomsWithSameAuIndex(a.auIndex).forEach(function (s) { if (mark(s)) cascadeCount++; });
+      }
+    });
+    var hostSel = state.atoms ? state.atoms.filter(function (a) { return toReassignUids[a.uid]; }) : [];
+    var guestSel = state.guestAtoms ? state.guestAtoms.filter(function (a) { return toReassignUids[a.uid]; }) : [];
     function reassign(a) {
       a.el = newEl; a.isCentroid = false; a.selected = false;
       a.cr = K.cov(newEl);
+      if (state.isCif && a.auIndex !== undefined && state.cifAsymUnit[a.auIndex]) state.cifAsymUnit[a.auIndex].el = newEl;
     }
     hostSel.forEach(reassign); guestSel.forEach(reassign);
     applyRadii(hostSel); applyColors(hostSel, state.hostColors);
@@ -3503,7 +3586,8 @@ select.sel:focus{border-color:var(--accent)}
     renderSelection();
     renderStructure(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); refreshBondCleanupElements(); updateSelectionInfo();
     var n = hostSel.length + guestSel.length;
-    setStatus("Reassigned " + n + " atom" + (n === 1 ? "" : "s") + " to " + newEl + ".", false);
+    setStatus("Reassigned " + n + " atom" + (n === 1 ? "" : "s") + " to " + newEl +
+      (cascadeCount ? " (" + cascadeCount + " symmetry-related atom" + (cascadeCount === 1 ? "" : "s") + " updated automatically)" : "") + ".", false);
   }
   function getSelectedAtomObjects() {
     var out = [];
@@ -3583,6 +3667,24 @@ select.sel:focus{border-color:var(--accent)}
    * (opIndex), and which unit cell translation on top of that (cellI/J/K).
    * That triple is what "already displayed" is checked against, so growth
    * never creates a duplicate of an atom already on screen. */
+  function positionOccupied(x, y, z, extraBatch) {
+    var tol2 = 0.0001; /* 0.01 A */
+    function checkArr(arr) {
+      if (!arr) return false;
+      for (var i = 0; i < arr.length; i++) {
+        var dx = arr[i].x - x, dy = arr[i].y - y, dz = arr[i].z - z;
+        if (dx * dx + dy * dy + dz * dz < tol2) return true;
+      }
+      return false;
+    }
+    return checkArr(state.atoms) || checkArr(state.guestAtoms) || checkArr(extraBatch);
+  }
+  function atomsWithSameAuIndex(auIndex) {
+    var out = [];
+    if (state.atoms) for (var i = 0; i < state.atoms.length; i++) if (state.atoms[i].auIndex === auIndex) out.push(state.atoms[i]);
+    if (state.guestAtoms) for (var j = 0; j < state.guestAtoms.length; j++) if (state.guestAtoms[j].auIndex === auIndex) out.push(state.guestAtoms[j]);
+    return out;
+  }
   function existingCifKeySet() {
     var seen = {};
     function scan(arr) {
@@ -3600,8 +3702,11 @@ select.sel:focus{border-color:var(--accent)}
     var f0 = K.applySymop(state.cifSymops[opIndex], [au.fx, au.fy, au.fz]);
     var f = [f0[0] + ci, f0[1] + cj, f0[2] + ck];
     var c = K.fracToCart(state.cifFracToCart, f);
+    var isCentroid = (au.el === "Xx"); /* still an un-reassigned centroid position -- every symmetry image of it must render and behave as a centroid too, until it's reassigned a real element */
     return {
-      el: au.el, x: c[0], y: c[1], z: c[2], r: K.vdw(au.el), cr: K.cov(au.el), color: K.cpk(au.el),
+      el: au.el, x: c[0], y: c[1], z: c[2],
+      r: isCentroid ? 0.2 : K.vdw(au.el), cr: isCentroid ? 0 : K.cov(au.el), color: isCentroid ? 0xffffff : K.cpk(au.el),
+      isCentroid: isCentroid,
       auIndex: auIndex, opIndex: opIndex, cellI: ci, cellJ: cj, cellK: ck, fx: f[0], fy: f[1], fz: f[2]
     };
   }
@@ -3613,6 +3718,7 @@ select.sel:focus{border-color:var(--accent)}
     var existing = existingCifKeySet(), out = [];
     var au = state.cifAsymUnit, symops = state.cifSymops;
     for (var auI = 0; auI < au.length; auI++) {
+      if (au[auI].deleted) continue;
       for (var opI = 0; opI < symops.length; opI++) {
         for (var ci = -cellRange; ci <= cellRange; ci++) for (var cj = -cellRange; cj <= cellRange; cj++) for (var ck = -cellRange; ck <= cellRange; ck++) {
           var key = auI + ":" + opI + ":" + ci + ":" + cj + ":" + ck;
@@ -3628,15 +3734,12 @@ select.sel:focus{border-color:var(--accent)}
       }
     }
     /* two different (auIndex, op, cell) triples occasionally generate the
-       same physical position (special positions) -- keep one */
+       same physical position (special positions) -- keep one. Checked
+       against everything already displayed, not just this batch, since the
+       same duplicate can arise across two separate growth actions */
     var deduped = [];
     for (var i = 0; i < out.length; i++) {
-      var dup = false;
-      for (var j = 0; j < deduped.length; j++) {
-        var a = out[i], b = deduped[j];
-        if (Math.abs(a.x - b.x) < 0.01 && Math.abs(a.y - b.y) < 0.01 && Math.abs(a.z - b.z) < 0.01) { dup = true; break; }
-      }
-      if (!dup) deduped.push(out[i]);
+      if (!positionOccupied(out[i].x, out[i].y, out[i].z, deduped)) deduped.push(out[i]);
     }
     return deduped;
   }
@@ -3650,16 +3753,13 @@ select.sel:focus{border-color:var(--accent)}
       if (seenOpCell[ockey]) continue;
       seenOpCell[ockey] = true;
       for (var auI = 0; auI < state.cifAsymUnit.length; auI++) {
+        if (state.cifAsymUnit[auI].deleted) continue;
         var key = auI + ":" + c.opIndex + ":" + c.cellI + ":" + c.cellJ + ":" + c.cellK;
         if (existing[key]) continue;
         var newAtom = generateSymmetryAtom(auI, c.opIndex, c.cellI, c.cellJ, c.cellK);
-        /* special-position check within this fragment: skip if it lands on
-           top of an atom already added in this same batch */
-        var dup = false;
-        for (var k = 0; k < out.length; k++) {
-          if (Math.abs(out[k].x - newAtom.x) < 0.01 && Math.abs(out[k].y - newAtom.y) < 0.01 && Math.abs(out[k].z - newAtom.z) < 0.01) { dup = true; break; }
-        }
-        if (!dup) { out.push(newAtom); existing[key] = true; }
+        /* special-position check: skip if it lands on top of an atom already
+           displayed, from this same fragment or any earlier growth action */
+        if (!positionOccupied(newAtom.x, newAtom.y, newAtom.z, out)) { out.push(newAtom); existing[key] = true; }
       }
     }
     return out;
@@ -3699,7 +3799,7 @@ select.sel:focus{border-color:var(--accent)}
     return newAtoms.length;
   }
   function deleteSymmetryGeneratedAtoms() {
-    if (!state.isCif) { setStatus("This is only meaningful for a CIF-based structure.", true); return; }
+    if (!state.isCif || state.symmetryForgotten) { setStatus("This is only meaningful for a CIF-based structure that still has its symmetry information.", true); return; }
     var isOriginal = function (a) { return a.opIndex === 0 && a.cellI === 0 && a.cellJ === 0 && a.cellK === 0; };
     var before = (state.atoms ? state.atoms.length : 0) + (state.guestAtoms ? state.guestAtoms.length : 0);
     pushUndo();
@@ -3710,6 +3810,23 @@ select.sel:focus{border-color:var(--accent)}
     renderStructure(); renderUnitCell(); updateHostInfo(); updateGuestInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); buildGuestGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
     var after = (state.atoms ? state.atoms.length : 0) + (state.guestAtoms ? state.guestAtoms.length : 0);
     setStatus("Removed " + (before - after) + " symmetry-generated atom" + ((before - after) === 1 ? "" : "s") + ", back to the original asymmetric unit.", false);
+  }
+  function forgetSymmetry() {
+    if (!state.isCif || state.symmetryForgotten) return;
+    var ok = window.confirm(
+      "This permanently discards this structure's symmetry information. Growth, \"show only asymmetric unit\", and automatic symmetry-linked changes (element, host/guest, and bond edits no longer propagating to related atoms) will no longer be available. Every atom currently present -- asymmetric unit and grown alike -- stays exactly as it is, now editable individually like a PDB-loaded structure. The unit cell display is unaffected.\n\nThis cannot be undone. Continue?"
+    );
+    if (!ok) { setStatus("Forget symmetry cancelled.", false); return; }
+    state.growMode = false;
+    var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = "";
+    state.showOnlyAsu = false;
+    function stripAtom(a) { delete a.auIndex; delete a.opIndex; delete a.cellI; delete a.cellJ; delete a.cellK; delete a.fx; delete a.fy; delete a.fz; }
+    if (state.atoms) state.atoms.forEach(stripAtom);
+    if (state.guestAtoms) state.guestAtoms.forEach(stripAtom);
+    state.cutBondSignatures = {};
+    state.symmetryForgotten = true;
+    renderStructure(); renderUnitCell(); refreshSymmetryUI();
+    setStatus("Symmetry information discarded. Atoms, guests, and bonds can still be edited individually, as with a PDB-loaded structure, but growth and automatic symmetry-linked changes are no longer available. This cannot be undone.", false);
   }
   function growFromSeed(seedAtom) {
     var candidates = findGrowthCandidates(seedAtom);
@@ -3724,7 +3841,9 @@ select.sel:focus{border-color:var(--accent)}
     var minCell = Math.min(state.cifCell.a, state.cifCell.b, state.cifCell.c);
     var cellRange = Math.max(5, Math.ceil(radius / minCell) + 1);
     var existing = existingCifKeySet(), out = [];
-    for (var auI = 0; auI < au.length; auI++) for (var opI = 0; opI < symops.length; opI++)
+    for (var auI = 0; auI < au.length; auI++) {
+      if (au[auI].deleted) continue;
+      for (var opI = 0; opI < symops.length; opI++)
       for (var ci = -cellRange; ci <= cellRange; ci++) for (var cj = -cellRange; cj <= cellRange; cj++) for (var ck = -cellRange; ck <= cellRange; ck++) {
         var key = auI + ":" + opI + ":" + ci + ":" + cj + ":" + ck;
         if (existing[key]) continue;
@@ -3732,14 +3851,10 @@ select.sel:focus{border-color:var(--accent)}
         var dx = cand.x - center[0], dy = cand.y - center[1], dz = cand.z - center[2];
         if (dx * dx + dy * dy + dz * dz <= radius * radius) out.push(cand);
       }
+    }
     var deduped = [];
     for (var i = 0; i < out.length; i++) {
-      var dup = false;
-      for (var j = 0; j < deduped.length; j++) {
-        var a = out[i], b = deduped[j];
-        if (Math.abs(a.x - b.x) < 0.01 && Math.abs(a.y - b.y) < 0.01 && Math.abs(a.z - b.z) < 0.01) { dup = true; break; }
-      }
-      if (!dup) deduped.push(out[i]);
+      if (!positionOccupied(out[i].x, out[i].y, out[i].z, deduped)) deduped.push(out[i]);
     }
     var toAdd = state.growByAtom ? deduped : expandToFragments(deduped);
     var n = commitGrownAtoms(toAdd);
@@ -3799,7 +3914,12 @@ select.sel:focus{border-color:var(--accent)}
   }
   function refreshSymmetryUI() {
     var sec = document.getElementById("symmetrySection");
-    if (sec) sec.style.display = state.isCif ? "" : "none";
+    if (sec) sec.style.display = (state.isCif && !state.symmetryForgotten) ? "" : "none";
+    var dsec = document.getElementById("cifDisplaySection");
+    if (dsec) dsec.style.display = state.isCif ? "" : "none";
+    var asuTg = document.getElementById("showOnlyAsuTg"); if (asuTg) asuTg.disabled = state.symmetryForgotten;
+    var delSymBtn = document.getElementById("deleteSymAtomsBtn"); if (delSymBtn) delSymBtn.disabled = state.symmetryForgotten;
+    var forgetBtn = document.getElementById("forgetSymmetryBtn"); if (forgetBtn) forgetBtn.disabled = state.symmetryForgotten;
     var auInfo = document.getElementById("auInfo");
     if (auInfo && state.isCif) {
       auInfo.innerHTML = "<div>Asymmetric unit: " + state.cifAsymUnit.length + " atom" + (state.cifAsymUnit.length === 1 ? "" : "s") +
@@ -3819,13 +3939,45 @@ select.sel:focus{border-color:var(--accent)}
   function deleteSelectedAtoms() {
     var c = countSelected();
     if (c.host + c.guest === 0) { setStatus("No atoms selected to delete.", true); return; }
+    var selected = (state.atoms || []).concat(state.guestAtoms || []).filter(function (a) { return a.selected; });
+    if (state.isCif) {
+      var canonicalCount = selected.filter(function (a) {
+        return a.auIndex !== undefined && a.opIndex === 0 && a.cellI === 0 && a.cellJ === 0 && a.cellK === 0;
+      }).length;
+      if (canonicalCount > 0) {
+        var ok = window.confirm(
+          "This selection includes " + canonicalCount + " asymmetric unit atom" + (canonicalCount === 1 ? "" : "s") +
+          " (not just a grown copy). Deleting " + (canonicalCount === 1 ? "it" : "them") +
+          " removes " + (canonicalCount === 1 ? "it" : "them") + " from the asymmetric unit entirely, along with every symmetry-related copy of " +
+          (canonicalCount === 1 ? "it" : "them") + " currently displayed.\n\nContinue?"
+        );
+        if (!ok) { setStatus("Deletion cancelled.", false); return; }
+      }
+    }
     pushUndo();
-    if (state.atoms) state.atoms = state.atoms.filter(function (a) { return !a.selected; });
-    if (state.guestAtoms) state.guestAtoms = state.guestAtoms.filter(function (a) { return !a.selected; });
+    var toDeleteUids = {};
+    var cascadeCount = 0;
+    selected.forEach(function (a) {
+      toDeleteUids[a.uid] = true;
+      /* deleting the untransformed (identity, no cell offset) copy of an
+         asymmetric unit atom removes it from the asymmetric unit entirely --
+         every symmetry image of it goes too, and growth will never
+         regenerate it. Deleting a grown copy on its own is just a normal,
+         local edit: the asymmetric unit atom and its other images are
+         untouched, and growing again can still recreate that same image. */
+      if (state.isCif && a.auIndex !== undefined && a.opIndex === 0 && a.cellI === 0 && a.cellJ === 0 && a.cellK === 0) {
+        if (state.cifAsymUnit[a.auIndex]) state.cifAsymUnit[a.auIndex].deleted = true;
+        atomsWithSameAuIndex(a.auIndex).forEach(function (s) { if (!toDeleteUids[s.uid]) { toDeleteUids[s.uid] = true; cascadeCount++; } });
+      }
+    });
+    if (state.atoms) state.atoms = state.atoms.filter(function (a) { return !toDeleteUids[a.uid]; });
+    if (state.guestAtoms) state.guestAtoms = state.guestAtoms.filter(function (a) { return !toDeleteUids[a.uid]; });
     pruneEmptyGuestGroups();
     if (state.isCif) { recomputeViewOffset(); renderUnitCell(); }
     renderStructure(); updateHostInfo(); updateGuestInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); buildGuestGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
-    setStatus("Deleted " + c.host + " host and " + c.guest + " guest atom" + (c.host + c.guest === 1 ? "" : "s") +
+    var total = Object.keys(toDeleteUids).length;
+    setStatus("Deleted " + total + " atom" + (total === 1 ? "" : "s") +
+      (cascadeCount ? " (" + cascadeCount + " removed automatically, since a full asymmetric unit atom was deleted)" : "") +
       ". Any already-calculated cavity is unaffected until you recalculate.", false);
   }
   function parseDest(v) {
@@ -3834,13 +3986,24 @@ select.sel:focus{border-color:var(--accent)}
   }
   function moveSelectionTo(dest) {
     /* dest: "host", an existing guest group id, or "__new__" for a fresh group */
-    var hostSel = state.atoms ? state.atoms.filter(function (a) { return a.selected; }) : [];
-    var guestSel = state.guestAtoms ? state.guestAtoms.filter(function (a) { return a.selected; }) : [];
-    var moved = hostSel.concat(guestSel);
-    if (!moved.length) { setStatus("No atoms selected to move.", true); return; }
+    var selectedNow = (state.atoms || []).concat(state.guestAtoms || []).filter(function (a) { return a.selected; });
+    if (!selectedNow.length) { setStatus("No atoms selected to move.", true); return; }
     pushUndo();
-    if (state.atoms) state.atoms = state.atoms.filter(function (a) { return !a.selected; });
-    if (state.guestAtoms) state.guestAtoms = state.guestAtoms.filter(function (a) { return !a.selected; });
+    var toMoveUids = {}, cascadeCount = 0;
+    function mark(a) { if (!toMoveUids[a.uid]) { toMoveUids[a.uid] = true; return true; } return false; }
+    selectedNow.forEach(function (a) {
+      mark(a);
+      /* host/guest membership is a property of the asymmetric unit position,
+         not of one particular symmetry image -- every copy has to move together */
+      if (state.isCif && a.auIndex !== undefined) {
+        atomsWithSameAuIndex(a.auIndex).forEach(function (s) { if (mark(s)) cascadeCount++; });
+      }
+    });
+    var hostSel = state.atoms ? state.atoms.filter(function (a) { return toMoveUids[a.uid]; }) : [];
+    var guestSel = state.guestAtoms ? state.guestAtoms.filter(function (a) { return toMoveUids[a.uid]; }) : [];
+    var moved = hostSel.concat(guestSel);
+    if (state.atoms) state.atoms = state.atoms.filter(function (a) { return !toMoveUids[a.uid]; });
+    if (state.guestAtoms) state.guestAtoms = state.guestAtoms.filter(function (a) { return !toMoveUids[a.uid]; });
     var i;
     for (i = 0; i < moved.length; i++) moved[i].selected = false;
     if (dest === "host") {
@@ -3857,7 +4020,9 @@ select.sel:focus{border-color:var(--accent)}
     pruneEmptyGuestGroups();
     if (state.isCif) { recomputeViewOffset(); renderUnitCell(); }
     renderStructure(); updateHostInfo(); updateGuestInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); buildGuestGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
-    setStatus("Moved " + moved.length + " atom" + (moved.length === 1 ? "" : "s") + ". Any already-calculated cavity is unaffected until you recalculate.", false);
+    setStatus("Moved " + moved.length + " atom" + (moved.length === 1 ? "" : "s") +
+      (cascadeCount ? " (" + cascadeCount + " symmetry-related atom" + (cascadeCount === 1 ? "" : "s") + " moved automatically)" : "") +
+      ". Any already-calculated cavity is unaffected until you recalculate.", false);
   }
   function cutSelectedBonds() {
     var keys = Object.keys(state.selectedBonds);
@@ -3955,8 +4120,10 @@ select.sel:focus{border-color:var(--accent)}
 
   /* ---------------- load + compute ---------------- */
   function applyRadii(atoms) {
-    for (var i = 0; i < atoms.length; i++)
+    for (var i = 0; i < atoms.length; i++) {
+      if (atoms[i].isCentroid) continue;
       atoms[i].r = state.radii.hasOwnProperty(atoms[i].el) ? state.radii[atoms[i].el] : K.vdw(atoms[i].el);
+    }
   }
   function defaultColorFor(elem) {
     return state.defaultColors.hasOwnProperty(elem) ? state.defaultColors[elem] : K.cpk(elem);
@@ -3984,20 +4151,29 @@ select.sel:focus{border-color:var(--accent)}
     var firstEver = !state.atoms && !state.everLoaded; state.everLoaded = true;
     state.atoms = atoms; state.name = name || "structure";
     state.isCif = !!cifMeta;
+    state.symmetryForgotten = false;
+    state.showOnlyAsu = false;
     state.cifCell = cifMeta ? cifMeta.cell : null;
     state.cifSymops = cifMeta ? cifMeta.symops : null;
     state.cifAsymUnit = cifMeta ? cifMeta.asymUnit : null;
     state.cifFracToCart = cifMeta ? cifMeta.M : null;
     recomputeViewOffset();
-    /* host, guest, and cavity are independent layers: loading a new host replaces
-       only the host atoms. Any previously calculated cavity (and the guest) stay
-       exactly as they were until the user explicitly recalculates or reloads them.
-       This is what makes the "build a generous host, calculate, then swap in a
-       trimmed host for display" workflow possible. Re-rendering the (unchanged)
-       cavity mesh here keeps it aligned with the new host's centring offset. */
+    /* host, guest, and cavity are independent layers: loading a new PDB host
+       replaces only the host atoms, leaving any guest and calculated cavity
+       exactly as they were. This is what makes the "build a generous host,
+       calculate, then swap in a trimmed host for display" workflow possible.
+       A CIF load is different: it isn't adding a layer to an existing scene,
+       it's starting fresh on a new structure to build out by symmetry, so
+       any previous guest and cavity are cleared along with the old host. */
+    if (cifMeta) {
+      state.guestAtoms = null; state.guestName = ""; state.guestBatch = 0; state.guestGroups = [];
+      state.interior = null; state.vols = null; state.calcInfo = null;
+      clearGroup(surfaceGroup);
+      updateResults(null);
+    }
     applyRadii(atoms);
     applyColors(atoms, state.hostColors);
-    renderStructure(); renderSurface(); renderUnitCell(); if (firstEver) frameCamera(); updateHostInfo(); buildRadiiEditor(); buildHostColorEditor(); refreshBondCleanupElements(); updateSelectionInfo();
+    renderStructure(); renderSurface(); renderUnitCell(); if (firstEver) frameCamera(); updateHostInfo(); updateGuestInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); buildGuestGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo();
     refreshSymmetryUI();
     if (!cifMeta) setStatus("Loaded " + state.name + ": " + atoms.length + " atoms. Set the probe radius and click Calculate.", false);
   }
@@ -4026,7 +4202,7 @@ select.sel:focus{border-color:var(--accent)}
     }
     var reducedNote = reduced.length < cif.atoms.length ? (" (reduced from " + cif.atoms.length + " atoms in the file to " + reduced.length + " symmetry-independent ones)") : "";
     loadAtoms(atoms, name, { cell: cif.cell, symops: cif.symops, asymUnit: reduced, M: M });
-    setStatus("Loaded " + (name || "structure") + ": asymmetric unit, " + atoms.length + " atom" + (atoms.length === 1 ? "" : "s") + reducedNote + ". Use Grow mode (Symmetry panel) to build out the structure.", false);
+    setStatus("Loaded " + (name || "structure") + ": asymmetric unit, " + atoms.length + " atom" + (atoms.length === 1 ? "" : "s") + reducedNote + ". Use the Grow panel to build out the structure.", false);
   }
   function loadPDBText(text, name) {
     var atoms = K.parsePDB(text);
@@ -4082,9 +4258,15 @@ select.sel:focus{border-color:var(--accent)}
   function removeHost() {
     /* host is just one layer -- removing it leaves the guest and any already
        calculated cavity exactly as they were, e.g. to show only how a guest
-       sits inside a cavity without the host obscuring it */
+       sits inside a cavity without the host obscuring it. Its CIF/symmetry
+       identity goes with it, though: without a host there's no coherent
+       asymmetric unit to speak of, and leaving it set would let a stale
+       "symmetry forgotten" status or asymmetric-unit state carry over into
+       whatever gets loaded next. */
     state.atoms = null; state.name = "";
-    renderStructure(); updateHostInfo(); buildRadiiEditor(); buildHostColorEditor(); refreshBondCleanupElements(); updateSelectionInfo();
+    state.isCif = false; state.symmetryForgotten = false; state.showOnlyAsu = false;
+    state.cifCell = null; state.cifSymops = null; state.cifAsymUnit = null; state.cifFracToCart = null;
+    renderStructure(); renderUnitCell(); updateHostInfo(); buildRadiiEditor(); buildHostColorEditor(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
     setStatus("Host removed. The guest and any calculated cavity are unaffected.", false);
   }
   function buildGuestGroupsUI() {
@@ -4425,13 +4607,16 @@ select.sel:focus{border-color:var(--accent)}
 
   /* ---------------- UI ---------------- */
   function el(t, c, x) { var e = document.createElement(t); if (c) e.className = c; if (x !== undefined) e.textContent = x; return e; }
-  function section(p, title, startOpen) {
+  function section(p, title, startOpen, onToggle) {
     var s = el("div", "section" + (startOpen ? " open" : ""));
     var h = el("div", "sechead");
     h.appendChild(el("span", null, title)); h.appendChild(el("span", "tri", "\u203A"));
     s.appendChild(h);
     var b = el("div", "sbody"); s.appendChild(b);
-    h.addEventListener("click", function () { s.classList.toggle("open"); });
+    h.addEventListener("click", function () {
+      s.classList.toggle("open");
+      if (onToggle) onToggle(s.classList.contains("open"));
+    });
     p.appendChild(s);
     return b;
   }
@@ -4511,6 +4696,23 @@ select.sel:focus{border-color:var(--accent)}
     w.appendChild(rng); p.appendChild(w);
     return rng;
   }
+  function radioRow(p, groupName, options, currentValue, onChange) {
+    var w = el("div", "ctl-inline");
+    var inputs = {};
+    for (var i = 0; i < options.length; i++) {
+      (function (opt) {
+        var lbl = el("label", "radio");
+        var inp = document.createElement("input"); inp.type = "radio"; inp.name = groupName; inp.value = opt[0];
+        inp.checked = (opt[0] === currentValue);
+        inp.addEventListener("change", function () { if (inp.checked) onChange(opt[0]); });
+        lbl.appendChild(inp); lbl.appendChild(el("span", null, opt[1]));
+        w.appendChild(lbl);
+        inputs[opt[0]] = inp;
+      })(options[i]);
+    }
+    p.appendChild(w);
+    return { wrap: w, inputs: inputs };
+  }
   function hexToCss(n) { return "#" + ("000000" + (n >>> 0).toString(16)).slice(-6); }
   function cssToHex(s) { return parseInt(s.replace("#", ""), 16); }
   function colorSwatch(hexInt, on) {
@@ -4568,28 +4770,67 @@ select.sel:focus{border-color:var(--accent)}
     gc.appendChild(el("div", "hint", "Guest components:"));
     var ggbox = el("div", "sbody"); ggbox.id = "guestGroupsBox"; ggbox.innerHTML = "<div class='dim'>No guest components yet.</div>"; gc.appendChild(ggbox);
 
-    var symC = section(left, "Symmetry");
+    var symC = section(left, "Grow", false, function (isOpen) {
+      if (!isOpen && state.growMode) {
+        state.growMode = false;
+        var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = "";
+        updateGrowModeBtnLabel();
+      }
+    });
     symC.parentElement.id = "symmetrySection"; symC.parentElement.style.display = "none";
     var auInfo = el("div", "readout"); auInfo.id = "auInfo"; auInfo.innerHTML = "<div class='dim'>No CIF loaded.</div>"; symC.appendChild(auInfo);
-    toggle(symC, "grow mode (click an atom to grow)", state.growMode, function (b) {
-      state.growMode = b;
-      var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = b ? "crosshair" : "";
+
+    var growTabs = tabbedPanel(symC, ["Mouse", "Pack", "Symmetry"]);
+    var mouseTab = growTabs[0], packTab = growTabs[1], symOpTab = growTabs[2];
+
+    var growModeBtn = button(mouseTab, "", null, function () {
+      state.growMode = !state.growMode;
+      var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = state.growMode ? "crosshair" : "";
+      updateGrowModeBtnLabel();
     });
-    toggle(symC, "grow whole asymmetric unit (off = single atom)", !state.growByAtom, function (b) { state.growByAtom = !b; });
-    toggle(symC, "grow by sphere of inclusion (off = covalent connection)", state.growBySphere, function (b) { state.growBySphere = b; });
-    var sphRow = el("div", "ctl-top"); sphRow.appendChild(el("label", null, "sphere radius"));
+    growModeBtn.id = "growModeBtn";
+    function updateGrowModeBtnLabel() {
+      var btn = document.getElementById("growModeBtn"); if (!btn) return;
+      btn.textContent = state.growMode ? "Grow mode is ON \u2014 click an atom to grow" : "Grow mode is OFF \u2014 click to turn on";
+      btn.className = "btn prominent" + (state.growMode ? "" : " ghost");
+    }
+    updateGrowModeBtnLabel();
+
+    var connRow = radioRow(mouseTab, "growConn", [["bonds", "Bonds"], ["sphere", "Sphere"]], state.growBySphere ? "sphere" : "bonds", function (v) {
+      state.growBySphere = (v === "sphere");
+    });
     var sphInp = document.createElement("input"); sphInp.type = "number"; sphInp.className = "num"; sphInp.id = "sphRadius"; sphInp.step = "0.1"; sphInp.value = state.sphereRadius;
     sphInp.addEventListener("input", function () { var v = parseFloat(sphInp.value); if (isFinite(v) && v > 0) state.sphereRadius = v; });
-    sphRow.appendChild(sphInp); sphRow.appendChild(el("span", "unit", U.ang)); symC.appendChild(sphRow);
-    symC.appendChild(el("div", "hint", "Unit cell:"));
-    toggle(symC, "show unit cell", state.showUnitCell, function (b) { state.showUnitCell = b; renderUnitCell(); });
-    var ucColorSw = colorControl(symC, "unit cell colour", state.unitCellColor, function (hex) { state.unitCellColor = hex; renderUnitCell(); });
-    var ucThickSl = slider(symC, "unit cell thickness", 0.01, 0.15, 0.005, state.unitCellThickness, U.ang, function (v) { state.unitCellThickness = v; renderUnitCell(); });
-    toggle(symC, "colour a/b/c axes red/green/blue", state.unitCellAxisColors, function (b) { state.unitCellAxisColors = b; renderUnitCell(); });
+    connRow.wrap.appendChild(sphInp); connRow.wrap.appendChild(el("span", "unit", U.ang));
+
+    radioRow(mouseTab, "growUnit", [["atom", "Atoms"], ["asu", "ASU"]], state.growByAtom ? "atom" : "asu", function (v) {
+      state.growByAtom = (v === "atom");
+    });
+
+    packTab.appendChild(el("div", "hint", "Growing by an explicit pack range is planned but not yet implemented."));
+    symOpTab.appendChild(el("div", "hint", "Growing by a specifically chosen symmetry operation or translation is planned but not yet implemented."));
+
+    var cifDispC = section(left, "Display");
+    cifDispC.parentElement.id = "cifDisplaySection"; cifDispC.parentElement.style.display = "none";
+    var cifDispTabs = tabbedPanel(cifDispC, ["Symmetry", "Unit cell"]);
+    var cifSymTab = cifDispTabs[0], cifCellTab = cifDispTabs[1];
+
+    var asuTg = toggle(cifSymTab, "show only asymmetric unit", state.showOnlyAsu, function (b) { state.showOnlyAsu = b; renderStructure(); });
+    asuTg.id = "showOnlyAsuTg";
     var resetGrowRow = el("div", "btnrow");
-    button(resetGrowRow, "Delete all symmetry-generated atoms", "ghost", deleteSymmetryGeneratedAtoms);
-    symC.appendChild(resetGrowRow);
-    symC.appendChild(el("div", "hint", "Removes everything added by growth, back to just the original asymmetric unit. A guest designation on an asymmetric unit atom is kept."));
+    var delSymBtn = button(resetGrowRow, "Delete all symmetry-generated atoms", "ghost", deleteSymmetryGeneratedAtoms);
+    delSymBtn.id = "deleteSymAtomsBtn";
+    cifSymTab.appendChild(resetGrowRow);
+    var forgetRow = el("div", "btnrow");
+    var forgetBtn = button(forgetRow, "Forget symmetry", "ghost", forgetSymmetry);
+    forgetBtn.id = "forgetSymmetryBtn";
+    cifSymTab.appendChild(forgetRow);
+
+    var ucTg = toggle(cifCellTab, "show unit cell", state.showUnitCell, function (b) { state.showUnitCell = b; renderUnitCell(); });
+    ucTg.id = "showUnitCellTg";
+    var ucColorSw = colorControl(cifCellTab, "unit cell colour", state.unitCellColor, function (hex) { state.unitCellColor = hex; renderUnitCell(); });
+    labelSlider(cifCellTab, "unit cell thickness", 0.01, 0.15, 0.005, state.unitCellThickness, function (v) { state.unitCellThickness = v; renderUnitCell(); });
+    toggle(cifCellTab, "colour a/b/c axes red/green/blue", state.unitCellAxisColors, function (b) { state.unitCellAxisColors = b; renderUnitCell(); });
 
     var ec = section(left, "Edit atoms and bonds");
     var ebTabs = tabbedPanel(ec, ["Atoms", "Bonds"]);
@@ -4668,7 +4909,7 @@ select.sel:focus{border-color:var(--accent)}
     var rb = el("div"); rb.id = "resultBox"; pc.appendChild(rb);
     var crow = el("div", "btnrow"); button(crow, "Calculate", null, calculate); button(crow, "Remove cavity", "ghost", removeCavity); pc.appendChild(crow);
 
-    var dispC = section(left, "Display");
+    var dispC = section(left, "Visual Effects");
     var tabs = tabbedPanel(dispC, ["Scene", "Material", "Lighting"]);
     var sceneTab = tabs[0], materialTab = tabs[1], lightingTab = tabs[2];
 
@@ -4720,6 +4961,20 @@ select.sel:focus{border-color:var(--accent)}
     var exrow = el("div", "btnrow"); button(exrow, "Export image (PNG)", null, exportImage); xc.appendChild(exrow);
     var cprow = el("div", "btnrow"); button(cprow, "Copy image to clipboard", "ghost", copyImageToClipboard); xc.appendChild(cprow);
   }
+  function toggleShowOnlyAsu() {
+    if (!state.isCif || state.symmetryForgotten) { setStatus("This only applies to a CIF-based structure that still has its symmetry information.", true); return; }
+    state.showOnlyAsu = !state.showOnlyAsu;
+    renderStructure();
+    var cb = document.getElementById("showOnlyAsuTg"); if (cb) cb.checked = state.showOnlyAsu;
+    setStatus(state.showOnlyAsu ? "Showing only the asymmetric unit." : "Showing all atoms.", false);
+  }
+  function toggleUnitCellDisplay() {
+    if (!state.isCif) { setStatus("This only applies to a CIF-based structure.", true); return; }
+    state.showUnitCell = !state.showUnitCell;
+    renderUnitCell();
+    var cb = document.getElementById("showUnitCellTg"); if (cb) cb.checked = state.showUnitCell;
+    setStatus(state.showUnitCell ? "Showing unit cell." : "Hiding unit cell.", false);
+  }
   function wireIO() {
     window.addEventListener("keydown", function (e) {
       /* spacebar and the rotation keys only act when focus isn't in a control
@@ -4740,6 +4995,8 @@ select.sel:focus{border-color:var(--accent)}
         generateCentroid();
         return;
       }
+      if (!e.ctrlKey && !e.altKey && !e.metaKey && e.code === "KeyA") { e.preventDefault(); toggleShowOnlyAsu(); return; }
+      if (!e.ctrlKey && !e.altKey && !e.metaKey && e.code === "KeyC") { e.preventDefault(); toggleUnitCellDisplay(); return; }
       var deg = 5 * Math.PI / 180, axis = null, angle = 0;
       if (e.code === "ArrowLeft") { axis = new THREE.Vector3(0, 1, 0); angle = deg; }
       else if (e.code === "ArrowRight") { axis = new THREE.Vector3(0, 1, 0); angle = -deg; }
@@ -4799,7 +5056,7 @@ select.sel:focus{border-color:var(--accent)}
       "<li><b>Ctrl + Alt + left drag</b> &mdash; lasso select whole fragments: the same outline, but each atom it touches brings its entire bonded fragment into the selection, the same rule ctrl-click uses for a single atom.</li>" +
       "<li>Lasso selection works on screen position only, not true depth: an atom behind another one, as long as its projected position falls inside the outline, is selected too, even though it's hidden from view. Rotating to a clearer angle before lassoing avoids surprises in a dense structure.</li>" +
       "<li><b>Right drag, vertical</b> &mdash; zoom (up = in, down = out). The mouse wheel is disabled.</li>" +
-      "<li><b>Arrow keys</b> &mdash; rotate in fixed 5&deg; steps: left/right about the vertical axis, up/down about the horizontal axis. <b>Page Up / Page Down</b> roll in 5&deg; steps. <b>Delete</b> (or Backspace) deletes the selected atoms, or cuts the selected bond(s) if no atoms are selected. These only respond while focus isn't in a text box, dropdown, or button.</li>" +
+      "<li><b>Arrow keys</b> &mdash; rotate in fixed 5&deg; steps: left/right about the vertical axis, up/down about the horizontal axis. <b>Page Up / Page Down</b> roll in 5&deg; steps. <b>Delete</b> (or Backspace) deletes the selected atoms, or cuts the selected bond(s) if no atoms are selected. <b>Ctrl-C</b> generates a centroid from the selected atoms. For a CIF-based structure: <b>a</b> toggles between showing only the asymmetric unit and showing everything currently grown; <b>c</b> toggles the unit cell. These only respond while focus isn't in a text box, dropdown, or button.</li>" +
       "<li><b>Depth scaling</b> (Display panel) &mdash; switches between perspective and orthographic projection. Off is often better for a figure meant for precise alignment or measurement, since distance no longer shrinks apparent size.</li>" +
       "</ul>" +
       "<h3>Display and Export</h3>" +
@@ -4811,16 +5068,16 @@ select.sel:focus{border-color:var(--accent)}
       "<p><b>Transparent background</b> drops the background colour (and briefly suspends fog, which would otherwise leave a visible tint) for that one exported frame, then restores both immediately afterward -- normal interactive display is never affected. It applies to both Export image and <b>Copy image to clipboard</b>, which renders the same way but places the PNG directly on the system clipboard for pasting into another document instead of saving a file; transparency survives that route too; wherever it lands, whether it stays transparent from there depends on the receiving application. Clipboard copying needs a recent click to work (this triggers it) and isn't available in every browser -- Export image (PNG) always works as the fallback.</p>" +
       "<h3>Loading structures</h3>" +
       "<ul>" +
-      "<li>Dropping a .pdb onto the 3D view always loads it as the <b>host</b>, clearing anything already there. Dropping a <b>.cif</b> instead starts symmetry mode, described below -- a host loaded this way isn't a fixed set of coordinates but a starting point you build outward from.</li>" +
+      "<li>Dropping a .pdb onto the 3D view loads it as the <b>host</b>, replacing only the host -- any guest and calculated cavity stay exactly as they were, since a PDB host is treated as one layer among independent others. Dropping a <b>.cif</b> is different: it starts symmetry mode, described below, and is treated as a fresh structure to build from scratch rather than a new layer on an existing one, so it clears the current guest and cavity along with the old host. A host loaded this way isn't a fixed set of coordinates but a starting point you build outward from.</li>" +
       "<li>A <b>guest</b> (e.g. an included gas molecule) is loaded separately, from its own drop box or file picker, and is shown in the figure but never included in the cavity calculation &mdash; only the host atoms are used for that. Each guest file you load is added to the guests already there, rather than replacing them, which is useful for building up a disordered guest from separately-loaded components; atoms from different guest loads are never inferred as bonded to each other, however close they sit. \"Remove all guests\" clears them all so you can start over. Guest loading isn't available yet while a CIF-based host is active.</li>" +
       "</ul>" +
       "<h3>CIF and symmetry (Symmetry panel)</h3>" +
       "<p>Dropping a CIF reads the unit cell, the symmetry operators (from the file's own symmetry loop), and the asymmetric unit, then displays just the asymmetric unit -- not a complete molecule -- as the starting point. If the file actually contains more atoms than the true asymmetric unit (Mercury sometimes exports a whole completed molecule this way), the extra symmetry-equivalent copies are automatically detected and removed first, so what's displayed is always just the independent set. An atom sitting exactly on a special position (a mirror plane, an inversion centre, a rotation axis) is never duplicated when a symmetry operation maps it onto itself or onto another copy already present -- this is handled automatically throughout, not something to manage by hand.</p>" +
-      "<p><b>Grow mode</b>, once switched on, changes what a plain click on an atom does: instead of selecting it, it grows the structure from that atom, whether it's a host or a guest atom -- there's no distinction between them for growth. The cursor turns into a crosshair while grow mode is on, as a reminder that clicking will grow rather than select. Two independent choices control how: <b>grow whole asymmetric unit</b> (on by default) adds every atom of the asymmetric unit the newly-found atom belongs to, generated under whatever symmetry operation connects it, rather than just that one atom; switching it off adds only the single connected atom. Separately, <b>grow by sphere of inclusion</b> changes what \"connected\" means -- off (the default), a new atom must be covalently bonded to the one clicked, searched for up to 5 unit cells away in every direction; on, every symmetry-equivalent atom within the given radius of the clicked atom is added regardless of bonding, which is useful for filling out a coordination sphere or a solvent shell that isn't covalently continuous. Either way, with whole asymmetric unit switched on, finding one atom of a unit pulls in the rest of that same unit too, generated under the same symmetry operation. All of this only ever adds atoms; nothing is removed automatically, and everything added this way can be deleted, selected, or undone exactly like any other atom in the app. \"Delete all symmetry-generated atoms\" removes everything growth has added in one step, back to just the original asymmetric unit -- a guest designation on an asymmetric unit atom survives this, only the grown copies are removed.</p>" +
+      "<p>The <b>Grow</b> panel appears once a CIF has been loaded, with the asymmetric unit and current atom count shown at the top, and its controls split into tabs -- <b>Mouse</b> (described here), plus <b>Pack</b> and <b>Symmetry</b> for growing by an explicit pack range or a specifically chosen symmetry operation, both planned but not yet built. On the Mouse tab, the large button turns grow mode on or off -- solid when on, a visual reminder alongside the crosshair cursor that a plain click will grow rather than select. Two independent radio choices control how: <b>Atoms</b> adds just the one newly-connected atom; <b>ASU</b> (the default) adds the whole asymmetric unit it belongs to instead, generated under whatever symmetry operation connects it. Separately, <b>Bonds</b> requires the new atom to be covalently bonded to the one clicked, searched up to 5 unit cells away; <b>Sphere</b> adds every symmetry-equivalent atom within the radius given next to it, regardless of bonding -- useful for filling out a coordination sphere or a solvent shell that isn't covalently continuous. Whether you click a host or a guest atom makes no difference to any of this. All of it only ever adds atoms; nothing is removed automatically, and everything added this way can be deleted, selected, or undone exactly like any other atom in the app. The separate <b>Display</b> panel (also CIF-only) holds \"Delete all symmetry-generated atoms\", which removes everything growth has added in one step back to just the original asymmetric unit -- a guest designation on an asymmetric unit atom survives this, only the grown copies are removed -- alongside \"show only asymmetric unit\" and the unit cell controls, described next.</p>" +
       "<p>Ctrl-Alt-click selects every currently-displayed atom that shares the same asymmetric unit origin as the one clicked -- every symmetry copy of that specific atom, across host and guest alike -- which is otherwise not something to find by hand once a structure has been grown out. This takes priority over grow mode, so it works the same way whether or not grow mode happens to be switched on.</p>" +
       "<p>If part of the asymmetric unit has been moved to a guest (e.g. an included CO<sub>2</sub>, moved there via \"move selection to\" in Edit atoms and bonds, the same way as in Mode 1), growth remembers that: every future symmetry-generated copy of that same asymmetric unit atom is added as a guest too, not host, from then on -- joining the same guest component it was already part of, rather than starting a new one each time. Clicking a guest atom in grow mode works exactly like clicking a host atom; there's no distinction between them for growth purposes.</p>" +
       "<p>The unit cell's colour and line thickness are both adjustable; edges are drawn the same way bonds are (as shaded cylinders, not flat lines), so they respond to lighting rather than looking flat. Its three edges from the origin can optionally be coloured in the deepest possible red/green/blue for a, b, c respectively, following the usual crystallographic convention, instead of the single default colour. The a, b, c edges are always labelled in italic, in whichever of black or white contrasts better with the current background (the same approach the lasso outline uses), so the labels stay readable regardless of colour scheme. All of this is purely visual and has no effect on growth or the cavity calculation.</p>" +
-      "<p><b>Show unit cell</b> draws the cell edges for reference. The Symmetry panel, sitting just below Guest, only appears once a CIF has been loaded -- it stays hidden for ordinary PDB-based hosts, which have no unit cell or symmetry to work with.</p>" +
+      "<p><b>Show unit cell</b> draws the cell edges for reference. Its controls, and \"show only asymmetric unit\", live in the Display panel just below Grow -- both only appear once a CIF has been loaded, staying hidden for ordinary PDB-based hosts, which have no unit cell or symmetry to work with.</p>" +
       "<p>This first version covers growing by clicking (atom or fragment) and by sphere of inclusion. Growing by a specific chosen symmetry operation or translation, and specifying an explicit packing range, are planned but not yet implemented. Only CIFs with an explicit list of symmetry operators are supported -- one that gives only a space group name or number, with no operator list, is read as P1 (no symmetry) since looking up operators from thousands of possible space group settings isn't implemented.</p>" +
       "<h3>How the cavity volume is calculated</h3>" +
       "<p>The swept (solvent-excluded) volume is computed on a grid at several spacings and extrapolated to zero spacing &mdash; the limit MSRoll reports, and the limit a fixed-resolution grid (such as Mercury's) cannot reach. The &plusmn; value is the extrapolation uncertainty, not an arbitrary error bar. Enclosure is decided by flood-fill connectivity, so only cavities fully enclosed by the host are reported; pockets open to the outside are excluded by design. Structures with more than one enclosed cavity report each one separately as well as the total. Grid spacing and jitter averaging are always fixed at their most precise setting -- there is no accuracy control to adjust.</p>" +
@@ -4844,6 +5101,10 @@ select.sel:focus{border-color:var(--accent)}
       "<p>\"Delete matching bonds\" does the same thing in bulk: choose two elements (either can be \"Any\" to match regardless of what it's bonded to), a distance range, and whether to cut bonds outside or inside that range, and every current bond between an atom of each chosen element (across host and guest together) meeting that criterion is cut in one action. This needs care -- it's easy to remove bonds you meant to keep if the range is too narrow, or miss the ones you meant to cut if it's too wide. If nothing gets cut, the status message says why: either matching bonds exist but sit outside the range given (showing their actual distance), or no such bond exists at all -- which can happen even when two atoms look close enough, since a minimum realistic bond length is always enforced and anything closer than that is never treated as a bond in the first place, in rendering or in this cleanup, consistently. \"Undo\" reverses a cut like any other edit if the result isn't what was intended.</p>" +
       "<h3>Undo</h3>" +
       "<p>\"Undo\" steps back through moving atoms, deleting atoms, and cutting bonds, in that order, one step at a time. It does not cover loading files or changing element/display settings, which have their own separate reset controls.</p>" +
+      "<h3>Keeping symmetry consistent</h3>" +
+      "<p>For a CIF-based structure, three things are always kept true of every asymmetric unit position, no matter which of its symmetry images is actually acted on: its element, and whether it belongs to host or a particular guest, are properties of the position itself, not of one copy of it. Changing either one on any single image -- the original or a symmetry-grown copy -- applies the same change to every other currently-displayed image of that same position automatically. \"Reassigned 3 atoms to Cl (2 symmetry-related atoms updated automatically)\" and similar messages confirm when this has happened.</p>" +
+      "<p>Deletion works slightly differently, since it's reasonable to want either behaviour depending on what's being removed. Deleting the untransformed copy of an asymmetric unit atom -- the one with no symmetry operation or cell offset applied, effectively \"the atom as it appears in the asymmetric unit itself\" -- removes it from the asymmetric unit entirely: every symmetry image of it is deleted too, and growth will never regenerate it afterwards. Deleting a symmetry-grown copy on its own, leaving the asymmetric unit atom in place, is treated as a simple local edit instead -- just that one image goes, the asymmetric unit position is untouched, and growing again from a nearby atom can still recreate that same image later. \"Delete all symmetry-generated atoms\" and Undo both work the same way regardless of which of these removed anything. Because the whole-asymmetric-unit case is easy to trigger without meaning to, deleting a selection that includes one asks for confirmation first, naming how many atoms are involved before anything is actually removed.</p>" +
+      "<p><b>Show only asymmetric unit</b> (or the <b>a</b> key) hides every symmetry-grown copy and shows just the untransformed atoms -- the ones with no symmetry operation or cell offset applied -- as a quick way to see what the asymmetric unit actually contains, separate from however far it's since been grown out. Pressing <b>a</b> again restores the full view. This is purely a display filter: it doesn't change what's selected, calculated, or grown, only what's currently drawn.</p>" +
       "<h3>Centroids and reassigning elements</h3>" +
       "<p>Select two or more atoms and \"Generate centroid\" (or Ctrl-C) adds a marker at their average position -- useful as a reference point for measuring or for defining a plane or vector that isn't sitting on a real atom. A centroid always renders as a small white sphere (0.2 &Aring; radius), regardless of the current display style, and doesn't affect the cavity calculation or bonding in any way -- it's a geometric reference, not a real atom. Its clickable area is a bit larger than it looks, since a sphere that small would otherwise be hard to hit precisely; this doesn't change how big it appears. It can be selected, moved between host and guest, and deleted exactly like any other atom. For a CIF-based structure, a centroid becomes part of the asymmetric unit, so it can be grown by symmetry the same way as everything else.</p>" +
       "<p>\"Reassign element to\" (under \"move selection to\") changes the element of the selected atom(s) to any element in the periodic table, whether or not that element was already present in the structure -- a new one is picked up automatically, with its own colour and radius, the moment it's assigned. Reassigning a centroid turns it into a real atom of that element from then on: it stops being a fixed white marker and starts looking and behaving like any other atom in whichever layer it belongs to.</p>" +
