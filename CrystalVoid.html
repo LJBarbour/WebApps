@@ -229,6 +229,7 @@ select.sel:focus{border-color:var(--accent)}
 <input type="file" id="pdbInput" accept=".pdb,.ent,.cif,.txt" style="display:none">
 <input type="file" id="guestPdbInput" accept=".pdb,.ent,.txt" style="display:none">
 <input type="file" id="elementCsvInput" accept=".csv,.txt" style="display:none">
+<input type="file" id="modelJsonInput" accept=".json" style="display:none">
 <script>
 /**
  * @license
@@ -2944,7 +2945,7 @@ select.sel:focus{border-color:var(--accent)}
   var sphereGeo = null, highlightCylGeo = null, matCache = {};
   var state = {
     atoms: null, name: "", surf: null, interior: null, vols: null, cavityList: null, everLoaded: false, viewOffset: [0, 0, 0],
-    style: "ballstick", probe: 1.50, volAcc: "fine", showHost: true,
+    probe: 1.50, volAcc: "fine", showHost: true,
     showSurface: true, surfaceOpacity: 0.55, surfaceColor: 0x4A6FA5, useSurfaceColorForAll: true, atomScale: 1.0,
     depthScaling: false, bgColor: 0xe9edf2,
     lightHeadlight: true, lightAngle: 0,
@@ -2952,17 +2953,18 @@ select.sel:focus{border-color:var(--accent)}
     highDetail: false, fogOn: false, fogDensity: 0.32, exportScale: 2, rotateSensitivity: 1.0,
     lastSourceHandle: null, exportTransparent: false,
     isCif: false, cifCell: null, cifSymops: null, cifAsymUnit: null, cifFracToCart: null,
-    showUnitCell: true, growMode: false, growUnit: "asu", growBySphere: false, sphereRadius: 4.0,
+    showUnitCell: true, growMode: false, growUnit: "frag", growBySphere: false, sphereRadius: 4.0,
     unitCellColor: 0x8a7a5c, unitCellThickness: 0.04, unitCellAxisColors: true, showOnlyAsu: false, symmetryForgotten: false,
     saveDisplay: true, saveLighting: true, saveMaterial: true,
     atomRoughness: 0.42, atomMetalness: 0.15, atomReflectivity: 0.9,
-    guestAtoms: null, guestName: "", guestStyle: "spacefill", guestScale: 1.0, guestBatch: 0, showGuest: true,
-    guestGroups: [], cutBonds: {}, cutBondSignatures: {}, undoStack: [], selectedBonds: {}, guestColorMode: "element",
+    guestAtoms: null, guestName: "", guestScale: 1.0, guestBatch: 0, showGuest: true,
+    guestGroups: [], cutBonds: {}, cutBondSignatures: {}, undoStack: [], selectedBonds: {}, guestColorMode: "component",
     hostBondRadius: 0.12, guestBondRadius: 0.12,
     hostColors: {}, guestColors: {}, defaultColors: {}, page: "model",
     hostColorMode: "element", hostSingleColor: 0x4A6FA5,
     hostBondColorMode: "split", hostBondColor: 0xFFFFFF, guestBondColorMode: "split", guestBondColor: 0xFFFFFF, showHBonds: false,
-    radii: {}
+    radii: {},
+    hostGrowStyle: "asu", guestGrowStyle: "asu"
   };
 
   /* ---------------- camera controller ----------------
@@ -2982,6 +2984,9 @@ select.sel:focus{border-color:var(--accent)}
   var camTarget = new THREE.Vector3(0, 0, 0);
   var camOrient = new THREE.Quaternion();
   var camDist = 1;
+  var SCALE_REF = 100; /* arbitrary reference so the displayed "scale" number is a plain, unit-less
+     value where bigger = more zoomed in (the inverse of camDist, which is a real distance where
+     bigger means further away) -- scale = SCALE_REF / camDist */
   var ROTATE_SPEED = 0.006, ZOOM_SPEED = 0.004;
   var dragMode = null, lastX = 0, lastY = 0;
   var pickDownX = 0, pickDownY = 0, pickMoved = false;
@@ -3016,6 +3021,11 @@ select.sel:focus{border-color:var(--accent)}
     if (orthoCam) { orthoCam.position.copy(pos); orthoCam.quaternion.copy(camOrient); }
     updateOrthoFrustum();
     if (state.fogOn) updateFog();
+    updateScaleDisplay();
+  }
+  function updateScaleDisplay() {
+    var inp = document.getElementById("dispScaleInput");
+    if (inp && document.activeElement !== inp) inp.value = (SCALE_REF / Math.max(camDist, 1e-6)).toFixed(2);
   }
   function cifAxisCartesian(which) {
     if (!state.cifFracToCart) return null;
@@ -3476,8 +3486,8 @@ select.sel:focus{border-color:var(--accent)}
     clearGroup(atomsGroup); clearGroup(bondsGroup); clearGroup(guestAtomsGroup); clearGroup(guestBondsGroup);
     if (!sphereGeo) sphereGeo = new THREE.SphereGeometry(1, state.highDetail ? 48 : 20, state.highDetail ? 36 : 16);
     var off = centroid(); /* host-based offset, applied to guest too so their relative geometry stays correct */
-    if (state.showHost) renderMoleculeInto(asuFilter(state.atoms), state.style, state.atomScale, state.hostBondRadius, atomsGroup, bondsGroup, off, false, state.hostBondColorMode, state.hostBondColor);
-    if (state.showGuest) renderMoleculeInto(asuFilter(visibleGuestAtoms()), state.guestStyle, state.guestScale, state.guestBondRadius, guestAtomsGroup, guestBondsGroup, off, true, state.guestBondColorMode, state.guestBondColor);
+    if (state.showHost) renderMoleculeInto(asuFilter(state.atoms), "ballstick", state.atomScale, state.hostBondRadius, atomsGroup, bondsGroup, off, false, state.hostBondColorMode, state.hostBondColor);
+    if (state.showGuest) renderMoleculeInto(asuFilter(visibleGuestAtoms()), "ballstick", state.guestScale, state.guestBondRadius, guestAtomsGroup, guestBondsGroup, off, true, state.guestBondColorMode, state.guestBondColor);
     renderHBonds(off);
     renderSelection();
   }
@@ -3549,7 +3559,14 @@ select.sel:focus{border-color:var(--accent)}
       addDashedBond(H.x + off[0], H.y + off[1], H.z + off[2], A.x + off[0], A.y + off[1], A.z + off[2], hbondsGroup);
     }
   }
-  function atomDisplayRadius(style, r, elem, bondRadius, scaleMult) {
+  function atomDisplayRadius(style, r, elem, bondRadius, scaleMult, atom) {
+    /* a per-atom display-only radius override (set via "Edit atoms and
+       bonds" > Atoms > display properties) takes priority over the
+       style-based sizing rules below, in every style -- it never touches
+       the atom's real .r field, which stays exactly what the cavity/channel
+       calculation and the Elements radii table expect it to be. */
+    if (atom && atom.dispRadiusMode === "fixed" && isFinite(atom.dispRadiusValue)) return Math.max(atom.dispRadiusValue, bondRadius) * scaleMult;
+    if (atom && atom.dispRadiusMode === "vdwx" && isFinite(atom.dispRadiusValue)) return Math.max(atom.dispRadiusValue * r, bondRadius) * scaleMult;
     if (style === "spacefill") return r * scaleMult;
     if (style === "stick") return bondRadius * scaleMult;
     /* ball-and-stick: scaled per atom from its own van der Waals radius (0.2x, or
@@ -3610,7 +3627,7 @@ select.sel:focus{border-color:var(--accent)}
         im.userData.atoms = arr; im.userData.isGuest = !!isGuest; /* for click-to-select raycasting */
         var m = new THREE.Matrix4();
         for (i = 0; i < arr.length; i++) {
-          var sc = arr[i].isCentroid ? 0.2 : atomDisplayRadius(style, arr[i].r, arr[i].el, bondRadius, scaleMult);
+          var sc = arr[i].isCentroid ? 0.2 : atomDisplayRadius(style, arr[i].r, arr[i].el, bondRadius, scaleMult, arr[i]);
           m.makeScale(sc, sc, sc);
           m.setPosition(arr[i].x + off[0], arr[i].y + off[1], arr[i].z + off[2]);
           im.setMatrixAt(i, m);
@@ -3752,7 +3769,7 @@ select.sel:focus{border-color:var(--accent)}
       if (!atoms) return;
       for (var i = 0; i < atoms.length; i++) {
         var a = atoms[i]; if (!a.selected) continue;
-        var dispR = a.isCentroid ? 0.2 : atomDisplayRadius(style, a.r, a.el, bondRadius, scaleMult);
+        var dispR = a.isCentroid ? 0.2 : atomDisplayRadius(style, a.r, a.el, bondRadius, scaleMult, a);
         /* mostly a small percentage (~6%), plus a small fixed floor (0.025 A)
            so the margin stays visible on the smallest spheres (e.g. Stick's
            joint caps) without ballooning into a loose halo on large ones */
@@ -3771,8 +3788,8 @@ select.sel:focus{border-color:var(--accent)}
         selectionGroup.add(mesh);
       }
     }
-    if (state.showHost) addHighlights(asuFilter(state.atoms), state.style, state.atomScale, state.hostBondRadius);
-    if (state.showGuest) addHighlights(asuFilter(visibleGuestAtoms()), state.guestStyle, state.guestScale, state.guestBondRadius);
+    if (state.showHost) addHighlights(asuFilter(state.atoms), "ballstick", state.atomScale, state.hostBondRadius);
+    if (state.showGuest) addHighlights(asuFilter(visibleGuestAtoms()), "ballstick", state.guestScale, state.guestBondRadius);
     if (!highlightCylGeo) highlightCylGeo = new THREE.CylinderGeometry(1, 1, 1, 12, 1, true);
     function addBondHighlights(atoms, style, bondRadius) {
       if (!atoms || (style !== "ballstick" && style !== "stick")) return;
@@ -3790,8 +3807,8 @@ select.sel:focus{border-color:var(--accent)}
         selectionGroup.add(mesh);
       }
     }
-    if (state.showHost) addBondHighlights(state.atoms, state.style, state.hostBondRadius);
-    if (state.showGuest) addBondHighlights(visibleGuestAtoms(), state.guestStyle, state.guestBondRadius);
+    if (state.showHost) addBondHighlights(state.atoms, "ballstick", state.hostBondRadius);
+    if (state.showGuest) addBondHighlights(visibleGuestAtoms(), "ballstick", state.guestBondRadius);
   }
   function fragmentIndices(atoms, startIdx) {
     var bonds = filterCutBonds(atoms, crossBatchBonds(atoms, K.bonds(atoms, 0.45))), adj = {}, i;
@@ -4052,6 +4069,8 @@ select.sel:focus{border-color:var(--accent)}
     if (planeBtn) planeBtn.disabled = (c.host + c.guest !== 3);
     if (centroidBtn) centroidBtn.disabled = (c.host + c.guest < 2);
     if (molVolBtn) molVolBtn.disabled = (c.host + c.guest < 1);
+    var copyAtomSettingsBtn2 = document.getElementById("copyAtomSettingsBtn");
+    if (copyAtomSettingsBtn2) copyAtomSettingsBtn2.disabled = (c.host + c.guest !== 1);
     if (c.host + c.guest === 0) { el2.innerHTML = "<div class='dim'>No atoms selected.</div>"; return; }
     el2.innerHTML = "<div>" + c.host + " host, " + c.guest + " guest atom" + (c.host + c.guest === 1 ? "" : "s") + " selected.</div>";
   }
@@ -4331,6 +4350,41 @@ select.sel:focus{border-color:var(--accent)}
       setStatus("Extended fragments: added " + n + " atom" + (n === 1 ? "" : "s") + ".", false);
     }, 30);
   }
+  function findAsuAtomByIndex(auIndex) {
+    /* the untransformed asymmetric-unit atom itself (no symmetry op, no cell
+       offset applied) -- may currently be host or guest */
+    function scan(arr) {
+      if (!arr) return null;
+      for (var i = 0; i < arr.length; i++) {
+        var a = arr[i];
+        if (a.auIndex === auIndex && a.opIndex === 0 && a.cellI === 0 && a.cellJ === 0 && a.cellK === 0) return a;
+      }
+      return null;
+    }
+    return scan(state.atoms) || scan(state.guestAtoms);
+  }
+  function applyGrowStyleToAtoms(atoms, growStyle) {
+    /* sets the *radius* override newly-grown atoms start with, per the
+       Host/Guest(s) "new atoms (grown)" dropdown -- never touches colour,
+       which growth always leaves alone (CPK by default, same as any other
+       newly-added atom). "Same as ASU" copies whatever radius override (or
+       lack of one) the atom's own asymmetric-unit source currently has, so a
+       grown copy always looks like the position it came from; the other
+       three options force every newly-grown atom in this layer to a fixed
+       look regardless of what the asymmetric unit atom looks like. */
+    if (!atoms.length) return;
+    for (var i = 0; i < atoms.length; i++) {
+      var a = atoms[i];
+      if (growStyle === "stick") { a.dispRadiusMode = "vdwx"; a.dispRadiusValue = 0; }
+      else if (growStyle === "ballstick") { a.dispRadiusMode = "vdwx"; a.dispRadiusValue = 0.2; }
+      else if (growStyle === "spacefill") { a.dispRadiusMode = "vdwx"; a.dispRadiusValue = 1; }
+      else { /* "asu" (default) */
+        var au = (a.auIndex !== undefined) ? findAsuAtomByIndex(a.auIndex) : null;
+        if (au && au.dispRadiusMode) { a.dispRadiusMode = au.dispRadiusMode; a.dispRadiusValue = au.dispRadiusValue; }
+        else { delete a.dispRadiusMode; delete a.dispRadiusValue; }
+      }
+    }
+  }
   function commitGrownAtoms(newAtoms) {
     if (!newAtoms.length) return 0;
     pushUndo();
@@ -4348,6 +4402,7 @@ select.sel:focus{border-color:var(--accent)}
     var hostNew = [], guestNew = [];
     for (var i = 0; i < newAtoms.length; i++) ((newAtoms[i].auIndex in guestAuGroup) ? guestNew : hostNew).push(newAtoms[i]);
     if (hostNew.length) {
+      applyGrowStyleToAtoms(hostNew, state.hostGrowStyle);
       applyRadii(hostNew); refreshHostAtomColors(hostNew);
       state.atoms = (state.atoms || []).concat(hostNew);
     }
@@ -4357,6 +4412,7 @@ select.sel:focus{border-color:var(--accent)}
          new component -- growing more of an already-designated guest adds
          to that same guest, it doesn't create new ones */
       for (var k = 0; k < guestNew.length; k++) guestNew[k].batch = guestAuGroup[guestNew[k].auIndex];
+      applyGrowStyleToAtoms(guestNew, state.guestGrowStyle);
       applyRadii(guestNew);
       state.guestAtoms = (state.guestAtoms || []).concat(guestNew);
       refreshGuestAtomColors();
@@ -4529,8 +4585,6 @@ select.sel:focus{border-color:var(--accent)}
   function refreshSymmetryUI() {
     var sec = document.getElementById("symmetrySection");
     if (sec) sec.style.display = (state.isCif && !state.symmetryForgotten) ? "" : "none";
-    var dsec = document.getElementById("cifDisplaySection");
-    if (dsec) dsec.style.display = state.isCif ? "" : "none";
 
     var asuTg = document.getElementById("showOnlyAsuTg"); if (asuTg) asuTg.disabled = state.symmetryForgotten;
     var delSymBtn = document.getElementById("deleteSymAtomsBtn"); if (delSymBtn) delSymBtn.disabled = state.symmetryForgotten;
@@ -4756,7 +4810,13 @@ select.sel:focus{border-color:var(--accent)}
       if (atoms[i].isCentroid) continue;
       var elem = atoms[i].el;
       if (!colorMap.hasOwnProperty(elem)) colorMap[elem] = defaultColorFor(elem);
-      atoms[i].color = colorMap[elem];
+      /* a per-atom "Custom" display colour override (see "Edit atoms and
+         bonds" > Atoms > display properties) takes priority over whatever
+         this element/component colour map would otherwise assign -- and has
+         to be re-applied here every time, since this function is what every
+         other recolour path (loading, resetting, reassigning element,
+         switching colour-by mode) ultimately calls */
+      atoms[i].color = (atoms[i].dispColorMode === "custom" && atoms[i].dispColor !== undefined) ? atoms[i].dispColor : colorMap[elem];
     }
   }
   var nextUid = 1;
@@ -4837,7 +4897,14 @@ select.sel:focus{border-color:var(--accent)}
     var atoms = atomsSubset || state.atoms;
     if (!atoms) return;
     if (state.hostColorMode === "component") {
-      for (var i = 0; i < atoms.length; i++) if (!atoms[i].isCentroid) atoms[i].color = state.hostSingleColor;
+      /* component mode is a single flat colour for the whole layer by
+         design -- it stays that way even for atoms that also carry a
+         per-atom Custom override, unlike element mode, where a Custom
+         override is exactly the point and always wins */
+      for (var i = 0; i < atoms.length; i++) {
+        if (atoms[i].isCentroid) continue;
+        atoms[i].color = state.hostSingleColor;
+      }
     } else {
       applyColors(atoms, state.hostColors);
     }
@@ -4849,6 +4916,10 @@ select.sel:focus{border-color:var(--accent)}
       for (i = 0; i < state.guestGroups.length; i++) byId[state.guestGroups[i].id] = state.guestGroups[i].color;
       for (i = 0; i < state.guestAtoms.length; i++) {
         var a = state.guestAtoms[i];
+        /* component mode always shows each guest's own component colour,
+           even for atoms that also carry a per-atom Custom override --
+           switch to Element (colour by) if you want a Custom override to
+           show through instead */
         a.color = byId.hasOwnProperty(a.batch) ? byId[a.batch] : 0x999999;
       }
     } else {
@@ -4878,6 +4949,11 @@ select.sel:focus{border-color:var(--accent)}
     loadGuestAtoms(atoms, name);
   }
   function removeGuest() {
+    if (!state.guestAtoms || !state.guestAtoms.length) { setStatus("There are no guest atoms to remove.", true); return; }
+    var guestMsg = state.isCif
+      ? "This will permanently delete all guest components -- including any asymmetric unit atoms currently assigned to a guest, and every symmetry-grown copy of them. Regrowing afterwards will not bring them back as guests unless reassigned again.\n\nContinue?"
+      : "This will permanently delete all guest components.\n\nContinue?";
+    if (!window.confirm(guestMsg)) { setStatus("Remove all guests cancelled.", false); return; }
     state.guestAtoms = null; state.guestName = ""; state.guestBatch = 0; state.guestGroups = [];
     renderStructure(); updateGuestInfo(); buildRadiiEditor(); buildGuestColorEditor(); buildGuestGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo();
     setStatus("All guest components removed.", false);
@@ -4890,6 +4966,11 @@ select.sel:focus{border-color:var(--accent)}
        asymmetric unit to speak of, and leaving it set would let a stale
        "symmetry forgotten" status or asymmetric-unit state carry over into
        whatever gets loaded next. */
+    if (!state.atoms || !state.atoms.length) { setStatus("There is no host to remove.", true); return; }
+    var hostMsg = state.isCif
+      ? "This will permanently delete the host -- including its asymmetric unit atoms and every symmetry-grown copy of them. The guest and any calculated cavity are unaffected.\n\nContinue?"
+      : "This will permanently delete all host atoms. The guest and any calculated cavity are unaffected.\n\nContinue?";
+    if (!window.confirm(hostMsg)) { setStatus("Remove host cancelled.", false); return; }
     state.atoms = null; state.name = "";
     state.isCif = false; state.symmetryForgotten = false; state.showOnlyAsu = false;
     state.cifCell = null; state.cifSymops = null; state.cifAsymUnit = null; state.cifFracToCart = null;
@@ -5166,7 +5247,6 @@ select.sel:focus{border-color:var(--accent)}
     button(row2, "Save element settings (CSV)", "ghost", saveElementSettingsCsv);
     button(row2, "Load element settings (CSV)", "ghost", function () { document.getElementById("elementCsvInput").click(); });
     toolbar.appendChild(row2);
-    toolbar.appendChild(el("div", "hint", "Radius (" + U.ang + ") and default colour for each element, used whenever a host or guest is loaded. Shared between host and guest for radius; the default colour here is what a newly loaded structure starts with, but can be overridden per element for host or guest separately in their own panels. Bondi and Alvarez apply to radius only and each cover only part of the periodic table (see Guide); elements outside their published sets are left as they were."));
     page.appendChild(toolbar);
     var grid = el("div", "ptable");
     for (var i = 0; i < PTABLE_LAYOUT.length; i++) (function (entry) {
@@ -5258,6 +5338,9 @@ select.sel:focus{border-color:var(--accent)}
   var EYE_OPEN_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>';
   var EYE_OFF_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/><line x1="3" y1="3" x2="21" y2="21"/></svg>';
   var X_ICON_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>';
+  var STICK_ICON_SVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><line x1="5" y1="19" x2="19" y2="5" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>';
+  var BALLSTICK_ICON_SVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><line x1="7" y1="17" x2="17" y2="7" stroke="currentColor" stroke-width="2"/><circle cx="7" cy="17" r="3.2" fill="currentColor"/><circle cx="17" cy="7" r="3.2" fill="currentColor"/></svg>';
+  var SPACEFILL_ICON_SVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="9" cy="15" r="7.5" fill="currentColor" opacity="0.88"/><circle cx="16" cy="8" r="7.5" fill="currentColor" opacity="0.88"/></svg>';
   function buildCavityListUI() {
     var box = document.getElementById("cavityListBox"); if (!box) return;
     box.innerHTML = "";
@@ -5450,85 +5533,428 @@ select.sel:focus{border-color:var(--accent)}
     parentTab.appendChild(row);
   }
 
+  /* ---------------- project save / load ----------------
+   * "Save model" writes everything needed to resume later: both atom lists in
+   * full (including every symmetry-tracking field, cut bonds, and per-atom
+   * colour/radius overrides), the CIF cell/symops/asymmetric unit, guest
+   * groups, every element/host/guest colour and radius table, bond display
+   * settings, the calculated cavity's numbers AND its actual mesh geometry
+   * (not just the inputs to recompute it -- avoids even the small amount of
+   * jitter-driven drift recomputation could introduce), the camera, and the
+   * Visual Effects settings. "Load model" reads it back and restores all of
+   * it directly, without recomputing or re-deriving anything from it. Atom
+   * selection is saved too (it is just whatever the atom objects themselves
+   * already carry) since there is no reason to discard it. Kept entirely
+   * separate from persistPreferences()/localStorage, which is a much smaller
+   * set of look-and-feel defaults carried between sessions automatically --
+   * this is an explicit, named document the user controls the file for. */
+  function serializeMeshPart(m) {
+    if (!m) return null;
+    return { positions: Array.from(m.positions || []), normals: Array.from(m.normals || []), count: m.count };
+  }
+  function serializeMesh(m) {
+    if (!m) return null;
+    var out = { count: m.count };
+    if (m.positions) out.positions = Array.from(m.positions);
+    if (m.normals) out.normals = Array.from(m.normals);
+    if (m.cavities) out.cavities = m.cavities.map(serializeMeshPart);
+    return out;
+  }
+  function deserializeMeshPart(m) {
+    if (!m) return null;
+    return { positions: new Float32Array(m.positions || []), normals: new Float32Array(m.normals || []), count: m.count };
+  }
+  function deserializeMesh(m) {
+    if (!m) return null;
+    var out = { count: m.count };
+    if (m.positions) out.positions = new Float32Array(m.positions);
+    if (m.normals) out.normals = new Float32Array(m.normals);
+    if (m.cavities) out.cavities = m.cavities.map(deserializeMeshPart);
+    return out;
+  }
+  function buildProjectSnapshot() {
+    return {
+      appName: "CrystalVoid", formatVersion: 1, savedAt: new Date().toISOString(),
+      name: state.name, guestName: state.guestName,
+      atoms: state.atoms, guestAtoms: state.guestAtoms,
+      guestGroups: state.guestGroups, guestBatch: state.guestBatch, nextUid: nextUid,
+      isCif: state.isCif, cifCell: state.cifCell, cifSymops: state.cifSymops,
+      cifAsymUnit: state.cifAsymUnit, cifFracToCart: state.cifFracToCart,
+      symmetryForgotten: state.symmetryForgotten, showOnlyAsu: state.showOnlyAsu,
+      cutBonds: state.cutBonds, cutBondSignatures: state.cutBondSignatures, selectedBonds: state.selectedBonds,
+      viewOffset: state.viewOffset,
+      radii: state.radii, defaultColors: state.defaultColors, hostColors: state.hostColors, guestColors: state.guestColors,
+      hostColorMode: state.hostColorMode, hostSingleColor: state.hostSingleColor, guestColorMode: state.guestColorMode,
+      hostBondColorMode: state.hostBondColorMode, hostBondColor: state.hostBondColor,
+      guestBondColorMode: state.guestBondColorMode, guestBondColor: state.guestBondColor,
+      hostBondRadius: state.hostBondRadius, guestBondRadius: state.guestBondRadius,
+      hostGrowStyle: state.hostGrowStyle, guestGrowStyle: state.guestGrowStyle,
+      showHost: state.showHost, showGuest: state.showGuest, showHBonds: state.showHBonds,
+      showUnitCell: state.showUnitCell, unitCellColor: state.unitCellColor,
+      unitCellThickness: state.unitCellThickness, unitCellAxisColors: state.unitCellAxisColors,
+      probe: state.probe, volAcc: state.volAcc,
+      surfaceColor: state.surfaceColor, useSurfaceColorForAll: state.useSurfaceColorForAll,
+      surfaceOpacity: state.surfaceOpacity, showSurface: state.showSurface,
+      calcInfo: state.calcInfo, vols: state.vols, interior: serializeMesh(state.interior),
+      cavityList: state.cavityList ? state.cavityList.map(function (c) {
+        return { volume: c.volume, mesh: serializeMeshPart(c.mesh), color: c.color, hidden: c.hidden };
+      }) : null,
+      camera: { camDist: camDist, camOrient: [camOrient.x, camOrient.y, camOrient.z, camOrient.w], camTarget: [camTarget.x, camTarget.y, camTarget.z] },
+      bgColor: state.bgColor, depthScaling: state.depthScaling, highDetail: state.highDetail,
+      fogOn: state.fogOn, fogDensity: state.fogDensity,
+      atomRoughness: state.atomRoughness, atomMetalness: state.atomMetalness, atomReflectivity: state.atomReflectivity,
+      lightHeadlight: state.lightHeadlight, lightAngle: state.lightAngle,
+      keyEnabled: state.keyEnabled, keyIntensity: state.keyIntensity,
+      fillEnabled: state.fillEnabled, fillIntensity: state.fillIntensity,
+      rimEnabled: state.rimEnabled, rimIntensity: state.rimIntensity
+    };
+  }
+  function saveModelToFile() {
+    if (!state.atoms && !state.guestAtoms) { setStatus("Nothing loaded yet -- load a host structure first.", true); return; }
+    var data = buildProjectSnapshot();
+    var blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+    var base = state.name ? state.name.replace(/\.[^./\\]+$/, "") : "CrystalVoid";
+    saveBlobToDisk(blob, base + "_project.json");
+  }
+  function maxUid(atoms) {
+    var m = 0; if (!atoms) return m;
+    for (var i = 0; i < atoms.length; i++) if (typeof atoms[i].uid === "number" && atoms[i].uid > m) m = atoms[i].uid;
+    return m;
+  }
+  function restoreProjectSnapshot(data) {
+    exitGrowMode();
+    state.undoStack = [];
+    state.name = data.name || ""; state.guestName = data.guestName || "";
+    state.atoms = data.atoms || null; state.guestAtoms = data.guestAtoms || null;
+    state.guestGroups = data.guestGroups || []; state.guestBatch = data.guestBatch || 0;
+    nextUid = Math.max(data.nextUid || 1, maxUid(state.atoms) + 1, maxUid(state.guestAtoms) + 1, 1);
+    state.isCif = !!data.isCif; state.cifCell = data.cifCell || null; state.cifSymops = data.cifSymops || null;
+    state.cifAsymUnit = data.cifAsymUnit || null; state.cifFracToCart = data.cifFracToCart || null;
+    state.symmetryForgotten = !!data.symmetryForgotten; state.showOnlyAsu = !!data.showOnlyAsu;
+    state.cutBonds = data.cutBonds || {}; state.cutBondSignatures = data.cutBondSignatures || {};
+    state.selectedBonds = data.selectedBonds || {};
+    if (data.viewOffset) state.viewOffset = data.viewOffset;
+
+    state.radii = data.radii || {}; state.defaultColors = data.defaultColors || {};
+    state.hostColors = data.hostColors || {}; state.guestColors = data.guestColors || {};
+    if (data.hostColorMode) state.hostColorMode = data.hostColorMode;
+    if (typeof data.hostSingleColor === "number") state.hostSingleColor = data.hostSingleColor;
+    if (data.guestColorMode) state.guestColorMode = data.guestColorMode;
+    if (data.hostBondColorMode) state.hostBondColorMode = data.hostBondColorMode;
+    if (typeof data.hostBondColor === "number") state.hostBondColor = data.hostBondColor;
+    if (data.guestBondColorMode) state.guestBondColorMode = data.guestBondColorMode;
+    if (typeof data.guestBondColor === "number") state.guestBondColor = data.guestBondColor;
+    if (typeof data.hostBondRadius === "number") state.hostBondRadius = data.hostBondRadius;
+    if (typeof data.guestBondRadius === "number") state.guestBondRadius = data.guestBondRadius;
+    if (data.hostGrowStyle) state.hostGrowStyle = data.hostGrowStyle;
+    if (data.guestGrowStyle) state.guestGrowStyle = data.guestGrowStyle;
+    var hostGrowSel = document.getElementById("hostGrowStyleSelect"); if (hostGrowSel) hostGrowSel.value = state.hostGrowStyle;
+    var guestGrowSel = document.getElementById("guestGrowStyleSelect"); if (guestGrowSel) guestGrowSel.value = state.guestGrowStyle;
+
+    if (typeof data.showHost === "boolean") state.showHost = data.showHost;
+    if (typeof data.showGuest === "boolean") state.showGuest = data.showGuest;
+    if (typeof data.showHBonds === "boolean") state.showHBonds = data.showHBonds;
+    if (typeof data.showUnitCell === "boolean") state.showUnitCell = data.showUnitCell;
+    if (typeof data.unitCellColor === "number") state.unitCellColor = data.unitCellColor;
+    if (typeof data.unitCellThickness === "number") state.unitCellThickness = data.unitCellThickness;
+    if (typeof data.unitCellAxisColors === "boolean") state.unitCellAxisColors = data.unitCellAxisColors;
+
+    if (typeof data.probe === "number") state.probe = data.probe;
+    if (data.volAcc) state.volAcc = data.volAcc;
+    if (typeof data.surfaceColor === "number") state.surfaceColor = data.surfaceColor;
+    if (typeof data.useSurfaceColorForAll === "boolean") state.useSurfaceColorForAll = data.useSurfaceColorForAll;
+    if (typeof data.surfaceOpacity === "number") state.surfaceOpacity = data.surfaceOpacity;
+    if (typeof data.showSurface === "boolean") state.showSurface = data.showSurface;
+
+    state.calcInfo = data.calcInfo || null;
+    state.vols = data.vols || null;
+    state.interior = deserializeMesh(data.interior);
+    state.cavityList = data.cavityList ? data.cavityList.map(function (c) {
+      return { volume: c.volume, mesh: deserializeMeshPart(c.mesh), color: c.color, hidden: !!c.hidden };
+    }) : null;
+
+    if (typeof data.bgColor === "number") { state.bgColor = data.bgColor; scene.background = new THREE.Color(state.bgColor); }
+    if (typeof data.depthScaling === "boolean") { state.depthScaling = data.depthScaling; setDepthScaling(state.depthScaling); }
+    if (typeof data.highDetail === "boolean") setHighDetail(data.highDetail);
+    if (typeof data.fogOn === "boolean") state.fogOn = data.fogOn;
+    if (typeof data.fogDensity === "number") state.fogDensity = data.fogDensity;
+    if (typeof data.atomRoughness === "number") state.atomRoughness = data.atomRoughness;
+    if (typeof data.atomMetalness === "number") state.atomMetalness = data.atomMetalness;
+    if (typeof data.atomReflectivity === "number") state.atomReflectivity = data.atomReflectivity;
+    updateMaterialAppearance();
+    if (typeof data.lightHeadlight === "boolean") setLightMode(data.lightHeadlight);
+    if (typeof data.lightAngle === "number") setLightAngle(data.lightAngle);
+    setKeyLight(data.keyEnabled, data.keyIntensity);
+    setFillLight(data.fillEnabled, data.fillIntensity);
+    setRimLight(data.rimEnabled, data.rimIntensity);
+
+    if (data.camera) {
+      if (typeof data.camera.camDist === "number") camDist = data.camera.camDist;
+      if (data.camera.camOrient) camOrient.set(data.camera.camOrient[0], data.camera.camOrient[1], data.camera.camOrient[2], data.camera.camOrient[3]);
+      if (data.camera.camTarget) camTarget.set(data.camera.camTarget[0], data.camera.camTarget[1], data.camera.camTarget[2]);
+      applyController();
+    }
+
+    updateFog();
+    renderStructure(); renderSurface(); renderUnitCell();
+    updateHostInfo(); updateGuestInfo();
+    buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); buildGuestGroupsUI();
+    refreshReassignElementOptions(); refreshBondCleanupElements();
+    renderSelection(); updateSelectionInfo(); updateBondSelectionInfo();
+    refreshSymmetryUI();
+    updateResults(state.vols ? { vols: state.vols, calcInfo: state.calcInfo } : null);
+    buildCavityListUI();
+  }
+  function loadModelFromFile(text) {
+    var data;
+    try { data = JSON.parse(text); } catch (e) { setStatus("Could not parse this file -- it may not be a CrystalVoid project JSON.", true); return; }
+    if (!data || data.appName !== "CrystalVoid" || !data.formatVersion) { setStatus("This does not look like a CrystalVoid project file.", true); return; }
+    restoreProjectSnapshot(data);
+    setStatus("Loaded project" + (data.name ? (" (" + data.name + ")") : "") + " -- resumed exactly as saved.", false);
+  }
+
   function buildUI() {
     var left = document.getElementById("leftPanel");
 
-    var hc = section(left, "Host");
-    var hinfo = el("div", "readout"); hinfo.id = "hostInfo"; hinfo.innerHTML = "&mdash;"; hc.appendChild(hinfo);
+    var modelC = section(left, "Model");
+    var modelTabs = tabbedPanel(modelC, ["Host", "Guest(s)", "Atoms", "Bonds"]);
+    var hostTab = modelTabs[0], guestTab = modelTabs[1], atomsTab = modelTabs[2], bondsTab = modelTabs[3];
+
+    /* ---- Host ---- */
+    var hinfo = el("div", "readout"); hinfo.id = "hostInfo"; hinfo.innerHTML = "&mdash;"; hostTab.appendChild(hinfo);
     var hrow = el("div", "btnrow");
     button(hrow, "Remove host", "ghost", removeHost);
-    hc.appendChild(hrow);
-    var hShowStyleRow = el("div", "ctl-inline");
-    toggle(hShowStyleRow, "show host", state.showHost, function (b) { state.showHost = b; renderStructure(); });
-    var hStyleLabel = el("label", "plain", "style"); hStyleLabel.style.marginLeft = "auto";
-    hShowStyleRow.appendChild(hStyleLabel);
-    var hStyleSel = document.createElement("select"); hStyleSel.className = "sel";
-    [["spacefill", "Spacefill"], ["ballstick", "Ball & stick"], ["stick", "Stick"]].forEach(function (o) {
-      var op = document.createElement("option"); op.value = o[0]; op.textContent = o[1]; if (o[0] === state.style) op.selected = true; hStyleSel.appendChild(op);
-    });
-    hStyleSel.addEventListener("change", function () { state.style = hStyleSel.value; renderStructure(); });
-    hShowStyleRow.appendChild(hStyleSel);
-    hc.appendChild(hShowStyleRow);
+    hostTab.appendChild(hrow);
+    toggle(hostTab, "show host", state.showHost, function (b) { state.showHost = b; renderStructure(); });
+    select(hostTab, "new atoms (grown)", [["asu", "Same as ASU"], ["stick", "Stick"], ["ballstick", "Ball & stick"], ["spacefill", "Spacefill"]], state.hostGrowStyle, function (v) { state.hostGrowStyle = v; }).id = "hostGrowStyleSelect";
 
-    var hostTabs = tabbedPanel(hc, ["Atoms", "Bonds"]);
-    var hostAtomsTab = hostTabs[0], hostBondsTab = hostTabs[1];
-
-    var hColorByRow = el("div", "ctl-inline");
-    hColorByRow.appendChild(el("label", "plain", "colour by"));
-    var hColorModeSel = document.createElement("select"); hColorModeSel.className = "sel";
-    [["element", "Element"], ["component", "Component"]].forEach(function (o) {
-      var op = document.createElement("option"); op.value = o[0]; op.textContent = o[1]; if (o[0] === state.hostColorMode) op.selected = true; hColorModeSel.appendChild(op);
-    });
-    hColorModeSel.addEventListener("change", function () { state.hostColorMode = hColorModeSel.value; refreshHostAtomColors(); renderStructure(); });
-    hColorByRow.appendChild(hColorModeSel);
-    var hSingleColorSw = colorSwatch(state.hostSingleColor, function (hex) { state.hostSingleColor = hex; refreshHostAtomColors(); renderStructure(); });
-    hColorByRow.appendChild(hSingleColorSw);
-    hostAtomsTab.appendChild(hColorByRow);
-    var hcbox = el("div", "sbody"); hcbox.id = "hostColorBox"; hcbox.innerHTML = "<div class='dim'>Load a host structure.</div>"; hostAtomsTab.appendChild(hcbox);
-    var hResetRow = el("div", "btnrow");
-    button(hResetRow, "Reset atom colours", "mini", function () {
-      state.hostColors = {}; if (state.atoms) { refreshHostAtomColors(); renderStructure(); buildHostColorEditor(); setStatus("Host colours reset to defaults.", false); }
-    });
-    hostAtomsTab.appendChild(hResetRow);
-
-    buildBondColorByRow(hostBondsTab, function () { return state.hostBondColorMode; }, function (v) { state.hostBondColorMode = v; }, function () { return state.hostBondColor; }, function (hex) { state.hostBondColor = hex; });
-    slider(hostBondsTab, "bond thickness", 0.02, 0.35, 0.01, state.hostBondRadius, U.ang, function (v) { state.hostBondRadius = v; renderStructure(); });
-
-    var gc = section(left, "Guest");
+    /* ---- Guest(s) ---- */
     var gbox = el("div", "guestbox", "Drop guest .pdb here (or click to browse)");
     gbox.id = "guestDropbox";
-    gc.appendChild(gbox);
-    var ginfo = el("div", "readout"); ginfo.id = "guestInfo"; ginfo.innerHTML = "<div class='dim'>No guest defined.</div>"; gc.appendChild(ginfo);
-    var grow = el("div", "btnrow");
-    button(grow, "Remove all guests", "ghost", removeGuest);
-    gc.appendChild(grow);
-    var gShowStyleRow = el("div", "ctl-inline");
-    toggle(gShowStyleRow, "show guest", state.showGuest, function (b) { state.showGuest = b; renderStructure(); });
-    var gStyleLabel = el("label", "plain", "style"); gStyleLabel.style.marginLeft = "auto";
-    gShowStyleRow.appendChild(gStyleLabel);
-    var gStyleSel = document.createElement("select"); gStyleSel.className = "sel";
-    [["spacefill", "Spacefill"], ["ballstick", "Ball & stick"], ["stick", "Stick"]].forEach(function (o) {
-      var op = document.createElement("option"); op.value = o[0]; op.textContent = o[1]; if (o[0] === state.guestStyle) op.selected = true; gStyleSel.appendChild(op);
+    guestTab.appendChild(gbox);
+    var ginfo = el("div", "readout"); ginfo.id = "guestInfo"; ginfo.innerHTML = "<div class='dim'>No guest defined.</div>"; guestTab.appendChild(ginfo);
+    var guestRemoveRow = el("div", "btnrow");
+    button(guestRemoveRow, "Remove all guests", "ghost", removeGuest);
+    guestTab.appendChild(guestRemoveRow);
+    toggle(guestTab, "show guest", state.showGuest, function (b) { state.showGuest = b; renderStructure(); });
+    select(guestTab, "colour by", [["element", "Element"], ["component", "Component"]], state.guestColorMode, function (v) { state.guestColorMode = v; refreshGuestAtomColors(); renderStructure(); });
+    select(guestTab, "new atoms (grown)", [["asu", "Same as ASU"], ["stick", "Stick"], ["ballstick", "Ball & stick"], ["spacefill", "Spacefill"]], state.guestGrowStyle, function (v) { state.guestGrowStyle = v; }).id = "guestGrowStyleSelect";
+    guestTab.appendChild(el("div", "hint", "Guest components:"));
+    var ggbox = el("div", "sbody"); ggbox.id = "guestGroupsBox"; ggbox.innerHTML = "<div class='dim'>No guest components yet.</div>"; guestTab.appendChild(ggbox);
+
+    /* ---- Atoms ---- */
+    var selInfo = el("div", "readout"); selInfo.id = "selInfo"; selInfo.innerHTML = "<div class='dim'>No atoms selected.</div>"; atomsTab.appendChild(selInfo);
+    var erow = el("div", "btnrow");
+    button(erow, "Delete selection", "ghost", deleteSelectedAtoms);
+    button(erow, "Undo", "ghost", undoEdit);
+    button(erow, "Clear selection", "ghost", clearSelection);
+    atomsTab.appendChild(erow);
+    var moveAssignGrid = el("div", "moveassign-grid");
+    button(moveAssignGrid, "Move selection to", "ghost", function () { moveSelectionTo(parseDest(document.getElementById("moveDest").value)); });
+    var moveSel = document.createElement("select"); moveSel.className = "sel"; moveSel.id = "moveDest";
+    moveAssignGrid.appendChild(moveSel);
+    button(moveAssignGrid, "Reassign element to", "ghost", function () {
+      var v = document.getElementById("reassignEl").value;
+      if (v === "__other__") { showElementPicker(function (sym) { reassignSelectedElement(sym); }); return; }
+      reassignSelectedElement(v);
     });
-    gStyleSel.addEventListener("change", function () { state.guestStyle = gStyleSel.value; renderStructure(); });
-    gShowStyleRow.appendChild(gStyleSel);
-    gc.appendChild(gShowStyleRow);
+    var reassignSel = document.createElement("select"); reassignSel.className = "sel"; reassignSel.id = "reassignEl";
+    moveAssignGrid.appendChild(reassignSel);
+    atomsTab.appendChild(moveAssignGrid);
+    refreshReassignElementOptions();
+    atomsTab.appendChild(el("hr", "divider"));
+    var actionGrid = el("div", "atoms-btn-grid");
+    var centroidBtn = button(actionGrid, "Generate centroid", "ghost", generateCentroid); centroidBtn.id = "centroidBtn"; centroidBtn.disabled = true;
+    var molVolBtn = button(actionGrid, "Calculate molecular volume", "ghost", calculateMolecularVolume); molVolBtn.id = "molVolBtn"; molVolBtn.disabled = true;
+    atomsTab.appendChild(actionGrid);
 
-    var guestTabs = tabbedPanel(gc, ["Atoms", "Bonds"]);
-    var guestAtomsTab = guestTabs[0], guestBondsTab = guestTabs[1];
+    /* ---- per-atom display properties (colour + radius override) ----
+       This is now the only place atom colour/size is set -- Host and Guest no
+       longer have their own Style or colour-by controls. Every atom always
+       renders as a sphere (vdW-based by default) plus bonds; select atoms
+       here and apply a Custom colour and/or a Fixed/vdW x radius override to
+       get a spacefill look (large radius), a stick look (radius 0, which
+       collapses to the bond's own thickness), or anything in between. Only
+       ever touches display fields (dispColorMode/dispColor/dispRadiusMode/
+       dispRadiusValue), never the atom's real .r, which the cavity/channel
+       calculation depends on. */
+    atomsTab.appendChild(el("hr", "divider"));
+    atomsTab.appendChild(el("div", "hint", "Display properties (selected atoms):"));
+    var atomDispColorMode = null, atomDispColorHex = 0xffffff;
+    var atomDispRadiusMode = null, atomDispFixedVal = 1.50, atomDispVdwFrac = 1.00;
 
-    select(guestAtomsTab, "colour by", [["element", "Element"], ["component", "Component"]], state.guestColorMode, function (v) { state.guestColorMode = v; refreshGuestAtomColors(); renderStructure(); });
-    var gcbox = el("div", "sbody"); gcbox.id = "guestColorBox"; gcbox.innerHTML = "<div class='dim'>Load a guest molecule.</div>"; guestAtomsTab.appendChild(gcbox);
-    var gResetRow = el("div", "btnrow");
-    button(gResetRow, "Reset atom colours", "mini", function () {
-      state.guestColors = {}; if (state.guestAtoms) { refreshGuestAtomColors(); renderStructure(); buildGuestColorEditor(); setStatus("Guest colours reset to defaults.", false); }
+    function exclusiveCheckPair(cbA, valA, cbB, valB, onChange) {
+      /* two checkboxes that behave like a radio pair plus a "neither" state:
+         checking one unchecks the other (mutual exclusion), but either can
+         also be unchecked on its own -- a real <input type=radio> group can
+         represent "one is on" but never "neither", so checkboxes with manual
+         exclusion stand in for that here. */
+      cbA.addEventListener("change", function () {
+        if (cbA.checked) cbB.checked = false;
+        onChange(cbA.checked ? valA : (cbB.checked ? valB : null));
+      });
+      cbB.addEventListener("change", function () {
+        if (cbB.checked) cbA.checked = false;
+        onChange(cbB.checked ? valB : (cbA.checked ? valA : null));
+      });
+    }
+
+    var atomDispColorRow = el("div", "ctl-inline");
+    atomDispColorRow.appendChild(el("label", "plain", "colour"));
+    var cpkLbl = el("label", "radio"); var cpkCb = document.createElement("input"); cpkCb.type = "checkbox";
+    cpkLbl.appendChild(cpkCb); cpkLbl.appendChild(el("span", null, "CPK")); atomDispColorRow.appendChild(cpkLbl);
+    var customLbl = el("label", "radio"); var customCb = document.createElement("input"); customCb.type = "checkbox";
+    customLbl.appendChild(customCb); customLbl.appendChild(el("span", null, "Custom")); atomDispColorRow.appendChild(customLbl);
+    /* the swatch stays editable regardless of whether "Custom" is ticked, so
+       a colour can be picked in advance and the checkbox ticked afterwards */
+    var atomDispColorSwatch = colorSwatch(atomDispColorHex, function (hex) { atomDispColorHex = hex; });
+    atomDispColorRow.appendChild(atomDispColorSwatch);
+    atomsTab.appendChild(atomDispColorRow);
+    exclusiveCheckPair(cpkCb, "cpk", customCb, "custom", function (v) { atomDispColorMode = v; });
+
+    var atomDispRadiusRow = el("div", "ctl-inline");
+    atomDispRadiusRow.appendChild(el("label", "plain", "radius"));
+    var fixedLbl = el("label", "radio"); var fixedCb = document.createElement("input"); fixedCb.type = "checkbox";
+    fixedLbl.appendChild(fixedCb); fixedLbl.appendChild(el("span", null, "Fixed")); atomDispRadiusRow.appendChild(fixedLbl);
+    var atomDispFixedInp = document.createElement("input"); atomDispFixedInp.type = "number"; atomDispFixedInp.className = "num";
+    atomDispFixedInp.step = "0.05"; atomDispFixedInp.min = "0"; atomDispFixedInp.value = atomDispFixedVal.toFixed(2);
+    atomDispFixedInp.addEventListener("input", function () { var v = parseFloat(atomDispFixedInp.value); if (isFinite(v) && v >= 0) atomDispFixedVal = v; });
+    atomDispRadiusRow.appendChild(atomDispFixedInp);
+    atomDispRadiusRow.appendChild(el("span", "unit", U.ang));
+    var vdwxLbl = el("label", "radio"); var vdwxCb = document.createElement("input"); vdwxCb.type = "checkbox";
+    vdwxLbl.appendChild(vdwxCb); vdwxLbl.appendChild(el("span", null, "vdW x")); atomDispRadiusRow.appendChild(vdwxLbl);
+    var atomDispVdwInp = document.createElement("input"); atomDispVdwInp.type = "number"; atomDispVdwInp.className = "num";
+    atomDispVdwInp.step = "0.05"; atomDispVdwInp.min = "0"; atomDispVdwInp.value = atomDispVdwFrac.toFixed(2);
+    atomDispVdwInp.addEventListener("input", function () { var v = parseFloat(atomDispVdwInp.value); if (isFinite(v) && v >= 0) atomDispVdwFrac = v; });
+    atomDispRadiusRow.appendChild(atomDispVdwInp);
+    atomDispRadiusRow.appendChild(el("span", "unit", "x vdW"));
+    atomsTab.appendChild(atomDispRadiusRow);
+    exclusiveCheckPair(fixedCb, "fixed", vdwxCb, "vdwx", function (v) { atomDispRadiusMode = v; });
+
+    function selectQuickStyle(frac) {
+      vdwxCb.checked = true; fixedCb.checked = false;
+      atomDispRadiusMode = "vdwx"; atomDispVdwFrac = frac; atomDispVdwInp.value = frac.toFixed(2);
+    }
+    var quickRow = el("div", "btnrow");
+    var stickBtn = document.createElement("button"); stickBtn.type = "button"; stickBtn.className = "icon-btn"; stickBtn.title = "Stick (radius 0 -- collapses to bond thickness)";
+    stickBtn.innerHTML = STICK_ICON_SVG;
+    stickBtn.addEventListener("click", function () { selectQuickStyle(0); });
+    quickRow.appendChild(stickBtn);
+    var ballstickBtn = document.createElement("button"); ballstickBtn.type = "button"; ballstickBtn.className = "icon-btn"; ballstickBtn.title = "Ball & stick (0.2x van der Waals radius)";
+    ballstickBtn.innerHTML = BALLSTICK_ICON_SVG;
+    ballstickBtn.addEventListener("click", function () { selectQuickStyle(0.2); });
+    quickRow.appendChild(ballstickBtn);
+    var spacefillBtn = document.createElement("button"); spacefillBtn.type = "button"; spacefillBtn.className = "icon-btn"; spacefillBtn.title = "Spacefill (full van der Waals radius)";
+    spacefillBtn.innerHTML = SPACEFILL_ICON_SVG;
+    spacefillBtn.addEventListener("click", function () { selectQuickStyle(1); });
+    quickRow.appendChild(spacefillBtn);
+    var copyAtomSettingsBtn = button(quickRow, "Copy atom settings", "ghost", function () {
+      var sel = getSelectedAtomObjects();
+      if (sel.length !== 1) { setStatus("Select exactly one atom first.", true); return; }
+      var a = sel[0];
+      /* an atom with no override at all is still rendering with a definite look --
+         CPK colour, ball-and-stick radius (0.2x vdW, or 0.15x for hydrogen) -- so
+         copying it should show exactly that, not "neither ticked". */
+      if (a.dispColorMode === "custom") { customCb.checked = true; cpkCb.checked = false; atomDispColorMode = "custom"; }
+      else { cpkCb.checked = true; customCb.checked = false; atomDispColorMode = "cpk"; }
+      var swatchHex = (a.dispColor !== undefined) ? a.dispColor : (a.color !== undefined ? a.color : atomDispColorHex);
+      atomDispColorHex = swatchHex; atomDispColorSwatch.value = hexToCss(swatchHex);
+      if (a.dispRadiusMode === "fixed") {
+        fixedCb.checked = true; vdwxCb.checked = false; atomDispRadiusMode = "fixed";
+        atomDispFixedVal = a.dispRadiusValue; atomDispFixedInp.value = atomDispFixedVal.toFixed(2);
+      } else {
+        vdwxCb.checked = true; fixedCb.checked = false; atomDispRadiusMode = "vdwx";
+        atomDispVdwFrac = (a.dispRadiusMode === "vdwx") ? a.dispRadiusValue : ((a.el === "H") ? 0.15 : 0.2);
+        atomDispVdwInp.value = atomDispVdwFrac.toFixed(2);
+      }
+      setStatus("Copied display settings from the selected atom.", false);
     });
-    guestAtomsTab.appendChild(gResetRow);
-    guestAtomsTab.appendChild(el("div", "hint", "Guest components:"));
-    var ggbox = el("div", "sbody"); ggbox.id = "guestGroupsBox"; ggbox.innerHTML = "<div class='dim'>No guest components yet.</div>"; guestAtomsTab.appendChild(ggbox);
+    copyAtomSettingsBtn.id = "copyAtomSettingsBtn";
+    copyAtomSettingsBtn.title = "Copy atom settings -- loads the single selected atom's colour and radius settings into the checkboxes above";
+    copyAtomSettingsBtn.disabled = true;
+    atomsTab.appendChild(quickRow);
 
-    buildBondColorByRow(guestBondsTab, function () { return state.guestBondColorMode; }, function (v) { state.guestBondColorMode = v; }, function () { return state.guestBondColor; }, function (hex) { state.guestBondColor = hex; });
-    slider(guestBondsTab, "bond thickness", 0.02, 0.35, 0.01, state.guestBondRadius, U.ang, function (v) { state.guestBondRadius = v; renderStructure(); });
+    var atomDispBtnRow = el("div", "btnrow");
+    button(atomDispBtnRow, "Apply", "ghost", function () {
+      var sel = getSelectedAtomObjects();
+      if (!sel.length) { setStatus("Select one or more atoms first.", true); return; }
+      if (!atomDispColorMode && !atomDispRadiusMode) { setStatus("Tick Colour and/or Radius first -- neither is currently set to apply.", true); return; }
+      pushUndo();
+      for (var i = 0; i < sel.length; i++) {
+        var a = sel[i];
+        if (atomDispColorMode === "cpk") { a.dispColorMode = "cpk"; delete a.dispColor; }
+        else if (atomDispColorMode === "custom") { a.dispColorMode = "custom"; a.dispColor = atomDispColorHex; }
+        if (atomDispRadiusMode === "fixed") { a.dispRadiusMode = "fixed"; a.dispRadiusValue = atomDispFixedVal; }
+        else if (atomDispRadiusMode === "vdwx") { a.dispRadiusMode = "vdwx"; a.dispRadiusValue = atomDispVdwFrac; }
+      }
+      refreshHostAtomColors(); refreshGuestAtomColors();
+      renderStructure(); renderSelection();
+      setStatus("Applied display settings to " + sel.length + " atom" + (sel.length === 1 ? "" : "s") + ".", false);
+      if (clearAfterApplyCb.checked) clearSelection();
+    });
+    button(atomDispBtnRow, "Clear overrides", "ghost", function () {
+      var sel = getSelectedAtomObjects();
+      if (!sel.length) { setStatus("Select one or more atoms first.", true); return; }
+      pushUndo();
+      for (var j = 0; j < sel.length; j++) {
+        var b = sel[j];
+        delete b.dispColorMode; delete b.dispColor; delete b.dispRadiusMode; delete b.dispRadiusValue;
+      }
+      refreshHostAtomColors(); refreshGuestAtomColors();
+      renderStructure(); renderSelection();
+      setStatus("Cleared custom display settings for " + sel.length + " atom" + (sel.length === 1 ? "" : "s") + ".", false);
+    });
+    atomsTab.appendChild(atomDispBtnRow);
+    var clearAfterApplyCb = toggle(atomsTab, "Clear", false, function () {});
+
+    /* ---- Bonds ---- */
+    bondsTab.appendChild(el("div", "hint", "Host bonds"));
+    buildBondColorByRow(bondsTab, function () { return state.hostBondColorMode; }, function (v) { state.hostBondColorMode = v; }, function () { return state.hostBondColor; }, function (hex) { state.hostBondColor = hex; });
+    slider(bondsTab, "bond thickness", 0.02, 0.35, 0.01, state.hostBondRadius, U.ang, function (v) { state.hostBondRadius = v; renderStructure(); });
+    bondsTab.appendChild(el("hr", "divider"));
+    bondsTab.appendChild(el("div", "hint", "Guest bonds"));
+    buildBondColorByRow(bondsTab, function () { return state.guestBondColorMode; }, function (v) { state.guestBondColorMode = v; }, function () { return state.guestBondColor; }, function (hex) { state.guestBondColor = hex; });
+    slider(bondsTab, "bond thickness", 0.02, 0.35, 0.01, state.guestBondRadius, U.ang, function (v) { state.guestBondRadius = v; renderStructure(); });
+    bondsTab.appendChild(el("hr", "divider"));
+
+    var bondSelInfo = el("div", "readout"); bondSelInfo.id = "bondSelInfo"; bondSelInfo.innerHTML = "<div class='dim'>No bonds selected.</div>"; bondsTab.appendChild(bondSelInfo);
+    toggle(bondsTab, "Show H bonds", state.showHBonds, function (b) { state.showHBonds = b; renderStructure(); });
+    var bondRow = el("div", "btnrow");
+    button(bondRow, "Cut selected", "ghost", cutSelectedBonds);
+    button(bondRow, "Undo", "ghost", undoEdit);
+    button(bondRow, "Clear selection", "ghost", clearBondSelection);
+    bondsTab.appendChild(bondRow);
+    bondsTab.appendChild(el("div", "hint", "delete bonds"));
+    var elRow = el("div", "ctl-inline");
+    elRow.appendChild(el("label", "plain", "from"));
+    var a1sel = document.createElement("select"); a1sel.className = "sel sel-narrow"; a1sel.id = "cbA1";
+    elRow.appendChild(a1sel);
+    elRow.appendChild(el("label", "plain", "to"));
+    var a2sel = document.createElement("select"); a2sel.className = "sel sel-narrow"; a2sel.id = "cbA2";
+    elRow.appendChild(a2sel);
+    var modeSel = document.createElement("select"); modeSel.className = "sel sel-narrow"; modeSel.id = "cbMode";
+    [["outside", "Outside range"], ["inside", "Inside range"]].forEach(function (o) { var op = document.createElement("option"); op.value = o[0]; op.textContent = o[1]; modeSel.appendChild(op); });
+    elRow.appendChild(modeSel);
+    bondsTab.appendChild(elRow);
+    var limRow = el("div", "ctl-inline");
+    limRow.appendChild(el("label", "plain", "lower limit"));
+    var loInp = document.createElement("input"); loInp.type = "number"; loInp.className = "num"; loInp.id = "cbLo"; loInp.step = "0.05"; loInp.value = "0.00";
+    limRow.appendChild(loInp);
+    limRow.appendChild(el("label", "plain", "upper limit"));
+    var hiInp = document.createElement("input"); hiInp.type = "number"; hiInp.className = "num"; hiInp.id = "cbHi"; hiInp.step = "0.05"; hiInp.value = "1.80";
+    limRow.appendChild(hiInp);
+    limRow.appendChild(el("span", "unit", U.ang));
+    bondsTab.appendChild(limRow);
+    var cbRow = el("div", "btnrow");
+    button(cbRow, "Delete matching bonds", "ghost", function () {
+      var el1 = document.getElementById("cbA1").value, el2 = document.getElementById("cbA2").value;
+      var lo = parseFloat(document.getElementById("cbLo").value), hi = parseFloat(document.getElementById("cbHi").value);
+      var mode = document.getElementById("cbMode").value;
+      if (!isFinite(lo) || !isFinite(hi) || lo < 0 || hi < lo) { setStatus("Enter a valid lower/upper limit (lower must be less than upper).", true); return; }
+      cleanupBondsByDistance(el1, el2, lo, hi, mode);
+    });
+    button(cbRow, "Reinstate all bonds", "ghost", reinstateAllBonds);
+    bondsTab.appendChild(cbRow);
 
     var symC = section(left, "Grow", false, function (isOpen) {
       if (!isOpen) exitGrowMode();
@@ -5751,7 +6177,7 @@ select.sel:focus{border-color:var(--accent)}
     refreshSymOpDropdown();
 
     var cifDispC = section(left, "Display");
-    cifDispC.parentElement.id = "cifDisplaySection"; cifDispC.parentElement.style.display = "none";
+    cifDispC.parentElement.id = "cifDisplaySection";
     var cifDispTabs = tabbedPanel(cifDispC, ["View", "Unit cell"]);
     var cifViewTab = cifDispTabs[0], cifCellTab = cifDispTabs[1];
 
@@ -5780,6 +6206,26 @@ select.sel:focus{border-color:var(--accent)}
     });
     cifViewTab.appendChild(hklRow);
 
+    cifViewTab.appendChild(el("hr", "divider"));
+    var viewSelRow = el("div", "btnrow");
+    var viewVecBtn = button(viewSelRow, "View along vector", "ghost", viewAlongTwoAtoms); viewVecBtn.id = "viewVecBtn"; viewVecBtn.disabled = true;
+    var viewPlaneBtn = button(viewSelRow, "View perpendicular to plane", "ghost", viewPerpendicularToPlane); viewPlaneBtn.id = "viewPlaneBtn"; viewPlaneBtn.disabled = true;
+    cifViewTab.appendChild(viewSelRow);
+
+    var scaleRow = el("div", "ctl-inline");
+    scaleRow.appendChild(el("label", "plain", "Set scale"));
+    var scaleInp = document.createElement("input"); scaleInp.type = "number"; scaleInp.className = "num wide"; scaleInp.id = "dispScaleInput";
+    scaleInp.title = "Bigger number = more zoomed in.";
+    scaleInp.step = "0.1"; scaleInp.min = "0.02"; scaleInp.max = "335"; scaleInp.value = (SCALE_REF / Math.max(camDist, 1e-6)).toFixed(2);
+    scaleInp.addEventListener("input", function () {
+      var v = parseFloat(scaleInp.value);
+      if (!isFinite(v) || v <= 0) return;
+      camDist = Math.max(0.3, Math.min(4000, SCALE_REF / v));
+      applyController();
+    });
+    scaleRow.appendChild(scaleInp);
+    cifViewTab.appendChild(scaleRow);
+
     var ucRow = el("div", "ctl-inline");
     var ucTg = toggle(ucRow, "show unit cell", state.showUnitCell, function (b) { state.showUnitCell = b; renderUnitCell(); });
     ucTg.id = "showUnitCellTg";
@@ -5789,80 +6235,9 @@ select.sel:focus{border-color:var(--accent)}
     var ucColorSw = colorControl(cifCellTab, "colour", state.unitCellColor, function (hex) { state.unitCellColor = hex; renderUnitCell(); });
     labelSlider(cifCellTab, "line thickness", 0.01, 0.15, 0.005, state.unitCellThickness, function (v) { state.unitCellThickness = v; renderUnitCell(); });
 
-    var ec = section(left, "Edit atoms and bonds");
-    var ebTabs = tabbedPanel(ec, ["Atoms", "Bonds"]);
-    var atomsTab = ebTabs[0], bondsTab = ebTabs[1];
-
-    var selInfo = el("div", "readout"); selInfo.id = "selInfo"; selInfo.innerHTML = "<div class='dim'>No atoms selected.</div>"; atomsTab.appendChild(selInfo);
-    var erow = el("div", "btnrow");
-    button(erow, "Delete selection", "ghost", deleteSelectedAtoms);
-    button(erow, "Undo", "ghost", undoEdit);
-    button(erow, "Clear selection", "ghost", clearSelection);
-    atomsTab.appendChild(erow);
-    var moveAssignGrid = el("div", "moveassign-grid");
-    button(moveAssignGrid, "Move selection to", "ghost", function () { moveSelectionTo(parseDest(document.getElementById("moveDest").value)); });
-    var moveSel = document.createElement("select"); moveSel.className = "sel"; moveSel.id = "moveDest";
-    moveAssignGrid.appendChild(moveSel);
-    button(moveAssignGrid, "Reassign element to", "ghost", function () {
-      var v = document.getElementById("reassignEl").value;
-      if (v === "__other__") { showElementPicker(function (sym) { reassignSelectedElement(sym); }); return; }
-      reassignSelectedElement(v);
-    });
-    var reassignSel = document.createElement("select"); reassignSel.className = "sel"; reassignSel.id = "reassignEl";
-    moveAssignGrid.appendChild(reassignSel);
-    atomsTab.appendChild(moveAssignGrid);
-    refreshReassignElementOptions();
-    atomsTab.appendChild(el("hr", "divider"));
-    var actionGrid = el("div", "atoms-btn-grid");
-    var centroidBtn = button(actionGrid, "Generate centroid", "ghost", generateCentroid); centroidBtn.id = "centroidBtn"; centroidBtn.disabled = true;
-    var molVolBtn = button(actionGrid, "Calculate molecular volume", "ghost", calculateMolecularVolume); molVolBtn.id = "molVolBtn"; molVolBtn.disabled = true;
-    var viewVecBtn = button(actionGrid, "View along vector", "ghost", viewAlongTwoAtoms); viewVecBtn.id = "viewVecBtn"; viewVecBtn.disabled = true;
-    var viewPlaneBtn = button(actionGrid, "View perpendicular to plane", "ghost", viewPerpendicularToPlane); viewPlaneBtn.id = "viewPlaneBtn"; viewPlaneBtn.disabled = true;
-    atomsTab.appendChild(actionGrid);
-
-    var bondSelInfo = el("div", "readout"); bondSelInfo.id = "bondSelInfo"; bondSelInfo.innerHTML = "<div class='dim'>No bonds selected.</div>"; bondsTab.appendChild(bondSelInfo);
-    toggle(bondsTab, "Show H bonds", state.showHBonds, function (b) { state.showHBonds = b; renderStructure(); });
-    var bondRow = el("div", "btnrow");
-    button(bondRow, "Cut selected", "ghost", cutSelectedBonds);
-    button(bondRow, "Undo", "ghost", undoEdit);
-    button(bondRow, "Clear selection", "ghost", clearBondSelection);
-    bondsTab.appendChild(bondRow);
-    bondsTab.appendChild(el("div", "hint", "delete bonds"));
-    var elRow = el("div", "ctl-inline");
-    elRow.appendChild(el("label", "plain", "from"));
-    var a1sel = document.createElement("select"); a1sel.className = "sel sel-narrow"; a1sel.id = "cbA1";
-    elRow.appendChild(a1sel);
-    elRow.appendChild(el("label", "plain", "to"));
-    var a2sel = document.createElement("select"); a2sel.className = "sel sel-narrow"; a2sel.id = "cbA2";
-    elRow.appendChild(a2sel);
-    var modeSel = document.createElement("select"); modeSel.className = "sel sel-narrow"; modeSel.id = "cbMode";
-    [["outside", "Outside range"], ["inside", "Inside range"]].forEach(function (o) { var op = document.createElement("option"); op.value = o[0]; op.textContent = o[1]; modeSel.appendChild(op); });
-    elRow.appendChild(modeSel);
-    bondsTab.appendChild(elRow);
-    var limRow = el("div", "ctl-inline");
-    limRow.appendChild(el("label", "plain", "lower limit"));
-    var loInp = document.createElement("input"); loInp.type = "number"; loInp.className = "num"; loInp.id = "cbLo"; loInp.step = "0.05"; loInp.value = "0.00";
-    limRow.appendChild(loInp);
-    limRow.appendChild(el("label", "plain", "upper limit"));
-    var hiInp = document.createElement("input"); hiInp.type = "number"; hiInp.className = "num"; hiInp.id = "cbHi"; hiInp.step = "0.05"; hiInp.value = "1.80";
-    limRow.appendChild(hiInp);
-    limRow.appendChild(el("span", "unit", U.ang));
-    bondsTab.appendChild(limRow);
-    var cbRow = el("div", "btnrow");
-    button(cbRow, "Delete matching bonds", "ghost", function () {
-      var el1 = document.getElementById("cbA1").value, el2 = document.getElementById("cbA2").value;
-      var lo = parseFloat(document.getElementById("cbLo").value), hi = parseFloat(document.getElementById("cbHi").value);
-      var mode = document.getElementById("cbMode").value;
-      if (!isFinite(lo) || !isFinite(hi) || lo < 0 || hi < lo) { setStatus("Enter a valid lower/upper limit (lower must be less than upper).", true); return; }
-      cleanupBondsByDistance(el1, el2, lo, hi, mode);
-    });
-    button(cbRow, "Reinstate all bonds", "ghost", reinstateAllBonds);
-    bondsTab.appendChild(cbRow);
-
     var pc = section(left, "Probe & cavity");
     numberOnly(pc, "probe radius", 0.5, 3.0, 0.01, state.probe, U.ang, function (v) { state.probe = v; });
     select(pc, "accuracy", [["fast", "Fast"], ["normal", "Normal"], ["fine", "Fine (default)"], ["veryfine", "Very fine \u2014 slow"]], state.volAcc, function (v) { state.volAcc = v; });
-    pc.appendChild(el("div", "hint", "Finer settings resolve narrower necks and pockets more completely, at the cost of longer calculation times \u2014 from a few seconds (Fast) to several minutes (Very fine) on a large structure."));
     var crow = el("div", "btnrow"); button(crow, "Calculate", null, calculate); button(crow, "Remove cavity", "ghost", removeCavity); pc.appendChild(crow);
     toggle(pc, "show cavity surface", state.showSurface, function (b) { state.showSurface = b; renderSurface(); });
     var surfCk = checkboxColor(pc, "surface colour", state.useSurfaceColorForAll, function (b) { state.useSurfaceColorForAll = b; renderSurface(); persistPreferences(); }, state.surfaceColor, function (hex) { state.surfaceColor = hex; renderSurface(); persistPreferences(); });
@@ -5925,6 +6300,10 @@ select.sel:focus{border-color:var(--accent)}
     toggle(xc, "transparent background", state.exportTransparent, function (b) { state.exportTransparent = b; });
     var exrow = el("div", "btnrow"); button(exrow, "Export image (PNG)", null, exportImage); xc.appendChild(exrow);
     var cprow = el("div", "btnrow"); button(cprow, "Copy image to clipboard", "ghost", copyImageToClipboard); xc.appendChild(cprow);
+
+    xc.appendChild(el("hr", "divider"));
+    var modelSaveRow = el("div", "btnrow"); button(modelSaveRow, "Save model...", null, saveModelToFile); xc.appendChild(modelSaveRow);
+    var modelLoadRow = el("div", "btnrow"); button(modelLoadRow, "Load model...", "ghost", function () { document.getElementById("modelJsonInput").click(); }); xc.appendChild(modelLoadRow);
   }
   function toggleShowOnlyAsu() {
     if (!state.isCif || state.symmetryForgotten) { setStatus("This only applies to a CIF-based structure that still has its symmetry information.", true); return; }
@@ -6006,6 +6385,8 @@ select.sel:focus{border-color:var(--accent)}
     });
     var radiiInput = document.getElementById("elementCsvInput");
     radiiInput.addEventListener("change", function (e) { var f = e.target.files[0]; if (!f) return; var rd = new FileReader(); rd.onload = function () { loadElementSettingsCsv(rd.result); }; rd.readAsText(f); });
+    var modelInput = document.getElementById("modelJsonInput");
+    modelInput.addEventListener("change", function (e) { var f = e.target.files[0]; if (!f) return; var rd = new FileReader(); rd.onload = function () { loadModelFromFile(rd.result); }; rd.readAsText(f); });
     var segBtns = document.querySelectorAll("#modeSeg button");
     for (var i = 0; i < segBtns.length; i++) segBtns[i].addEventListener("click", function (e) { setPage(e.currentTarget.getAttribute("data-page")); });
 
@@ -6045,22 +6426,23 @@ select.sel:focus{border-color:var(--accent)}
       "<h2>Guide</h2>" +
       "<h3>View controls</h3>" +
       "<ul>" +
-      "<li><b>Left drag</b> &mdash; rotate. Free rotation about the camera's own axes; there is no limit, and it stops the instant the mouse does. \"Rotation sensitivity\" (Display panel, Scene tab) can slow this down for lining up a precise view -- it only ever slows down, never speeds up past the default, and resets to full speed the next time the file is opened rather than being remembered.</li>" +
+      "<li><b>Left drag</b> &mdash; rotate. Free rotation about the camera's own axes; there is no limit, and it stops the instant the mouse does. \"Rotation sensitivity\" (Visual Effects panel, Scene tab) can slow this down for lining up a precise view -- it only ever slows down, never speeds up past the default, and resets to full speed the next time the file is opened rather than being remembered.</li>" +
       "<li><b>Shift + left drag</b> &mdash; roll (rotate in the screen plane), for straightening a figure without changing what you're looking at.</li>" +
       "<li><b>Alt + left drag</b> &mdash; lasso select: draw a freeform outline and every atom projected inside it (host and guest together, whichever are currently shown) is added to the selection.</li>" +
       "<li><b>Ctrl + Alt + left drag</b> &mdash; lasso select whole fragments: the same outline, but each atom it touches brings its entire bonded fragment into the selection, the same rule ctrl-click uses for a single atom.</li>" +
       "<li>Lasso selection works on screen position only, not true depth: an atom behind another one, as long as its projected position falls inside the outline, is selected too, even though it's hidden from view. Rotating to a clearer angle before lassoing avoids surprises in a dense structure.</li>" +
       "<li><b>Right drag, vertical</b> &mdash; zoom (up = in, down = out). The mouse wheel is disabled.</li>" +
       "<li><b>Arrow keys</b> &mdash; rotate in fixed 5&deg; steps: left/right about the vertical axis, up/down about the horizontal axis. <b>Page Up / Page Down</b> roll in 5&deg; steps. <b>Delete</b> (or Backspace) deletes the selected atoms, or cuts the selected bond(s) if no atoms are selected. <b>Ctrl-C</b> generates a centroid from the selected atoms. For a CIF-based structure: <b>a</b> toggles between showing only the asymmetric unit and showing everything currently grown; <b>c</b> toggles the unit cell. These only respond while focus isn't in a text box, dropdown, or button.</li>" +
-      "<li><b>Depth scaling</b> (Display panel) &mdash; switches between perspective and orthographic projection. Off is often better for a figure meant for precise alignment or measurement, since distance no longer shrinks apparent size.</li>" +
+      "<li><b>Depth scaling</b> (Visual Effects panel) &mdash; switches between perspective and orthographic projection. Off is often better for a figure meant for precise alignment or measurement, since distance no longer shrinks apparent size.</li>" +
       "</ul>" +
-      "<h3>Display and Export</h3>" +
-      "<p><b>Display</b> gathers everything about how the scene looks into one panel, split into three tabs: <b>Scene</b> (background, projection, detail level, fog, rotation sensitivity), <b>Material</b> (how atoms respond to light), and <b>Lighting</b> (the three light sources). <b>Export</b> covers producing an image and isn't a look-and-feel setting in the same sense as the other three, so it has no \"retain\" box of its own -- export resolution and transparent background are export-time choices, always starting fresh (current size, opaque) each time this file is reopened. Each of the three Display tabs has its own \"restore defaults\" button, scoped to just that tab, and its own \"retain these settings\" box. With that box checked (the default), the tab's settings are remembered and restored the next time this file is opened, the same way element radii and colours already are. Unchecked, that tab quietly goes back to using the built-in defaults every time the file is opened instead, and whatever was saved for it before is forgotten immediately -- there's no partial memory of it lying around to reappear if the box is checked again later. Several sliders here (fog, rotation sensitivity, material, light angle and intensity) show no number -- the slider position is the control, without a readout to fuss over.</p>" +
+      "<h3>Visual Effects and Export</h3>" +
+      "<p><b>Visual Effects</b> gathers everything about how the scene looks into one panel, split into three tabs: <b>Scene</b> (background, projection, detail level, fog, rotation sensitivity), <b>Material</b> (how atoms respond to light), and <b>Lighting</b> (the three light sources). <b>Export</b> covers producing an image and isn't a look-and-feel setting in the same sense as the other three, so it has no \"retain\" box of its own -- export resolution and transparent background are export-time choices, always starting fresh (current size, opaque) each time this file is reopened. Each of the three Visual Effects tabs has its own \"restore defaults\" button, scoped to just that tab, and its own \"retain these settings\" box. With that box checked (the default), the tab's settings are remembered and restored the next time this file is opened, the same way element radii and colours already are. Unchecked, that tab quietly goes back to using the built-in defaults every time the file is opened instead, and whatever was saved for it before is forgotten immediately -- there's no partial memory of it lying around to reappear if the box is checked again later. Several sliders here (fog, rotation sensitivity, material, light angle and intensity) show no number -- the slider position is the control, without a readout to fuss over.</p>" +
       "<p><b>Light follows view</b> is on by default: the lights are attached to the camera, so they always illuminate from the same relative direction no matter how the view is rotated. Turning it off fixes the lights in the scene instead, like a lit room, which can shift shading as you rotate. <b>Light angle</b> spins the whole lighting rig around the view direction (most meaningful with \"light follows view\" on). The key, fill, and rim lights -- the three light sources responsible for the reflections visible on a glossy atom -- each have their own on/off switch and intensity, so any one of them can be turned down or off entirely rather than only scaling all three together.</p>" +
       "<p><b>High detail spheres &amp; tubes</b> swaps in much finer sphere and cylinder tessellation, at some cost to rotation smoothness for large structures -- useful for previewing exactly how a figure will look before exporting. <b>Depth cueing</b> fades distant atoms toward the background colour, which can help read depth in a crowded structure; <b>fog amount</b> controls how aggressively.</p>" +
       "<p>Atoms don't emit any light themselves -- <b>atom roughness</b>, <b>atom metalness</b>, and <b>reflection strength</b> (Material panel) control how they respond to the scene's lighting instead. Lower roughness gives a glossier, more reflective surface; higher metalness moves it from a plastic-like look toward bare metal (useful for a striking cover-art render, less so for a conventional scientific figure); reflection strength scales how much the environment map contributes, which mainly shows up once metalness is raised. If a selected atom's highlight is hard to make out, a glossy, brightly lit atom is usually why -- the highlight itself doesn't respond to lighting at all, but a very bright, reflective atom underneath it can still make thin highlight lines harder to see by contrast.</p>" +
       "<p><b>Export image (PNG)</b> always renders at full tessellation regardless of the high detail toggle, at the chosen <b>export resolution</b> multiple of the current view size, then restores the interactive settings afterward -- so a quick figure never requires manually maxing out quality settings first. In Chrome or Edge it opens a normal save dialog, defaulting to the folder of whichever host or guest PDB was most recently dropped onto the app (not one opened via the file browser button, since only a genuine drag hands over that information) -- other browsers fall back to a plain download instead. That last-used folder is only remembered for the current session, not saved between visits.</p>" +
       "<p><b>Transparent background</b> drops the background colour (and briefly suspends fog, which would otherwise leave a visible tint) for that one exported frame, then restores both immediately afterward -- normal interactive display is never affected. It applies to both Export image and <b>Copy image to clipboard</b>, which renders the same way but places the PNG directly on the system clipboard for pasting into another document instead of saving a file; transparency survives that route too; wherever it lands, whether it stays transparent from there depends on the receiving application. Clipboard copying needs a recent click to work (this triggers it) and isn't available in every browser -- Export image (PNG) always works as the fallback.</p>" +
+      "<p><b>Save model...</b> and <b>Load model...</b>, at the bottom of the <b>Export</b> panel, save or restore the complete working state to a single file -- every atom including everything Grow has added, the CIF symmetry data, colour and radius overrides, bond and display settings, the calculated cavity itself (not just the inputs to recompute it), and the camera's exact position -- so a session can be closed and reopened later exactly where it was left, without repeating the grow and calculate steps. This is a separate, deliberate snapshot of one specific piece of work, distinct from the automatic per-browser memory of element radii and display settings described below -- a saved model file is portable and permanent, and is the one to keep if the work needs to survive a change of computer or browser.</p>" +
       "<h3>Loading structures</h3>" +
       "<ul>" +
       "<li>Dropping a .pdb onto the 3D view loads it as the <b>host</b>, replacing only the host -- any guest and calculated cavity stay exactly as they were, since a PDB host is treated as one layer among independent others. Dropping a <b>.cif</b> is different: it starts symmetry mode, described below, and is treated as a fresh structure to build from scratch rather than a new layer on an existing one, so it clears the current guest and cavity along with the old host. A host loaded this way isn't a fixed set of coordinates but a starting point you build outward from.</li>" +
@@ -6069,35 +6451,37 @@ select.sel:focus{border-color:var(--accent)}
       "<h3>CIF and symmetry (Symmetry panel)</h3>" +
       "<p>Dropping a CIF reads the unit cell, the symmetry operators (from the file's own symmetry loop), and the asymmetric unit, then displays just the asymmetric unit -- not a complete molecule -- as the starting point. If the file actually contains more atoms than the true asymmetric unit (Mercury sometimes exports a whole completed molecule this way), the extra symmetry-equivalent copies are automatically detected and removed first, so what's displayed is always just the independent set. An atom sitting exactly on a special position (a mirror plane, an inversion centre, a rotation axis) is never duplicated when a symmetry operation maps it onto itself or onto another copy already present -- this is handled automatically throughout, not something to manage by hand.</p>" +
       "<p>The <b>Grow</b> panel appears once a CIF has been loaded, with the asymmetric unit and current atom count shown at the top, and its controls split into tabs -- <b>Mouse</b>, <b>Pack</b>, and <b>Symmetry</b>.</p>" +
-      "<p>On the <b>Mouse</b> tab, the large button turns grow mode on or off -- solid when on, a visual reminder alongside the crosshair cursor that a plain click will grow rather than select. Two independent radio choices control how: <b>Bonds</b> requires the new atom to be covalently bonded to the one clicked, searched up to 5 unit cells away; <b>Sphere of inclusion</b> adds every symmetry-equivalent atom within the radius given next to it, regardless of bonding -- useful for filling out a coordination sphere or a solvent shell that isn't covalently continuous. Separately, <b>Atoms</b> adds just the one newly-connected atom; <b>Fragment</b> adds the whole covalently-connected molecule the new atom belongs to within its asymmetric unit, leaving the rest of that asymmetric unit alone; <b>ASU</b> (the default) adds the entire asymmetric unit instead, generated under whatever symmetry operation connects it -- everything in it, not just the connected molecule. The Fragment/ASU distinction matters when the asymmetric unit contains more than one physically separate molecule (say, a host and a guest together, or two independent solvent molecules): ASU would grow both together since they share the same symmetry transform, where Fragment grows only the one actually connected to what was clicked. Whether you click a host or a guest atom makes no difference to any of this.</p>" +
+      "<p>On the <b>Mouse</b> tab, the large button turns grow mode on or off -- solid when on, a visual reminder alongside the crosshair cursor that a plain click will grow rather than select. Two independent radio choices control how: <b>Bonds</b> requires the new atom to be covalently bonded to the one clicked, searched up to 5 unit cells away; <b>Sphere of inclusion</b> adds every symmetry-equivalent atom within the radius given next to it, regardless of bonding -- useful for filling out a coordination sphere or a solvent shell that isn't covalently continuous. Separately, <b>Atoms</b> adds just the one newly-connected atom; <b>Fragment</b> (the default) adds the whole covalently-connected molecule the new atom belongs to within its asymmetric unit, leaving the rest of that asymmetric unit alone; <b>ASU</b> adds the entire asymmetric unit instead, generated under whatever symmetry operation connects it -- everything in it, not just the connected molecule. The Fragment/ASU distinction matters when the asymmetric unit contains more than one physically separate molecule (say, a host and a guest together, or two independent solvent molecules): ASU would grow both together since they share the same symmetry transform, where Fragment grows only the one actually connected to what was clicked. Whether you click a host or a guest atom makes no difference to any of this.</p>" +
       "<p>The <b>Pack</b> tab grows by an explicit fractional-coordinate range instead of a click: set limits for a, b, and c (each defaults to 0 to 1, one full unit cell, and can range from -5 to 5), choose whether a fragment qualifies when <b>a fragment atom</b> falls within those limits or only when its <b>centroid</b> does, then press <b>Pack</b>. Every symmetry-related copy of the asymmetric unit meeting that condition is added in one step, each still a whole covalently-connected fragment (not split by Atoms/Fragment/ASU, which are Mouse-tab-only concepts).</p>" +
       "<p>The <b>Symmetry</b> tab applies one specific, explicitly chosen symmetry operation to whichever atoms are currently selected, rather than growing by proximity or by range. The dropdown lists every operator of this structure's space group exactly as the CIF itself expresses them (e.g. <span class='mono'>x,y,z</span> for identity, <span class='mono'>-x,y+0.5,-z</span> for a 2-fold screw axis parallel to b); choosing one fills in the 3x4 matrix beside it -- three rows of a rotation coefficient triple plus a translation, e.g. a c-glide perpendicular to b would read as rows (1,0,0,0), (0,-1,0,0), (0,0,-1,0.5). The rotation coefficients (always -1, 0, or 1 for any real symmetry operation) step through those three values with the small up/down arrows; the translations accept any typed value, since a screw or glide component is usually a fraction but there's no reason to restrict it to one. Apply doesn't reset any of this afterwards -- the matrix stays exactly as set until deliberately changed again, whether by picking a different operator from the dropdown or editing a box directly. Each row also has its own <b>-a/+a</b>, <b>-b/+b</b>, or <b>-c/+c</b> pair alongside it; pressing one always applies a fresh, plain +1 or -1 cell translation along that one axis to whatever's currently selected -- not a further nudge on top of whatever the matrix happened to already show -- and, unlike the rest of the matrix, does so immediately without needing Apply, since the point of a cell shift is usually to walk straight to a neighbouring copy one step at a time (it does overwrite the displayed matrix to show that plain translation, though, so what's about to happen is always visible first). With <b>Inverse</b> checked, Apply and the shift buttons alike carry out the matrix as given in reverse instead. Each selected atom is mapped through the operation to find its image; if that image is a position not already displayed, the atom is added there (correctly tracked for further growth or symmetry-aware deletion, exactly like any other grown atom), and if it's already present, that one atom is simply left alone rather than duplicated. With <b>Select new</b> checked, the originally-selected atoms are deselected once Apply runs and each one's image -- newly added or already there -- is selected in their place, which is what makes stepping a shift button repeatedly walk outward one cell at a time rather than needing to reselect anything by hand in between.</p>" +
       "<p>All of this only ever adds atoms; nothing is removed automatically, and everything added this way can be deleted, selected, or undone exactly like any other atom in the app. <b>Extend fragment(s)</b>, visible above the tabs regardless of which one is open, applies the Mouse tab's Bonds+Frag behaviour all at once: it snapshots every atom currently displayed and grows the connected fragment attached to each one that has a new symmetry-connected neighbour, in a single step. Only atoms present at the moment it's pressed are used as starting points -- atoms it adds during that same pass are never themselves used to grow further, which is what keeps something like a polymer or chain from running away indefinitely. \"Delete all symmetry-generated atoms\", just below it, removes everything growth has added in one step back to just the original asymmetric unit -- a guest designation on an asymmetric unit atom survives this, only the grown copies are removed.</p>" +
+      "<p>The <b>Host</b> and <b>Guest(s)</b> tabs each have their own <b>new atoms (grown)</b> dropdown, which decides the radius a newly grown atom starts with in that layer -- <b>Same as ASU</b> (the default) copies whatever radius override its own asymmetric unit source atom currently has (or none, if that atom has none, giving the ordinary ball-and-stick default), so grown copies always match the position they came from; <b>Stick</b>, <b>Ball &amp; stick</b>, and <b>Spacefill</b> instead force every atom grown into that layer to that fixed radius (0, 0.2x, or 1x van der Waals) regardless of what its source atom looks like. This only ever sets a radius override at the moment an atom is grown -- it never touches colour, and never revisits atoms already present when the dropdown is changed.</p>" +
       "<p>Guests inherit their host or guest membership from the asymmetric unit position they came from, which normally makes sense -- but there are times a guest that's currently linked to others this way needs to move independently, or join the host, without dragging its symmetry-related copies along. \"Forget symmetry\", below that, makes this possible: it permanently discards this structure's symmetry information. Afterwards, every atom present -- asymmetric unit and grown copies alike -- stays exactly where it is, but each one can be edited, deleted, reassigned, or moved between host and guest completely independently, exactly like a PDB-loaded structure. Growth, ASU only, and the automatic symmetry-linked cascades (an element or host/guest change spreading to related atoms, a cut bond applying to its symmetry images) all stop -- the entire Grow panel disappears, since none of it applies any more. The Display panel's Unit cell tab is unaffected and stays fully controllable, since it doesn't depend on any of this. This cannot be undone, and asks for confirmation before doing anything.</p>" +
       "<p>Ctrl-Alt-click selects every currently-displayed atom that shares the same asymmetric unit origin as the one clicked -- every symmetry copy of that specific atom, across host and guest alike -- which is otherwise not something to find by hand once a structure has been grown out. This takes priority over grow mode, so it works the same way whether or not grow mode happens to be switched on.</p>" +
-      "<p>If part of the asymmetric unit has been moved to a guest (e.g. an included CO<sub>2</sub>, moved there via \"Move selection to\" in Edit atoms and bonds, the same way as in Mode 1), growth remembers that: every future symmetry-generated copy of that same asymmetric unit atom is added as a guest too, not host, from then on -- joining the same guest component it was already part of, rather than starting a new one each time. Clicking a guest atom in grow mode works exactly like clicking a host atom; there's no distinction between them for growth purposes.</p>" +
+      "<p>If part of the asymmetric unit has been moved to a guest (e.g. an included CO<sub>2</sub>, moved there via \"Move selection to\" in Model &gt; Atoms, the same way as in Mode 1), growth remembers that: every future symmetry-generated copy of that same asymmetric unit atom is added as a guest too, not host, from then on -- joining the same guest component it was already part of, rather than starting a new one each time. Clicking a guest atom in grow mode works exactly like clicking a host atom; there's no distinction between them for growth purposes.</p>" +
       "<p>The unit cell's colour and line thickness are both adjustable; edges are drawn the same way bonds are (as shaded cylinders, not flat lines), so they respond to lighting rather than looking flat. Its three edges from the origin can optionally be coloured in the deepest possible red/green/blue for a, b, c respectively, following the usual crystallographic convention, instead of the single default colour. The a, b, c edges are always labelled in italic, in whichever of black or white contrasts better with the current background (the same approach the lasso outline uses), so the labels stay readable regardless of colour scheme. All of this is purely visual and has no effect on growth or the cavity calculation.</p>" +
-      "<p>The <b>Display</b> panel (CIF-only, appearing just below Grow) holds two tabs. <b>View</b> has \"ASU only\" (described next) plus a <b>View direction</b> set of crystallographic view shortcuts: buttons for looking straight down each cell axis (a, b, c) and perpendicular to each pair-wise plane (bc, ac, ab), and a general <b>[hkl]</b> field for viewing along any specific direction, entered as its own three numbers. <b>Unit cell</b> holds \"show unit cell\", which draws the cell edges for reference, plus its <b>colour</b>, <b>line thickness</b>, and a <b>RGB axes</b> option to colour the a/b/c edges red/green/blue.</p>" +
+      "<p>The <b>Display</b> panel, just below Grow, holds two tabs and is always available, whether or not the structure came from a CIF. <b>View</b> has \"ASU only\" (described next, meaningful only for a CIF-based structure) plus a <b>View direction</b> set of crystallographic view shortcuts: buttons for looking straight down each cell axis (a, b, c) and perpendicular to each pair-wise plane (bc, ac, ab), and a general <b>[hkl]</b> field for viewing along any specific direction, entered as its own three numbers -- these axis-relative shortcuts only make sense once a unit cell exists, so they only do anything useful for a CIF-based structure. Also on <b>View</b>: <b>View along vector</b> and <b>View perpendicular to plane</b> (see \"Viewing along a vector or a plane\" below), which orient the camera from a selection of atoms instead, and work regardless of whether the structure came from a CIF or a PDB; and <b>Set scale</b>, a box showing the current zoom level as a plain number -- bigger means more zoomed in, the reverse sense of a raw camera distance -- which updates live as you zoom and can be typed into directly for an exact value instead of judging it by eye. <b>Unit cell</b> holds \"show unit cell\", which draws the cell edges for reference, plus its <b>colour</b>, <b>line thickness</b>, and a <b>RGB axes</b> option to colour the a/b/c edges red/green/blue.</p>" +
       "<p>This first version covers growing by clicking (atom or fragment) and by sphere of inclusion. Growing by a specific chosen symmetry operation or translation, and specifying an explicit packing range, are planned but not yet implemented. Only CIFs with an explicit list of symmetry operators are supported -- one that gives only a space group name or number, with no operator list, is read as P1 (no symmetry) since looking up operators from thousands of possible space group settings isn't implemented.</p>" +
       "<h3>How the cavity volume is calculated</h3>" +
       "<p>The swept (solvent-excluded) volume is computed on a grid at several spacings and extrapolated to zero spacing &mdash; the limit MSRoll reports, and the limit a fixed-resolution grid (such as Mercury's) cannot reach. The &plusmn; value is the extrapolation uncertainty, not an arbitrary error bar. Enclosure is decided by flood-fill connectivity, so only cavities fully enclosed by the host are reported; pockets open to the outside are excluded by design. Structures with more than one enclosed cavity report each one separately as well as the total. The <b>accuracy</b> control (Fast/Normal/Fine/Very fine) sets how many grid spacings are used and how finely, together with how many randomly-offset samples are averaged at each one, for both this number and the displayed surface together -- finer settings resolve narrower necks and pockets that a coarser one can still cut off, catching real enclosed volume a coarser grid would miss entirely, at the cost of longer calculation times (Fast finishes in seconds; Very fine can take minutes on a large structure). A progress bar during \"Integrating volume\" reflects this. If the swept-volume estimate was still rising noticeably between the two finest spacings actually used, a note says so in the results -- a sign a finer accuracy setting may raise the number further, rather than a fixed answer having been reached.</p>" +
       "<h3>How the cavity surface is rendered</h3>" +
       "<p>The displayed surface is a marching-cubes isosurface of the same probe-distance field used to decide enclosure for the volume calculation &mdash; watertight by construction, with no gaps. It is built at a single grid spacing tied to the same accuracy setting as the volume number (so what's on screen and what's reported move together), rather than extrapolated, so the reported surface area is a close but resolution-dependent estimate, not an error-bounded one like the volume.</p>" +
       "<h3>Host, guest, and cavity are independent layers</h3>" +
-      "<p>Loading a new host replaces only the host atoms -- any guest already loaded, and any cavity already calculated, are left exactly as they are. This is deliberate: build a generous host so the probe can't escape, calculate the cavity, then load a trimmed host (with the atoms you don't want to display removed) and the cavity stays put. \"Remove host\", \"Remove all guests\", and \"Remove cavity\" each only ever clear their own layer. The cavity only ever changes when you press Calculate again. The Results panel shows which host (by name and atom count) and probe radius a given cavity was actually computed from, since it may no longer match what's currently loaded host -- that's expected with this workflow, not an error.</p>" +
+      "<p>Loading a new host replaces only the host atoms -- any guest already loaded, and any cavity already calculated, are left exactly as they are. This is deliberate: build a generous host so the probe can't escape, calculate the cavity, then load a trimmed host (with the atoms you don't want to display removed) and the cavity stays put. \"Remove host\" and \"Remove all guests\" each ask for confirmation first, since for a CIF-based structure they permanently delete the relevant asymmetric unit atoms along with everything grown from them by symmetry, not just what happens to be currently displayed; \"Remove cavity\" needs no such warning, since a cavity can always be recalculated. Each of the three only ever clears its own layer. The cavity only ever changes when you press Calculate again. The Results panel shows which host (by name and atom count) and probe radius a given cavity was actually computed from, since it may no longer match what's currently loaded host -- that's expected with this workflow, not an error.</p>" +
       "<h3>Elements: radii and default colours</h3>" +
       "<p>The <b>Elements</b> page (top right) is a periodic table showing every element's van der Waals radius and default colour together. Radius is shared between host and guest, since there's rarely a reason to want two different radii for the same element, and is used for both the atom display and the cavity calculation. \"Use Bondi radii\" and \"Use Alvarez radii\" apply published literature values (Bondi, J. Phys. Chem. 1964, 68, 441; Alvarez, Dalton Trans. 2013, 42, 8617) to whichever elements each study actually covered, leaving everything else -- including all colours -- untouched rather than guessing; Bondi covers mainly main-group elements and a handful of common metals, Alvarez covers most naturally occurring elements including transition metals. \"Restore defaults\" resets both radius and colour to their built-in values. \"Save element settings\" and \"Load element settings\" read and write a CSV file (atomic number, radius in " + U.ang + ", colour) so a preferred set of radii and colours can be kept and reloaded later.</p>" +
       "<p>Radii and default colours set on the Elements page are also remembered automatically in the browser, and restored the next time this file is opened, without needing to load a CSV -- no separate action required. This is tied to the browser you're using, not to the file itself, so it won't follow the file to a different computer or survive clearing browser data; the CSV export is the portable, permanent copy to keep.</p>" +
-      "<p>Colour is per element and per layer, host and guest independently. Loading an element for the first time into a layer takes its colour from the Elements page's current default at that moment -- from then on that layer remembers its own colour for that element, shown and editable on the <b>Atoms</b> tab of the \"Host\" or \"Guest\" panel. Changing a default on the Elements page afterwards does not reach back and change anything already loaded; it only takes effect the next time that element is freshly loaded into a layer, or after that layer's \"Reset atom colours\" button is pressed, which re-reads the current defaults for whatever is currently loaded. Loading a second guest component reuses whatever colour the guest layer already has for a shared element, so a colour chosen for one component carries over to the next rather than reverting to the default.</p>" +
-      "<p>Both the <b>Host</b> and <b>Guest</b> panels split their per-atom controls into <b>Atoms</b> and <b>Bonds</b> tabs, with \"show [host/guest]\" and its display style sharing one row above the tabs. On the host's Atoms tab, <b>colour by</b> chooses between <b>Element</b> (the per-element swatches described above, the default) and <b>Component</b>: switching to Component paints every host atom the single colour in the swatch beside the dropdown, regardless of element, and switching back to Element restores each atom to whatever its own element is set to -- nothing about the per-element colours themselves is lost while Component is active, since they're just not being used for display at that moment. The guest's Atoms tab offers the same choice, but its \"Component\" here means something already familiar from \"Guest components\" below it: each separately-loaded guest component keeps its own distinct colour rather than the whole guest sharing one.</p>" +
+      "<p>Every atom is coloured CPK (its element's default colour from the Elements page) unless you have given it a Custom colour of its own from <b>Model &gt; Atoms &gt; Display properties</b> (select the atoms first, then Apply). Host and Guest no longer have their own separate colour-by-element editors or \"Reset atom colours\" buttons -- select whichever atoms you want to change (a whole guest component can be selected in one click from its row on the <b>Guest(s)</b> tab) and set their colour there instead. Radius works the same way: Fixed or vdW x overrides on the same tab replace the old per-layer Style dropdown.</p>" +
+      "<p>Colour and Radius on <b>Model &gt; Atoms &gt; Display properties</b> are each an independent tri-state choice, not a plain radio button: either can be off, or exactly one of its two options can be on, but never both at once -- ticking Custom automatically unticks CPK (and vice versa), and the same goes for Fixed and vdW x, while clicking an already-ticked box turns it off again with neither selected. Only a property that's actually ticked is touched by Apply: leaving both Colour and Radius unticked and pressing Apply does nothing at all, and leaving just one unticked leaves whatever those atoms already had for it alone -- so a colour override can be applied to a selection without disturbing its existing radius, or the other way round. The custom colour swatch can be set at any time, whether or not Custom is currently ticked, ready for whenever it's turned on. The three square icon buttons (stick / ball-and-stick / spacefill) are shortcuts, not a separate mode of their own: each just ticks vdW x and sets its factor to 0, 0.2, or 1 respectively -- Apply is still required afterwards, exactly as if that number had been typed in by hand. <b>Copy atom settings</b>, next to those three, instead loads the single selected atom's own current colour and radius settings into the checkboxes and swatch above -- only enabled when exactly one atom is selected. This works even for an atom with no override at all: since such an atom is still rendering with a definite look (CPK colour, 0.2x -- or 0.15x for hydrogen -- van der Waals radius), Copy atom settings loads exactly that rather than leaving both checkboxes unticked. A quick way to match a new selection to one atom already set up the way you want, before pressing Apply. The <b>Clear</b> checkbox below Apply, off by default, additionally empties the selection once Apply has run -- useful for working through several groups of atoms one after another without a separate \"clear selection\" click in between.</p>" +
+      "<p>The <b>Guest(s)</b> tab's own <b>colour by</b> dropdown (Element or Component, Component by default) sets how guest atoms are coloured as a whole. <b>Element</b> colours each guest atom by its own element, the same as CPK, but a Custom override from Model &gt; Atoms still takes priority for any atom that's been given one. <b>Component</b> instead gives every atom in a guest component the one colour from the swatch next to that component's row on the Guest(s) tab, regardless of any Custom override on individual atoms -- useful for keeping disordered components visually distinct without a stray custom colour breaking the pattern.</p>" +
       "<h3>Bond thickness</h3>" +
-      "<p>Set directly in " + U.ang + " (default 0.12), independently for host and guest, and applies to Stick and Ball &amp; stick only -- Spacefill has no visible bonds. In Stick, the joint spheres are sized to match the bond radius exactly. In Ball &amp; stick, each ball is sized from its own element's van der Waals radius (0.2&times;, or 0.15&times; for hydrogen); if a bond is set thick enough that it would be wider than a small ball (typically a hydrogen), that ball is widened to match the bond so it is never narrower than what feeds into it.</p>" +
-      "<p>Each bond is normally drawn as two halves, one in each of its atoms' own colours -- \"Split colour\", the default, on the <b>colour by</b> control above the thickness slider on the Bonds tab. Choosing <b>Single colour</b> instead paints every bond the one colour in the swatch beside it, independently for host and guest. This only ever affects <b>Ball &amp; stick</b> (marked \"B&amp;S only\" next to the swatch as a reminder): Spacefill has no bonds to colour, and Stick keeps them tied to atom colour regardless of this setting, since at that thickness the bonds are essentially the whole visible structure and losing the element colouring there would make it much harder to read at a glance.</p>" +
+      "<p>Set directly in " + U.ang + " (default 0.12), independently for host and guest, on <b>Model &gt; Bonds</b>. Bonds and atom spheres are always shown together now (there is no separate Spacefill/Stick mode): each ball is sized from its own element's van der Waals radius (0.2&times;, or 0.15&times; for hydrogen) unless overridden per atom from <b>Model &gt; Atoms</b>, and is widened to match the bond thickness if that would otherwise make it narrower than the bond feeding into it -- setting a selection's radius override to 0 collapses it all the way down to exactly the bond's own thickness, for a \"stick-only\" look on just those atoms.</p>" +
+      "<p>Each bond is normally drawn as two halves, one in each of its atoms' own colours -- \"Split colour\", the default, on the <b>colour by</b> control above the thickness slider on <b>Model &gt; Bonds</b>. Choosing <b>Single colour</b> instead paints every bond the one colour in the swatch beside it, independently for host and guest.</p>" +
       "<h3>Selecting and deleting atoms</h3>" +
       "<p>Click an atom to select it (shown with a yellow wire highlight); click a selected atom again to deselect it. The modifier keys compose: <b>Shift</b> restricts to atoms of the same element, <b>Ctrl</b> restricts to the clicked atom's bonded fragment, and <b>Alt</b> restricts to the clicked atom's whole component (the host, or one specific guest group) -- \"component\" here means host, guest 1, guest 2, and so on are all counted separately. Ctrl-click selects the whole fragment regardless of element; Alt-click selects the whole component regardless of element; Shift-click selects that element everywhere, host and guest together; Shift+Ctrl-click narrows that down to just that element within the clicked atom's fragment; Shift+Alt-click narrows it to just that element within the clicked atom's component. Ctrl+Alt (with or without Shift) isn't currently defined and does nothing. Every one of these toggles based on whether the clicked atom is currently selected, so clicking the same way again on an already-selected atom deselects the matching set instead. This all works the same way on host and guest atoms. Pressing spacebar, while focus isn't in a text box or other control, selects every atom if none are currently selected, or clears the selection entirely if any are. \"Delete selection\" removes them from whichever layer they belong to -- typically used to build a host generous enough that the probe can't escape, calculate the cavity, then delete the atoms that were only needed to close it off, without touching the cavity itself. Deleting never retroactively changes a cavity you've already calculated; it only affects what's used the next time you press Calculate.</p>" +
       "<h3>Moving atoms between host and guest</h3>" +
       "<p>A structure can be loaded as a single combined file and split afterwards, instead of always requiring separate host and guest files: select the atoms that belong on the other side, choose a destination from the dropdown (Host, an existing guest component, or \"New guest group\"), and press \"Move selection to\". This is exactly the same selection mechanism used for deletion, so the same click and ctrl-click rules apply. A moved atom keeps its radius but takes on its new layer's colour rules, snapshotting whatever the current host or guest default is at the moment it arrives.</p>" +
-      "<p>This is also how disordered guests with more than one component are separated when working from a plain PDB (which, unlike a SHELX file, has no PART numbers to do this automatically): select one component's atoms and move them to a new guest group, then repeat for each remaining component. Guest components are listed in the Guest panel with an atom count and their own show/hide checkbox, and \"Select\" there re-selects all of a component's atoms at once -- useful for correcting a mistake by moving atoms out of the wrong group. If deleting or moving atoms empties a component completely, it disappears from the list and the remaining ones are renumbered so there's no gap -- the numbers are just labels and aren't used for anything else, so this has no other effect. Ctrl-click's whole-fragment shortcut can mis-select across two disorder components that happen to sit close together, since that's indistinguishable from a real bond by geometry alone; when that happens, select atom by atom instead.</p>" +
+      "<p>This is also how disordered guests with more than one component are separated when working from a plain PDB (which, unlike a SHELX file, has no PART numbers to do this automatically): select one component's atoms and move them to a new guest group, then repeat for each remaining component. Guest components are listed in the <b>Guest(s)</b> tab with an atom count and their own show/hide checkbox, and \"Select\" there re-selects all of a component's atoms at once -- useful for correcting a mistake by moving atoms out of the wrong group. If deleting or moving atoms empties a component completely, it disappears from the list and the remaining ones are renumbered so there's no gap -- the numbers are just labels and aren't used for anything else, so this has no other effect. Ctrl-click's whole-fragment shortcut can mis-select across two disorder components that happen to sit close together, since that's indistinguishable from a real bond by geometry alone; when that happens, select atom by atom instead.</p>" +
       "<h3>Cutting a bond</h3>" +
       "<p>Click directly on a bond (rather than an atom) to select it, then \"Cut selected\" to sever it. This only ever affects what's drawn and what ctrl-click's fragment selection follows -- the cavity calculation never used bonds and is unaffected. It exists for the one case nothing automatic can fix: two atoms that happen to sit a normal bond-length apart even though they shouldn't be connected (most often two disorder components overlapping), which is otherwise indistinguishable from a real bond. Bonds shorter than a physically reasonable minimum are already excluded automatically and never need cutting. For a CIF-based structure, cutting a bond also cuts every symmetry-equivalent copy of it -- the same pair of asymmetric unit atoms at exactly the same distance elsewhere in the structure -- rather than just the one instance clicked.</p>" +
       "<p>\"Delete matching bonds\" does the same thing in bulk: choose two elements (either can be \"Any\" to match regardless of what it's bonded to), a distance range, and whether to cut bonds outside or inside that range, and every current bond between an atom of each chosen element (across host and guest together) meeting that criterion is cut in one action. This needs care -- it's easy to remove bonds you meant to keep if the range is too narrow, or miss the ones you meant to cut if it's too wide. If nothing gets cut, the status message says why: either matching bonds exist but sit outside the range given (showing their actual distance), or no such bond exists at all -- which can happen even when two atoms look close enough, since a minimum realistic bond length is always enforced and anything closer than that is never treated as a bond in the first place, in rendering or in this cleanup, consistently. \"Undo\" reverses a cut like any other edit if the result isn't what was intended.</p>" +
@@ -6113,7 +6497,7 @@ select.sel:focus{border-color:var(--accent)}
       "<p>Select two or more atoms and \"Generate centroid\" (or Ctrl-C) adds a marker at their average position -- useful as a reference point for measuring or for defining a plane or vector that isn't sitting on a real atom. A centroid always renders as a small white sphere (0.2 &Aring; radius), regardless of the current display style, and doesn't affect the cavity calculation or bonding in any way -- it's a geometric reference, not a real atom. Its clickable area is a bit larger than it looks, since a sphere that small would otherwise be hard to hit precisely; this doesn't change how big it appears. It can be selected, moved between host and guest, and deleted exactly like any other atom. For a CIF-based structure, a centroid becomes part of the asymmetric unit, so it can be grown by symmetry the same way as everything else.</p>" +
       "<p>\"Reassign element to\", just below \"Move selection to\", changes the element of the selected atom(s) to any element in the periodic table, whether or not that element was already present in the structure -- a new one is picked up automatically, with its own colour and radius, the moment it's assigned. Reassigning a centroid turns it into a real atom of that element from then on: it stops being a fixed white marker and starts looking and behaving like any other atom in whichever layer it belongs to.</p>" +
       "<h3>Viewing along a vector or a plane</h3>" +
-      "<p>Select exactly two atoms and \"View along vector\" (in Edit atoms and bonds) becomes available, orienting the camera to look straight along the line through them. Select exactly three and \"View perpendicular to plane\" becomes available instead, orienting the camera face-on to the plane they define. Both only ever rotate the view -- they never move the zoom level or what the camera is centred on -- and each is disabled again the moment the selection count isn't exactly right for it.</p>" +
+      "<p>Select exactly two atoms (Model &gt; Atoms) and \"View along vector\" (Display &gt; View) becomes available, orienting the camera to look straight along the line through them. Select exactly three and \"View perpendicular to plane\" becomes available instead, orienting the camera face-on to the plane they define. Both only ever rotate the view -- they never move the zoom level or what the camera is centred on -- and each is disabled again the moment the selection count isn't exactly right for it.</p>" +
       "<h3>Results panel</h3>" +
       "<p>Only the swept volume and its extrapolation uncertainty are shown, since that's the number that matters day to day. The accessible volume, cavity surface area, and compute time are still calculated every time and held internally for a possible future report -- they're just not displayed.</p>";
     document.getElementById("guideBtn").addEventListener("click", function () { document.getElementById("guideModal").classList.add("open"); });
