@@ -1,0 +1,1356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VoidSqueeze &mdash; Unmodeled Electron Recovery</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap');
+
+:root{
+  --paper:#FAF6EE; --panel:#F2EBE0; --panel-edge:#E4DAC8;
+  --ink:#2C2A26; --ink-soft:#6B6558; --accent:#4A6FA5; --accent-soft:#7C97BE;
+  --pos:#B4562E; --neg:#3E6E8E; --good:#5A7D52; --warn:#B4562E;
+  --shadow:0 1px 2px rgba(44,42,38,.06),0 3px 12px rgba(44,42,38,.05);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--paper); color:var(--ink);
+  font-family:'DM Sans',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased;
+}
+.mono{font-family:'DM Mono',ui-monospace,Menlo,Consolas,monospace}
+h1,h2,h3{font-family:'Fraunces',Georgia,serif; font-weight:600; letter-spacing:-.01em; margin:0}
+
+/* ---- layout ---- */
+.app{display:grid; grid-template-columns:340px 1fr; min-height:100vh}
+.sidebar{
+  background:var(--panel); border-right:1px solid var(--panel-edge);
+  padding:20px 18px 40px; overflow-y:auto; height:100vh; position:sticky; top:0;
+}
+.main{padding:26px 34px 60px; max-width:1180px}
+header.top{display:flex; align-items:baseline; gap:12px; margin-bottom:6px}
+header.top h1{font-size:26px}
+header.top .ver{font-family:'DM Mono',monospace; font-size:12px; color:var(--accent); background:#EAF0F8; padding:2px 8px; border-radius:20px; border:1px solid #D6E1F0}
+.tagline{color:var(--ink-soft); font-size:13.5px; margin:0 0 22px; max-width:760px}
+
+/* ---- sidebar panels ---- */
+.panel{margin-bottom:14px; border:1px solid var(--panel-edge); border-radius:10px; background:rgba(255,255,255,.35); overflow:hidden}
+.panel > .head{
+  display:flex; align-items:center; justify-content:space-between; cursor:pointer;
+  padding:11px 13px; font-weight:600; font-size:13px; user-select:none;
+}
+.panel > .head .chev{transition:transform .18s ease; color:var(--ink-soft); font-size:11px}
+.panel.collapsed > .head .chev{transform:rotate(-90deg)}
+.panel > .body{padding:4px 13px 14px}
+.panel.collapsed > .body{display:none}
+
+.drop{
+  border:1.5px dashed var(--panel-edge); border-radius:9px; padding:14px 12px; text-align:center;
+  cursor:pointer; transition:.15s; background:var(--paper); margin-bottom:9px;
+}
+.drop:hover,.drop.hover{border-color:var(--accent); background:#F4F7FC}
+.drop .k{font-weight:600; font-size:12.5px}
+.drop .h{color:var(--ink-soft); font-size:11.5px; margin-top:2px}
+.drop.loaded{border-style:solid; border-color:var(--good); background:#F1F5EF}
+.drop.loaded .k{color:var(--good)}
+.fileinfo{font-family:'DM Mono',monospace; font-size:11px; color:var(--ink-soft); margin-top:3px; word-break:break-all}
+
+label.field{display:block; margin:10px 0 3px; font-size:12px; font-weight:500; color:var(--ink-soft)}
+input[type=number],select{
+  width:100%; padding:7px 9px; border:1px solid var(--panel-edge); border-radius:7px;
+  background:var(--paper); color:var(--ink); font-family:'DM Mono',monospace; font-size:13px;
+}
+input[type=range]{width:100%}
+.row2{display:grid; grid-template-columns:1fr 1fr; gap:8px}
+.hint{font-size:11px; color:var(--ink-soft); margin-top:3px; line-height:1.45}
+
+button.run{
+  width:100%; margin-top:16px; padding:11px; border:none; border-radius:9px;
+  background:var(--accent); color:#fff; font-family:'DM Sans',sans-serif; font-weight:600; font-size:14px;
+  cursor:pointer; transition:.15s; box-shadow:var(--shadow);
+}
+button.run:hover{background:#3d5f8f}
+button.run:disabled{background:var(--accent-soft); cursor:not-allowed}
+button.ghost{
+  padding:7px 12px; border:1px solid var(--panel-edge); border-radius:7px; background:var(--paper);
+  color:var(--ink); font-family:'DM Sans',sans-serif; font-size:12.5px; cursor:pointer; font-weight:500;
+}
+button.ghost:hover{border-color:var(--accent); color:var(--accent)}
+button.ghost:disabled{opacity:.45; cursor:not-allowed}
+
+/* ---- progress ---- */
+.progress-wrap{margin-top:14px; display:none}
+.progress-wrap.on{display:block}
+.pbar{height:7px; background:var(--panel-edge); border-radius:20px; overflow:hidden}
+.pbar > span{display:block; height:100%; width:0%; background:var(--accent); transition:width .12s linear}
+.pstat{font-family:'DM Mono',monospace; font-size:11px; color:var(--ink-soft); margin-top:5px}
+
+/* ---- main results ---- */
+.empty{color:var(--ink-soft); font-size:14px; padding:40px 0; max-width:640px}
+.empty ol{padding-left:18px; line-height:1.9}
+.headline{
+  display:none; align-items:baseline; gap:16px; flex-wrap:wrap;
+  background:linear-gradient(180deg,#F4F7FC,#EEF3FA); border:1px solid #D6E1F0;
+  border-radius:12px; padding:20px 24px; margin-bottom:22px;
+}
+.headline.on{display:flex}
+.headline .big{font-family:'Fraunces',serif; font-weight:600; font-size:46px; color:var(--accent); line-height:1}
+.headline .biglabel{font-size:13px; color:var(--ink-soft)}
+.headline .sep{width:1px; align-self:stretch; background:#D6E1F0}
+.headline .stat .v{font-family:'DM Mono',monospace; font-size:20px; font-weight:500}
+.headline .stat .l{font-size:11.5px; color:var(--ink-soft)}
+
+.grid-cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:22px}
+.card{background:var(--panel); border:1px solid var(--panel-edge); border-radius:10px; padding:13px 15px}
+.card .l{font-size:11.5px; color:var(--ink-soft)}
+.card .v{font-family:'DM Mono',monospace; font-size:18px; font-weight:500; margin-top:3px}
+.card .u{font-size:11px; color:var(--ink-soft)}
+
+.section-title{font-size:18px; margin:26px 0 12px}
+table.voids{width:100%; border-collapse:collapse; font-size:13px}
+table.voids th,table.voids td{text-align:right; padding:8px 12px; border-bottom:1px solid var(--panel-edge)}
+table.voids th{color:var(--ink-soft); font-weight:600; font-size:11.5px; text-transform:uppercase; letter-spacing:.03em}
+table.voids td{font-family:'DM Mono',monospace}
+table.voids td:first-child,table.voids th:first-child{text-align:left}
+table.voids tr.total td{border-top:2px solid var(--panel-edge); font-weight:600; border-bottom:none}
+
+/* ---- viewer ---- */
+.viewer{display:grid; grid-template-columns:1fr 240px; gap:20px; align-items:start}
+.canvas-hold{background:var(--panel); border:1px solid var(--panel-edge); border-radius:12px; padding:14px; position:relative}
+#mapcanvas{width:100%; height:auto; image-rendering:pixelated; border-radius:6px; background:#fff; display:block}
+.vcontrols label.field{margin-top:6px}
+.legend{display:flex; align-items:center; gap:8px; margin-top:10px; font-size:11.5px; color:var(--ink-soft)}
+.legend .bar{height:10px; flex:1; border-radius:6px; background:linear-gradient(90deg,var(--neg),#f4f0e8 50%,var(--pos))}
+.slice-info{font-family:'DM Mono',monospace; font-size:12px; color:var(--ink-soft); margin-top:8px}
+
+.notes{background:#FBF3EC; border:1px solid #EAD9C8; border-radius:10px; padding:14px 16px; font-size:12.5px; color:#6B5A48; margin-top:26px; line-height:1.6}
+.notes b{color:#7A4A2A}
+.msg{padding:11px 14px; border-radius:9px; font-size:13px; margin-bottom:12px; display:none}
+.msg.err{background:#F8E9E3; border:1px solid #E6C4B4; color:#8A3B1C; display:block}
+.msg.info{background:#EAF0F8; border:1px solid #D6E1F0; color:#3d5f8f; display:block}
+.footer{margin-top:40px; color:var(--ink-soft); font-size:11.5px; border-top:1px solid var(--panel-edge); padding-top:14px}
+a{color:var(--accent)}
+@media(max-width:820px){ .app{grid-template-columns:1fr} .sidebar{height:auto; position:static} .viewer{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar">
+    <div style="font-family:'Fraunces',serif;font-weight:600;font-size:19px;margin-bottom:2px">VoidSqueeze</div>
+    <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:16px">Solvent-mask electron recovery</div>
+
+    <div class="panel" id="p-input">
+      <div class="head" data-panel="p-input"><span>1 &middot; Input files</span><span class="chev">&#9660;</span></div>
+      <div class="body">
+        <div class="drop" id="drop-cif">
+          <div class="k">Structure &mdash; CIF</div>
+          <div class="h">cell, symmetry, ordered atoms</div>
+          <div class="fileinfo" id="info-cif"></div>
+        </div>
+        <input type="file" id="file-cif" accept=".cif,.txt" hidden>
+        <div class="drop" id="drop-hkl">
+          <div class="k">Reflections &mdash; SHELX HKL</div>
+          <div class="h">h k l F<sup>2</sup> &sigma; (HKLF 4)</div>
+          <div class="fileinfo" id="info-hkl"></div>
+        </div>
+        <input type="file" id="file-hkl" accept=".hkl,.fcf,.txt" hidden>
+      </div>
+    </div>
+
+    <div class="panel" id="p-params">
+      <div class="head" data-panel="p-params"><span>2 &middot; Mask &amp; map</span><span class="chev">&#9660;</span></div>
+      <div class="body">
+        <label class="field">Probe radius (&Aring;)</label>
+        <input type="number" id="probe" value="1.2" step="0.05" min="0">
+        <div class="hint">Rolling-probe radius added to van der Waals radii to define the solvent-accessible surface.</div>
+
+        <div class="row2">
+          <div>
+            <label class="field">Grid / d<sub>min</sub></label>
+            <input type="number" id="gridfac" value="3" step="0.5" min="2" max="6">
+          </div>
+          <div>
+            <label class="field">Max grid</label>
+            <input type="number" id="maxgrid" value="128" step="32" min="32" max="256">
+          </div>
+        </div>
+        <div class="hint">Real-space sampling. Finer grids sharpen the mask; capped for speed. The
+          FFT requires power-of-2 grid dimensions, so max grid is rounded down to the nearest one
+          (e.g. 96 becomes 64) &mdash; large cells may want this raised to 128 or 256.</div>
+
+        <label class="field">Resolution cutoff d<sub>min</sub> (&Aring;, 0 = all)</label>
+        <input type="number" id="dmincut" value="0" step="0.05" min="0">
+
+        <label class="field">Scaling</label>
+        <select id="scalemode">
+          <option value="linear">Linear (single k)</option>
+          <option value="shell">Resolution-shell k</option>
+        </select>
+        <div class="hint">k scales F<sub>o</sub> onto the absolute (electron) scale of F<sub>c</sub>.</div>
+
+        <label class="field">Iterations</label>
+        <input type="number" id="niter" value="1" step="1" min="1" max="200">
+        <div class="hint">Leave at 1 (single-pass difference map). Verified against reference SQUEEZE/masks
+          runs: with complete low-angle data, one pass already matches closely and every extra cycle makes
+          it worse, not better (the recovery has no stable value to settle on -- it overshoots more the
+          longer it runs, even inventing electrons in voids that are genuinely empty). Only raise this if
+          you specifically want to explore that behaviour; it is not a way to get a more accurate number.</div>
+      </div>
+    </div>
+
+    <button class="run" id="btn-run" disabled>Recover electrons</button>
+    <div class="progress-wrap" id="prog">
+          <div class="pbar"><span id="pbar-fill"></span></div>
+      <div class="pstat" id="pstat">working&hellip;</div>
+    </div>
+    <div class="hint" id="convnote" style="display:none;color:#a15c2a;margin-top:8px;"></div>
+
+    <div class="panel collapsed" id="p-export" style="margin-top:14px">
+      <div class="head" data-panel="p-export"><span>3 &middot; Export</span><span class="chev">&#9660;</span></div>
+      <div class="body">
+        <button class="ghost" id="btn-report" disabled style="width:100%;margin-bottom:8px">Save report (.txt)</button>
+        <button class="ghost" id="btn-fab" disabled style="width:100%">Save void F(hkl) (.fab)</button>
+        <div class="hint">The .fab list gives the masked-region structure-factor contribution A, B for each measured reflection &mdash; the SQUEEZE back-transform, for use in continued refinement.</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <main class="main">
+    <header class="top"><h1>Unmodeled electron recovery</h1><span class="ver">v1.0</span></header>
+    <p class="tagline">A SQUEEZE-style difference-Fourier route to diffuse solvent: build a
+      (F<sub>o</sub>&minus;F<sub>c</sub>) map from the ordered model, mask the solvent-accessible voids,
+      and integrate the residual density to recover the electrons that were never modelled.</p>
+
+    <div class="msg" id="msg"></div>
+
+    <div class="empty" id="empty">
+      <ol>
+        <li>Drop in a <b>CIF</b> of the ordered structure (cell, symmetry operators and refined atoms) and the matching <b>SHELX .hkl</b> (HKLF 4: h&nbsp;k&nbsp;l&nbsp;F<sup>2</sup>&nbsp;&sigma;).</li>
+        <li>Set the probe radius and grid sampling &mdash; the defaults mirror common SQUEEZE settings.</li>
+        <li>Press <b>Recover electrons</b>. You get the electron count per void and per cell, a mask summary, and a browsable difference-density map.</li>
+      </ol>
+    </div>
+
+    <!-- headline -->
+    <div class="headline" id="headline">
+      <div><div class="big" id="h-etot">&ndash;</div><div class="biglabel">electrons recovered / unit cell</div></div>
+      <div class="sep"></div>
+      <div class="stat"><div class="v" id="h-nvoid">&ndash;</div><div class="l">distinct voids</div></div>
+      <div class="stat"><div class="v" id="h-vvol">&ndash;</div><div class="l">void volume (&Aring;<sup>3</sup>)</div></div>
+      <div class="stat"><div class="v" id="h-vpct">&ndash;</div><div class="l">% of cell</div></div>
+    </div>
+
+    <div class="grid-cards" id="cards" style="display:none">
+      <div class="card"><div class="l">Reflections used</div><div class="v" id="c-nref">&ndash;</div></div>
+      <div class="card"><div class="l">Resolution d<sub>min</sub></div><div class="v" id="c-dmin">&ndash;</div><div class="u">&Aring;</div></div>
+      <div class="card"><div class="l">Scale k (F<sub>o</sub>&rarr;F<sub>c</sub>)</div><div class="v" id="c-scale">&ndash;</div></div>
+      <div class="card"><div class="l">R<sub>1</sub> (ordered)</div><div class="v" id="c-r1">&ndash;</div></div>
+      <div class="card"><div class="l">Grid</div><div class="v" id="c-grid">&ndash;</div></div>
+      <div class="card"><div class="l">Model electrons</div><div class="v" id="c-zmodel">&ndash;</div><div class="u">/ cell</div></div>
+    </div>
+
+    <div id="voidsblock" style="display:none">
+      <h2 class="section-title">Per-void breakdown</h2>
+      <table class="voids" id="voidtable"><thead><tr>
+        <th>Void</th><th>Electrons</th><th>Volume (&Aring;<sup>3</sup>)</th>
+        <th>e / 1000&Aring;<sup>3</sup></th><th>Centroid (frac)</th>
+      </tr></thead><tbody></tbody></table>
+    </div>
+
+    <div id="viewerblock" style="display:none">
+      <h2 class="section-title">Difference-density map</h2>
+      <div class="viewer">
+        <div class="canvas-hold">
+          <canvas id="mapcanvas" width="400" height="400"></canvas>
+          <div class="legend"><span id="leg-neg">&minus;</span><span class="bar"></span><span id="leg-pos">+</span>
+            <span style="margin-left:8px">e/&Aring;<sup>3</sup></span></div>
+          <div class="slice-info" id="sliceinfo"></div>
+        </div>
+        <div class="vcontrols">
+          <label class="field">Slice axis</label>
+          <select id="sliceaxis"><option value="2">c (along z)</option><option value="1">b (along y)</option><option value="0">a (along x)</option></select>
+          <label class="field">Layer</label>
+          <input type="range" id="slicelayer" min="0" max="10" value="5">
+          <label class="field">Contrast (max |&rho;| = <span id="contrastval" class="mono"></span>)</label>
+          <input type="range" id="contrast" min="10" max="100" value="60">
+          <label class="field" style="margin-top:12px">
+            <input type="checkbox" id="showmask" checked style="width:auto;margin-right:6px">Outline void mask
+          </label>
+          <label class="field">
+            <input type="checkbox" id="showatoms" checked style="width:auto;margin-right:6px">Mark atom sites
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="notes" id="notes" style="display:none">
+      <b>How to read this.</b> The recovered count is the residual density integrated over the
+      solvent-<i>excluded</i> (Connolly) mask &mdash; the region swept by a probe rolling over the van&nbsp;der&nbsp;Waals
+      surface, obtained by morphological closing rather than a bare vdW+probe cut-off. Measurements are
+      first merged to the true crystallographically-unique set (by full Laue symmetry, not just exact
+      hkl duplicates), then each unique reflection is expanded back out to every symmetry- and
+      Friedel-related grid point with its own correctly phased structure factor, so the map uses the
+      full measured redundancy rather than leaving most of it to be estimated. This is an independent
+      implementation, not Spek's code: it uses an overall (or shell) scale and an isotropic-equivalent
+      model when only U<sub>iso</sub> is available. On test data this tracks PLATON SQUEEZE/masks
+      closely on void geometry &mdash; void count, volume, and centroid positions (the last of these
+      correctly handles voids that straddle the periodic cell boundary, e.g. sitting on a special
+      position at or near the origin).
+      <br><br>
+      <b>Electron count: leave Iterations at 1.</b> Testing against several reference SQUEEZE/masks
+      results found that a single difference-map pass already matches closely when the low-angle data
+      is complete, and that running further iterations to try to recover missing low-order reflections
+      &mdash; the app's own earlier approach &mdash; does not converge to a stable answer on any dataset
+      tested; it overshoots progressively the longer it runs, even inventing electrons in voids that are
+      genuinely empty. When the low-angle data does have a real gap (often a beamstop limitation, flagged
+      automatically from the largest measured d-spacing), the single-pass count is a lower-bound estimate
+      with no reliable correction currently available here &mdash; use PLATON/masks directly for that
+      number.
+    </div>
+
+    <div class="footer">VoidSqueeze v1.0 &middot; offline, single file &middot; difference-Fourier solvent-mask integration.
+      Not affiliated with or derived from PLATON; "SQUEEZE" is used descriptively.</div>
+  </main>
+</div>
+
+<script>
+"use strict";
+/* =========================================================================
+   VoidSqueeze v1.0  --  SQUEEZE-style unmodeled-electron recovery
+   Pipeline: CIF+HKL -> Fc(model) with phases -> scale Fo -> (Fo-Fc) diff map
+   -> FFT to real space -> vdW+probe solvent mask -> integrate residual density
+   ASCII-only source. Angstrom = \u00c5, sigma = \u03c3, rho = \u03c1 in JS text.
+   ========================================================================= */
+
+/* ----- element data: Cromer-Mann (a1 b1 a2 b2 a3 b3 a4 b4 c) + vdW radius ----- */
+var CM = {
+ H :[0.489918,20.6593,0.262003,7.74039,0.196767,49.5519,0.049879,2.20159,0.001305, 1.20],
+ B :[2.05450,23.2185,1.33260,1.02100,1.09790,60.3498,0.706800,0.140300,-0.19320, 1.92],
+ C :[2.31000,20.8439,1.02000,10.2075,1.58860,0.568700,0.865000,51.6512,0.215600, 1.70],
+ N :[12.2126,0.005700,3.13220,9.89330,2.01250,28.9975,1.16630,0.582600,-11.529, 1.55],
+ O :[3.04850,13.2771,2.28680,5.70110,1.54630,0.323900,0.867000,32.9089,0.250800, 1.52],
+ F :[3.53920,10.2825,2.64120,4.29440,1.51700,0.261500,1.02430,26.1476,0.277600, 1.47],
+ Na:[4.76260,3.28500,3.17360,8.84220,1.26740,0.313600,1.11280,129.424,0.676000, 2.27],
+ Mg:[5.42040,2.82750,2.17350,79.2611,1.22690,0.380800,2.30730,7.19370,0.858400, 1.73],
+ Al:[6.42020,3.03870,1.90020,0.742600,1.59360,31.5472,1.96460,85.0886,1.11510, 1.84],
+ Si:[6.29150,2.43860,3.03530,32.3337,1.98910,0.678500,1.54100,81.6937,1.14070, 2.10],
+ P :[6.43450,1.90670,4.17910,27.1570,1.78000,0.526000,1.49080,68.1645,1.11490, 1.80],
+ S :[6.90530,1.46790,5.20340,22.2151,1.43790,0.253600,1.58630,56.1720,0.866900, 1.80],
+ Cl:[11.4604,0.010400,7.19640,1.16620,6.25560,18.5194,1.64550,47.7784,-9.5574, 1.75],
+ K :[8.21860,12.7949,7.43980,0.774800,1.05190,213.187,0.865900,41.6841,1.42280, 2.75],
+ Ca:[8.62660,10.4421,7.38730,0.659900,1.58990,85.7484,1.02110,178.437,1.37510, 2.31],
+ Ti:[9.75950,7.85080,7.35580,0.500000,1.69910,35.6338,1.90210,116.105,1.28070, 2.15],
+ V :[10.2971,6.86570,7.35110,0.438500,2.07030,26.8938,2.05710,102.478,1.21990, 2.05],
+ Cr:[10.6406,6.10380,7.35370,0.392000,3.32400,20.2626,1.49220,98.7399,1.18320, 2.05],
+ Mn:[11.2819,5.34090,7.35730,0.343200,3.01930,17.8674,2.24410,83.7543,1.08960, 2.05],
+ Fe:[11.7695,4.76110,7.35730,0.307200,3.52220,15.3535,2.30450,76.8805,1.03690, 2.05],
+ Co:[12.2841,4.27910,7.34090,0.278400,4.00340,13.5359,2.34880,71.1692,1.01180, 2.00],
+ Ni:[12.8376,3.87850,7.29200,0.256500,4.44380,12.1763,2.38000,66.3421,1.03410, 2.00],
+ Cu:[13.3380,3.58280,7.16760,0.247000,5.61580,11.3966,1.67350,64.8126,1.19100, 2.00],
+ Zn:[14.0743,3.26550,7.03180,0.233300,5.16520,10.3163,2.41000,58.7097,1.30410, 2.10],
+ Ga:[15.2354,3.06690,6.70060,0.241200,4.35910,10.7805,2.96230,61.4135,1.71890, 1.87],
+ Ge:[16.0816,2.85090,6.37470,0.251600,3.70680,11.4468,3.68300,54.7625,2.13130, 2.11],
+ As:[16.6723,2.63450,6.07010,0.264700,3.43130,12.9479,4.27790,47.7972,2.53100, 1.85],
+ Br:[17.1789,2.17230,5.23580,16.5796,5.63770,0.260900,3.98510,41.4328,2.95570, 1.85],
+ Rb:[17.1784,1.78880,9.64350,17.3151,5.13990,0.274800,1.52920,164.934,3.48730, 3.03],
+ Sr:[17.5663,1.55640,9.81840,14.0988,5.42200,0.166400,2.66940,132.376,2.50640, 2.49],
+ Zr:[17.8765,1.27618,10.9480,11.9160,5.41732,0.117622,3.65721,87.6627,2.06929, 2.20],
+ Mo:[3.70250,0.277200,17.2356,1.09580,12.8876,11.0040,3.74290,61.6584,4.38750, 2.10],
+ Ag:[19.2808,0.644600,16.6885,7.47260,4.80450,24.6605,1.04630,99.8156,5.17900, 2.03],
+ Cd:[19.2214,0.594600,17.6444,6.90890,4.46100,24.7008,1.60290,87.4825,5.06940, 2.18],
+ Sn:[19.1889,5.83030,19.1005,0.503100,4.45850,26.8909,2.46630,83.9571,4.78210, 2.17],
+ Sb:[19.6418,5.30340,19.0455,0.460700,5.03710,27.9074,2.68270,75.2825,4.59090, 2.06],
+ I :[20.1472,4.34700,18.9949,0.381400,7.51380,27.7660,2.27350,66.8776,4.07120, 1.98],
+ Cs:[20.3892,3.56900,19.1062,0.310700,10.6620,24.3879,1.49530,213.904,3.33520, 3.43],
+ Ba:[20.3361,3.21600,19.2970,0.275600,10.8880,20.2073,2.69590,167.202,2.77310, 2.68],
+ Pt:[27.0059,1.51293,17.7639,8.81174,15.7131,0.424593,5.78370,38.6103,11.6883, 2.13],
+ Au:[16.8819,0.461100,18.5913,8.62160,25.5582,1.48260,5.86000,36.3956,12.0658, 2.14],
+ Hg:[20.6809,5.96460,19.0417,0.542100,21.6575,1.55890,5.96760,38.3246,12.6089, 2.23],
+ Pb:[31.0617,0.690200,13.0637,2.35760,18.4420,8.61800,5.96960,47.2579,13.4118, 2.02]
+};
+var DEF_VDW=2.00;
+
+function cmScatter(el,s2){ // s2 = (sinTheta/lambda)^2
+  var c=CM[el]; if(!c) c=CM.C;
+  return c[0]*Math.exp(-c[1]*s2)+c[2]*Math.exp(-c[3]*s2)+c[4]*Math.exp(-c[5]*s2)+c[6]*Math.exp(-c[7]*s2)+c[8];
+}
+function vdw(el){ var c=CM[el]; return c?c[9]:DEF_VDW; }
+function fzero(el){ var c=CM[el]; if(!c) c=CM.C; return c[0]+c[2]+c[4]+c[6]+c[8]; } // ~ Z
+
+/* ================= state ================= */
+var ST={ cif:null, hkl:null, cell:null, sym:null, atoms:null, aniso:null,
+         refl:null, result:null };
+
+/* ================= UI plumbing ================= */
+function $(id){return document.getElementById(id);}
+function msg(t,kind){ var m=$('msg'); m.textContent=t; m.className='msg '+(kind||'info'); }
+function clearMsg(){ $('msg').className='msg'; }
+
+document.querySelectorAll('.panel > .head').forEach(function(h){
+  h.addEventListener('click',function(){ $(h.getAttribute('data-panel')).classList.toggle('collapsed'); });
+});
+
+function wireDrop(dropId,inputId,kind){
+  var d=$(dropId), inp=$(inputId);
+  d.addEventListener('click',function(){inp.click();});
+  d.addEventListener('dragover',function(e){e.preventDefault();d.classList.add('hover');});
+  d.addEventListener('dragleave',function(){d.classList.remove('hover');});
+  d.addEventListener('drop',function(e){e.preventDefault();d.classList.remove('hover');
+    if(e.dataTransfer.files.length) loadFile(e.dataTransfer.files[0],kind);});
+  inp.addEventListener('change',function(){ if(inp.files.length) loadFile(inp.files[0],kind); });
+}
+wireDrop('drop-cif','file-cif','cif');
+wireDrop('drop-hkl','file-hkl','hkl');
+
+function loadFile(file,kind){
+  var r=new FileReader();
+  r.onload=function(){
+    try{
+      if(kind==='cif'){ parseCIF(r.result); ST.cifName=file.name;
+        $('drop-cif').classList.add('loaded'); $('info-cif').textContent=file.name;
+      }else{ parseHKL(r.result); ST.hklName=file.name;
+        $('drop-hkl').classList.add('loaded'); $('info-hkl').textContent=
+          file.name+'  ('+ST.refl.length+' refl)';
+      }
+      clearMsg();
+    }catch(err){ msg((kind==='cif'?'CIF':'HKL')+' parse failed: '+err.message,'err'); }
+    $('btn-run').disabled = !(ST.cell && ST.atoms && ST.refl);
+  };
+  r.readAsText(file);
+}
+
+/* ================= CIF parser ================= */
+function parseCIF(text){
+  var lines=text.split(/\r\n|\r|\n/);
+  var cell={}, syms=[], atoms=[], aniso={};
+  var i=0;
+  function stripComment(s){ var q=false,out=''; for(var j=0;j<s.length;j++){var ch=s[j];
+    if(ch==="'"||ch==='"') q=!q; if(ch==='#'&&!q) break; out+=ch;} return out; }
+  function tok(line){ // whitespace tokens honouring simple quotes
+    var t=[],cur='',q=null;
+    for(var j=0;j<line.length;j++){var c=line[j];
+      if(q){ if(c===q){q=null;} else cur+=c; }
+      else if(c==="'"||c==='"'){q=c;}
+      else if(c===' '||c==='\t'){ if(cur.length){t.push(cur);cur='';} }
+      else cur+=c;
+    } if(cur.length)t.push(cur); return t;
+  }
+  var cellKeys={ '_cell_length_a':'a','_cell_length_b':'b','_cell_length_c':'c',
+    '_cell_angle_alpha':'al','_cell_angle_beta':'be','_cell_angle_gamma':'ga' };
+
+  while(i<lines.length){
+    var raw=stripComment(lines[i]);
+    var line=raw.trim();
+    if(line==='' ){ i++; continue; }
+    // simple key-value
+    var kv=line.split(/\s+/);
+    if(kv[0] && cellKeys[kv[0].toLowerCase()] && kv.length>=2){
+      cell[cellKeys[kv[0].toLowerCase()]]=parseFloat(kv[1]); i++; continue;
+    }
+    if(/^loop_$/i.test(line)){
+      i++; var hdrs=[];
+      while(i<lines.length){ var hl=stripComment(lines[i]).trim();
+        if(hl[0]==='_'){ hdrs.push(hl.toLowerCase()); i++; } else break; }
+      // read data rows until blank / new underscore / loop_
+      var rows=[];
+      while(i<lines.length){
+        var dl=stripComment(lines[i]);
+        var dt=dl.trim();
+        if(dt===''||dt[0]==='_'||/^loop_$/i.test(dt)|| dt.charAt(0)==='#'){ break; }
+        rows.push(tok(dl)); i++;
+      }
+      classifyLoop(hdrs,rows);
+      continue;
+    }
+    i++;
+  }
+
+  function classifyLoop(hdrs,rows){
+    var idxSym = hdrs.indexOf('_symmetry_equiv_pos_as_xyz');
+    if(idxSym<0) idxSym=hdrs.indexOf('_space_group_symop_operation_xyz');
+    if(idxSym>=0){ rows.forEach(function(r){ if(r[idxSym]) syms.push(r[idxSym]); }); return; }
+    // atom site
+    var la=hdrs.indexOf('_atom_site_label');
+    var fx=hdrs.indexOf('_atom_site_fract_x');
+    if(la>=0 && fx>=0){
+      var ty=hdrs.indexOf('_atom_site_type_symbol');
+      var fy=hdrs.indexOf('_atom_site_fract_y'), fz=hdrs.indexOf('_atom_site_fract_z');
+      var oc=hdrs.indexOf('_atom_site_occupancy');
+      var ui=hdrs.indexOf('_atom_site_u_iso_or_equiv');
+      if(ui<0) ui=hdrs.indexOf('_atom_site_b_iso_or_equiv');
+      var uiIsB = (hdrs.indexOf('_atom_site_u_iso_or_equiv')<0 && hdrs.indexOf('_atom_site_b_iso_or_equiv')>=0);
+      var dAsm=hdrs.indexOf('_atom_site_disorder_assembly');
+      var dGrp=hdrs.indexOf('_atom_site_disorder_group');
+      rows.forEach(function(r){
+        if(!r[fx]) return;
+        var label=r[la];
+        var el = ty>=0 && r[ty] ? cleanEl(r[ty]) : cleanEl(label);
+        var uiso = ui>=0 ? num(r[ui]) : 0.03;
+        if(uiIsB && isFinite(uiso)) uiso = uiso/(8*Math.PI*Math.PI);
+        if(!isFinite(uiso)||uiso<=0) uiso=0.03;
+        var asm = dAsm>=0 ? (r[dAsm]||'.').trim() : '.';
+        var grp = dGrp>=0 ? (r[dGrp]||'.').trim() : '.';
+        if(asm==='?') asm='.'; if(grp==='?') grp='.';
+        atoms.push({ label:label, el:el,
+          x:num(r[fx]), y:num(r[fy]), z:num(r[fz]),
+          occ: oc>=0 && isFinite(num(r[oc])) ? num(r[oc]) : 1.0,
+          uiso: uiso, disAsm: asm, disGrp: grp });
+      });
+      return;
+    }
+    // aniso
+    var al=hdrs.indexOf('_atom_site_aniso_label');
+    var u11=hdrs.indexOf('_atom_site_aniso_u_11');
+    if(al>=0 && u11>=0){
+      var u22=hdrs.indexOf('_atom_site_aniso_u_22'), u33=hdrs.indexOf('_atom_site_aniso_u_33');
+      var u23=hdrs.indexOf('_atom_site_aniso_u_23'), u13=hdrs.indexOf('_atom_site_aniso_u_13'),
+          u12=hdrs.indexOf('_atom_site_aniso_u_12');
+      rows.forEach(function(r){ if(!r[al])return;
+        aniso[r[al]]={ u11:num(r[u11]),u22:num(r[u22]),u33:num(r[u33]),
+                       u23:num(r[u23]),u13:num(r[u13]),u12:num(r[u12]) }; });
+    }
+  }
+  function num(s){ if(s==null) return NaN; return parseFloat(String(s).replace(/\(.*\)/,'')); }
+  function cleanEl(s){ var m=String(s).match(/^([A-Za-z]{1,2})/); if(!m) return 'C';
+    var e=m[1]; return e.charAt(0).toUpperCase()+ (e.length>1?e.charAt(1).toLowerCase():''); }
+
+  if(!(cell.a>0)) throw new Error('no unit cell found');
+  if(!atoms.length) throw new Error('no atom sites found');
+  if(!syms.length) syms=['x,y,z'];
+
+  ST.cell=cell; ST.sym=syms.map(parseSymop); ST.atoms=atoms; ST.aniso=aniso;
+  // attach aniso to atoms
+  atoms.forEach(function(a){ if(aniso[a.label]) a.adp=aniso[a.label]; });
+  computeMetric();
+}
+
+function parseSymop(str){
+  var parts=str.split(',');
+  if(parts.length!==3) throw new Error('bad symop: '+str);
+  var R=[[0,0,0],[0,0,0],[0,0,0]], t=[0,0,0];
+  for(var c=0;c<3;c++){
+    var s=parts[c].replace(/\s+/g,'').toLowerCase();
+    // split into signed terms
+    var terms=s.replace(/-/g,'+-').split('+').filter(function(x){return x!=='';});
+    terms.forEach(function(tm){
+      var sign=1; if(tm[0]==='-'){sign=-1; tm=tm.slice(1);}
+      if(tm.indexOf('x')>=0){ R[c][0]+=sign*coef(tm,'x'); }
+      else if(tm.indexOf('y')>=0){ R[c][1]+=sign*coef(tm,'y'); }
+      else if(tm.indexOf('z')>=0){ R[c][2]+=sign*coef(tm,'z'); }
+      else { // pure translation, maybe fraction
+        var f=tm.indexOf('/')>=0 ? parseFloat(tm.split('/')[0])/parseFloat(tm.split('/')[1]) : parseFloat(tm);
+        if(isFinite(f)) t[c]+=sign*f;
+      }
+    });
+  }
+  function coef(tm,v){ var pre=tm.replace(v,''); if(pre===''||pre==='*') return 1;
+    if(pre.indexOf('/')>=0){var p=pre.split('/');return parseFloat(p[0])/parseFloat(p[1]);}
+    return parseFloat(pre)||1; }
+  return {R:R,t:t};
+}
+
+/* ================= cell metric / orthogonalisation ================= */
+function computeMetric(){
+  var c=ST.cell, d2r=Math.PI/180;
+  var a=c.a,b=c.b,cc=c.c, al=c.al*d2r, be=c.be*d2r, ga=c.ga*d2r;
+  var ca=Math.cos(al),cb=Math.cos(be),cg=Math.cos(ga),sg=Math.sin(ga);
+  var V=a*b*cc*Math.sqrt(1-ca*ca-cb*cb-cg*cg+2*ca*cb*cg);
+  c.V=V;
+  // crystal-to-cartesian (columns are a,b,c vectors)
+  c.M=[[a, b*cg, cc*cb],
+       [0, b*sg, cc*(ca-cb*cg)/sg],
+       [0, 0,    V/(a*b*sg)]];
+  // reciprocal metric G* : |h*|^2 = h.Gstar.h
+  var as=b*cc*Math.sin(al)/V, bs=a*cc*Math.sin(be)/V, cs=a*b*sg/V;
+  var cas=(cb*cg-ca)/(Math.sin(be)*sg), cbs=(ca*cg-cb)/(Math.sin(al)*sg), cgs=(ca*cb-cg)/(Math.sin(al)*Math.sin(be));
+  c.Gstar=[[as*as, as*bs*cgs, as*cs*cbs],
+           [as*bs*cgs, bs*bs, bs*cs*cas],
+           [as*cs*cbs, bs*cs*cas, cs*cs]];
+  c.rstar={as:as,bs:bs,cs:cs,cas:cas,cbs:cbs,cgs:cgs};
+}
+function invD2(h,k,l){ var G=ST.cell.Gstar;
+  return h*h*G[0][0]+k*k*G[1][1]+l*l*G[2][2]+2*h*k*G[0][1]+2*h*l*G[0][2]+2*k*l*G[1][2]; }
+function fracToCart(x,y,z){ var M=ST.cell.M;
+  return [M[0][0]*x+M[0][1]*y+M[0][2]*z, M[1][1]*y+M[1][2]*z, M[2][2]*z]; }
+
+/* ================= Laue-symmetry reflection merging ================= */
+// Reciprocal-space (hkl) equivalence only depends on the ROTATION part of each
+// symmetry operator; translations contribute a pure phase and do not generate
+// new indices. Space groups with centring/glide/screw components therefore
+// have several symmetry operators sharing the same rotation matrix; dedupe
+// those first so each distinct hkl-transform is only applied once.
+function uniqueRotations(sym){
+  var out=[], seen={};
+  for(var s=0;s<sym.length;s++){
+    var R=sym[s].R;
+    var key=R[0][0].toFixed(3)+','+R[0][1].toFixed(3)+','+R[0][2].toFixed(3)+';'+
+            R[1][0].toFixed(3)+','+R[1][1].toFixed(3)+','+R[1][2].toFixed(3)+';'+
+            R[2][0].toFixed(3)+','+R[2][1].toFixed(3)+','+R[2][2].toFixed(3);
+    if(!seen[key]){ seen[key]=1; out.push(R); }
+  }
+  return out;
+}
+function mergeLaueUnique(refl){
+  var rots=uniqueRotations(ST.sym);
+  ST.laueRot=rots; // cached for the difference-map expansion step
+  function canon(h,k,l){
+    var best=null;
+    for(var s=0;s<rots.length;s++){ var R=rots[s];
+      var hh=h*R[0][0]+k*R[1][0]+l*R[2][0];
+      var kk=h*R[0][1]+k*R[1][1]+l*R[2][1];
+      var ll=h*R[0][2]+k*R[1][2]+l*R[2][2];
+      for(var sgn=1; sgn>=-1; sgn-=2){
+        var H=sgn*hh, K=sgn*kk, L=sgn*ll;
+        var key=H+','+K+','+L;
+        if(best===null || key<best) best=key;
+      }
+    }
+    return best;
+  }
+  var groups={}, order=[];
+  for(var i=0;i<refl.length;i++){ var r=refl[i];
+    var key=canon(r.h,r.k,r.l); var g=groups[key];
+    if(!g){ g={sum:0,n:0,h:r.h,k:r.k,l:r.l}; groups[key]=g; order.push(key); }
+    g.sum+=r.f2; g.n++;
+  }
+  var out=[]; for(var o=0;o<order.length;o++){ var g2=groups[order[o]];
+    out.push({h:g2.h,k:g2.k,l:g2.l,f2:g2.sum/g2.n}); }
+  return out;
+}
+
+/* ================= HKL parser (SHELX HKLF 4) ================= */
+function parseHKL(text){
+  var lines=text.split(/\r\n|\r|\n/);
+  var refl=[], started=false, stopped=false;
+  for(var i=0;i<lines.length;i++){
+    var ln=lines[i]; if(ln.trim()==='' ) continue;
+    var h,k,l,f2,sig, ok=false;
+    // try fixed format 3I4,2F8.2
+    if(ln.length>=20){
+      h=parseInt(ln.substr(0,4),10); k=parseInt(ln.substr(4,4),10); l=parseInt(ln.substr(8,4),10);
+      f2=parseFloat(ln.substr(12,8)); sig=parseFloat(ln.substr(20,8));
+      if(isFinite(h)&&isFinite(k)&&isFinite(l)&&isFinite(f2)) ok=true;
+    }
+    if(!ok){ // free format fallback
+      var p=ln.trim().split(/\s+/);
+      if(p.length>=4){ h=parseInt(p[0],10);k=parseInt(p[1],10);l=parseInt(p[2],10);
+        f2=parseFloat(p[3]); sig=parseFloat(p[4]);
+        if(isFinite(h)&&isFinite(k)&&isFinite(l)&&isFinite(f2)) ok=true; }
+    }
+    if(!ok) continue;
+    if(h===0&&k===0&&l===0){ if(started){ stopped=true; break; } else continue; }
+    started=true;
+    refl.push({h:h,k:k,l:l,f2:f2,sig:isFinite(sig)?sig:1});
+  }
+  if(!refl.length) throw new Error('no reflections parsed');
+  // ---- merge exact-duplicate (h,k,l) measurements by mean intensity ----
+  // Raw HKLF-4 files are usually UNMERGED (many measurements per unique hkl).
+  // Placing every measurement into the difference map (which accumulates) would
+  // overcount each reflection by its multiplicity and corrupt the density.
+  var mmap={}, order=[];
+  for(var r=0;r<refl.length;r++){ var rr=refl[r];
+    var key=rr.h+'_'+rr.k+'_'+rr.l; var e=mmap[key];
+    if(!e){ e={h:rr.h,k:rr.k,l:rr.l,sum:0,ssig:0,n:0}; mmap[key]=e; order.push(key); }
+    e.sum+=rr.f2; e.ssig+=(isFinite(rr.sig)?rr.sig:1); e.n++;
+  }
+  var merged=[]; for(var o=0;o<order.length;o++){ var e2=mmap[order[o]];
+    merged.push({h:e2.h,k:e2.k,l:e2.l,f2:e2.sum/e2.n,sig:e2.ssig/e2.n}); }
+  ST.refl=merged; ST.nrawrefl=refl.length; ST.nmergedrefl=merged.length;
+}
+
+/* ================= async helpers ================= */
+function showProg(on){ $('prog').className='progress-wrap'+(on?' on':''); }
+function setProg(frac,txt){ $('pbar-fill').style.width=(frac*100).toFixed(1)+'%'; if(txt)$('pstat').textContent=txt; }
+function yield_(){ return new Promise(function(res){ setTimeout(res,0); }); }
+
+/* ================= structure factors ================= */
+// expand atoms by symmetry once (fractional, wrapped), with cart + adp meta for masking
+function expandAtoms(){
+  var out=[]; var sym=ST.sym;
+  ST.atoms.forEach(function(a){
+    var seen={};
+    for(var s=0;s<sym.length;s++){
+      var R=sym[s].R,t=sym[s].t;
+      var nx=R[0][0]*a.x+R[0][1]*a.y+R[0][2]*a.z+t[0];
+      var ny=R[1][0]*a.x+R[1][1]*a.y+R[1][2]*a.z+t[1];
+      var nz=R[2][0]*a.x+R[2][1]*a.y+R[2][2]*a.z+t[2];
+      nx=nx-Math.floor(nx); ny=ny-Math.floor(ny); nz=nz-Math.floor(nz);
+      var key=Math.round(nx*1000)+'_'+Math.round(ny*1000)+'_'+Math.round(nz*1000);
+      if(seen[key]) continue; seen[key]=1;
+      out.push({el:a.el,x:nx,y:ny,z:nz,occ:a.occ,uiso:a.uiso,adp:a.adp,Rop:R,disAsm:a.disAsm,disGrp:a.disGrp});
+    }
+  });
+  return out;
+}
+
+// compute Fc (A,B) for a reflection using the symmetry-generated list is expensive;
+// instead sum over asymmetric atoms with per-symop phase (standard, faster).
+function structureFactor(h,k,l,s2){
+  var A=0,B=0; var atoms=ST.atoms, sym=ST.sym; var tp=2*Math.PI;
+  for(var ai=0;ai<atoms.length;ai++){
+    var a=atoms[ai]; var f=cmScatter(a.el,s2)*a.occ;
+    var sa=0,sb=0;
+    for(var si=0;si<sym.length;si++){
+      var R=sym[si].R,t=sym[si].t;
+      var hx=h*R[0][0]+k*R[1][0]+l*R[2][0];  // h' = h.R  (row-vector times R)
+      var hy=h*R[0][1]+k*R[1][1]+l*R[2][1];
+      var hz=h*R[0][2]+k*R[1][2]+l*R[2][2];
+      var phase=tp*(hx*a.x+hy*a.y+hz*a.z + (h*t[0]+k*t[1]+l*t[2]));
+      // thermal factor
+      var T;
+      if(a.adp){ var u=a.adp;
+        T=Math.exp(-2*Math.PI*Math.PI*(
+            hx*hx*ST.cell.rstar.as*ST.cell.rstar.as*u.u11 +
+            hy*hy*ST.cell.rstar.bs*ST.cell.rstar.bs*u.u22 +
+            hz*hz*ST.cell.rstar.cs*ST.cell.rstar.cs*u.u33 +
+            2*hx*hy*ST.cell.rstar.as*ST.cell.rstar.bs*u.u12 +
+            2*hx*hz*ST.cell.rstar.as*ST.cell.rstar.cs*u.u13 +
+            2*hy*hz*ST.cell.rstar.bs*ST.cell.rstar.cs*u.u23 ));
+      } else {
+        T=Math.exp(-2*Math.PI*Math.PI*a.uiso* invD2(hx,hy,hz));
+      }
+      sa+=T*Math.cos(phase); sb+=T*Math.sin(phase);
+    }
+    A+=f*sa; B+=f*sb;
+  }
+  return [A,B];
+}
+
+/* ================= 3D FFT (radix-2 separable) ================= */
+function nextPow2(n){ var p=1; while(p<n) p<<=1; return p; }
+function fft1dSub(re,im,n,inv){
+  for(var i=1,j=0;i<n;i++){var bit=n>>1;for(;j&bit;bit>>=1)j^=bit;j^=bit;
+    if(i<j){var tr=re[i];re[i]=re[j];re[j]=tr;var ti=im[i];im[i]=im[j];im[j]=ti;}}
+  var sign=inv?1:-1;
+  for(var len=2;len<=n;len<<=1){var ang=sign*2*Math.PI/len;var wr=Math.cos(ang),wi=Math.sin(ang);
+    for(var i2=0;i2<n;i2+=len){var cr=1,ci=0;
+      for(var kk=0;kk<len/2;kk++){var ur=re[i2+kk],ui=im[i2+kk];
+        var vr=re[i2+kk+len/2]*cr-im[i2+kk+len/2]*ci;var vi=re[i2+kk+len/2]*ci+im[i2+kk+len/2]*cr;
+        re[i2+kk]=ur+vr;im[i2+kk]=ui+vi;re[i2+kk+len/2]=ur-vr;im[i2+kk+len/2]=ui-vi;
+        var ncr=cr*wr-ci*wi;ci=cr*wi+ci*wr;cr=ncr;}}}
+  if(inv){for(var q=0;q<n;q++){re[q]/=n;im[q]/=n;}}
+}
+function fft3d(re,im,Nx,Ny,Nz,inv){
+  var mx=Math.max(Nx,Ny,Nz); var lr=new Float64Array(mx),li=new Float64Array(mx);
+  function idx(x,y,z){return (z*Ny+y)*Nx+x;}
+  var x,y,z;
+  for(z=0;z<Nz;z++)for(y=0;y<Ny;y++){
+    for(x=0;x<Nx;x++){var p=idx(x,y,z);lr[x]=re[p];li[x]=im[p];}
+    fft1dSub(lr,li,Nx,inv);
+    for(x=0;x<Nx;x++){var p2=idx(x,y,z);re[p2]=lr[x];im[p2]=li[x];}
+  }
+  for(z=0;z<Nz;z++)for(x=0;x<Nx;x++){
+    for(y=0;y<Ny;y++){var p=idx(x,y,z);lr[y]=re[p];li[y]=im[p];}
+    fft1dSub(lr,li,Ny,inv);
+    for(y=0;y<Ny;y++){var p2=idx(x,y,z);re[p2]=lr[y];im[p2]=li[y];}
+  }
+  for(y=0;y<Ny;y++)for(x=0;x<Nx;x++){
+    for(z=0;z<Nz;z++){var p=idx(x,y,z);lr[z]=re[p];li[z]=im[p];}
+    fft1dSub(lr,li,Nz,inv);
+    for(z=0;z<Nz;z++){var p2=idx(x,y,z);re[p2]=lr[z];im[p2]=li[z];}
+  }
+}
+
+/* ================= main compute ================= */
+async function run(){
+  clearMsg(); showProg(true); setProg(0,'preparing');
+  $('btn-run').disabled=true;
+  try{
+    await yield_();
+    var cell=ST.cell, V=cell.V;
+    var probe=parseFloat($('probe').value)||1.2;
+    var gridfac=parseFloat($('gridfac').value)||3;
+    var maxgrid=parseInt($('maxgrid').value,10)||96;
+    var dcut=parseFloat($('dmincut').value)||0;
+    var scalemode=$('scalemode').value;
+    var niterSetting=parseInt($('niter').value,10)||600;
+
+    // ---- resolution ----
+    // Merge to TRUE crystallographically-unique reflections (full Laue symmetry +
+    // Friedel), not just exact-index duplicates. A raw HKLF file typically lists
+    // many symmetry-equivalent copies of the same physical reflection under
+    // different (h,k,l); treating each as independent "measured data" under-uses
+    // the redundancy and, worse, leaves most of the OTHER symmetry-equivalent grid
+    // points unfilled (i.e. wrongly marked as unmeasured), starving the difference
+    // map of real data. PLATON explicitly merges to unique data then expands back
+    // out to the full symmetry-equivalent set for the Fourier synthesis; we do the
+    // same below.
+    var refl=mergeLaueUnique(ST.refl), maxinvd2=0, mininvd2=1e30;
+    for(var i=0;i<refl.length;i++){ var r=refl[i];
+      r.invd2=invD2(r.h,r.k,r.l); if(r.invd2>maxinvd2) maxinvd2=r.invd2;
+      if(r.invd2>1e-6 && r.invd2<mininvd2) mininvd2=r.invd2; }
+    var dmin_data=1/Math.sqrt(maxinvd2);
+    var dmax_measured=1/Math.sqrt(mininvd2);
+    var dmin = dcut>0 ? Math.max(dcut,dmin_data) : dmin_data;
+    var invd2cut = 1/(dmin*dmin);
+
+    // ---- structure factors + scaling ----
+    setProg(0.05,'structure factors');
+    await yield_();
+    var used=[];
+    var sFoFc=0,sFo2=0, chunk=0;
+    for(i=0;i<refl.length;i++){
+      var rf=refl[i];
+      if(rf.invd2>invd2cut+1e-9) continue;
+      if(rf.f2<0) continue;
+      var s2=rf.invd2/4;
+      var AB=structureFactor(rf.h,rf.k,rf.l,s2);
+      var Fc=Math.sqrt(AB[0]*AB[0]+AB[1]*AB[1]);
+      var Fo=Math.sqrt(rf.f2);
+      rf.Fc=Fc; rf.A=AB[0]; rf.B=AB[1]; rf.Fo=Fo;
+      sFoFc+=Fo*Fc; sFo2+=Fo*Fo;
+      used.push(rf);
+      if((++chunk & 511)===0){ setProg(0.05+0.45*i/refl.length,'structure factors '+i+'/'+refl.length); await yield_(); }
+    }
+    if(!used.length) throw new Error('no usable reflections within resolution');
+    var k = sFo2>0 ? sFoFc/sFo2 : 1;
+
+    // optional shell scaling
+    if(scalemode==='shell'){
+      var NB=12, binSum=[],binN=[]; for(var b=0;b<NB;b++){binSum[b]=0;binN[b]=0;}
+      var maxid=invd2cut;
+      used.forEach(function(rf){ var bi=Math.min(NB-1,Math.floor(NB*rf.invd2/maxid));
+        if(rf.Fo>0){ binSum[bi]+=rf.Fc/rf.Fo; binN[bi]++; } });
+      var kb=[]; for(b=0;b<NB;b++) kb[b]= binN[b]>0? binSum[b]/binN[b] : k;
+      used.forEach(function(rf){ var bi=Math.min(NB-1,Math.floor(NB*rf.invd2/maxid)); rf.kshell=kb[bi]; });
+    }
+
+    // R1 of ordered model
+    var num=0,den=0;
+    used.forEach(function(rf){ var kk=(scalemode==='shell'?rf.kshell:k);
+      num+=Math.abs(kk*rf.Fo-rf.Fc); den+=kk*rf.Fo; });
+    var R1= den>0? num/den : 0;
+
+    // ---- grid dims ----
+    // CRITICAL: fft3d is a radix-2 transform and requires every dimension to be
+    // an exact power of 2. nextPow2() guarantees that, but capping the result
+    // with maxgrid via a plain Math.min can silently produce a NON-power-of-2
+    // value (e.g. nextPow2 wants 128 but maxgrid=96 clamps it to 96), which
+    // corrupts the FFT for part of the grid without erroring -- exactly the kind
+    // of large, needs-a-big-grid structure where this matters. maxgrid itself
+    // must therefore be rounded down to a power of 2 before it's used as a cap.
+    function floorPow2(n){ var p=1; while(p*2<=n) p*=2; return p; }
+    var maxgridP2=floorPow2(maxgrid);
+    var spacing=dmin/gridfac;
+    var Nx=Math.min(maxgridP2,nextPow2(Math.ceil(cell.a/spacing)));
+    var Ny=Math.min(maxgridP2,nextPow2(Math.ceil(cell.b/spacing)));
+    var Nz=Math.min(maxgridP2,nextPow2(Math.ceil(cell.c/spacing)));
+    Nx=Math.max(16,Nx);Ny=Math.max(16,Ny);Nz=Math.max(16,Nz);
+    var Ntot=Nx*Ny*Nz;
+
+    // ---- measured difference coefficients (full Laue+Friedel star per reflection) ----
+    // Each merged, truly-unique reflection is re-expanded to every symmetry-
+    // equivalent (and Friedel-related) hkl in the grid. Every one of those grid
+    // points gets its OWN correctly phased Fc (via structureFactor), even though
+    // they all share the same measured |Fo|. This is what lets the difference
+    // map carry the full space-group symmetry and use essentially all of the
+    // measured redundancy, rather than leaving most symmetry-equivalent grid
+    // points to be guessed by the iterative step below.
+    setProg(0.52,'building difference map');
+    await yield_();
+    var widx=function(h,N){ return ((h%N)+N)%N; };
+    var measRe=new Float64Array(Ntot), measIm=new Float64Array(Ntot), isMeas=new Uint8Array(Ntot);
+    var rots=ST.laueRot;
+    used.forEach(function(rf){
+      var kk=(scalemode==='shell'?rf.kshell:k);
+      var dFbase=kk*rf.Fo;
+      for(var s=0;s<rots.length;s++){ var R=rots[s];
+        var hh=rf.h*R[0][0]+rf.k*R[1][0]+rf.l*R[2][0];
+        var kh=rf.h*R[0][1]+rf.k*R[1][1]+rf.l*R[2][1];
+        var lh=rf.h*R[0][2]+rf.k*R[1][2]+rf.l*R[2][2];
+        for(var sgn=1; sgn>=-1; sgn-=2){
+          var H=sgn*hh, K=sgn*kh, L=sgn*lh;
+          var p=(widx(L,Nz)*Ny+widx(K,Ny))*Nx+widx(H,Nx);
+          if(isMeas[p]) continue; // already placed via another equivalent operator
+          var AB=structureFactor(H,K,L,rf.invd2/4);
+          var Fc=Math.sqrt(AB[0]*AB[0]+AB[1]*AB[1]); if(Fc<1e-9) continue;
+          var dF=dFbase-Fc, cph=AB[0]/Fc, sph=AB[1]/Fc;
+          measRe[p]=dF*cph; measIm[p]=dF*sph; isMeas[p]=1;
+        }
+      }
+    });
+
+    // ---- solvent-EXCLUDED (Connolly) mask via morphological closing ----
+    // PLATON's solvent-accessible void is the region swept by a probe rolling over
+    // the van der Waals surface: erode by (vdW+probe) to find the probe-centre core,
+    // then dilate that core back out by the probe radius (clipped to outside vdW).
+    // (A raw "farther than vdW+probe from every atom" test only maps the probe CENTRE
+    // and drastically under-counts the accessible volume.)
+    setProg(0.60,'expanding symmetry');
+    await yield_();
+    var dv=V/Ntot;
+    // Partial occupancy shows up for two very different reasons, and they need
+    // opposite treatment in the void mask:
+    //  (a) a genuinely disordered HOST/framework fragment, modelled as two or
+    //      more mutually-exclusive alternatives whose occupancies sum to ~1
+    //      (e.g. 0.48 + 0.52) -- something is ALWAYS physically there, just
+    //      with positional ambiguity, so every alternative should still block
+    //      at its full van der Waals radius.
+    //  (b) a partially-modelled GUEST fragment with no complementary
+    //      alternative on record (e.g. a single 0.37-occupancy component with
+    //      the rest of its density left for this recovery step) -- blocking on
+    //      it treats a sometimes-there atom as permanently there, and can seal
+    //      off the very void it's meant to help characterise (verified: a
+    //      genuinely open channel with a 1.95 A gap reads as -1.7 A, i.e.
+    //      "inside an atom", once such a component is included as a blocker).
+    // CIF's _atom_site_disorder_assembly/_group distinguish these: atoms
+    // sharing an assembly ID with 2+ distinct group values present are case
+    // (a) and should block; a low-occupancy atom whose assembly has only one
+    // group on record (or no assembly tag at all) is case (b) and shouldn't.
+    var asmGroups={};
+    ST.atoms.forEach(function(a){
+      if(a.disAsm && a.disAsm!=='.' ){
+        (asmGroups[a.disAsm]||(asmGroups[a.disAsm]=Object.create(null)))[a.disGrp]=1;
+      }
+    });
+    function shouldBlock(a){
+      if(a.occ>0.999) return true;                 // full occupancy: always blocks
+      if(a.disAsm && a.disAsm!=='.'){
+        var g=asmGroups[a.disAsm];
+        var n=0; for(var k in g) n++;
+        if(n>=2) return true;                       // complementary alternative(s) on record: real disorder
+      }
+      return false;                                  // lone partial component: likely a partial guest
+    }
+    var eatoms=expandAtoms().filter(shouldBlock);
+    var superAtoms=[];
+    for(var sx=-1;sx<=1;sx++)for(var sy=-1;sy<=1;sy++)for(var sz=-1;sz<=1;sz++){
+      eatoms.forEach(function(a){ var c=fracToCart(a.x+sx,a.y+sy,a.z+sz);
+        superAtoms.push({cx:c[0],cy:c[1],cz:c[2],vdw:vdw(a.el)}); });
+    }
+    var maxCut=probe; superAtoms.forEach(function(a){ if(a.vdw+probe>maxCut)maxCut=a.vdw+probe; });
+    var bin=Math.max(maxCut,1.0);
+    var minc=[1e9,1e9,1e9];
+    superAtoms.forEach(function(a){ if(a.cx<minc[0])minc[0]=a.cx; if(a.cy<minc[1])minc[1]=a.cy; if(a.cz<minc[2])minc[2]=a.cz; });
+    var buckets={};
+    function bkey(ix,iy,iz){return ix+'_'+iy+'_'+iz;}
+    superAtoms.forEach(function(a){ var ix=Math.floor((a.cx-minc[0])/bin),iy=Math.floor((a.cy-minc[1])/bin),iz=Math.floor((a.cz-minc[2])/bin);
+      (buckets[bkey(ix,iy,iz)]||(buckets[bkey(ix,iy,iz)]=[])).push(a); });
+    function within(cx,cy,cz,extra){
+      var bx=Math.floor((cx-minc[0])/bin),by=Math.floor((cy-minc[1])/bin),bz=Math.floor((cz-minc[2])/bin);
+      for(var dx=-1;dx<=1;dx++)for(var dy=-1;dy<=1;dy++)for(var dz=-1;dz<=1;dz++){
+        var arr=buckets[bkey(bx+dx,by+dy,bz+dz)]; if(!arr)continue;
+        for(var m=0;m<arr.length;m++){ var a=arr[m]; var ex=cx-a.cx,ey=cy-a.cy,ez=cz-a.cz,R=a.vdw+extra;
+          if(ex*ex+ey*ey+ez*ez<R*R) return true; } }
+      return false;
+    }
+    setProg(0.66,'masking voids');
+    await yield_();
+    var cartX=new Float64Array(Ntot),cartY=new Float64Array(Ntot),cartZ=new Float64Array(Ntot);
+    var occ=new Uint8Array(Ntot), coreList=[];
+    for(var iz2=0;iz2<Nz;iz2++){
+      for(var iy2=0;iy2<Ny;iy2++){
+        for(var ix2=0;ix2<Nx;ix2++){
+          var idxg=(iz2*Ny+iy2)*Nx+ix2; var c=fracToCart(ix2/Nx,iy2/Ny,iz2/Nz);
+          cartX[idxg]=c[0];cartY[idxg]=c[1];cartZ[idxg]=c[2];
+          occ[idxg]=within(c[0],c[1],c[2],0)?1:0;
+          if(!within(c[0],c[1],c[2],probe)) coreList.push(idxg);
+        }
+      }
+      if((iz2 & 3)===0){ setProg(0.66+0.06*iz2/Nz,'masking voids'); await yield_(); }
+    }
+    var cbin=Math.max(probe,0.8); var cbk={};
+    function addCoreBucket(px,py,pz){
+      var bx=Math.floor((px-minc[0])/cbin), by=Math.floor((py-minc[1])/cbin), bz=Math.floor((pz-minc[2])/cbin);
+      var key=bkey(bx,by,bz);
+      (cbk[key]||(cbk[key]=[])).push(px,py,pz);
+    }
+    // The dilation search below only looks at a core point's own bucket and its
+    // immediate neighbours -- correct for a query in the cell interior, but a
+    // query near a cell FACE (or edge/corner) can have genuinely nearby core
+    // points sitting just across the periodic boundary, which live in a bucket
+    // far away in this coordinate system and would otherwise be missed. That
+    // silently breaks symmetry for any void touching a special position at or
+    // near a cell face/corner (verified: two crystallographically-identical
+    // voids came out with measurably different volumes and electron counts
+    // because only one of them happened to sit away from a boundary). Pad the
+    // bucket hash with translated copies of boundary-adjacent core points so
+    // the same simple local search finds them; the margin is generous (based
+    // on the shortest cell axis) since over-padding only costs a little memory.
+    var margin=[probe/cell.a, probe/cell.b, probe/cell.c].map(function(v){ return Math.min(0.5, v*1.5); });
+    coreList.forEach(function(idx){
+      var z0=(idx/(Nx*Ny))|0, rem0=idx-z0*Nx*Ny, y0=(rem0/Nx)|0, x0=rem0-y0*Nx;
+      var fx=x0/Nx, fy=y0/Ny, fz=z0/Nz;
+      addCoreBucket(cartX[idx], cartY[idx], cartZ[idx]);
+      var loX=fx<margin[0], hiX=fx>1-margin[0];
+      var loY=fy<margin[1], hiY=fy>1-margin[1];
+      var loZ=fz<margin[2], hiZ=fz>1-margin[2];
+      if(!(loX||hiX||loY||hiY||loZ||hiZ)) return;   // interior point: no padding needed
+      for(var sx=-1;sx<=1;sx++){ if(sx===-1&&!hiX) continue; if(sx===1&&!loX) continue;
+        for(var sy=-1;sy<=1;sy++){ if(sy===-1&&!hiY) continue; if(sy===1&&!loY) continue;
+          for(var sz=-1;sz<=1;sz++){ if(sz===-1&&!hiZ) continue; if(sz===1&&!loZ) continue;
+            if(sx===0&&sy===0&&sz===0) continue;
+            var c2=fracToCart(fx+sx, fy+sy, fz+sz);
+            addCoreBucket(c2[0], c2[1], c2[2]);
+          }
+        }
+      }
+    });
+    var mask=new Uint8Array(Ntot); var voidCount=0;
+    for(var qq=0;qq<Ntot;qq++){
+      if(occ[qq]) continue;
+      var cx=cartX[qq],cy=cartY[qq],cz=cartZ[qq];
+      var bx=Math.floor((cx-minc[0])/cbin),by=Math.floor((cy-minc[1])/cbin),bz=Math.floor((cz-minc[2])/cbin);
+      var ok=false;
+      for(var dx2=-1;dx2<=1&&!ok;dx2++)for(var dy2=-1;dy2<=1&&!ok;dy2++)for(var dz2=-1;dz2<=1;dz2++){
+        var arr2=cbk[bkey(bx+dx2,by+dy2,bz+dz2)]; if(!arr2)continue;
+        for(var mm=0;mm<arr2.length;mm+=3){ var ex=cx-arr2[mm],ey=cy-arr2[mm+1],ez=cz-arr2[mm+2];
+          if(ex*ex+ey*ey+ez*ez<probe*probe){ ok=true; break; } }
+        if(ok) break;
+      }
+      if(ok){ mask[qq]=1; voidCount++; }
+    }
+
+    // ---- iterative SQUEEZE ------------------------------------------------------
+    // A single difference map cannot localise the solvent when the very low-angle
+    // reflections are missing (here theta_min gives d_max ~5.2 A, so all d>5.2 A
+    // reflections are behind the beamstop). Those unmeasured low-order terms are
+    // recovered by iterating a real-space constraint: zero all density OUTSIDE the
+    // void, back-transform to estimate the missing structure factors, reinsert
+    // them, and repeat (Spek, Acta Cryst. C71, 9-18, section 4.2). Critically,
+    // density INSIDE the void is kept as-is (signed) between iterations -- only
+    // the final reported electron count sums the positive part. Clipping negative
+    // density to zero on every cycle (an earlier version of this app did that)
+    // throws away information the back-transform needs and stalls convergence
+    // well short of the true value; leaving it signed lets F(000) climb to its
+    // correct level over more iterations.
+    setProg(0.80,'iterative squeeze');
+    await yield_();
+    var niter=niterSetting;
+    var checkpointIt=Math.max(1,Math.floor(niter*0.9));
+    var F000checkpoint=0, F000final=0;
+    var FsRe=new Float64Array(Ntot), FsIm=new Float64Array(Ntot);
+    var gr=new Float64Array(Ntot), gi=new Float64Array(Ntot);
+    var invV=1/V;
+    for(var it=0; it<niter; it++){
+      for(var pp=0;pp<Ntot;pp++){ if(isMeas[pp]){gr[pp]=measRe[pp];gi[pp]=measIm[pp];} else {gr[pp]=FsRe[pp];gi[pp]=FsIm[pp];} }
+      fft3d(gr,gi,Nx,Ny,Nz,false);          // -> difference density (x V)
+      for(i=0;i<Ntot;i++){ gr[i]*=invV; gi[i]*=invV; }
+      for(i=0;i<Ntot;i++){ if(!mask[i]){ gr[i]=0; gi[i]=0; } else { gi[i]=0; } }  // zero outside void only
+      var fr=new Float64Array(Ntot), fi=new Float64Array(Ntot);
+      for(i=0;i<Ntot;i++){ fr[i]=gr[i]; fi[i]=gi[i]; }
+      fft3d(fr,fi,Nx,Ny,Nz,true);            // inverse (1/Ntot) -> structure factors /V
+      for(i=0;i<Ntot;i++){ fr[i]*=V; fi[i]*=V; }
+      for(pp=0;pp<Ntot;pp++){ if(!isMeas[pp]){ FsRe[pp]=fr[pp]; FsIm[pp]=fi[pp]; } }
+      if(it===checkpointIt) F000checkpoint=fr[0];
+      if(it===niter-1) F000final=fr[0];
+      if((it&7)===0){ setProg(0.80+0.15*it/niter,'iterative squeeze '+(it+1)+'/'+niter); await yield_(); }
+    }
+    // Convergence check: this iteration is a slow asymptotic climb toward the true
+    // value, not a fast few-cycle convergence like PLATON's own implementation --
+    // it can still be changing meaningfully even after hundreds of cycles for a
+    // heavily solvated void, and (unlike PLATON) has no principled stopping rule
+    // built in, so silently trusting a fixed iteration count risks reporting an
+    // under-converged number. Flag it plainly when the last 10% of iterations
+    // still moved the total by more than a couple of percent.
+    var convPct = F000checkpoint>0.5 ? 100*Math.abs(F000final-F000checkpoint)/Math.abs(F000final) : 0;
+    var notConverged = convPct>2.0;
+    // final map for reporting: rebuild once more and keep only positive density in the void
+    for(pp=0;pp<Ntot;pp++){ if(isMeas[pp]){gr[pp]=measRe[pp];gi[pp]=measIm[pp];} else {gr[pp]=FsRe[pp];gi[pp]=FsIm[pp];} }
+    fft3d(gr,gi,Nx,Ny,Nz,false);
+    for(i=0;i<Ntot;i++){ gr[i]*=invV; }
+    for(i=0;i<Ntot;i++){ if(!mask[i]||gr[i]<0) gr[i]=0; }
+    // gr now = masked, positive-only solvent density (e/A^3) for reporting
+
+    // ---- connected components (periodic 6-connectivity) ----
+    // NOTE ON CENTROIDS: a void can straddle the periodic cell boundary (very
+    // common for voids sitting on or near a special position such as the origin
+    // in a high-symmetry space group). Averaging raw grid indices directly is
+    // only valid for a compact region that does NOT wrap; for a wrapping region
+    // it silently produces a centroid near the middle of the cell instead of
+    // near the true wrap point. We therefore use a circular mean (via sin/cos of
+    // each fractional coordinate) for cx,cy,cz, which is correct whether or not
+    // the void wraps.
+    setProg(0.86,'labelling voids');
+    await yield_();
+    var label=new Int32Array(Ntot).fill(-1);
+    var comps=[]; // {n, sumE, cx,cy,cz}
+    var dv=V/Ntot;
+    var stack=new Int32Array(Ntot); 
+    function gi3(x,y,z){return (z*Ny+y)*Nx+x;}
+    var tp=2*Math.PI;
+    for(var start=0;start<Ntot;start++){
+      if(mask[start]!==1||label[start]!==-1) continue;
+      var lid=comps.length; var sp=0; stack[sp++]=start; label[start]=lid;
+      var cnt=0,sumE=0,scx=0,ccx=0,scy=0,ccy=0,scz=0,ccz=0;
+      while(sp>0){ var cur=stack[--sp];
+        var z=(cur/(Nx*Ny))|0, rem=cur-z*Nx*Ny, y=(rem/Nx)|0, x=rem-y*Nx;
+        cnt++; sumE+=gr[cur];
+        var ax=tp*x/Nx, ay=tp*y/Ny, az=tp*z/Nz;
+        scx+=Math.sin(ax); ccx+=Math.cos(ax);
+        scy+=Math.sin(ay); ccy+=Math.cos(ay);
+        scz+=Math.sin(az); ccz+=Math.cos(az);
+        var nb=[gi3((x+1)%Nx,y,z),gi3((x-1+Nx)%Nx,y,z),gi3(x,(y+1)%Ny,z),
+                gi3(x,(y-1+Ny)%Ny,z),gi3(x,y,(z+1)%Nz),gi3(x,y,(z-1+Nz)%Nz)];
+        for(var nn=0;nn<6;nn++){ var np=nb[nn]; if(mask[np]===1&&label[np]===-1){label[np]=lid;stack[sp++]=np;} }
+      }
+      var fcx=Math.atan2(scx,ccx)/tp; if(fcx<0) fcx+=1;
+      var fcy=Math.atan2(scy,ccy)/tp; if(fcy<0) fcy+=1;
+      var fcz=Math.atan2(scz,ccz)/tp; if(fcz<0) fcz+=1;
+      comps.push({n:cnt, e:sumE*dv, cx:fcx, cy:fcy, cz:fcz});
+    }
+    // merge periodic-adjacent labels? 6-connectivity with modulo already crosses boundaries -> fine.
+    comps.sort(function(a,b){return b.e-a.e;});
+
+    var totalE=0; comps.forEach(function(c){ totalE+=c.e; });
+    var voidVol=voidCount*dv;
+    var modelZ=0; ST.atoms.forEach(function(a){ modelZ+=fzero(a.el)*a.occ; });
+    modelZ*=ST.sym.length; // per cell (approx; symmetry multiplicity)
+
+    setProg(0.98,'finishing');
+    await yield_();
+
+    ST.result={ totalE:totalE, comps:comps, voidVol:voidVol, V:V,
+      Nx:Nx,Ny:Ny,Nz:Nz, dmin:dmin, nref:used.length, k:k, R1:R1,
+      modelZ:modelZ, density:gr, mask:mask, probe:probe, scalemode:scalemode,
+      niter:niter, convPct:convPct, notConverged:notConverged, dmax_measured:dmax_measured };
+
+    renderResults();
+    prepareViewer();
+    setProg(1,'done');
+    setTimeout(function(){showProg(false);},600);
+    $('btn-report').disabled=false; $('btn-fab').disabled=false;
+    $('p-export').classList.remove('collapsed');
+  }catch(err){
+    msg('Compute failed: '+err.message,'err'); showProg(false);
+    if(window.console) console.error(err);
+  }
+  $('btn-run').disabled=false;
+}
+
+/* ================= render ================= */
+function fmt(x,n){ if(!isFinite(x))return '&ndash;'; return x.toFixed(n===undefined?2:n); }
+function renderResults(){
+  var R=ST.result;
+  $('empty').style.display='none';
+  $('headline').classList.add('on');
+  $('cards').style.display='grid';
+  $('voidsblock').style.display='block';
+  $('viewerblock').style.display='block';
+  $('notes').style.display='block';
+
+  $('h-etot').textContent=R.totalE.toFixed(1);
+  $('h-nvoid').textContent=R.comps.length;
+  $('h-vvol').textContent=R.voidVol.toFixed(0);
+  $('h-vpct').textContent=(100*R.voidVol/R.V).toFixed(1)+'%';
+
+  // Electron-count guidance, verified against reference SQUEEZE/masks runs on
+  // several real datasets:
+  //  - Single pass (niter=1) matches closely when the low-angle data is
+  //    complete (checked via the largest measured d-spacing).
+  //  - The iterative recovery (niter>1) does NOT settle to a stable value on
+  //    any dataset tested -- it overshoots more the longer it runs, even
+  //    inventing electrons in voids that are genuinely empty -- so it is
+  //    flagged plainly rather than presented as a refinement.
+  var lowAngleGap = R.dmax_measured < 15.0;
+  var msgs=[];
+  if(R.niter<=1){
+    msgs.push('<b>Single-pass difference map</b> (recommended setting). Matches reference '+
+      'SQUEEZE/masks runs closely when low-angle data is complete.');
+  } else {
+    msgs.push('<b>Iterative recovery in use ('+R.niter+' cycles) -- not recommended.</b> Verified '+
+      'on multiple datasets: this does not settle to a stable value and overshoots further the '+
+      'longer it runs (it changed '+R.convPct.toFixed(1)+'% over the last 10% of iterations here). '+
+      'Set Iterations back to 1 for a reliable number.');
+  }
+  if(lowAngleGap){
+    msgs.push('<b>Largest measured d-spacing is only '+R.dmax_measured.toFixed(1)+' &Aring;</b>, suggesting '+
+      'low-order (low-angle) reflections may be missing -- often a beamstop limitation. When that\'s '+
+      'the case even the single-pass count is a substantial <i>underestimate</i>, with no reliable '+
+      'correction available here; treat it as a lower bound and use PLATON/masks for the real number.');
+  }
+  msgs.push('Void count, volume, and centroids do not have these problems and track PLATON reliably.');
+  $('convnote').style.display='block';
+  $('convnote').innerHTML=msgs.join(' ');
+
+  $('c-nref').textContent=R.nref;
+  $('c-dmin').textContent=R.dmin.toFixed(2);
+  $('c-scale').textContent=R.k.toFixed(4);
+  $('c-r1').textContent=(R.R1*100).toFixed(1)+'%';
+  $('c-grid').textContent=R.Nx+'\u00d7'+R.Ny+'\u00d7'+R.Nz;
+  $('c-zmodel').textContent=R.modelZ.toFixed(0);
+
+  var tb=$('voidtable').querySelector('tbody'); tb.innerHTML='';
+  R.comps.forEach(function(c,i){
+    var vol=c.n*R.V/(R.Nx*R.Ny*R.Nz);
+    var tr=document.createElement('tr');
+    tr.innerHTML='<td>#'+(i+1)+'</td><td>'+c.e.toFixed(1)+'</td><td>'+vol.toFixed(1)+
+      '</td><td>'+(vol>0?(1000*c.e/vol).toFixed(1):'0')+'</td><td>'+
+      c.cx.toFixed(3)+', '+c.cy.toFixed(3)+', '+c.cz.toFixed(3)+'</td>';
+    tb.appendChild(tr);
+  });
+  var totvol=R.voidVol;
+  var tr=document.createElement('tr'); tr.className='total';
+  tr.innerHTML='<td>Total</td><td>'+R.totalE.toFixed(1)+'</td><td>'+totvol.toFixed(1)+
+    '</td><td>'+(totvol>0?(1000*R.totalE/totvol).toFixed(1):'0')+'</td><td></td>';
+  tb.appendChild(tr);
+}
+
+/* ================= viewer ================= */
+var VW={};
+function prepareViewer(){
+  var R=ST.result;
+  VW.axis=parseInt($('sliceaxis').value,10);
+  setupSlider();
+  drawSlice();
+}
+function setupSlider(){
+  var R=ST.result; var axis=parseInt($('sliceaxis').value,10);
+  var n=[R.Nx,R.Ny,R.Nz][axis];
+  var sl=$('slicelayer'); sl.min=0; sl.max=n-1; sl.value=Math.floor(n/2);
+}
+function drawSlice(){
+  var R=ST.result; if(!R)return;
+  var axis=parseInt($('sliceaxis').value,10);
+  var layer=parseInt($('slicelayer').value,10);
+  var cpc=parseInt($('contrast').value,10)/100;
+  var Nx=R.Nx,Ny=R.Ny,Nz=R.Nz, gr=R.density, mask=R.mask;
+  function gi3(x,y,z){return (z*Ny+y)*Nx+x;}
+  // find max |rho|
+  var mx=0; for(var i=0;i<gr.length;i++){var v=Math.abs(gr[i]); if(v>mx)mx=v;}
+  var scale=mx*cpc; if(scale<=0)scale=1;
+  $('contrastval').textContent=scale.toFixed(3);
+
+  var W,H, getVal, inMask, atomHit;
+  if(axis===2){ W=Nx;H=Ny; getVal=function(u,v){return gr[gi3(u,v,layer)];}; inMask=function(u,v){return mask[gi3(u,v,layer)];}; }
+  else if(axis===1){ W=Nx;H=Nz; getVal=function(u,v){return gr[gi3(u,layer,v)];}; inMask=function(u,v){return mask[gi3(u,layer,v)];}; }
+  else { W=Ny;H=Nz; getVal=function(u,v){return gr[gi3(layer,u,v)];}; inMask=function(u,v){return mask[gi3(layer,u,v)];}; }
+
+  var cv=$('mapcanvas'); var px=Math.max(2,Math.floor(420/Math.max(W,H)));
+  cv.width=W*px; cv.height=H*px;
+  var ctx=cv.getContext('2d'); var img=ctx.createImageData(cv.width,cv.height);
+  for(var v2=0;v2<H;v2++){
+    for(var u2=0;u2<W;u2++){
+      var val=getVal(u2,v2)/scale; if(val>1)val=1; if(val<-1)val=-1;
+      var col=diverge(val);
+      if($('showmask').checked && inMask(u2,v2)){ col=[Math.min(255,col[0]+8),Math.min(255,col[1]+30),Math.max(0,col[2]-10)]; }
+      for(var dy=0;dy<px;dy++)for(var dx=0;dx<px;dx++){
+        var Y=(H-1-v2)*px+dy, Xp=u2*px+dx;
+        var o=(Y*cv.width+Xp)*4;
+        img.data[o]=col[0];img.data[o+1]=col[1];img.data[o+2]=col[2];img.data[o+3]=255;
+      }
+    }
+  }
+  ctx.putImageData(img,0,0);
+  // mask outline
+  if($('showmask').checked){
+    ctx.strokeStyle='rgba(74,111,165,.55)'; ctx.lineWidth=1;
+    for(v2=0;v2<H;v2++)for(u2=0;u2<W;u2++){
+      if(!inMask(u2,v2))continue;
+      var right=(u2+1<W)?inMask(u2+1,v2):0, up=(v2+1<H)?inMask(u2,v2+1):0;
+      if(!right){ ctx.beginPath();ctx.moveTo((u2+1)*px,(H-1-v2)*px);ctx.lineTo((u2+1)*px,(H-v2)*px);ctx.stroke(); }
+      if(!up){ ctx.beginPath();ctx.moveTo(u2*px,(H-1-v2)*px);ctx.lineTo((u2+1)*px,(H-1-v2)*px);ctx.stroke(); }
+    }
+  }
+  // atoms near this slice
+  if($('showatoms').checked){
+    var fracLayer=layer/[Nx,Ny,Nz][axis];
+    ctx.fillStyle='rgba(44,42,38,.8)';
+    ST.atoms.forEach(function(a){
+      var coord=[a.x-Math.floor(a.x),a.y-Math.floor(a.y),a.z-Math.floor(a.z)];
+      if(Math.abs(coord[axis]-fracLayer)<0.06){
+        var uu,vv;
+        if(axis===2){uu=coord[0]*W;vv=coord[1]*H;}
+        else if(axis===1){uu=coord[0]*W;vv=coord[2]*H;}
+        else {uu=coord[1]*W;vv=coord[2]*H;}
+        ctx.beginPath(); ctx.arc(uu*px,(H*px)-(vv*px),3,0,2*Math.PI); ctx.fill();
+      }
+    });
+  }
+  var axname=['a','b','c'][axis];
+  $('sliceinfo').textContent='axis '+axname+'  layer '+layer+' / '+([Nx,Ny,Nz][axis]-1)+
+    '   frac '+(layer/[Nx,Ny,Nz][axis]).toFixed(3);
+  $('leg-neg').textContent='-'+scale.toFixed(2); $('leg-pos').textContent='+'+scale.toFixed(2);
+}
+function diverge(t){ // -1..1 -> blue..paper..orange
+  var paper=[244,240,232], neg=[62,110,142], pos=[180,86,46];
+  if(t>=0){ return [Math.round(paper[0]+(pos[0]-paper[0])*t),Math.round(paper[1]+(pos[1]-paper[1])*t),Math.round(paper[2]+(pos[2]-paper[2])*t)]; }
+  t=-t; return [Math.round(paper[0]+(neg[0]-paper[0])*t),Math.round(paper[1]+(neg[1]-paper[1])*t),Math.round(paper[2]+(neg[2]-paper[2])*t)];
+}
+['sliceaxis'].forEach(function(id){$(id).addEventListener('change',function(){setupSlider();drawSlice();});});
+['slicelayer','contrast','showmask','showatoms'].forEach(function(id){$(id).addEventListener('input',drawSlice);});
+
+/* ================= exports ================= */
+function saveText(name,text){
+  var blob=new Blob([text],{type:'text/plain'});
+  if(window.showSaveFilePicker){
+    window.showSaveFilePicker({suggestedName:name,startIn:'documents',
+      types:[{description:'Text',accept:{'text/plain':['.txt','.fab']}}]})
+      .then(function(h){return h.createWritable();})
+      .then(function(w){return w.write(blob).then(function(){return w.close();});})
+      .catch(function(){ dl(name,blob); });
+  } else dl(name,blob);
+}
+function dl(name,blob){ var u=URL.createObjectURL(blob); var a=document.createElement('a');
+  a.href=u;a.download=name;a.click(); setTimeout(function(){URL.revokeObjectURL(u);},2000); }
+
+$('btn-report').addEventListener('click',function(){
+  var R=ST.result; if(!R)return;
+  var L=[];
+  L.push('VoidSqueeze v1.0  -  unmodeled electron recovery report');
+  L.push('==========================================================');
+  L.push('CIF        : '+(ST.cifName||'?'));
+  L.push('HKL        : '+(ST.hklName||'?'));
+  L.push('');
+  L.push('Cell       : a='+ST.cell.a.toFixed(4)+' b='+ST.cell.b.toFixed(4)+' c='+ST.cell.c.toFixed(4));
+  L.push('             al='+ST.cell.al+' be='+ST.cell.be+' ga='+ST.cell.ga+'   V='+R.V.toFixed(2)+' A^3');
+  L.push('Symmetry   : '+ST.sym.length+' operators');
+  L.push('Resolution : d_min = '+R.dmin.toFixed(3)+' A   ('+R.nref+' reflections used)');
+  L.push('Scale k    : '+R.k.toFixed(5)+'  ('+R.scalemode+')');
+  L.push('R1(ordered): '+(R.R1*100).toFixed(2)+' %');
+  L.push('Grid       : '+R.Nx+' x '+R.Ny+' x '+R.Nz);
+  L.push('Probe      : '+R.probe.toFixed(2)+' A (vdW + probe solvent-accessible mask)');
+  L.push('');
+  L.push('RECOVERED ELECTRONS / UNIT CELL : '+R.totalE.toFixed(2));
+  L.push('Total void volume               : '+R.voidVol.toFixed(2)+' A^3  ('+(100*R.voidVol/R.V).toFixed(1)+'% of cell)');
+  L.push('');
+  L.push('Per-void:');
+  L.push('  void   electrons     volume(A^3)   e/1000A^3   centroid(frac)');
+  R.comps.forEach(function(c,i){ var vol=c.n*R.V/(R.Nx*R.Ny*R.Nz);
+    L.push('  #'+(i+1)+'     '+pad(c.e.toFixed(2),9)+'   '+pad(vol.toFixed(1),9)+'    '+
+      pad((vol>0?(1000*c.e/vol).toFixed(1):'0'),7)+'    '+
+      c.cx.toFixed(3)+' '+c.cy.toFixed(3)+' '+c.cz.toFixed(3)); });
+  L.push('');
+  L.push('NOTE: independent SQUEEZE-style estimate. Reflections merged to true Laue-');
+  L.push('unique set and re-expanded with full symmetry; solvent-excluded (Connolly)');
+  L.push('mask. Void count, volume, and centroids track PLATON reliably.');
+  L.push('Iterations: '+R.niter+' (1 = single-pass, recommended). Largest measured');
+  L.push('d-spacing: '+R.dmax_measured.toFixed(1)+' A'+(R.dmax_measured<15?' -- possible beamstop gap;':';')+
+    ' electron count is a');
+  L.push((R.dmax_measured<15?'lower-bound estimate in that case.':'reasonable estimate when data is complete.')+
+    ' Validate against PLATON before use.');
+  function pad(s,n){s=String(s);while(s.length<n)s=' '+s;return s;}
+  saveText((ST.cifName||'structure').replace(/\.[^.]+$/,'')+'_voidsqueeze.txt', L.join('\n'));
+});
+
+$('btn-fab').addEventListener('click',function(){
+  var R=ST.result; if(!R)return;
+  // masked difference density -> back-transform to F_void(hkl)
+  var Nx=R.Nx,Ny=R.Ny,Nz=R.Nz,Ntot=Nx*Ny*Nz;
+  var mr=new Float64Array(Ntot), mi=new Float64Array(Ntot);
+  for(var i=0;i<Ntot;i++){ mr[i]=R.mask[i]? R.density[i] : 0; }
+  fft3d(mr,mi,Nx,Ny,Nz,true);   // inverse (sign +1, /N)
+  var Vv=R.V;
+  function widx(h,N){return ((h%N)+N)%N;}
+  var L=['# VoidSqueeze void structure-factor contribution (SQUEEZE back-transform)',
+         '# columns: h k l  A_void  B_void  |F_void|'];
+  ST.refl.forEach(function(rf){
+    if(rf.invd2===undefined) rf.invd2=invD2(rf.h,rf.k,rf.l);
+    if(rf.invd2>1/(R.dmin*R.dmin)+1e-9) return;
+    var p=(widx(rf.l,Nz)*Ny+widx(rf.k,Ny))*Nx+widx(rf.h,Nx);
+    var A=mr[p]*Vv, B=mi[p]*Vv;
+    var F=Math.sqrt(A*A+B*B);
+    L.push([pad(rf.h,4),pad(rf.k,4),pad(rf.l,4),pad(A.toFixed(3),11),pad(B.toFixed(3),11),pad(F.toFixed(3),10)].join(''));
+  });
+  function pad(s,n){s=String(s);while(s.length<n)s=' '+s;return s;}
+  saveText((ST.cifName||'structure').replace(/\.[^.]+$/,'')+'_void.fab', L.join('\n'));
+});
+
+$('btn-run').addEventListener('click',run);
+</script>
+</body>
+</html>

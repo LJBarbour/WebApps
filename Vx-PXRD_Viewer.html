@@ -80,7 +80,7 @@ header .spacer{flex:1;}
 
 /* dataset cards */
 .ds-list{display:flex;flex-direction:column;gap:4px;}
-.ds-card{display:flex;align-items:center;gap:5px;background:var(--bg);border:1px solid var(--line);
+.ds-card{display:flex;align-items:flex-start;gap:5px;background:var(--bg);border:1px solid var(--line);
          border-radius:4px;padding:4px 5px;}
 .ds-card.drag-over{box-shadow:inset 0 2px 0 var(--accent);}
 .ds-card.dragging{opacity:.35;}
@@ -161,6 +161,16 @@ select.cp-sel{flex:1;padding:3px 4px;border:1px solid var(--border);border-radiu
 select.cp-sel:focus{border-color:var(--accent);}
 input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;cursor:pointer;}
 .mode-only{display:none;}
+.cp-sub{border:1px solid var(--line);border-radius:4px;overflow:hidden;}
+.cp-subhead{padding:7px 9px;display:flex;align-items:center;justify-content:space-between;
+  cursor:pointer;user-select:none;background:var(--paper2);
+  font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink);}
+.cp-subhead:hover{color:var(--accent);}
+.cp-subchevron{font-size:10px;color:var(--ink-faint);transition:transform .2s;}
+.cp-sub.open .cp-subchevron{transform:rotate(90deg);color:var(--accent);}
+.cp-sub.open .cp-subhead{border-bottom:1px solid var(--line);}
+.cp-subbody{padding:9px 10px 11px;display:none;flex-direction:column;gap:9px;background:var(--bg);}
+.cp-sub.open .cp-subbody{display:flex;}
 
 /* modal */
 .modal-veil{position:fixed;inset:0;background:rgba(44,36,22,.35);display:none;
@@ -272,7 +282,7 @@ input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;cursor:po
     </ul>
 
     <h3>Peak-track guides (intensity map)</h3>
-    <p>Enable <em>Peak-track guides</em>, then click on the map to drop a vertical reference line at that 2&theta;; click a guide's handle to remove it. Guides export with the figure -- useful for annotating a peak that shifts or splits through a transition.</p>
+    <p>Enable <em>Peak-track guides</em>, then click on the map to drop a vertical reference line at that 2&theta;; click a guide's label to remove it. Guides export with the figure -- useful for annotating a peak that shifts or splits through a transition.</p>
 
     <h3>Plot interaction</h3>
     <ul>
@@ -615,48 +625,81 @@ function val(id,def){const el=$(id);if(!el)return def;return el.type==='checkbox
 function numv(id,def){const v=parseFloat(val(id));return isFinite(v)?v:def;}
 
 const PANEL_HTML=`
-<!-- shared: axis ranges -->
+<!-- shared: axes & labels -->
 <div class="cp-group" data-modes="stack map">
-  <div class="cp-header">Axis Ranges<span class="cp-chevron">\u203A</span></div>
+  <div class="cp-header">Axes &amp; Labels<span class="cp-chevron">\u203A</span></div>
   <div class="cp-body">
-    <div class="cp-row"><span class="cp-label">2\u03B8 min (\u00B0)</span><input type="number" id="cTtMin" step="0.1" placeholder="auto" style="width:66px;flex:none;"></div>
-    <div class="cp-row"><span class="cp-label">2\u03B8 max (\u00B0)</span><input type="number" id="cTtMax" step="0.1" placeholder="auto" style="width:66px;flex:none;"></div>
-  </div>
-</div>
-<!-- shared: frame, ticks & grid -->
-<div class="cp-group mode-only" data-modes="stack map">
-  <div class="cp-header">Frame, Ticks &amp; Grid<span class="cp-chevron">\u203A</span></div>
-  <div class="cp-body">
-    <div class="cp-row mode-only" data-modes="stack"><span class="cp-label">Frame width</span><input type="range" id="cStkAxisW" min="0.5" max="6" step="0.25" value="1.5"><span class="cp-val" id="cStkAxisWV">1.5</span></div>
-    <div class="cp-row mode-only" data-modes="stack"><span class="cp-label">Show plot box</span><input type="checkbox" id="cShowBox"></div>
-    <div class="cp-row mode-only" data-modes="map"><span class="cp-label">Frame width</span><input type="range" id="cMapAxisW" min="0.5" max="8" step="0.5" value="3"><span class="cp-val" id="cMapAxisWV">3.0</span></div>
-    <div class="cp-row"><span class="cp-label">Tick length</span><input type="range" id="cTickLen" min="2" max="20" value="8" step="1"><span class="cp-val" id="cTickLenV">8</span></div>
-    <div class="cp-row"><span class="cp-label">Tick direction</span>
-      <select class="cp-sel" id="cTickDir"><option value="out" selected>Outward</option><option value="in">Inward</option><option value="both">Both</option></select></div>
-    <div class="cp-row"><span class="cp-label">Vertical gridlines</span><input type="checkbox" id="cGrid"></div>
-    <div class="cp-row mode-only" data-modes="map"><span class="cp-label">Horizontal gridlines</span><input type="checkbox" id="cGridH"></div>
-    <div class="cp-row"><span class="cp-label">Grid colour</span><input type="color" id="cGridColor" value="#C9BFA6"></div>
-    <div class="cp-row"><span class="cp-label">Grid weight</span><input type="range" id="cGridW" min="0.5" max="4" step="0.5" value="1"><span class="cp-val" id="cGridWV">1.0</span></div>
-    <div class="cp-row"><span class="cp-label">Grid line style</span>
-      <select class="cp-sel" id="cGridStyle"><option value="dashed" selected>Dashed</option><option value="dotted">Dotted</option><option value="solid">Solid</option></select></div>
-  </div>
-</div>
-<!-- shared: typography -->
-<div class="cp-group mode-only" data-modes="stack map">
-  <div class="cp-header">Typography<span class="cp-chevron">\u203A</span></div>
-  <div class="cp-body">
-    <div class="cp-row"><span class="cp-label">Font</span>
-      <select class="cp-sel" id="cFont">
-        <option value="Arial" selected>Arial</option>
-        <option value="Times New Roman">Times New Roman</option>
-        <option value="Helvetica">Helvetica</option>
-        <option value="Georgia">Georgia</option>
-        <option value="Garamond">Garamond</option>
-        <option value="Palatino Linotype">Palatino</option>
-        <option value="Century Schoolbook">Century Schoolbook</option>
-      </select></div>
-    <div class="cp-row"><span class="cp-label">Axis label size</span><input type="range" id="cLabelSz" min="10" max="72" value="30" step="1"><span class="cp-val" id="cLabelSzV">30</span></div>
-    <div class="cp-row"><span class="cp-label">Tick label size</span><input type="range" id="cTickSz" min="10" max="60" value="24" step="1"><span class="cp-val" id="cTickSzV">24</span></div>
+
+    <div class="cp-sub">
+      <div class="cp-subhead">Axis Ranges<span class="cp-subchevron">\u203A</span></div>
+      <div class="cp-subbody">
+        <div class="cp-row"><span class="cp-label">2\u03B8 min (\u00B0)</span><input type="number" id="cTtMin" step="0.1" placeholder="auto" style="width:66px;flex:none;"></div>
+        <div class="cp-row"><span class="cp-label">2\u03B8 max (\u00B0)</span><input type="number" id="cTtMax" step="0.1" placeholder="auto" style="width:66px;flex:none;"></div>
+      </div>
+    </div>
+
+    <div class="cp-sub">
+      <div class="cp-subhead">Axis Labels<span class="cp-subchevron">\u203A</span></div>
+      <div class="cp-subbody">
+        <div class="cp-row"><span class="cp-label">Axis label font</span>
+          <select class="cp-sel" id="cFont">
+            <option value="Arial" selected>Arial</option>
+            <option value="Times New Roman">Times New Roman</option>
+            <option value="Helvetica">Helvetica</option>
+            <option value="Georgia">Georgia</option>
+            <option value="Garamond">Garamond</option>
+            <option value="Palatino Linotype">Palatino</option>
+            <option value="Century Schoolbook">Century Schoolbook</option>
+          </select></div>
+        <div class="cp-row"><span class="cp-label">Axis label size</span><input type="range" id="cLabelSz" min="10" max="72" value="30" step="1"><span class="cp-val" id="cLabelSzV">30</span></div>
+        <div class="cp-row"><span class="cp-label">X-axis label</span><input type="text" id="cXLabel" value="2\u03B8 (\u00B0)" placeholder="2\u03B8 (\u00B0)"></div>
+        <div class="cp-row mode-only" data-modes="stack"><span class="cp-label">Y-axis label</span><input type="text" id="cStkYLabel" value="Intensity" placeholder="Intensity"></div>
+        <div class="cp-row mode-only" data-modes="map"><span class="cp-label">Y-axis label</span><input type="text" id="cYLabel" value="Temperature (\u00B0C)"></div>
+        <div class="cp-row mode-only" data-modes="stack"><span class="cp-label">X-axis label offset</span><input type="range" id="cStkXLblOff" min="-20" max="60" value="0" step="1"><span class="cp-val" id="cStkXLblOffV">0</span></div>
+        <div class="cp-row mode-only" data-modes="stack"><span class="cp-label">Y-axis label offset</span><input type="range" id="cStkYLblOff" min="-20" max="60" value="0" step="1"><span class="cp-val" id="cStkYLblOffV">0</span></div>
+        <div class="cp-row mode-only" data-modes="map"><span class="cp-label">X-axis label offset</span><input type="range" id="cMapXLblOff" min="-20" max="60" value="0" step="1"><span class="cp-val" id="cMapXLblOffV">0</span></div>
+        <div class="cp-row mode-only" data-modes="map"><span class="cp-label">Y-axis label offset</span><input type="range" id="cMapYLblOff" min="-20" max="60" value="0" step="1"><span class="cp-val" id="cMapYLblOffV">0</span></div>
+      </div>
+    </div>
+
+    <div class="cp-sub">
+      <div class="cp-subhead">Frame &amp; Ticks<span class="cp-subchevron">\u203A</span></div>
+      <div class="cp-subbody">
+        <div class="cp-row mode-only" data-modes="stack"><span class="cp-label">Frame width</span><input type="range" id="cStkAxisW" min="0.5" max="6" step="0.25" value="1.5"><span class="cp-val" id="cStkAxisWV">1.5</span></div>
+        <div class="cp-row mode-only" data-modes="stack"><span class="cp-label">Show plot box</span><input type="checkbox" id="cShowBox"></div>
+        <div class="cp-row mode-only" data-modes="map"><span class="cp-label">Frame width</span><input type="range" id="cMapAxisW" min="0.5" max="8" step="0.5" value="3"><span class="cp-val" id="cMapAxisWV">3.0</span></div>
+        <div class="cp-row"><span class="cp-label">Tick label font</span>
+          <select class="cp-sel" id="cTickFont">
+            <option value="" selected>Same as axis</option>
+            <option value="Arial">Arial</option>
+            <option value="Times New Roman">Times New Roman</option>
+            <option value="Helvetica">Helvetica</option>
+            <option value="Georgia">Georgia</option>
+            <option value="Garamond">Garamond</option>
+            <option value="Palatino Linotype">Palatino</option>
+            <option value="Century Schoolbook">Century Schoolbook</option>
+          </select></div>
+        <div class="cp-row"><span class="cp-label">Tick label size</span><input type="range" id="cTickSz" min="10" max="60" value="24" step="1"><span class="cp-val" id="cTickSzV">24</span></div>
+        <div class="cp-row"><span class="cp-label">Tick length</span><input type="range" id="cTickLen" min="2" max="20" value="8" step="1"><span class="cp-val" id="cTickLenV">8</span></div>
+        <div class="cp-row"><span class="cp-label">Tick direction</span>
+          <select class="cp-sel" id="cTickDir"><option value="out" selected>Outward</option><option value="in">Inward</option></select></div>
+        <div class="cp-row"><span class="cp-label">X-axis tick interval</span><input type="number" id="cXTickStep" placeholder="auto" min="0" step="any" style="width:66px;flex:none;"></div>
+        <div class="cp-row mode-only" data-modes="map"><span class="cp-label">Y-axis tick interval</span><input type="number" id="cYTickStep" placeholder="auto" min="0" step="any" style="width:66px;flex:none;"></div>
+      </div>
+    </div>
+
+    <div class="cp-sub">
+      <div class="cp-subhead">Gridlines<span class="cp-subchevron">\u203A</span></div>
+      <div class="cp-subbody">
+        <div class="cp-row"><span class="cp-label">Vertical gridlines</span><input type="checkbox" id="cGrid"></div>
+        <div class="cp-row mode-only" data-modes="map"><span class="cp-label">Horizontal gridlines</span><input type="checkbox" id="cGridH"></div>
+        <div class="cp-row"><span class="cp-label">Grid colour</span><input type="color" id="cGridColor" value="#C9BFA6"></div>
+        <div class="cp-row"><span class="cp-label">Grid weight</span><input type="range" id="cGridW" min="0.5" max="4" step="0.5" value="1"><span class="cp-val" id="cGridWV">1.0</span></div>
+        <div class="cp-row"><span class="cp-label">Grid line style</span>
+          <select class="cp-sel" id="cGridStyle"><option value="dashed" selected>Dashed</option><option value="dotted">Dotted</option><option value="solid">Solid</option></select></div>
+      </div>
+    </div>
+
   </div>
 </div>
 <!-- shared: data appearance -->
@@ -706,14 +749,12 @@ const PANEL_HTML=`
     <div class="cp-row mode-wf" id="rowWfFill" style="display:none"><span class="cp-label">Fill opacity</span><input type="range" id="cWfFill" min="0" max="1" value="0.85" step="0.05"><span class="cp-val" id="cWfFillV">0.85</span></div>
     <div class="cp-row"><span class="cp-label">Reverse order</span><input type="checkbox" id="cReverse"></div>
     <div class="cp-row"><span class="cp-label">Side padding</span><input type="range" id="cXPad" min="0" max="40" value="14" step="2"><span class="cp-val" id="cXPadV">14</span></div>
-    <div class="cp-row"><span class="cp-label">Y-axis label</span><input type="text" id="cStkYLabel" value="Intensity" placeholder="Intensity"></div>
   </div>
 </div>
 <!-- map: data & scale -->
 <div class="cp-group mode-only" data-modes="map">
   <div class="cp-header">Data & scale<span class="cp-chevron">\u203A</span></div>
   <div class="cp-body">
-    <div class="cp-row"><span class="cp-label">Y-axis label</span><input type="text" id="cYLabel" value="Temperature (\u00B0C)"></div>
     <div class="cp-row"><span class="cp-label">Y-axis mode</span>
       <select class="cp-sel" id="cYMode"><option value="stimulus" selected>By stimulus value</option><option value="sequence">By sequence order</option></select></div>
     <div class="cp-row"><span class="cp-label">Normalisation</span>
@@ -723,6 +764,7 @@ const PANEL_HTML=`
     <div class="cp-row"><span class="cp-label">Plot height (px)</span><input type="number" id="cMapH" min="200" max="4000" step="50" placeholder="auto" style="width:66px;flex:none;"></div>
     <div class="cp-row"><span class="cp-label">Reverse order</span><input type="checkbox" id="cMapReverse"></div>
     <div class="cp-row"><span class="cp-label">Pattern markers</span><input type="checkbox" id="cMarkers"></div>
+    <div class="cp-row"><span class="cp-label">Peak-track guides</span><input type="checkbox" id="cGuides"></div>
   </div>
 </div>
 <!-- map: colour & contrast -->
@@ -743,8 +785,6 @@ const PANEL_HTML=`
     <div class="cp-row"><span class="cp-label">Peak emphasis</span><input type="range" id="cEmph" min="1" max="4" step="0.1" value="1"><span class="cp-val" id="cEmphV">1.0</span></div>
     <div class="cp-row"><span class="cp-label">Noise floor</span><input type="range" id="cNoise" min="0" max="5" step="0.1" value="0"><span class="cp-val" id="cNoiseV">0.0%</span></div>
     <div class="cp-row"><span class="cp-label">Show colourbar</span><input type="checkbox" id="cColorbar"></div>
-    <div class="cp-row"><span class="cp-label">Peak-track guides</span><input type="checkbox" id="cGuides"></div>
-    <div class="cp-note" id="guideNote" style="display:none">Click the map to drop a 2\u03B8 guide; click a guide's \u25BE handle to remove it.</div>
   </div>
 </div>
 <!-- shared: output -->
@@ -779,6 +819,7 @@ $('rightPanel').innerHTML=PANEL_HTML;
 
 // collapsible
 document.querySelectorAll('.cp-header').forEach(h=>h.addEventListener('click',()=>h.parentElement.classList.toggle('open')));
+document.querySelectorAll('.cp-subhead').forEach(h=>h.addEventListener('click',()=>h.parentElement.classList.toggle('open')));
 
 // show/hide groups & rows by mode
 function applyModeVisibility(){
@@ -795,7 +836,6 @@ function applyModeVisibility(){
   $('rowBandH').style.display=(mode==='stack'&&!wf)?'flex':'none';
   // mono row only when monochrome
   const mono=$('rowMono');if(mono)mono.style.display=(mode==='map'&&val('cMapScheme')==='mono')?'flex':'none';
-  const gn=$('guideNote');if(gn)gn.style.display=(mode==='map'&&val('cGuides'))?'block':'none';
 }
 
 // ===========================================================
@@ -812,6 +852,18 @@ function effRange(){
 // ===========================================================
 // STACKED RENDER (line bands OR waterfall) -- via backend
 // ===========================================================
+// Shared with figureSize() so the canvas height and the actual drawn margin always
+// agree -- this is what makes the X-axis label offset (cStkXLblOff) actually move
+// anything, instead of affecting a margin that the canvas height ignores.
+function stackBottomMargin(){
+  const font=val('cFont'),tickSz=numv('cTickSz',24),labelSz=numv('cLabelSz',30);
+  const tickFont=val('cTickFont')||font;
+  const xLabelTxt=val('cXLabel')||'2\u03B8 (\u00B0)';
+  const xOff=numv('cStkXLblOff',0);
+  const xTickMet=measureTextMetrics('0.0',tickSz,tickFont);
+  const xTitleMet=measureTextMetrics(xLabelTxt,labelSz,font);
+  return Math.max(20,Math.round(numv('cTickLen',8)+3+xTickMet.height+8+xTitleMet.height+4+xOff));
+}
 function drawStack(be,W,H,forScreen,skipLegends){
   const style=val('cStackStyle'),wf=style==='waterfall';
   const reverse=val('cReverse');
@@ -830,15 +882,19 @@ function drawStack(be,W,H,forScreen,skipLegends){
   const order=reverse?[...patterns]:[...patterns].reverse(); // index0 -> top unless reversed
   const N=order.length;
 
-  const xStep=niceStep((ttMax-ttMin)/8),xDec=decimalsForStep(xStep);
-  const xTickMaxW=measureText(fmtTick(ttMax,xDec),tickSz,font);
+  const tickFont=val('cTickFont')||font;
+  const xLabelTxt=val('cXLabel')||'2\u03B8 (\u00B0)';
+  const xOff=numv('cStkXLblOff',0),yOff=numv('cStkYLblOff',0);
+  const manualXStep=numv('cXTickStep',0);
+  const xStep=manualXStep>0?manualXStep:niceStep((ttMax-ttMin)/8),xDec=decimalsForStep(xStep);
+  const xTickMaxW=measureText(fmtTick(ttMax,xDec),tickSz,tickFont);
   const yLabelTxt=val('cStkYLabel')||'Intensity';
   const yTitleX=6,yTitleMet=measureTextMetrics(yLabelTxt,labelSz,font),yTitleThick=yTitleMet.height,yTitleGap=8;
-  const xTickMet=measureTextMetrics('0.0',tickSz,font);
-  const xTitleMet=measureTextMetrics('2\u03B8 (\u00B0)',labelSz,font);
+  const xTickMet=measureTextMetrics('0.0',tickSz,tickFont);
+  const xTitleMet=measureTextMetrics(xLabelTxt,labelSz,font);
   const M={top:Math.round(14+labelSz*0.2),right:Math.round(18+xPad),
-    bottom:Math.round(numv('cTickLen',8)+3+xTickMet.height+8+xTitleMet.height+4),
-    left:Math.round(yTitleX+yTitleThick+yTitleGap+xPad)};
+    bottom:stackBottomMargin(),
+    left:Math.max(20,Math.round(yTitleX+yTitleThick+yTitleGap+xPad+yOff))};
   const plotW=W-M.left-M.right;
   const wfOffset=numv('cWfOffset',34)/100, wfFill=numv('cWfFill',0.85);
 
@@ -897,15 +953,15 @@ function drawStack(be,W,H,forScreen,skipLegends){
   else be.line(M.left,M.top+plotH,M.left+plotW,M.top+plotH,INK,Math.max(0.5,axisWt));
   // x ticks
   const tkLen=numv('cTickLen',8);
-  const drawOutS=(tickDir==='out'||tickDir==='both'),drawInS=(tickDir==='in'||tickDir==='both');
+  const drawOutS=(tickDir==='out'),drawInS=(tickDir==='in');
   for(let tt=Math.ceil(ttMin/xStep)*xStep;tt<=ttMax+1e-9;tt=+(tt+xStep).toFixed(9)){
     const px=M.left+((tt-ttMin)/(ttMax-ttMin))*plotW;
     if(drawOutS)be.line(px,M.top+plotH,px,M.top+plotH+tkLen,INK,Math.max(0.5,axisWt));
     if(drawInS)be.line(px,M.top+plotH,px,M.top+plotH-tkLen,INK,Math.max(0.5,axisWt));
-    be.text(fmtTick(tt,xDec),px,M.top+plotH+tkLen+3,{size:tickSz,font,color:INK,align:'center',baseline:'top'});
+    be.text(fmtTick(tt,xDec),px,M.top+plotH+tkLen+3,{size:tickSz,font:tickFont,color:INK,align:'center',baseline:'top'});
   }
-  be.text('2\u03B8 (\u00B0)',M.left+plotW/2,H-4,{size:labelSz,font,color:INK,align:'center',baseline:'bottom'});
-  be.text(val('cStkYLabel')||'Intensity',yTitleX,M.top+plotH/2,{size:labelSz,font,color:INK,align:'center',baseline:'top',rotate:-90});
+  be.text(xLabelTxt,M.left+plotW/2,H-4,{size:labelSz,font,color:INK,align:'center',baseline:'bottom'});
+  be.text(yLabelTxt,yTitleX,M.top+plotH/2,{size:labelSz,font,color:INK,align:'center',baseline:'top',rotate:-90});
 
   // legends (skipped when building the clean snapshot base for interactive drag)
   const geom={M,plotW,plotH,bandH,wf,bottomPad,N,order,scheme,legSz,font,INK};
@@ -999,22 +1055,27 @@ function drawMap(be,W,H,forScreen){
   const{ordered,rowFrac,yMin,yMax,normArrays,GRID,yMode}=computeMapArrays(ttMin,ttMax);
   const nPat=ordered.length;
 
+  const tickFont=val('cTickFont')||font;
+  const xLabelTxt=val('cXLabel')||'2\u03B8 (\u00B0)';
+  const xOff=numv('cMapXLblOff',0),yOff=numv('cMapYLblOff',0);
+  const manualYStep=numv('cYTickStep',0);
+
   // margins
   const yDecSeq=decimalsForStep(niceStep(Math.abs(yMax-yMin)/(nPat||1)));
   let maxYTickW=0;
-  if(yMode==='stimulus'){const yStep=niceStep((yMax-yMin)/6),yDec=decimalsForStep(yStep);
-    for(let yv=Math.ceil(yMin/yStep)*yStep;yv<=yMax+1e-9;yv=+(yv+yStep).toFixed(9))maxYTickW=Math.max(maxYTickW,measureText(fmtTick(yv,yDec),tickSz,font));}
-  else for(const p of ordered)maxYTickW=Math.max(maxYTickW,measureText(fmtTick(p.y,yDecSeq),tickSz,font));
+  if(yMode==='stimulus'){const yStep=manualYStep>0?manualYStep:niceStep((yMax-yMin)/6),yDec=decimalsForStep(yStep);
+    for(let yv=Math.ceil(yMin/yStep)*yStep;yv<=yMax+1e-9;yv=+(yv+yStep).toFixed(9))maxYTickW=Math.max(maxYTickW,measureText(fmtTick(yv,yDec),tickSz,tickFont));}
+  else for(const p of ordered)maxYTickW=Math.max(maxYTickW,measureText(fmtTick(p.y,yDecSeq),tickSz,tickFont));
   const yTitleMetMap=measureTextMetrics(yLabelTxt,labelSz,font);
   const afterLabel=8;
-  const left=4+yTitleMetMap.height+afterLabel+Math.ceil(maxYTickW)+tickLen+3;
+  const left=Math.max(20,4+yTitleMetMap.height+afterLabel+Math.ceil(maxYTickW)+tickLen+3+yOff);
   const yLabelCX=4+yTitleMetMap.height/2;
   const cbarW=showCbar?Math.round(26+labelSz*0.4):0;
-  const cbarGap=showCbar?Math.round(tickLen+6+measureText('0.0',tickSz,font)+labelSz*1.2):0;
+  const cbarGap=showCbar?Math.round(tickLen+6+measureText('0.0',tickSz,tickFont)+labelSz*1.2):0;
   const right=22+cbarW+cbarGap;
-  const xTickMetMap=measureTextMetrics('0.0',tickSz,font);
-  const xTitleMetMap=measureTextMetrics('2\u03B8 (\u00B0)',labelSz,font);
-  const bottom=Math.round(tickLen+3+xTickMetMap.height+8+xTitleMetMap.height+4);
+  const xTickMetMap=measureTextMetrics('0.0',tickSz,tickFont);
+  const xTitleMetMap=measureTextMetrics(xLabelTxt,labelSz,font);
+  const bottom=Math.max(20,Math.round(tickLen+3+xTickMetMap.height+8+xTitleMetMap.height+4+xOff));
   // Top margin must reserve room for:
   //   (a) half a Y-axis tick label that sits centred on the topmost tick (baseline:'middle')
   //   (b) peak-track guide labels when guides are active
@@ -1049,33 +1110,34 @@ function drawMap(be,W,H,forScreen){
   else be.imageURL(off.toDataURL('image/png'),left,top,plotW,plotH);
 
   // gridlines over image
-  const xStep=niceStep((ttMax-ttMin)/8),xDec=decimalsForStep(xStep);
+  const manualXStep=numv('cXTickStep',0);
+  const xStep=manualXStep>0?manualXStep:niceStep((ttMax-ttMin)/8),xDec=decimalsForStep(xStep);
   if(showGrid){be.pushClip(left,top,plotW,plotH);
     for(let tt=Math.ceil(ttMin/xStep)*xStep;tt<=ttMax+1e-9;tt=+(tt+xStep).toFixed(9)){const px=left+((tt-ttMin)/(ttMax-ttMin))*plotW;be.line(px,top,px,top+plotH,gridColor,gridW,gridDash);}
     be.popClip();}
 
   // frame + x axis
   const showGridH=val('cGridH');
-  const drawOutM=(tickDir==='out'||tickDir==='both'),drawInM=(tickDir==='in'||tickDir==='both');
+  const drawOutM=(tickDir==='out'),drawInM=(tickDir==='in');
   be.box(left,top,plotW,plotH,INK,axisWt);
   for(let tt=Math.ceil(ttMin/xStep)*xStep;tt<=ttMax+1e-9;tt=+(tt+xStep).toFixed(9)){
     const px=left+((tt-ttMin)/(ttMax-ttMin))*plotW;
     if(drawOutM)be.line(px,top+plotH,px,top+plotH+tickLen,INK,axisWt);
     if(drawInM)be.line(px,top+plotH,px,top+plotH-tickLen,INK,axisWt);
-    be.text(fmtTick(tt,xDec),px,top+plotH+tickLen+2,{size:tickSz,font,color:INK,align:'center',baseline:'top'});
+    be.text(fmtTick(tt,xDec),px,top+plotH+tickLen+2,{size:tickSz,font:tickFont,color:INK,align:'center',baseline:'top'});
   }
-  be.text('2\u03B8 (\u00B0)',left+plotW/2,H-4,{size:labelSz,font,color:INK,align:'center',baseline:'bottom'});
+  be.text(xLabelTxt,left+plotW/2,H-4,{size:labelSz,font,color:INK,align:'center',baseline:'bottom'});
 
   // y axis
   const mapRev=val('cMapReverse');
-  if(yMode==='stimulus'){const yRange=yMax-yMin||1,yStep=niceStep(yRange/6),yDec=decimalsForStep(yStep);
+  if(yMode==='stimulus'){const yRange=yMax-yMin||1,yStep=manualYStep>0?manualYStep:niceStep(yRange/6),yDec=decimalsForStep(yStep);
     for(let yv=Math.ceil(yMin/yStep)*yStep;yv<=yMax+1e-9;yv=+(yv+yStep).toFixed(9)){
       const frac=(yv-yMin)/yRange;
       const py=top+(mapRev?frac:1-frac)*plotH;
       if(drawOutM)be.line(left-tickLen,py,left,py,INK,axisWt);
       if(drawInM)be.line(left,py,left+tickLen,py,INK,axisWt);
       if(showGridH)be.line(left,py,left+plotW,py,gridColor,gridW,gridDash);
-      be.text(fmtTick(yv,yDec),left-tickLen-3,py,{size:tickSz,font,color:INK,align:'right',baseline:'middle'});
+      be.text(fmtTick(yv,yDec),left-tickLen-3,py,{size:tickSz,font:tickFont,color:INK,align:'right',baseline:'middle'});
     }
     if(showMarkers)ordered.forEach(p=>{const frac=(p.y-yMin)/(yMax-yMin||1);const py=top+(mapRev?frac:1-frac)*plotH;be.line(left+plotW,py,left+plotW+tickLen,py,INK,axisWt);});
   }else{
@@ -1083,7 +1145,7 @@ function drawMap(be,W,H,forScreen){
       if(drawOutM)be.line(left-tickLen,py,left,py,INK,axisWt);
       if(drawInM)be.line(left,py,left+tickLen,py,INK,axisWt);
       if(showGridH)be.line(left,py,left+plotW,py,gridColor,gridW,gridDash);
-      be.text(fmtTick(p.y,yDecSeq),left-tickLen-3,py,{size:tickSz,font,color:INK,align:'right',baseline:'middle'});
+      be.text(fmtTick(p.y,yDecSeq),left-tickLen-3,py,{size:tickSz,font:tickFont,color:INK,align:'right',baseline:'middle'});
       if(showMarkers)be.line(left+plotW,py,left+plotW+tickLen,py,INK,axisWt);});
   }
   be.text(yLabelTxt,yLabelCX,top+plotH/2,{size:labelSz,font,color:INK,align:'center',baseline:'middle',rotate:-90});
@@ -1111,7 +1173,7 @@ function drawMap(be,W,H,forScreen){
       be.line(px,top,px,top+plotH,hexAlpha('#4A6FA5',0.9),1.5,[6,4]);}
     be.popClip();
     for(const g of peakGuides){if(g<ttMin||g>ttMax)continue;const px=left+((g-ttMin)/(ttMax-ttMin))*plotW;
-      be.text('\u25BE '+g.toFixed(2)+'\u00B0',px,top-2,{size:Math.max(11,tickSz*0.6),font,color:'#4A6FA5',align:'center',baseline:'bottom'});}
+      be.text(g.toFixed(2)+'\u00B0',px,top-2,{size:Math.max(11,tickSz*0.6),font,color:'#4A6FA5',align:'center',baseline:'bottom'});}
   }
 
   if(forScreen)plotMeta={type:'map',left,top,plotW,plotH,ttMin,ttMax,yMin,yMax,yMode,rowFrac,ordered};
@@ -1137,7 +1199,7 @@ function figureSize(){
     const axisWt=numv('cStkAxisW',1.5);const font=val('cFont'),tickSz=numv('cTickSz',24),labelSz=numv('cLabelSz',30);
     const bottomPad=Math.round(14+axisWt*1.5);
     const plotH=wf?Math.round(bandH*(1+(N-1)*Math.max(0.12,wfOffset)))+bottomPad:N*bandH+bottomPad;
-    const top=Math.round(14+labelSz*0.2),bottom=Math.ceil(tickSz*1.35)+Math.ceil(labelSz*1.35)+18;
+    const top=Math.round(14+labelSz*0.2),bottom=stackBottomMargin();
     return[lockW,top+plotH+bottom];
   }else{
     const lockW=dims?dims[0]:Math.max(400,wrap.clientWidth-28);
@@ -1256,6 +1318,7 @@ const SETTING_IDS=['cTtMin','cTtMax','cStackStyle','cBandH','cWfOffset','cWfFill
  'cYLabel','cYMode','cNorm','cGridRes','cMapH','cMapReverse','cMarkers','cMapScheme','cPeakColor','cMapBg','cInvert',
  'cGamma','cEmph','cNoise','cColorbar','cGuides','cStkScheme','cStkLW','cStkAxisW','cStkLegends','cStkSnap',
  'cStkLegSz','cLegFont','cGrid','cGridH','cGridColor','cGridW','cGridStyle','cTickDir','cTickLen','cMapAxisW','cFont','cTickSz','cLabelSz',
+ 'cXLabel','cTickFont','cStkXLblOff','cStkYLblOff','cMapXLblOff','cMapYLblOff','cXTickStep','cYTickStep',
  'cSizePreset','cLockW','cLockH'];
 function collectSettings(){const o={_app:'Vx-PXRD_Viewer',_version:3};
   for(const id of SETTING_IDS){const el=$(id);if(el)o[id]=el.type==='checkbox'?el.checked:el.value;}return o;}
@@ -1280,7 +1343,9 @@ function syncLabels(){
    ['cXPad','cXPadV',v=>v],['cStkLW','cStkLWV',v=>(+v).toFixed(1)],['cStkAxisW','cStkAxisWV',v=>(+v).toFixed(1)],
    ['cGamma','cGammaV',v=>(+v).toFixed(2)],['cEmph','cEmphV',v=>(+v).toFixed(1)],['cNoise','cNoiseV',v=>(+v).toFixed(1)+'%'],
    ['cGrid W','',null],['cGridW','cGridWV',v=>(+v).toFixed(1)],['cMapAxisW','cMapAxisWV',v=>(+v).toFixed(1)],['cTickLen','cTickLenV',v=>v],
-   ['cTickSz','cTickSzV',v=>v],['cLabelSz','cLabelSzV',v=>v],['cStkLegSz','cStkLegSzV',v=>v]];
+   ['cTickSz','cTickSzV',v=>v],['cLabelSz','cLabelSzV',v=>v],['cStkLegSz','cStkLegSzV',v=>v],
+   ['cStkXLblOff','cStkXLblOffV',v=>v],['cStkYLblOff','cStkYLblOffV',v=>v],
+   ['cMapXLblOff','cMapXLblOffV',v=>v],['cMapYLblOff','cMapYLblOffV',v=>v]];
   for(const[a,b,f] of sl){if(!f)continue;const el=$(a),lb=$(b);if(el&&lb)lb.textContent=f(el.value);}
 }
 // wire every control: label sync + re-render; some also affect visibility
@@ -1367,8 +1432,8 @@ canvas.addEventListener('mousedown',e=>{if(!plotMeta||e.button!==0)return;const{
   if(mode==='stack'&&val('cStkLegends')){const hit=legendHit(x,y);
     if(hit){draggingLegend={key:hit.key,idx:hit.idx,offX:x-hit.x,offY:y-hit.y,w:hit.w};dragMode='legend';canvas.style.cursor='grabbing';e.preventDefault();return;}}
   if(mode==='map'&&val('cGuides')){const tt=plotXtoTt(x);
-    // click near existing guide handle removes it
-    const hitIdx=peakGuides.findIndex(g=>Math.abs(((g-plotMeta.ttMin)/(plotMeta.ttMax-plotMeta.ttMin))-((tt-plotMeta.ttMin)/(plotMeta.ttMax-plotMeta.ttMin)))*plotMeta.plotW<8&&y<plotTop()+16);
+    // click near an existing guide's label removes it
+    const hitIdx=peakGuides.findIndex(g=>Math.abs(((g-plotMeta.ttMin)/(plotMeta.ttMax-plotMeta.ttMin))-((tt-plotMeta.ttMin)/(plotMeta.ttMax-plotMeta.ttMin)))*plotMeta.plotW<22&&y<plotTop()+16);
     if(hitIdx>=0){peakGuides.splice(hitIdx,1);scheduleRender();return;}
     if(inPlotX(x)){peakGuides.push(+tt.toFixed(3));scheduleRender();return;}}
   dragX0=x;dragMode='zoom';});
@@ -1411,11 +1476,12 @@ canvas.addEventListener('mousemove',e=>{if(!plotMeta)return;const{x,y}=evtXY(e);
 });
 window.addEventListener('mouseup',e=>{
   if(dragMode==='zoom'&&dragX0!=null&&plotMeta){const{x}=evtXY(e);$('zoomRect').style.display='none';
-    if(Math.abs(x-dragX0)>8){const t0=plotXtoTt(dragX0),t1=plotXtoTt(x);viewTt=[Math.min(t0,t1),Math.max(t0,t1)];scheduleRender();}}
+    if(Math.abs(x-dragX0)>8){const t0=plotXtoTt(dragX0),t1=plotXtoTt(x);viewTt=[Math.min(t0,t1),Math.max(t0,t1)];
+      $('cTtMin').value=viewTt[0].toFixed(1);$('cTtMax').value=viewTt[1].toFixed(1);scheduleRender();}}
   dragX0=null;dragMode=null;draggingLegend=null;if(canvas.style.cursor==='grabbing')canvas.style.cursor='crosshair';});
-canvas.addEventListener('dblclick',()=>{viewTt=null;scheduleRender();});
+canvas.addEventListener('dblclick',()=>{viewTt=null;$('cTtMin').value='';$('cTtMax').value='';scheduleRender();});
 canvas.addEventListener('mouseleave',()=>{$('floatTip').style.display='none';$('cursorEl').textContent='';});
-$('zoomResetBtn').addEventListener('click',()=>{viewTt=null;scheduleRender();});
+$('zoomResetBtn').addEventListener('click',()=>{viewTt=null;$('cTtMin').value='';$('cTtMax').value='';scheduleRender();});
 
 // init
 syncLabels();applyModeVisibility();updateButtons();
