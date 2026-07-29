@@ -218,6 +218,7 @@ select.sel:focus{border-color:var(--accent)}
 <header>
   <h1>CrystalComparator</h1>
   <span class="sub">CIF structure viewer &middot; symmetry growth &middot; structural selection</span>
+  <span class="sub" id="buildStamp">Build 2026-07-29.12 &middot; optional strained unit cell</span>
   <span class="spacer"></span>
   <button class="hbtn" id="guideBtn">Guide</button>
 </header>
@@ -234,6 +235,7 @@ select.sel:focus{border-color:var(--accent)}
 <input type="file" id="pdbInput" accept=".cif" style="display:none">
 <input type="file" id="guestPdbInput" accept=".pdb,.ent,.txt" style="display:none">
 <input type="file" id="elementCsvInput" accept=".csv,.txt" style="display:none">
+<input type="file" id="overlaySessionInput" accept=".json,application/json" style="display:none">
 <script>
 /**
  * @license
@@ -3335,6 +3337,335 @@ select.sel:focus{border-color:var(--accent)}
     setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
     setStatus("Downloaded " + suggestedName + (dims || "") + " (this browser can't offer a folder picker for saving).", false);
   }
+  function pdbField(value, width) {
+    value = String(value);
+    return value.length >= width ? value.slice(-width) : new Array(width - value.length + 1).join(" ") + value;
+  }
+  function pdbAtomName(element) {
+    element = String(element || "C").slice(0, 2);
+    return element.length === 1 ? (" " + element + "  ") : (" " + element + " ");
+  }
+  function overlayMockPdbText(structureIndex) {
+    var slot = structureSlots[structureIndex], atoms = slot && slot.atoms || [], lines = [];
+    if (atoms.length > 99999) throw new Error("Mock-PDB export supports at most 99,999 atoms per structure.");
+    for (var i = 0; i < atoms.length; i++) {
+      var p = atomAlignedPosition(atoms[i], structureIndex);
+      var xyz = [p.x, p.y, p.z].map(function (v) {
+        if (!isFinite(v)) throw new Error("An exported atom has invalid coordinates.");
+        var field = v.toFixed(3);
+        if (field.length > 8) throw new Error("A coordinate lies outside the fixed-width PDB range.");
+        return pdbField(field, 8);
+      });
+      lines.push("ATOM  " + pdbField(i + 1, 5) + " " + pdbAtomName(atoms[i].el) +
+        "              " + xyz.join("") + pdbField("1.00", 6) + pdbField("5.00", 6) + "              ");
+    }
+    return lines.join("\n") + "\n";
+  }
+  function overlayPdbFilename(structureIndex) {
+    var slot = structureSlots[structureIndex], base = slot && slot.name || ("Structure_" + (structureIndex + 1));
+    base = base.replace(/\.[^.]+$/, "").replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
+    return (base || ("Structure_" + (structureIndex + 1))) + "_S" + (structureIndex + 1) + "_overlay.pdb";
+  }
+  function savePdbBlobToDisk(blob, suggestedName) {
+    if (window.showSaveFilePicker) {
+      var opts = { suggestedName: suggestedName, types: [{ description: "Mock-PDB coordinates", accept: { "chemical/x-pdb": [".pdb"] } }] };
+      if (state.lastSourceHandle) opts.startIn = state.lastSourceHandle;
+      window.showSaveFilePicker(opts).then(function (handle) {
+        return handle.createWritable().then(function (writable) { return writable.write(blob).then(function () { return writable.close(); }); });
+      }).then(function () {
+        setStatus("Saved " + suggestedName + " in the shared overlay Cartesian frame.", false);
+      }).catch(function (e) {
+        if (e && e.name === "AbortError") { setStatus("PDB export cancelled.", false); return; }
+        legacyDownload(blob, suggestedName, "");
+      });
+    } else {
+      legacyDownload(blob, suggestedName, "");
+    }
+  }
+  function exportOverlayMockPdb(structureIndex) {
+    if (!structureSlots || !structureSlots[0] || !structureSlots[1] ||
+        !structureSlots[0].atoms || !structureSlots[0].atoms.length ||
+        !structureSlots[1].atoms || !structureSlots[1].atoms.length) {
+      setStatus("Load both structures before exporting shared-space coordinates.", true);
+      return;
+    }
+    saveActiveStructureState();
+    try {
+      var name = overlayPdbFilename(structureIndex);
+      var text = overlayMockPdbText(structureIndex);
+      savePdbBlobToDisk(new Blob([text], { type: "chemical/x-pdb" }), name);
+    } catch (e) {
+      setStatus("PDB export failed: " + (e && e.message ? e.message : String(e)), true);
+    }
+  }
+  var OVERLAY_SESSION_VISUAL_KEYS = [
+    "bgColor", "depthScaling", "highDetail", "fogOn", "fogDensity",
+    "lightHeadlight", "lightAngle", "keyEnabled", "keyIntensity",
+    "fillEnabled", "fillIntensity", "rimEnabled", "rimIntensity",
+    "atomRoughness", "atomMetalness", "atomReflectivity"
+  ];
+  function sessionClone(value) {
+    if (value === undefined) return null;
+    return JSON.parse(JSON.stringify(value));
+  }
+  function sessionAtomUid(atom) {
+    return atom && atom.uid !== undefined && atom.uid !== null ? atom.uid : null;
+  }
+  function sessionAtomPair(pair) {
+    return pair ? { a1: sessionAtomUid(pair.a1), a2: sessionAtomUid(pair.a2) } : null;
+  }
+  function sessionComponent(component) {
+    return (component || []).map(sessionAtomUid).filter(function (uid) { return uid !== null; });
+  }
+  function serialiseMolecularCorrespondence(result) {
+    if (!result) return null;
+    return {
+      count1: result.count1, count2: result.count2, radius: result.radius, cutoff: result.cutoff,
+      centroidRmsd: result.centroidRmsd, atomicRmsd: result.atomicRmsd, matchedAtoms: result.matchedAtoms,
+      components1: (result.components1 || []).map(sessionComponent),
+      components2: (result.components2 || []).map(sessionComponent),
+      pairs: (result.pairs || []).map(function (pair) {
+        return {
+          comp1: sessionComponent(pair.comp1), comp2: sessionComponent(pair.comp2),
+          centroidDistance: pair.centroidDistance, atomicRmsd: pair.atomicRmsd, atomCount: pair.atomCount,
+          atomPairs: (pair.atomPairs || []).map(sessionAtomPair)
+        };
+      })
+    };
+  }
+  function serialiseStructureForSession(slot) {
+    var out = {};
+    for (var i = 0; i < STRUCTURE_STATE_KEYS.length; i++) {
+      var key = STRUCTURE_STATE_KEYS[i];
+      if (key === "lastSourceHandle") out[key] = null;
+      else if (key === "undoStack") out[key] = [];
+      else out[key] = slot[key];
+    }
+    return sessionClone(out);
+  }
+  function overlaySessionPayload() {
+    saveActiveStructureState();
+    var visual = {};
+    OVERLAY_SESSION_VISUAL_KEYS.forEach(function (key) { visual[key] = state[key]; });
+    return {
+      format: "CrystalComparator overlay session",
+      version: 1,
+      build: COMPARATOR_BUILD,
+      savedAt: new Date().toISOString(),
+      activeStructureIndex: activeStructureIndex,
+      comparisonViewMode: "overlay",
+      comparisonColours: comparisonColours.slice(),
+      visual: visual,
+      camera: {
+        target: [camTarget.x, camTarget.y, camTarget.z],
+        orientation: [camOrient.x, camOrient.y, camOrient.z, camOrient.w],
+        distance: camDist
+      },
+      structures: structureSlots.map(serialiseStructureForSession),
+      comparison: {
+        anchorPairs: anchorPairs.map(sessionAtomPair),
+        anchorPending: sessionAtomUid(anchorPending),
+        twoAnchorWholePackingFitComplete: twoAnchorWholePackingFitComplete,
+        moleculeFitResult: sessionClone(moleculeFitResult),
+        symmetryBaseCorrespondence: symmetryBaseCorrespondence ? {
+          pairs: (symmetryBaseCorrespondence.pairs || []).map(sessionAtomPair),
+          total1: symmetryBaseCorrespondence.total1, total2: symmetryBaseCorrespondence.total2
+        } : null,
+        comparisonAtomPairs: comparisonAtomPairs.map(sessionAtomPair),
+        comparisonAtomMask: sessionClone(comparisonAtomMask),
+        comparisonMaskLocked: comparisonMaskLocked,
+        molecularCorrespondenceResult: serialiseMolecularCorrespondence(molecularCorrespondenceResult),
+        showCorrespondenceLinks: showCorrespondenceLinks,
+        radialAnalysisResult: sessionClone(radialAnalysisResult),
+        volumetricAnalysisResult: sessionClone(volumetricAnalysisResult),
+        radialReportText: radialReportText,
+        inflationOptimResults: sessionClone(inflationOptimResults),
+        diagnosticEvents: sessionClone(comparisonDiagnosticEvents)
+      }
+    };
+  }
+  function overlaySessionFilename() {
+    var one = structureSlots[0].name || "S1", two = structureSlots[1].name || "S2";
+    var base = (one.replace(/\.[^.]+$/, "") + "_vs_" + two.replace(/\.[^.]+$/, ""))
+      .replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
+    return "CrystalComparator_" + (base || "overlay") + "_session.json";
+  }
+  function saveOverlaySessionBlob(blob, suggestedName) {
+    if (window.showSaveFilePicker) {
+      var opts = { suggestedName: suggestedName, types: [{ description: "CrystalComparator overlay session", accept: { "application/json": [".json"] } }] };
+      if (state.lastSourceHandle) opts.startIn = state.lastSourceHandle;
+      window.showSaveFilePicker(opts).then(function (handle) {
+        return handle.createWritable().then(function (writable) { return writable.write(blob).then(function () { return writable.close(); }); });
+      }).then(function () {
+        setStatus("Saved portable overlay session " + suggestedName + ".", false);
+      }).catch(function (e) {
+        if (e && e.name === "AbortError") { setStatus("Overlay-session export cancelled.", false); return; }
+        legacyDownload(blob, suggestedName, "");
+      });
+    } else {
+      legacyDownload(blob, suggestedName, "");
+    }
+  }
+  function exportOverlaySession() {
+    if (!structureSlots || !structureSlots[0] || !structureSlots[1] ||
+        !structureSlots[0].atoms || !structureSlots[0].atoms.length ||
+        !structureSlots[1].atoms || !structureSlots[1].atoms.length) {
+      setStatus("Load both structures before exporting an overlay session.", true);
+      return;
+    }
+    try {
+      var payload = overlaySessionPayload();
+      saveOverlaySessionBlob(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }), overlaySessionFilename());
+    } catch (e) {
+      setStatus("Overlay-session export failed: " + (e && e.message ? e.message : String(e)), true);
+    }
+  }
+  function importedStructureState(raw, template) {
+    var slot = {};
+    for (var i = 0; i < STRUCTURE_STATE_KEYS.length; i++) {
+      var key = STRUCTURE_STATE_KEYS[i];
+      slot[key] = raw.hasOwnProperty(key) ? raw[key] : template[key];
+    }
+    slot.lastSourceHandle = null;
+    slot.undoStack = [];
+    slot.selectedBonds = slot.selectedBonds || {};
+    slot.cutBonds = slot.cutBonds || {};
+    slot.cutBondSignatures = slot.cutBondSignatures || {};
+    slot.atoms = Array.isArray(slot.atoms) ? slot.atoms : [];
+    slot.everLoaded = !!slot.atoms.length;
+    ensureAlignment(slot);
+    return slot;
+  }
+  function sessionAtomMaps() {
+    return structureSlots.map(function (slot) {
+      var map = {};
+      (slot.atoms || []).forEach(function (atom) { if (atom.uid !== undefined && atom.uid !== null) map[String(atom.uid)] = atom; });
+      return map;
+    });
+  }
+  function sessionRestoreAtom(uid, map) {
+    return uid === undefined || uid === null ? null : map[String(uid)] || null;
+  }
+  function restoreSessionPair(raw, maps) {
+    if (!raw) return null;
+    var a1 = sessionRestoreAtom(raw.a1, maps[0]), a2 = sessionRestoreAtom(raw.a2, maps[1]);
+    return a1 && a2 ? { a1: a1, a2: a2 } : null;
+  }
+  function restoreSessionComponent(raw, map) {
+    return (raw || []).map(function (uid) { return sessionRestoreAtom(uid, map); }).filter(Boolean);
+  }
+  function restoreMolecularCorrespondence(raw, maps) {
+    if (!raw) return null;
+    var result = {
+      count1: raw.count1, count2: raw.count2, radius: raw.radius, cutoff: raw.cutoff,
+      centroidRmsd: raw.centroidRmsd, atomicRmsd: raw.atomicRmsd, matchedAtoms: raw.matchedAtoms,
+      components1: (raw.components1 || []).map(function (component) { return restoreSessionComponent(component, maps[0]); }),
+      components2: (raw.components2 || []).map(function (component) { return restoreSessionComponent(component, maps[1]); })
+    };
+    result.pairs = (raw.pairs || []).map(function (pair) {
+      var restoredPairs = (pair.atomPairs || []).map(function (atomPair) { return restoreSessionPair(atomPair, maps); }).filter(Boolean);
+      return {
+        comp1: restoreSessionComponent(pair.comp1, maps[0]),
+        comp2: restoreSessionComponent(pair.comp2, maps[1]),
+        centroidDistance: pair.centroidDistance, atomicRmsd: pair.atomicRmsd,
+        atomCount: pair.atomCount, atomPairs: restoredPairs
+      };
+    }).filter(function (pair) { return pair.comp1.length && pair.comp2.length; });
+    return result;
+  }
+  function loadOverlaySessionText(text, filename) {
+    var payload;
+    try { payload = JSON.parse(text); }
+    catch (e) { setStatus("This is not a valid JSON file.", true); return; }
+    if (!payload || payload.format !== "CrystalComparator overlay session" || payload.version !== 1 ||
+        !Array.isArray(payload.structures) || payload.structures.length !== 2 ||
+        !payload.structures[0] || !payload.structures[1] ||
+        !Array.isArray(payload.structures[0].atoms) || !Array.isArray(payload.structures[1].atoms)) {
+      setStatus("This JSON file is not a supported CrystalComparator overlay session.", true);
+      return;
+    }
+    if (structureSlots && structureSlots.some(function (slot) { return slot && slot.atoms && slot.atoms.length; })) {
+      var replaceWarning = "All structural information currently loaded will be lost, including both structures, selections, alignment, correspondence, strain and analysis results.\n\nLoading the overlay session cannot be undone. Continue?";
+      if (!window.confirm(replaceWarning)) {
+        setStatus("Overlay-session loading cancelled. The current structures and comparison were left unchanged.", false);
+        return;
+      }
+    }
+    try {
+      var template = captureStructureState();
+      structureSlots = [
+        importedStructureState(payload.structures[0], template),
+        importedStructureState(payload.structures[1], template)
+      ];
+      var maxUid = 0;
+      structureSlots.forEach(function (slot) {
+        slot.atoms.forEach(function (atom) { if (typeof atom.uid === "number" && isFinite(atom.uid)) maxUid = Math.max(maxUid, atom.uid); });
+      });
+      nextUid = Math.max(nextUid, maxUid + 1);
+      comparisonColours = Array.isArray(payload.comparisonColours) && payload.comparisonColours.length === 2 ?
+        payload.comparisonColours.map(function (colour, index) { return typeof colour === "number" && isFinite(colour) ? colour : [0x4A6FA5, 0xC46A47][index]; }) :
+        [0x4A6FA5, 0xC46A47];
+      var visual = payload.visual || {};
+      OVERLAY_SESSION_VISUAL_KEYS.forEach(function (key) { if (visual.hasOwnProperty(key)) state[key] = visual[key]; });
+      activeStructureIndex = payload.activeStructureIndex === 1 ? 1 : 0;
+      applyStructureState(structureSlots[activeStructureIndex]);
+      comparisonViewMode = "overlay";
+      var maps = sessionAtomMaps(), comparison = payload.comparison || {};
+      anchorFitMode = false;
+      alignmentPairedGrowMode = false;
+      anchorPairs = (comparison.anchorPairs || []).map(function (pair) { return restoreSessionPair(pair, maps); }).filter(Boolean);
+      anchorPending = sessionRestoreAtom(comparison.anchorPending, maps[0]);
+      twoAnchorWholePackingFitComplete = !!comparison.twoAnchorWholePackingFitComplete;
+      moleculeFitResult = comparison.moleculeFitResult || null;
+      symmetryBaseCorrespondence = comparison.symmetryBaseCorrespondence ? {
+        pairs: (comparison.symmetryBaseCorrespondence.pairs || []).map(function (pair) { return restoreSessionPair(pair, maps); }).filter(Boolean),
+        total1: comparison.symmetryBaseCorrespondence.total1,
+        total2: comparison.symmetryBaseCorrespondence.total2
+      } : null;
+      comparisonAtomPairs = (comparison.comparisonAtomPairs || []).map(function (pair) { return restoreSessionPair(pair, maps); }).filter(Boolean);
+      comparisonAtomMask = comparison.comparisonAtomMask || {};
+      comparisonMaskLocked = !!comparison.comparisonMaskLocked;
+      molecularCorrespondenceResult = restoreMolecularCorrespondence(comparison.molecularCorrespondenceResult, maps);
+      showCorrespondenceLinks = comparison.showCorrespondenceLinks !== false;
+      radialAnalysisResult = comparison.radialAnalysisResult || null;
+      volumetricAnalysisResult = comparison.volumetricAnalysisResult || null;
+      radialReportText = comparison.radialReportText || "";
+      inflationOptimResults = comparison.inflationOptimResults || [];
+      comparisonDiagnosticEvents = comparison.diagnosticEvents || [];
+      symmetrySearchResults = [];
+      symmetrySearchSelected = 0;
+      symmetryPreviewStarted = false;
+      inflationCache = [null, null];
+      scene.background = new THREE.Color(state.bgColor);
+      setDepthScaling(!!state.depthScaling);
+      setLightMode(!!state.lightHeadlight);
+      setLightAngle(state.lightAngle);
+      setKeyLight(!!state.keyEnabled, state.keyIntensity);
+      setFillLight(!!state.fillEnabled, state.fillIntensity);
+      setRimLight(!!state.rimEnabled, state.rimIntensity);
+      if (sphereGeo) sphereGeo.dispose();
+      sphereGeo = new THREE.SphereGeometry(1, state.highDetail ? 48 : 20, state.highDetail ? 36 : 16);
+      rebuildActiveStructurePanel({ scrollTop: 0, sections: {} });
+      renderStructure();
+      renderUnitCell();
+      renderAnchorMarkers();
+      renderMolecularCorrespondenceLinks();
+      var savedCamera = payload.camera || {};
+      if (Array.isArray(savedCamera.orientation) && savedCamera.orientation.length === 4) {
+        camOrient.set(savedCamera.orientation[0], savedCamera.orientation[1], savedCamera.orientation[2], savedCamera.orientation[3]).normalize();
+      }
+      if (Array.isArray(savedCamera.target) && savedCamera.target.length === 3) {
+        camTarget.set(savedCamera.target[0], savedCamera.target[1], savedCamera.target[2]);
+      }
+      if (typeof savedCamera.distance === "number" && isFinite(savedCamera.distance) && savedCamera.distance > 0) camDist = savedCamera.distance;
+      applyController();
+      updateComparatorHeader();
+      updateAlignmentUI();
+      setStatus("Loaded overlay session " + (filename || "") + " with " + structureSlots[0].atoms.length + " / " + structureSlots[1].atoms.length + " atoms.", false);
+    } catch (e) {
+      setStatus("Could not restore this overlay session: " + (e && e.message ? e.message : String(e)), true);
+    }
+  }
   function exportImage() {
     renderExportBlob(function (blob, w, h) {
       if (!blob) { setStatus("Export failed.", true); return; }
@@ -4631,7 +4962,17 @@ select.sel:focus{border-color:var(--accent)}
     for (var i = 0; i < 8; i++) {
       var c = K.fracToCart(M, [(i & 1) ? 1 : 0, (i & 2) ? 1 : 0, (i & 4) ? 1 : 0]);
       var cp=new THREE.Vector3(c[0]+off[0],c[1]+off[1],c[2]+off[2]);
-      if(structureIndex===1&&structureSlots&&structureSlots[1]){var sc=structureSlots[1].inflationScale||1,ic=structureSlots[1].inflationCenter||ensureInflationCenter();if(ic&&Math.abs(sc-1)>1e-12){var cv=new THREE.Vector3(ic[0],ic[1],ic[2]);cp.sub(cv).multiplyScalar(sc).add(cv);}}
+      if(structureIndex===1&&structureSlots&&structureSlots[1]&&structureSlots[1].deformUnitCellDisplay){
+        var deformationSlot=structureSlots[1],sc=deformationSlot.inflationScale||1,ic=(deformationSlot.anisotropicEnabled&&deformationSlot.anisotropicCenter)||deformationSlot.inflationCenter||ensureInflationCenter();
+        if(ic){
+          var cv=new THREE.Vector3(ic[0],ic[1],ic[2]),relative=cp.clone().sub(cv),deformed=new THREE.Vector3();
+          if(deformationSlot.anisotropicEnabled){
+            var cellAxes=deformationSlot.anisotropicAxes||[[1,0,0],[0,1,0],[0,0,1]],cellStretches=deformationSlot.anisotropicStretches||[1,1,1];
+            for(var axisIndex=0;axisIndex<3;axisIndex++){var cellAxis=new THREE.Vector3(cellAxes[axisIndex][0],cellAxes[axisIndex][1],cellAxes[axisIndex][2]).normalize();deformed.addScaledVector(cellAxis,relative.dot(cellAxis)*cellStretches[axisIndex]);}
+          }else deformed.copy(relative);
+          cp.copy(cv).add(deformed.multiplyScalar(sc));
+        }
+      }
       corners.push([cp.x,cp.y,cp.z]);
     }
     var edges = [[0, 1], [0, 2], [0, 4], [1, 3], [1, 5], [2, 3], [2, 6], [3, 7], [4, 5], [4, 6], [5, 7], [6, 7]];
@@ -4969,7 +5310,7 @@ select.sel:focus{border-color:var(--accent)}
     state.cifFracToCart = cifMeta ? cifMeta.M : null;
     state.alignment = null;
     state.inflationScale = 1.0; state.inflationCenter = null;
-    state.anisotropicEnabled=false;state.anisotropicStretches=[1,1,1];state.anisotropicAxes=[[1,0,0],[0,1,0],[0,0,1]];state.anisotropicCenter=null;state.anisotropicResult=null;state.showAnisotropicEllipsoid=false;state.anisotropicEllipsoidStyle="solid";state.anisotropicEllipsoidColor=0x4A6FA5;state.anisotropicEllipsoidOpacity=0.28;
+    state.anisotropicEnabled=false;state.anisotropicStretches=[1,1,1];state.anisotropicAxes=[[1,0,0],[0,1,0],[0,0,1]];state.anisotropicCenter=null;state.anisotropicResult=null;state.deformUnitCellDisplay=false;state.showAnisotropicEllipsoid=false;state.anisotropicEllipsoidStyle="solid";state.anisotropicEllipsoidColor=0x4A6FA5;state.anisotropicEllipsoidOpacity=0.28;
     state.viewOffset = [0, 0, 0];
     recomputeViewOffset();
     if (typeof freshAlignment === "function") state.alignment = freshAlignment();
@@ -5667,6 +6008,14 @@ select.sel:focus{border-color:var(--accent)}
     hShowStyleRow.appendChild(hStyleSel);
     hc.appendChild(hShowStyleRow);
 
+    var overlayColourRow = el("div", "ctl-inline");
+    overlayColourRow.appendChild(el("label", "plain", "overlay colour"));
+    var activeOverlayColour = colorSwatch(comparisonColours[activeStructureIndex], function (hex) { setComparisonColour(activeStructureIndex, hex); });
+    activeOverlayColour.id = "comparisonColourActive";
+    activeOverlayColour.title = "Structure " + (activeStructureIndex + 1) + " overlay colour";
+    overlayColourRow.appendChild(activeOverlayColour);
+    hc.appendChild(overlayColourRow);
+
     slider(hc, "bond thickness", 0.02, 0.35, 0.01, state.hostBondRadius, U.ang, function (v) { state.hostBondRadius = v; renderStructure(); });
 
     var gc = section(left, "Guest");
@@ -6114,6 +6463,12 @@ select.sel:focus{border-color:var(--accent)}
     var cprow = el("div", "btnrow"); button(cprow, "Copy image to clipboard", "ghost", copyImageToClipboard); xc.appendChild(cprow);
     var pdfrow=el("div","btnrow");button(pdfrow,"Generate analysis report (PDF)","prominent",generatePdfReport);xc.appendChild(pdfrow);
     xc.appendChild(el("div","hint","Creates a local multi-page scientific report with the structural overlay, correspondence and strain results, radial plots and analysis settings."));
+    var pdb1row=el("div","btnrow");button(pdb1row,"Export Structure 1 overlay PDB","ghost",function(){exportOverlayMockPdb(0);});xc.appendChild(pdb1row);
+    var pdb2row=el("div","btnrow");button(pdb2row,"Export Structure 2 overlay PDB","ghost",function(){exportOverlayMockPdb(1);});xc.appendChild(pdb2row);
+    xc.appendChild(el("div","hint","Exports the current retained atoms using their final Cartesian positions in the shared overlay frame. Alignment, isotropic inflation and principal-strain deformation are included; unit-cell coordinates are not."));
+    var sessionSaveRow=el("div","btnrow");button(sessionSaveRow,"Export complete overlay (JSON)","prominent",exportOverlaySession);xc.appendChild(sessionSaveRow);
+    var sessionLoadRow=el("div","btnrow");button(sessionLoadRow,"Load overlay session (JSON)","ghost",function(){document.getElementById("overlaySessionInput").click();});xc.appendChild(sessionLoadRow);
+    xc.appendChild(el("div","hint","The portable JSON session restores both structures, their shared-space overlay, colours, camera view, deformation, correspondence markers and completed analysis results."));
   }
 
   var STRUCTURE_STATE_KEYS = [
@@ -6124,12 +6479,15 @@ select.sel:focus{border-color:var(--accent)}
     "cutBonds", "cutBondSignatures", "undoStack", "selectedBonds",
     "hostBondRadius", "hostColors", "defaultColors", "hostColorMode", "hostSingleColor",
     "hostBondColorMode", "hostBondColor", "radii", "alignment", "inflationScale", "inflationCenter",
-    "anisotropicEnabled", "anisotropicStretches", "anisotropicAxes", "anisotropicCenter", "anisotropicResult", "showAnisotropicEllipsoid", "anisotropicEllipsoidStyle", "anisotropicEllipsoidColor", "anisotropicEllipsoidOpacity"
+    "anisotropicEnabled", "anisotropicStretches", "anisotropicAxes", "anisotropicCenter", "anisotropicResult", "deformUnitCellDisplay", "showAnisotropicEllipsoid", "anisotropicEllipsoidStyle", "anisotropicEllipsoidColor", "anisotropicEllipsoidOpacity"
   ];
   var structureSlots = null;
   var activeStructureIndex = 0;
   var comparisonViewMode = "structure1";
   var comparisonColours = [0x4A6FA5, 0xC46A47];
+  var COMPARATOR_BUILD = "2026-07-29.12-optional-strained-unit-cell";
+  var comparisonDiagnosticEvents = [];
+  function recordComparisonDiagnosticEvent(name,data){comparisonDiagnosticEvents.push({time:new Date().toISOString(),name:name,data:data||null});if(comparisonDiagnosticEvents.length>500)comparisonDiagnosticEvents.shift();}
   var alignmentMode = "camera";
   var alignmentMovingIndex = 1;
   var interactiveAlignment = false;
@@ -6157,6 +6515,15 @@ select.sel:focus{border-color:var(--accent)}
   var inflationOptimResults = [];
   var autofitCursor = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M4 4L20 20M20 4L4 20' stroke='white' stroke-width='5' stroke-linecap='round'/%3E%3Cpath d='M4 4L20 20M20 4L4 20' stroke='%231c2430' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E\") 12 12, crosshair";
 
+  function setComparisonColour(index, hex) {
+    if (index < 0 || index > 1 || !isFinite(hex)) return;
+    comparisonColours[index] = hex;
+    renderStructure();
+    renderUnitCell();
+    renderAnchorMarkers();
+    renderMolecularCorrespondenceLinks();
+  }
+
   function updateViewportCursor(){
     var vp=document.getElementById("viewport");if(!vp)return;
     if(anchorFitMode){vp.style.cursor=autofitCursor;return;}
@@ -6169,9 +6536,9 @@ select.sel:focus{border-color:var(--accent)}
   function clearAllDerivedComparisonState(){
     anchorFitMode=false;alignmentPairedGrowMode=false;anchorPairs=[];anchorPending=null;twoAnchorWholePackingFitComplete=false;moleculeFitResult=null;symmetrySearchResults=[];symmetrySearchSelected=0;symmetryPreviewStarted=false;symmetryBaseCorrespondence=null;
     comparisonAtomPairs=[];comparisonAtomMask={};comparisonMaskLocked=false;molecularCorrespondenceResult=null;radialAnalysisResult=null;volumetricAnalysisResult=null;radialReportText="";inflationOptimResults=[];inflationCache=[null,null];
-    function resetSlot(slot){if(!slot)return;slot.alignment=freshAlignment();slot.inflationScale=1;slot.inflationCenter=null;slot.anisotropicEnabled=false;slot.anisotropicStretches=[1,1,1];slot.anisotropicAxes=[[1,0,0],[0,1,0],[0,0,1]];slot.anisotropicCenter=null;slot.anisotropicResult=null;slot.showAnisotropicEllipsoid=false;}
+    function resetSlot(slot){if(!slot)return;slot.alignment=freshAlignment();slot.inflationScale=1;slot.inflationCenter=null;slot.anisotropicEnabled=false;slot.anisotropicStretches=[1,1,1];slot.anisotropicAxes=[[1,0,0],[0,1,0],[0,0,1]];slot.anisotropicCenter=null;slot.anisotropicResult=null;slot.deformUnitCellDisplay=false;slot.showAnisotropicEllipsoid=false;}
     if(structureSlots){resetSlot(structureSlots[0]);resetSlot(structureSlots[1]);}
-    state.alignment=freshAlignment();state.inflationScale=1;state.inflationCenter=null;state.anisotropicEnabled=false;state.anisotropicStretches=[1,1,1];state.anisotropicAxes=[[1,0,0],[0,1,0],[0,0,1]];state.anisotropicCenter=null;state.anisotropicResult=null;state.showAnisotropicEllipsoid=false;
+    state.alignment=freshAlignment();state.inflationScale=1;state.inflationCenter=null;state.anisotropicEnabled=false;state.anisotropicStretches=[1,1,1];state.anisotropicAxes=[[1,0,0],[0,1,0],[0,0,1]];state.anisotropicCenter=null;state.anisotropicResult=null;state.deformUnitCellDisplay=false;state.showAnisotropicEllipsoid=false;
     if(anisotropicEllipsoidGroup)clearGroup(anisotropicEllipsoidGroup);if(correspondenceLinkGroup)clearGroup(correspondenceLinkGroup);if(anchorMarkerGroup)clearGroup(anchorMarkerGroup);
     if(typeof updateAnchorUI==="function")updateAnchorUI();if(typeof updateCorrespondenceUI==="function")updateCorrespondenceUI();if(typeof updateSymmetrySearchUI==="function")updateSymmetrySearchUI();if(typeof updateAnisotropicUI==="function")updateAnisotropicUI();if(typeof updateVolumetricUI==="function")updateVolumetricUI();if(typeof updateRadialAnalysisUI==="function")updateRadialAnalysisUI();if(typeof updateAlignmentUI==="function")updateAlignmentUI();
   }
@@ -6196,7 +6563,7 @@ select.sel:focus{border-color:var(--accent)}
     empty.hostColors = {}; empty.defaultColors = {}; empty.radii = Object.assign({}, template.radii || {});
     empty.alignment = freshAlignment();
     empty.inflationScale = 1.0; empty.inflationCenter = null;
-    empty.anisotropicEnabled=false;empty.anisotropicStretches=[1,1,1];empty.anisotropicAxes=[[1,0,0],[0,1,0],[0,0,1]];empty.anisotropicCenter=null;empty.anisotropicResult=null;empty.showAnisotropicEllipsoid=false;empty.anisotropicEllipsoidStyle="solid";empty.anisotropicEllipsoidColor=0x4A6FA5;empty.anisotropicEllipsoidOpacity=0.28;
+    empty.anisotropicEnabled=false;empty.anisotropicStretches=[1,1,1];empty.anisotropicAxes=[[1,0,0],[0,1,0],[0,0,1]];empty.anisotropicCenter=null;empty.anisotropicResult=null;empty.deformUnitCellDisplay=false;empty.showAnisotropicEllipsoid=false;empty.anisotropicEllipsoidStyle="solid";empty.anisotropicEllipsoidColor=0x4A6FA5;empty.anisotropicEllipsoidOpacity=0.28;
     return empty;
   }
   function saveActiveStructureState() {
@@ -6210,11 +6577,37 @@ select.sel:focus{border-color:var(--accent)}
   function clearGroupAlignment(group) {
     if (!group) return; group.position.set(0, 0, 0); group.rotation.set(0, 0, 0);
   }
+  function updateDisplayedRotationCenter() {
+    var nextTarget = new THREE.Vector3(), count = 0;
+    if (comparisonViewMode === "overlay" && structureSlots) {
+      for (var structureIndex = 0; structureIndex < 2; structureIndex++) {
+        var slot = structureSlots[structureIndex];
+        if (!slot || slot.showHost === false || !slot.atoms) continue;
+        for (var atomIndex = 0; atomIndex < slot.atoms.length; atomIndex++) {
+          var atom = slot.atoms[atomIndex];
+          if (slot.isCif && slot.showOnlyAsu &&
+              !(atom.opIndex === 0 && atom.cellI === 0 && atom.cellJ === 0 && atom.cellK === 0)) continue;
+          nextTarget.add(atomAlignedPosition(atom, structureIndex));
+          count++;
+        }
+      }
+      if (count) nextTarget.multiplyScalar(1 / count);
+    }
+    if (nextTarget.distanceToSquared(camTarget) > 1e-20) {
+      camTarget.copy(nextTarget);
+      /* applyController moves the camera by the same change in target, retaining
+         the current viewing direction, roll and zoom while recentering the
+         displayed model and making its centroid the new orbit point. */
+      applyController();
+    }
+  }
   function applyAlignmentTransforms() {
     var activeGroups = [atomsGroup, bondsGroup, hbondsGroup, unitCellGroup];
     var otherGroups = [comparisonAtomsGroup, comparisonBondsGroup, comparisonUnitCellGroup];
     if (comparisonViewMode !== "overlay" || !structureSlots) {
-      activeGroups.concat(otherGroups).forEach(clearGroupAlignment); clearGroupAlignment(anisotropicEllipsoidGroup); return;
+      activeGroups.concat(otherGroups).forEach(clearGroupAlignment); clearGroupAlignment(anisotropicEllipsoidGroup);
+      updateDisplayedRotationCenter();
+      return;
     }
     saveActiveStructureState();
     var activeA = ensureAlignment(structureSlots[activeStructureIndex]);
@@ -6224,6 +6617,7 @@ select.sel:focus{border-color:var(--accent)}
     if(anisotropicEllipsoidGroup)setGroupAlignment(anisotropicEllipsoidGroup,ensureAlignment(structureSlots[1]));
     if(selectionGroup&&selectionGroup.children.length)renderSelection();
     if (anchorFitMode || anchorPairs.length || anchorPending) renderAnchorMarkers();
+    updateDisplayedRotationCenter();
   }
   function movingAlignment() {
     return alignmentForIndex(alignmentMovingIndex);
@@ -6248,9 +6642,10 @@ select.sel:focus{border-color:var(--accent)}
     var centre=(aniso&&slot.anisotropicCenter)||slot.inflationCenter||ensureInflationCenter();
     var anisoIdentity=Math.abs(stretches[0]-1)<1e-12&&Math.abs(stretches[1]-1)<1e-12&&Math.abs(stretches[2]-1)<1e-12;
     if(!centre||(Math.abs(scale-1)<1e-12&&(!aniso||anisoIdentity)))return null;
-    var key=(slot.atoms?slot.atoms.length:0)+"|"+scale.toFixed(8)+"|"+centre.join(",")+"|"+(slot.viewOffset||[]).join(",")+"|"+aniso+"|"+stretches.join(",")+"|"+JSON.stringify(axes);if(inflationCache[1]&&inflationCache[1].key===key)return inflationCache[1].map;
+    var centroidPairs=comparisonMaskLocked?activeComparisonAtomPairs():null;if(centroidPairs&&centroidPairs.length<3)centroidPairs=null;var centroidSignature=centroidPairs?centroidPairs.map(function(p){return p.a2&&p.a2.auIndex;}).join(","):"full";
+    var key=(slot.atoms?slot.atoms.length:0)+"|"+scale.toFixed(8)+"|"+centre.join(",")+"|"+(slot.viewOffset||[]).join(",")+"|"+aniso+"|"+stretches.join(",")+"|"+JSON.stringify(axes)+"|"+centroidSignature;if(inflationCache[1]&&inflationCache[1].key===key)return inflationCache[1].map;
     var map={},C=new THREE.Vector3(centre[0],centre[1],centre[2]),axisVec=axes.map(function(a){return new THREE.Vector3(a[0],a[1],a[2]).normalize();}),components=allMolecularComponents(slot);
-    components.forEach(function(comp){var mc=new THREE.Vector3(),n=0;comp.forEach(function(a){if(a.el!=="H"){mc.add(rawAtomLocalPosition(a,1));n++;}});if(!n)return;mc.multiplyScalar(1/n);var v=mc.clone().sub(C),moved=new THREE.Vector3();
+    components.forEach(function(comp){var comparable=centroidPairs&&componentComparableCentroid(comp,1,centroidPairs,rawAtomLocalPosition),mc=comparable&&comparable.c,n=comparable&&comparable.n;if(!mc){mc=new THREE.Vector3();n=0;comp.forEach(function(a){if(a.el!=="H"){mc.add(rawAtomLocalPosition(a,1));n++;}});if(!n)return;mc.multiplyScalar(1/n);}var v=mc.clone().sub(C),moved=new THREE.Vector3();
       if(aniso)for(var d=0;d<3;d++)moved.addScaledVector(axisVec[d],v.dot(axisVec[d])*stretches[d]);else moved.copy(v);
       moved.multiplyScalar(scale);var shift=moved.sub(v);comp.forEach(function(a){map[a.uid]=shift;});
     });inflationCache[1]={key:key,map:map};return map;
@@ -6353,10 +6748,10 @@ select.sel:focus{border-color:var(--accent)}
     if(hit.structureIndex!==expected){setStatus("Select the next anchor in Structure "+(expected+1)+".",true);return;}
     if(!anchorPending){anchorPending=hit.atom;setStatus("Now select the corresponding atom in Structure 2.",false);}
     else {
-      anchorPairs.push({a1:anchorPending,a2:hit.atom});anchorPending=null;moleculeFitResult=null;symmetrySearchResults=[];symmetryPreviewStarted=false;symmetryBaseCorrespondence=null;invalidateComparisonDefinition();
+      anchorPairs.push({a1:anchorPending,a2:hit.atom});recordComparisonDiagnosticEvent("anchor-pair-added",{pair:anchorPairs.length,a1:comparisonAtomLabel(anchorPending,0),a2:comparisonAtomLabel(hit.atom,1)});anchorPending=null;moleculeFitResult=null;symmetrySearchResults=[];symmetryPreviewStarted=false;symmetryBaseCorrespondence=null;invalidateComparisonDefinition();
       if(anchorPairs.length>=3)anchorFitMode=false;
       fitAnchorPairs();
-      if(anchorPairs.length>=3)setStatus("Three anchor pairs fitted. Autofit selection is now off; continue with whole-molecule fitting.",false);
+      if(anchorPairs.length>=3)setStatus("Three anchor pairs fitted. Autofit selection is now off; continue with molecule or packed-substructure fitting.",false);
       else setStatus("Anchor pair "+anchorPairs.length+" fitted. Select the next atom in Structure 1.",false);
     }
     renderAnchorMarkers();updateAnchorUI();updateViewportCursor();
@@ -6391,7 +6786,7 @@ select.sel:focus{border-color:var(--accent)}
   }
   function undoAnchor(){if(anchorPending)anchorPending=null;else{anchorPairs.pop();twoAnchorWholePackingFitComplete=false;}moleculeFitResult=null;symmetrySearchResults=[];symmetryPreviewStarted=false;symmetryBaseCorrespondence=null;invalidateComparisonDefinition();if(anchorPairs.length)fitAnchorPairs();renderAnchorMarkers();updateAnchorUI();updateSymmetrySearchUI();}
   function toggleAnchorFit(){anchorFitMode=!anchorFitMode;if(anchorFitMode){exitGrowMode();alignmentPairedGrowMode=false;updateAlignmentPairedGrowUI();if(structureSlots){structureSlots[0].growMode=false;structureSlots[1].growMode=false;}comparisonViewMode="overlay";interactiveAlignment=false;alignmentMode="camera";setStatus(anchorPending?"Select the corresponding atom in Structure 2.":"Select the first anchor atom in Structure 1.",false);}updateComparatorHeader();renderStructure();renderUnitCell();updateAnchorUI();updateAlignmentUI();updateViewportCursor();}
-  function updateAnchorUI(){var b=document.getElementById("anchorFitBtn");if(b){b.textContent=anchorFitMode?"Anchor fit is ON — click corresponding atoms":"Anchor fit is OFF — click to start";b.className="btn prominent"+(anchorFitMode?" grow-active":" ghost");}var axisFit=document.getElementById("twoAnchorAxisFitBtn");if(axisFit)axisFit.disabled=anchorPairs.length!==2||!!anchorPending;var refine=document.getElementById("moleculeFitBtn");if(refine)refine.disabled=anchorPairs.length<3&&!twoAnchorWholePackingFitComplete&&!symmetryBaseCorrespondence;var box=document.getElementById("anchorInfo");if(box){var rms=anchorRmsd();box.innerHTML="<div>Pairs: "+anchorPairs.length+(anchorPending?" + Structure 1 atom pending":"")+"</div><div>Next: Structure "+(anchorPending?2:1)+"</div>"+(rms!==null?"<div>Anchor RMSD: "+rms.toFixed(4)+" "+U.ang+"</div>":"");}var result=document.getElementById("moleculeFitInfo");if(result){if(!moleculeFitResult)result.innerHTML="<div class='dim'>No whole-molecule fit yet.</div>";else result.innerHTML="<div><b>Whole-molecule fit</b></div><div>Matched: "+moleculeFitResult.matched+" heavy atoms</div><div>Coverage: "+moleculeFitResult.coverage1.toFixed(1)+"% / "+moleculeFitResult.coverage2.toFixed(1)+"%</div><div>RMSD: "+moleculeFitResult.rmsd.toFixed(4)+" "+U.ang+"</div><div>Unmatched: "+moleculeFitResult.unmatched1+" / "+moleculeFitResult.unmatched2+"</div>";}}
+  function updateAnchorUI(){var b=document.getElementById("anchorFitBtn");if(b){b.textContent=anchorFitMode?"Anchor fit is ON — click corresponding atoms":"Anchor fit is OFF — click to start";b.className="btn prominent"+(anchorFitMode?" grow-active":" ghost");}var axisFit=document.getElementById("twoAnchorAxisFitBtn");if(axisFit)axisFit.disabled=anchorPairs.length!==2||!!anchorPending;var refine=document.getElementById("moleculeFitBtn");if(refine)refine.disabled=anchorPairs.length<3&&!twoAnchorWholePackingFitComplete&&!symmetryBaseCorrespondence;var box=document.getElementById("anchorInfo");if(box){var rms=anchorRmsd();box.innerHTML="<div>Pairs: "+anchorPairs.length+(anchorPending?" + Structure 1 atom pending":"")+"</div><div>Next: Structure "+(anchorPending?2:1)+"</div>"+(rms!==null?"<div>Anchor RMSD: "+rms.toFixed(4)+" "+U.ang+"</div>":"");}var result=document.getElementById("moleculeFitInfo");if(result){if(!moleculeFitResult)result.innerHTML="<div class='dim'>No molecule or packed-substructure fit yet.</div>";else{var fitLabel=moleculeFitResult.fitType==="substructure"?"Packed-substructure fit":"Whole-molecule fit";result.innerHTML="<div><b>"+fitLabel+"</b></div>"+(moleculeFitResult.components>1?"<div>Anchored molecule pairs: "+moleculeFitResult.components+"</div>":"")+"<div>Matched: "+moleculeFitResult.matched+" heavy atoms</div><div>Coverage: "+moleculeFitResult.coverage1.toFixed(1)+"% / "+moleculeFitResult.coverage2.toFixed(1)+"%</div><div>RMSD: "+moleculeFitResult.rmsd.toFixed(4)+" "+U.ang+"</div><div>Unmatched: "+moleculeFitResult.unmatched1+" / "+moleculeFitResult.unmatched2+"</div>";}}}
   function comparisonPairKey(p){return p.a1.uid+"|"+p.a2.uid;}
   function comparisonAtomLabel(atom,index){var slot=structureSlots&&structureSlots[index],au=slot&&slot.cifAsymUnit&&atom.auIndex!==undefined?slot.cifAsymUnit[atom.auIndex]:null;return au&&au.label?au.label:(atom.label||atom.el+(atom.auIndex!==undefined?atom.auIndex+1:""));}
   function activeComparisonAtomPairs(){return comparisonAtomPairs.filter(function(p){return comparisonAtomMask[comparisonPairKey(p)]!==false;});}
@@ -6402,12 +6797,16 @@ select.sel:focus{border-color:var(--accent)}
   function toggleComparisonMaskLock(){if(!comparisonAtomPairs.length){setStatus("Build the comparison atom set first.",true);return;}if(!comparisonMaskLocked&&activeComparisonAtomPairs().length<3){setStatus("At least three included atom pairs are required.",true);return;}comparisonMaskLocked=!comparisonMaskLocked;molecularCorrespondenceResult=null;radialAnalysisResult=null;renderMolecularCorrespondenceLinks();updateCorrespondenceUI();updateRadialAnalysisUI();setStatus(comparisonMaskLocked?"Comparison atom set locked.":"Comparison atom set unlocked; molecular assignments were cleared.",false);}
   function componentCentroidDisplayed(comp,index){var c=new THREE.Vector3(),n=0;comp.forEach(function(a){if(a.el!=="H"){c.add(atomAlignedPosition(a,index));n++;}});return n?c.multiplyScalar(1/n):null;}
   function componentAtomMap(comp){var m={};comp.forEach(function(a){if(a.auIndex!==undefined)m[a.auIndex]=a;});return m;}
-  function componentPairAtomicRmsd(comp1,comp2,pairs){var m1=componentAtomMap(comp1),m2=componentAtomMap(comp2),sum=0,n=0;pairs.forEach(function(p){var a=m1[p.a1.auIndex],b=m2[p.a2.auIndex];if(a&&b&&a.el===p.a1.el&&b.el===p.a2.el){sum+=atomAlignedPosition(a,0).distanceToSquared(atomAlignedPosition(b,1));n++;}});return n>=3?{rmsd:Math.sqrt(sum/n),n:n}:null;}
-  function matchMolecularNeighbourhood(){if(!comparisonMaskLocked){setStatus("Lock the comparison atom set before matching surrounding molecules.",true);return;}var atomPairs=activeComparisonAtomPairs(),radius=parseFloat(document.getElementById("corrRadius").value),cutoff=parseFloat(document.getElementById("corrCutoff").value);if(!isFinite(radius)||radius<=0||!isFinite(cutoff)||cutoff<=0){setStatus("Enter positive molecular matching radius and tolerance values.",true);return;}saveActiveStructureState();var refs=referenceMolecules();if(!refs){setStatus("No fitted whole-molecule reference is available.",true);return;}var central1=refs.comp1,central2=refs.comp2,origin1=componentCentroidDisplayed(central1,0),origin2=componentCentroidDisplayed(central2,1);if(!origin1||!origin2){setStatus("Could not determine the reference molecular centroids.",true);return;}
-    function records(index,origin,limit){return allMolecularComponents(structureSlots[index]).map(function(comp){var c=componentCentroidDisplayed(comp,index),heavy=comp.filter(function(a){return a.el!=="H";}).length;return {comp:comp,c:c,heavy:heavy};}).filter(function(r){return r.c&&r.heavy>=3&&r.c.distanceTo(origin)<=limit;});}
-    var r1=records(0,origin1,radius),r2=records(1,origin2,radius+cutoff),candidates=[];r1.forEach(function(a,i){r2.forEach(function(b,j){if(Math.abs(a.heavy-b.heavy)>Math.max(3,.25*Math.max(a.heavy,b.heavy)))return;var cd=a.c.distanceTo(b.c);if(cd>cutoff)return;var ar=componentPairAtomicRmsd(a.comp,b.comp,atomPairs);if(!ar)return;candidates.push({i:i,j:j,cost:cd+.15*ar.rmsd,centroidDistance:cd,atomicRmsd:ar.rmsd,atomCount:ar.n});});});candidates.sort(function(a,b){return a.cost-b.cost;});var used1={},used2={},matches=[];candidates.forEach(function(p){if(!used1[p.i]&&!used2[p.j]){used1[p.i]=used2[p.j]=1;matches.push({comp1:r1[p.i].comp,comp2:r2[p.j].comp,c1:r1[p.i].c,c2:r2[p.j].c,centroidDistance:p.centroidDistance,atomicRmsd:p.atomicRmsd,atomCount:p.atomCount});}});
-    var csum=0,asum=0,atoms=0;matches.forEach(function(p){csum+=p.centroidDistance*p.centroidDistance;asum+=p.atomicRmsd*p.atomicRmsd*p.atomCount;atoms+=p.atomCount;});molecularCorrespondenceResult={pairs:matches,count1:r1.length,count2:r2.length,components1:r1.map(function(r){return r.comp;}),components2:r2.map(function(r){return r.comp;}),radius:radius,cutoff:cutoff,centroidRmsd:matches.length?Math.sqrt(csum/matches.length):Infinity,atomicRmsd:atoms?Math.sqrt(asum/atoms):Infinity,matchedAtoms:atoms};radialAnalysisResult=null;renderMolecularCorrespondenceLinks();updateCorrespondenceUI();updateRadialAnalysisUI();setStatus("Matched "+matches.length+" molecular pairs within "+radius.toFixed(1)+" "+U.ang+".",false);}
-  function renderMolecularCorrespondenceLinks(){if(!correspondenceLinkGroup)return;while(correspondenceLinkGroup.children.length){var old=correspondenceLinkGroup.children.pop();if(old.geometry)old.geometry.dispose();if(old.material)old.material.dispose();}if(!showCorrespondenceLinks||!molecularCorrespondenceResult)return;var mat=new THREE.LineBasicMaterial({color:0x8f6b24,transparent:true,opacity:.8,depthTest:false});molecularCorrespondenceResult.pairs.forEach(function(p){var c1=componentCentroidDisplayed(p.comp1,0),c2=componentCentroidDisplayed(p.comp2,1);if(!c1||!c2)return;var geo=new THREE.BufferGeometry().setFromPoints([c1,c2]),line=new THREE.Line(geo,mat.clone());line.renderOrder=28;correspondenceLinkGroup.add(line);});}
+  function componentComparableAtoms(comp,index,pairs){var required={},out=[];pairs.forEach(function(p){var t=index===0?p.a1:p.a2;if(!t||t.auIndex===undefined)return;var key=t.el+"|"+t.auIndex;required[key]=(required[key]||0)+1;});Object.keys(required).forEach(function(key){var parts=key.split("|"),elName=parts[0],au=parseInt(parts[1],10),available=comp.filter(function(a){return a.el===elName&&a.auIndex===au;});for(var i=0;i<Math.min(required[key],available.length);i++)out.push(available[i]);});return out;}
+  function componentComparableCentroid(comp,index,pairs,positionFunction){var atoms=componentComparableAtoms(comp,index,pairs),c=new THREE.Vector3();atoms.forEach(function(a){c.add(positionFunction(a,index));});return atoms.length>=3?{c:c.multiplyScalar(1/atoms.length),n:atoms.length}:null;}
+  function directComponentAtomicMatch(comp1,comp2,pairs,positionFunction){var required={};pairs.forEach(function(p){if(p.a1&&p.a2&&p.a1.el===p.a2.el)required[p.a1.el]=(required[p.a1.el]||0)+1;});var selected=[];Object.keys(required).forEach(function(elName){var one=comp1.filter(function(a){return a.el===elName;}),two=comp2.filter(function(a){return a.el===elName;}),candidates=[];one.forEach(function(a,i){two.forEach(function(b,j){var d2=positionFunction(a,0).distanceToSquared(positionFunction(b,1));candidates.push({i:i,j:j,a1:a,a2:b,d2:d2,cost:d2});});});var assigned=minimumCostMolecularAssignment(one.length,two.length,candidates);assigned.sort(function(a,b){return a.d2-b.d2;});var limit=Math.min(required[elName],assigned.length);for(var k=0;k<limit;k++)selected.push(assigned[k]);});var sum=0;selected.forEach(function(p){sum+=p.d2;});return selected.length>=3?{rmsd:Math.sqrt(sum/selected.length),n:selected.length,pairs:selected.map(function(p){return {a1:p.a1,a2:p.a2};})}:null;}
+  function componentPairAtomicRmsd(comp1,comp2,pairs){return directComponentAtomicMatch(comp1,comp2,pairs,atomAlignedPosition);}
+  function minimumCostMolecularAssignment(count1,count2,candidates){var n=Math.max(count1,count2),missing=1e8,unmatched=1e4,cost=Array.from({length:n},function(_,i){return Array.from({length:n},function(_,j){return i<count1&&j<count2?missing:unmatched;});}),lookup={};candidates.forEach(function(c){cost[c.i][c.j]=c.cost;lookup[c.i+"|"+c.j]=c;});var u=new Array(n+1).fill(0),v=new Array(n+1).fill(0),p=new Array(n+1).fill(0),way=new Array(n+1).fill(0);for(var i=1;i<=n;i++){p[0]=i;var j0=0,minv=new Array(n+1).fill(Infinity),used=new Array(n+1).fill(false);do{used[j0]=true;var i0=p[j0],delta=Infinity,j1=0;for(var j=1;j<=n;j++)if(!used[j]){var cur=cost[i0-1][j-1]-u[i0]-v[j];if(cur<minv[j]){minv[j]=cur;way[j]=j0;}if(minv[j]<delta){delta=minv[j];j1=j;}}for(j=0;j<=n;j++)if(used[j]){u[p[j]]+=delta;v[j]-=delta;}else minv[j]-=delta;j0=j1;}while(p[j0]!==0);do{var previous=way[j0];p[j0]=p[previous];j0=previous;}while(j0!==0);}var out=[];for(var col=1;col<=n;col++){var row=p[col]-1,candidate=lookup[row+"|"+(col-1)];if(row>=0&&row<count1&&col-1<count2&&candidate)out.push(candidate);}return out;}
+  function matchMolecularNeighbourhood(){if(!comparisonMaskLocked){setStatus("Lock the comparison atom set before matching surrounding molecules.",true);return;}var atomPairs=activeComparisonAtomPairs(),radius=parseFloat(document.getElementById("corrRadius").value),cutoff=parseFloat(document.getElementById("corrCutoff").value);if(!isFinite(radius)||radius<=0||!isFinite(cutoff)||cutoff<=0){setStatus("Enter positive molecular matching radius and tolerance values.",true);return;}saveActiveStructureState();var refs=referenceMolecules();if(!refs){setStatus("No fitted whole-molecule reference is available.",true);return;}var central1=refs.comp1,central2=refs.comp2,centralComparable1=componentComparableCentroid(central1,0,atomPairs,atomAlignedPosition),centralComparable2=componentComparableCentroid(central2,1,atomPairs,atomAlignedPosition),origin1=centralComparable1&&centralComparable1.c,origin2=centralComparable2&&centralComparable2.c;if(!origin1||!origin2){setStatus("Could not determine the locked-scaffold centroids of the reference molecules.",true);return;}
+    function records(index,origin,limit){return allMolecularComponents(structureSlots[index]).map(function(comp){var comparable=componentComparableCentroid(comp,index,atomPairs,atomAlignedPosition);return {comp:comp,c:comparable&&comparable.c,comparable:comparable?comparable.n:0};}).filter(function(r){return r.c&&r.comparable>=3&&r.c.distanceTo(origin)<=limit;});}
+    var r1=records(0,origin1,radius),r2=records(1,origin2,radius+cutoff),candidates=[];r1.forEach(function(a,i){r2.forEach(function(b,j){var cd=a.c.distanceTo(b.c);if(cd>cutoff)return;var ar=componentPairAtomicRmsd(a.comp,b.comp,atomPairs);if(!ar)return;candidates.push({i:i,j:j,cost:ar.rmsd+.25*cd,centroidDistance:cd,atomicRmsd:ar.rmsd,atomCount:ar.n,directAtomPairs:ar.pairs});});});var assignments=minimumCostMolecularAssignment(r1.length,r2.length,candidates),matches=assignments.map(function(p){return {comp1:r1[p.i].comp,comp2:r2[p.j].comp,c1:r1[p.i].c,c2:r2[p.j].c,centroidDistance:p.centroidDistance,atomicRmsd:p.atomicRmsd,atomCount:p.atomCount,atomPairs:p.directAtomPairs};});
+    var csum=0,asum=0,atoms=0;matches.forEach(function(p){csum+=p.centroidDistance*p.centroidDistance;asum+=p.atomicRmsd*p.atomicRmsd*p.atomCount;atoms+=p.atomCount;});molecularCorrespondenceResult={pairs:matches,count1:r1.length,count2:r2.length,components1:r1.map(function(r){return r.comp;}),components2:r2.map(function(r){return r.comp;}),radius:radius,cutoff:cutoff,centroidRmsd:matches.length?Math.sqrt(csum/matches.length):Infinity,atomicRmsd:atoms?Math.sqrt(asum/atoms):Infinity,matchedAtoms:atoms};recordComparisonDiagnosticEvent("molecular-neighbourhood-matched",{matched:matches.length,available1:r1.length,available2:r2.length,centroidRmsd:molecularCorrespondenceResult.centroidRmsd,atomicRmsd:molecularCorrespondenceResult.atomicRmsd,matchedAtoms:atoms,radius:radius,cutoff:cutoff});radialAnalysisResult=null;renderMolecularCorrespondenceLinks();updateCorrespondenceUI();updateRadialAnalysisUI();setStatus("Matched "+matches.length+" molecular pairs within "+radius.toFixed(1)+" "+U.ang+".",false);}
+  function renderMolecularCorrespondenceLinks(){if(!correspondenceLinkGroup)return;while(correspondenceLinkGroup.children.length){var old=correspondenceLinkGroup.children.pop();if(old.geometry)old.geometry.dispose();if(old.material)old.material.dispose();}if(!showCorrespondenceLinks||!molecularCorrespondenceResult)return;var mat=new THREE.LineBasicMaterial({color:0x8f6b24,transparent:true,opacity:.8,depthTest:false}),atomPairs=activeComparisonAtomPairs();molecularCorrespondenceResult.pairs.forEach(function(p){var a=componentComparableCentroid(p.comp1,0,atomPairs,atomAlignedPosition),b=componentComparableCentroid(p.comp2,1,atomPairs,atomAlignedPosition),c1=a&&a.c,c2=b&&b.c;if(!c1||!c2)return;var geo=new THREE.BufferGeometry().setFromPoints([c1,c2]),line=new THREE.Line(geo,mat.clone());line.renderOrder=28;correspondenceLinkGroup.add(line);});}
   function updateCorrespondenceUI(){var list=document.getElementById("correspondencePairsList"),lock=document.getElementById("corrLockBtn"),info=document.getElementById("molecularCorrespondenceInfo"),links=document.getElementById("corrShowLinks");if(lock){lock.textContent=comparisonMaskLocked?"Comparison atom set is LOCKED":"Lock comparison atom set";lock.className="btn prominent"+(comparisonMaskLocked?" grow-active":" ghost");}if(links)links.checked=showCorrespondenceLinks;if(list){list.innerHTML="";if(!comparisonAtomPairs.length)list.innerHTML="<div class='dim'>No comparison atom set yet.</div>";else comparisonAtomPairs.forEach(function(p,i){var row=document.createElement("label");row.className="toggle";var cb=document.createElement("input");cb.type="checkbox";cb.checked=comparisonAtomMask[comparisonPairKey(p)]!==false;cb.disabled=comparisonMaskLocked;cb.addEventListener("change",function(){comparisonAtomMask[comparisonPairKey(p)]=cb.checked;molecularCorrespondenceResult=null;radialAnalysisResult=null;renderMolecularCorrespondenceLinks();updateCorrespondenceUI();updateRadialAnalysisUI();});row.appendChild(cb);row.appendChild(document.createTextNode(" "+comparisonAtomLabel(p.a1,0)+" ↔ "+comparisonAtomLabel(p.a2,1)));list.appendChild(row);});}if(info){var r=molecularCorrespondenceResult;if(!r)info.innerHTML="<div class='dim'>No molecular neighbourhood match yet.</div>";else info.innerHTML="<div><b>One-to-one molecular correspondence</b></div><div>Matched: "+r.pairs.length+"</div><div>Available: "+r.count1+" / "+r.count2+"</div><div>Unmatched: "+(r.count1-r.pairs.length)+" / "+(r.count2-r.pairs.length)+"</div><div>Centroid RMSD: "+(isFinite(r.centroidRmsd)?r.centroidRmsd.toFixed(4):"—")+" "+U.ang+"</div><div>Atomic RMSD: "+(isFinite(r.atomicRmsd)?r.atomicRmsd.toFixed(4):"—")+" "+U.ang+"</div><div>Matched atom observations: "+r.matchedAtoms+"</div>";}}
   function unmatchedMolecularComponents(){
     var r=molecularCorrespondenceResult;if(!r||!r.components1||!r.components2)return null;var matchedComp1=r.pairs.map(function(p){return p.comp1;}),matchedComp2=r.pairs.map(function(p){return p.comp2;});
@@ -6432,16 +6831,14 @@ select.sel:focus{border-color:var(--accent)}
   function baseAtomWorldPosition(atom,index){var p=rawAtomLocalPosition(atom,index),a=ensureAlignment(structureSlots[index]);return p.applyQuaternion(alignmentQuaternion(a)).add(new THREE.Vector3(a.tx,a.ty,a.tz));}
   function baseComponentCentroid(comp,index){var c=new THREE.Vector3(),n=0;comp.forEach(function(a){if(a.el!=="H"){c.add(baseAtomWorldPosition(a,index));n++;}});return n?c.multiplyScalar(1/n):null;}
   function baseComponentAtomicRmsd(comp1,comp2,pairs){
-    var m1=componentAtomMap(comp1),m2=componentAtomMap(comp2),sum=0,n=0;
-    pairs.forEach(function(p){var a=m1[p.a1.auIndex],b=m2[p.a2.auIndex];if(a&&b&&a.el===p.a1.el&&b.el===p.a2.el){sum+=baseAtomWorldPosition(a,0).distanceToSquared(baseAtomWorldPosition(b,1));n++;}});
-    return n>=3?{rmsd:Math.sqrt(sum/n),n:n}:null;
+    return directComponentAtomicMatch(comp1,comp2,pairs,baseAtomWorldPosition);
   }
   function computeLocalNeighbourhoodMatch(radius,cutoff,atomPairs){
-    var refs=referenceMolecules();if(!refs)return null;var O1=baseComponentCentroid(refs.comp1,0),O2=baseComponentCentroid(refs.comp2,1);if(!O1||!O2)return null;
-    function records(index,origin,limit){return allMolecularComponents(structureSlots[index]).map(function(comp){var c=baseComponentCentroid(comp,index),heavy=comp.filter(function(a){return a.el!=="H";}).length;return {comp:comp,c:c,heavy:heavy};}).filter(function(r){return r.c&&r.heavy>=3&&r.c.distanceTo(origin)<=limit+1e-8;});}
+    var refs=referenceMolecules();if(!refs)return null;var reference1=componentComparableCentroid(refs.comp1,0,atomPairs,baseAtomWorldPosition),reference2=componentComparableCentroid(refs.comp2,1,atomPairs,baseAtomWorldPosition),O1=reference1&&reference1.c,O2=reference2&&reference2.c;if(!O1||!O2)return null;
+    function records(index,origin,limit){return allMolecularComponents(structureSlots[index]).map(function(comp){var comparable=componentComparableCentroid(comp,index,atomPairs,baseAtomWorldPosition);return {comp:comp,c:comparable&&comparable.c,comparable:comparable?comparable.n:0};}).filter(function(r){return r.c&&r.comparable>=3&&r.c.distanceTo(origin)<=limit+1e-8;});}
     var r1=records(0,O1,radius),r2=records(1,O2,radius+cutoff),candidates=[];
-    r1.forEach(function(a,i){r2.forEach(function(b,j){if(Math.abs(a.heavy-b.heavy)>Math.max(3,.25*Math.max(a.heavy,b.heavy)))return;var cd=a.c.distanceTo(b.c);if(cd>cutoff)return;var ar=baseComponentAtomicRmsd(a.comp,b.comp,atomPairs);if(ar)candidates.push({i:i,j:j,cost:cd+.15*ar.rmsd,centroidDistance:cd,atomicRmsd:ar.rmsd,atomCount:ar.n});});});
-    candidates.sort(function(a,b){return a.cost-b.cost;});var used1={},used2={},matches=[];candidates.forEach(function(p){if(!used1[p.i]&&!used2[p.j]){used1[p.i]=used2[p.j]=1;matches.push({comp1:r1[p.i].comp,comp2:r2[p.j].comp,c1:r1[p.i].c,c2:r2[p.j].c,centroidDistance:p.centroidDistance,atomicRmsd:p.atomicRmsd,atomCount:p.atomCount});}});
+    r1.forEach(function(a,i){r2.forEach(function(b,j){var cd=a.c.distanceTo(b.c);if(cd>cutoff)return;var ar=baseComponentAtomicRmsd(a.comp,b.comp,atomPairs);if(ar)candidates.push({i:i,j:j,cost:ar.rmsd+.25*cd,centroidDistance:cd,atomicRmsd:ar.rmsd,atomCount:ar.n,directAtomPairs:ar.pairs});});});
+    var assignments=minimumCostMolecularAssignment(r1.length,r2.length,candidates),matches=assignments.map(function(p){return {comp1:r1[p.i].comp,comp2:r2[p.j].comp,c1:r1[p.i].c,c2:r2[p.j].c,centroidDistance:p.centroidDistance,atomicRmsd:p.atomicRmsd,atomCount:p.atomCount,atomPairs:p.directAtomPairs};});
     return {pairs:matches,count1:r1.length,count2:r2.length,radius:radius,cutoff:cutoff,origin1:O1,origin2:O2};
   }
   function radialAnalysisReadiness(){
@@ -6471,12 +6868,12 @@ select.sel:focus{border-color:var(--accent)}
     if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(radialReportText).then(function(){setStatus("Concise isostructurality report copied to the clipboard.",false);},function(){setStatus("The report could not be copied by this browser.",true);});
     else setStatus("Clipboard access is unavailable in this browser.",true);
   }
-  function calculateRadialSimilarity(){if(!comparisonMaskLocked||!molecularCorrespondenceResult){setStatus("Lock the atom set and match the molecular neighbourhood before radial analysis.",true);return;}var maxR=parseFloat(document.getElementById("radialMaxRadius").value),step=parseFloat(document.getElementById("radialStep").value),delta=parseFloat(document.getElementById("radialThreshold").value),coverageTarget=parseFloat(document.getElementById("radialCoverage").value)/100;if(!isFinite(maxR)||maxR<=0||!isFinite(step)||step<=0||!isFinite(delta)||delta<=0||!isFinite(coverageTarget)||coverageTarget<0||coverageTarget>1){setStatus("Enter valid positive radial-analysis settings.",true);return;}if(maxR>molecularCorrespondenceResult.radius+1e-6){setStatus("The requested radius exceeds the matched molecular neighbourhood. Rematch molecules using at least "+maxR.toFixed(1)+" "+U.ang+" first.",true);return;}saveActiveStructureState();var atomPairs=activeComparisonAtomPairs(),refs=referenceMolecules();if(!refs){setStatus("No fitted whole-molecule reference is available.",true);return;}var central1=refs.comp1,central2=refs.comp2,O1=baseComponentCentroid(central1,0),O2=baseComponentCentroid(central2,1);if(!O1||!O2)return;var localMatch=computeLocalNeighbourhoodMatch(maxR,molecularCorrespondenceResult.cutoff,atomPairs);if(!localMatch){setStatus("Could not rematch the molecular neighbourhood inside the requested radial-analysis radius.",true);return;}
-    var centroidPairs=localMatch.pairs.map(function(p){var c1=baseComponentCentroid(p.comp1,0),c2=baseComponentCentroid(p.comp2,1);return {source:p,c1:c1,c2:c2,x:c2.clone().sub(O2),y:c1.clone().sub(O1),radius:c1.distanceTo(O1)};}).filter(function(p){return p.radius<=maxR+1e-8;});if(centroidPairs.length<4){setStatus("At least four locally rematched molecular pairs are required within the analysis radius.",true);return;}
+  function calculateRadialSimilarity(){if(!comparisonMaskLocked||!molecularCorrespondenceResult){setStatus("Lock the atom set and match the molecular neighbourhood before radial analysis.",true);return;}var maxR=parseFloat(document.getElementById("radialMaxRadius").value),step=parseFloat(document.getElementById("radialStep").value),delta=parseFloat(document.getElementById("radialThreshold").value),coverageTarget=parseFloat(document.getElementById("radialCoverage").value)/100;if(!isFinite(maxR)||maxR<=0||!isFinite(step)||step<=0||!isFinite(delta)||delta<=0||!isFinite(coverageTarget)||coverageTarget<0||coverageTarget>1){setStatus("Enter valid positive radial-analysis settings.",true);return;}if(maxR>molecularCorrespondenceResult.radius+1e-6){setStatus("The requested radius exceeds the matched molecular neighbourhood. Rematch molecules using at least "+maxR.toFixed(1)+" "+U.ang+" first.",true);return;}saveActiveStructureState();var atomPairs=activeComparisonAtomPairs(),refs=referenceMolecules();if(!refs){setStatus("No fitted whole-molecule reference is available.",true);return;}var central1=refs.comp1,central2=refs.comp2,reference1=componentComparableCentroid(central1,0,atomPairs,baseAtomWorldPosition),reference2=componentComparableCentroid(central2,1,atomPairs,baseAtomWorldPosition),O1=reference1&&reference1.c,O2=reference2&&reference2.c;if(!O1||!O2)return;var localMatch=computeLocalNeighbourhoodMatch(maxR,molecularCorrespondenceResult.cutoff,atomPairs);if(!localMatch){setStatus("Could not rematch the molecular neighbourhood inside the requested radial-analysis radius.",true);return;}
+    var centroidPairs=localMatch.pairs.map(function(p){var comparable1=componentComparableCentroid(p.comp1,0,atomPairs,baseAtomWorldPosition),comparable2=componentComparableCentroid(p.comp2,1,atomPairs,baseAtomWorldPosition),c1=comparable1&&comparable1.c,c2=comparable2&&comparable2.c;return c1&&c2?{source:p,c1:c1,c2:c2,x:c2.clone().sub(O2),y:c1.clone().sub(O1),radius:c1.distanceTo(O1)}:null;}).filter(function(p){return p&&p.radius<=maxR+1e-8;});if(centroidPairs.length<4){setStatus("At least four locally rematched molecular pairs are required within the analysis radius.",true);return;}
     var denom=0,numer=0;centroidPairs.forEach(function(p){denom+=p.x.lengthSq();numer+=p.x.dot(p.y);});var isoScale=denom>1e-12?numer/denom:1,stretch=fitSymmetricStretch(centroidPairs);if(!stretch){setStatus("The matched neighbourhood cannot determine a three-dimensional anisotropic model.",true);return;}var eig=symmetricEigen3(stretch);
     function predictedCentroid(model,p){if(model==="rigid")return p.c2.clone();if(model==="isotropic")return O1.clone().add(p.x.clone().multiplyScalar(isoScale));return O1.clone().add(applyMatrix3Vector(stretch,p.x));}
-    var observations=centroidPairs.map(function(p){var map1=componentAtomMap(p.source.comp1),map2=componentAtomMap(p.source.comp2),models={rigid:[],isotropic:[],anisotropic:[]},sourceCentered=[],targetCentered=[];atomPairs.forEach(function(ap){var a1=map1[ap.a1.auIndex],a2=map2[ap.a2.auIndex];if(!a1||!a2)return;var w1=baseAtomWorldPosition(a1,0),w2=baseAtomWorldPosition(a2,1);sourceCentered.push(w2.clone().sub(p.c2));targetCentered.push(w1.clone().sub(p.c1));["rigid","isotropic","anisotropic"].forEach(function(model){var shift=predictedCentroid(model,p).sub(p.c2),pp=w2.clone().add(shift);models[model].push(pp.distanceToSquared(w1));});});var angle=NaN;if(sourceCentered.length>=3){var rf=rigidFitQuaternion(sourceCentered,targetCentered);angle=2*Math.acos(Math.max(-1,Math.min(1,Math.abs(rf.q.w))))*180/Math.PI;}var centroidD2={};["rigid","isotropic","anisotropic"].forEach(function(model){centroidD2[model]=predictedCentroid(model,p).distanceToSquared(p.c1);});return {radius:p.radius,atomD2:models,atomCount:models.rigid.length,centroidD2:centroidD2,orientationAngle:angle};});
-    var available=allMolecularComponents(structureSlots[0]).map(function(comp){return baseComponentCentroid(comp,0);}).filter(function(c){return c&&c.distanceTo(O1)<=maxR+1e-8;}).map(function(c){return c.distanceTo(O1);}),radii=[];for(var R=step;R<maxR-1e-9;R+=step)radii.push(R);radii.push(maxR);var models=["rigid","isotropic","anisotropic"],curves={rigid:[],isotropic:[],anisotropic:[]},coverage=[];
+    var observations=centroidPairs.map(function(p){var directPairs=p.source.atomPairs||[],models={rigid:[],isotropic:[],anisotropic:[]},sourceCentered=[],targetCentered=[];directPairs.forEach(function(ap){var a1=ap.a1,a2=ap.a2;if(!a1||!a2)return;var w1=baseAtomWorldPosition(a1,0),w2=baseAtomWorldPosition(a2,1);sourceCentered.push(w2.clone().sub(p.c2));targetCentered.push(w1.clone().sub(p.c1));["rigid","isotropic","anisotropic"].forEach(function(model){var shift=predictedCentroid(model,p).sub(p.c2),pp=w2.clone().add(shift);models[model].push(pp.distanceToSquared(w1));});});var angle=NaN;if(sourceCentered.length>=3){var rf=rigidFitQuaternion(sourceCentered,targetCentered);angle=2*Math.acos(Math.max(-1,Math.min(1,Math.abs(rf.q.w))))*180/Math.PI;}var centroidD2={};["rigid","isotropic","anisotropic"].forEach(function(model){centroidD2[model]=predictedCentroid(model,p).distanceToSquared(p.c1);});return {radius:p.radius,atomD2:models,atomCount:models.rigid.length,centroidD2:centroidD2,orientationAngle:angle};});
+    var available=allMolecularComponents(structureSlots[0]).map(function(comp){var comparable=componentComparableCentroid(comp,0,atomPairs,baseAtomWorldPosition);return comparable&&comparable.c;}).filter(function(c){return c&&c.distanceTo(O1)<=maxR+1e-8;}).map(function(c){return c.distanceTo(O1);}),radii=[];for(var R=step;R<maxR-1e-9;R+=step)radii.push(R);radii.push(maxR);var models=["rigid","isotropic","anisotropic"],curves={rigid:[],isotropic:[],anisotropic:[]},coverage=[];
     radii.forEach(function(R){var inside=observations.filter(function(o){return o.radius<=R+1e-9;}),shell=observations.filter(function(o){return o.radius>R-step-1e-9&&o.radius<=R+1e-9;}),avail=available.filter(function(r){return r<=R+1e-9;}).length,matchedAtoms=inside.reduce(function(s,o){return s+o.atomCount;},0),orientationVals=inside.filter(function(o){return isFinite(o.orientationAngle);});coverage.push({radius:R,moleculeCoverage:avail?inside.length/avail:0,atomCoverage:avail&&atomPairs.length?matchedAtoms/(avail*atomPairs.length):0,matchedMolecules:inside.length,availableMolecules:avail,matchedAtoms:matchedAtoms});models.forEach(function(model){function atomMetric(arr){var sum=0,n=0;arr.forEach(function(o){o.atomD2[model].forEach(function(d){sum+=d;n++;});});return n?Math.sqrt(sum/n):NaN;}var csum=0;inside.forEach(function(o){csum+=o.centroidD2[model];});var osum=0;orientationVals.forEach(function(o){osum+=o.orientationAngle*o.orientationAngle;});curves[model].push({radius:R,atomicRmsd:atomMetric(inside),shellAtomicRmsd:atomMetric(shell),centroidRmsd:inside.length?Math.sqrt(csum/inside.length):NaN,orientationRmsd:orientationVals.length?Math.sqrt(osum/orientationVals.length):NaN});});});
     var thresholdRadius={};models.forEach(function(model){thresholdRadius[model]=0;var continuous=true;for(var i=0;i<radii.length;i++){var passes=isFinite(curves[model][i].atomicRmsd)&&curves[model][i].atomicRmsd<=delta&&coverage[i].moleculeCoverage>=coverageTarget;if(!passes)continuous=false;if(continuous)thresholdRadius[model]=radii[i];}});radialAnalysisResult={maxRadius:maxR,step:step,threshold:delta,coverageTarget:coverageTarget,atomPairCount:atomPairs.length,moleculePairCount:centroidPairs.length,isoScale:isoScale,anisotropicStretches:eig.map(function(e){return e.value;}),curves:curves,coverage:coverage,thresholdRadius:thresholdRadius,locallyRematched:true};updateRadialAnalysisUI();setStatus("Calculated locally rematched rigid, isotropic and anisotropic radial profiles to "+maxR.toFixed(1)+" "+U.ang+".",false);}
   function radialSvgPlot(title,series,yKey,yLabel,percent){var ns="http://www.w3.org/2000/svg",svg=document.createElementNS(ns,"svg"),W=640,H=235,pad={l:52,r:16,t:30,b:38};svg.setAttribute("viewBox","0 0 "+W+" "+H);svg.style.width="100%";svg.style.background="rgba(255,255,255,.35)";var values=[];series.forEach(function(s){s.data.forEach(function(d){var v=d[yKey];if(isFinite(v))values.push(percent?100*v:v);});});var ymax=Math.max(1e-6,values.length?Math.max.apply(null,values)*1.12:1),xmax=radialAnalysisResult.maxRadius;function line(x1,y1,x2,y2,color){var l=document.createElementNS(ns,"line");l.setAttribute("x1",x1);l.setAttribute("y1",y1);l.setAttribute("x2",x2);l.setAttribute("y2",y2);l.setAttribute("stroke",color||"#777");l.setAttribute("stroke-width","1");svg.appendChild(l);}function textEl(x,y,t,size){var e=document.createElementNS(ns,"text");e.setAttribute("x",x);e.setAttribute("y",y);e.setAttribute("font-size",size||11);e.setAttribute("fill","#39362f");e.textContent=t;svg.appendChild(e);}line(pad.l,H-pad.b,W-pad.r,H-pad.b);line(pad.l,pad.t,pad.l,H-pad.b);textEl(pad.l,pad.t-10,title,13);textEl(W/2,H-8,"Radius (Å)",11);textEl(4,pad.t+4,yLabel,10);for(var ti=0;ti<=4;ti++){var yy=H-pad.b-(H-pad.t-pad.b)*ti/4,val=ymax*ti/4;line(pad.l-4,yy,pad.l,yy);textEl(6,yy+4,val.toFixed(val<1?2:1),10);}series.forEach(function(s,si){var pts=[];s.data.forEach(function(d){var v=d[yKey];if(!isFinite(v))return;v=percent?100*v:v;pts.push((pad.l+(W-pad.l-pad.r)*d.radius/xmax)+","+(H-pad.b-(H-pad.t-pad.b)*v/ymax));});if(pts.length){var pl=document.createElementNS(ns,"polyline");pl.setAttribute("points",pts.join(" "));pl.setAttribute("fill","none");pl.setAttribute("stroke",s.color);pl.setAttribute("stroke-width","2.2");if(s.dash)pl.setAttribute("stroke-dasharray",s.dash);svg.appendChild(pl);}textEl(pad.l+si*150,pad.t+12,s.label,10);var sw=document.createElementNS(ns,"line");sw.setAttribute("x1",pad.l+si*150);sw.setAttribute("y1",pad.t+18);sw.setAttribute("x2",pad.l+si*150+24);sw.setAttribute("y2",pad.t+18);sw.setAttribute("stroke",s.color);sw.setAttribute("stroke-width","2.2");svg.appendChild(sw);});return svg;}
@@ -6539,15 +6936,9 @@ select.sel:focus{border-color:var(--accent)}
     for(var index=0;index<2;index++){activeStructureIndex=index;applyStructureState(structureSlots[index]);state.growUnit="asu";state.growBySphere=true;state.sphereRadius=alignmentPairedGrowRadius;var before=(state.atoms||[]).length;growSphereOfInclusion([centres[index].x,centres[index].y,centres[index].z],alignmentPairedGrowRadius);counts[index]=(state.atoms||[]).length-before;structureSlots[index]=captureStructureState();}
     activeStructureIndex=originalIndex;applyStructureState(structureSlots[originalIndex]);state.growUnit="asu";state.growBySphere=true;state.sphereRadius=alignmentPairedGrowRadius;renderStructure();renderUnitCell();renderAnchorMarkers();updateHostInfo();refreshSymmetryUI();updateComparatorHeader();updateGrowModeBtnLabel();updateAlignmentPairedGrowUI();setStatus("Paired sphere growth added "+counts[0]+" atoms to Structure 1 and "+counts[1]+" atoms to Structure 2 within "+alignmentPairedGrowRadius.toFixed(2)+" "+U.ang+".",false);
   }
-  function findMoleculeCorrespondence() {
-    if(anchorPairs.length<3&&!twoAnchorWholePackingFitComplete){if(symmetryBaseCorrespondence&&symmetryBaseCorrespondence.pairs&&symmetryBaseCorrespondence.pairs.length>=3)return symmetryBaseCorrespondence;setStatus("Select three anchor pairs, or complete the two-anchor whole-packing rotation, before refining the whole molecule.",true);return null;}
-    saveActiveStructureState(); var comp1=moleculeComponent(structureSlots[0],anchorPairs[0].a1),comp2=moleculeComponent(structureSlots[1],anchorPairs[0].a2);
-    if(!comp1||!comp2){setStatus("Could not identify both anchored molecules.",true);return null;}
-    var correspondenceAnchors=anchorPairs;
-    if(twoAnchorWholePackingFitComplete&&anchorPairs.length===2)correspondenceAnchors=anchorPairs.filter(function(p){return comp1.indexOf(p.a1)>=0&&comp2.indexOf(p.a2)>=0;});
-    else for(var ap=0;ap<anchorPairs.length;ap++)if(comp1.indexOf(anchorPairs[ap].a1)<0||comp2.indexOf(anchorPairs[ap].a2)<0){setStatus("All anchor pairs must belong to the same molecule in each structure.",true);return null;}
+  function matchAnchoredComponentPair(comp1,comp2,componentAnchors) {
     var g1=buildHeavyGraph(comp1),g2=buildHeavyGraph(comp2),map12={},used2={};
-    for(var a=0;a<correspondenceAnchors.length;a++){var i1=g1.indexByUid[correspondenceAnchors[a].a1.uid],i2=g2.indexByUid[correspondenceAnchors[a].a2.uid];if(i1===undefined||i2===undefined)continue;if(g1.atoms[i1].el!==g2.atoms[i2].el){setStatus("Anchored heavy atoms must have matching elements for molecular refinement.",true);return null;}if((map12[i1]!==undefined&&map12[i1]!==i2)||(used2[i2]&&map12[i1]!==i2)){setStatus("Anchor pairs contain conflicting atom correspondences.",true);return null;}map12[i1]=i2;used2[i2]=1;}
+    for(var a=0;a<componentAnchors.length;a++){var i1=g1.indexByUid[componentAnchors[a].a1.uid],i2=g2.indexByUid[componentAnchors[a].a2.uid];if(i1===undefined||i2===undefined)continue;if(g1.atoms[i1].el!==g2.atoms[i2].el)return {error:"Anchored heavy atoms must have matching elements for molecular or substructure refinement."};if((map12[i1]!==undefined&&map12[i1]!==i2)||(used2[i2]&&map12[i1]!==i2))return {error:"Anchor pairs contain conflicting atom correspondences."};map12[i1]=i2;used2[i2]=1;}
     var changed=true;
     while(changed){changed=false;var best=null;
       for(var u=0;u<g1.atoms.length;u++){if(map12[u]!==undefined)continue;for(var v=0;v<g2.atoms.length;v++){if(used2[v]||g1.atoms[u].el!==g2.atoms[v].el)continue;var support=0,mismatch=0;
@@ -6558,16 +6949,30 @@ select.sel:focus{border-color:var(--accent)}
       if(best){map12[best.u]=best.v;used2[best.v]=1;changed=true;}
     }
     var pairs=[];Object.keys(map12).forEach(function(k){pairs.push({a1:g1.atoms[parseInt(k,10)],a2:g2.atoms[map12[k]]});});
-    if(pairs.length<3){setStatus("Fewer than three heavy-atom correspondences could be established. Choose heavy-atom anchors within the common molecular scaffold.",true);return null;}
-    return {pairs:pairs,total1:g1.atoms.length,total2:g2.atoms.length};
+    return {pairs:pairs,total1:g1.atoms.length,total2:g2.atoms.length,comp1:comp1,comp2:comp2};
+  }
+  function findMoleculeCorrespondence() {
+    if(anchorPairs.length<3&&!twoAnchorWholePackingFitComplete){if(symmetryBaseCorrespondence&&symmetryBaseCorrespondence.pairs&&symmetryBaseCorrespondence.pairs.length>=3)return symmetryBaseCorrespondence;setStatus("Select three anchor pairs, or complete the two-anchor whole-packing rotation, before refining the molecule or packed substructure.",true);return null;}
+    saveActiveStructureState();var all1=allMolecularComponents(structureSlots[0]),all2=allMolecularComponents(structureSlots[1]);
+    function containing(components,atom){for(var i=0;i<components.length;i++)if(components[i].indexOf(atom)>=0)return i;return -1;}
+    var correspondenceAnchors=anchorPairs;
+    if(twoAnchorWholePackingFitComplete&&anchorPairs.length===2){var first1=containing(all1,anchorPairs[0].a1),first2=containing(all2,anchorPairs[0].a2);correspondenceAnchors=anchorPairs.filter(function(p){return containing(all1,p.a1)===first1&&containing(all2,p.a2)===first2;});}
+    var groups=[],byKey={},map1={},map2={};
+    for(var ap=0;ap<correspondenceAnchors.length;ap++){var p=correspondenceAnchors[ap],ci=containing(all1,p.a1),cj=containing(all2,p.a2);if(ci<0||cj<0){setStatus("Could not identify every anchored molecule in the packed substructures.",true);return null;}if((map1[ci]!==undefined&&map1[ci]!==cj)||(map2[cj]!==undefined&&map2[cj]!==ci)){setStatus("The anchors assign one molecule to more than one counterpart. Choose a one-to-one packed-substructure correspondence.",true);return null;}map1[ci]=cj;map2[cj]=ci;var key=ci+"|"+cj;if(!byKey[key]){byKey[key]={comp1:all1[ci],comp2:all2[cj],anchors:[]};groups.push(byKey[key]);}byKey[key].anchors.push(p);}
+    if(!groups.length){setStatus("Could not identify both anchored molecules.",true);return null;}
+    var componentMatches=[],pairs=[],total1=0,total2=0;
+    for(var gi=0;gi<groups.length;gi++){var group=groups[gi],matched=matchAnchoredComponentPair(group.comp1,group.comp2,group.anchors);if(matched.error){setStatus(matched.error,true);return null;}if(!matched.pairs.length){setStatus("No heavy-atom correspondence could be propagated for anchored molecule pair "+(gi+1)+".",true);return null;}componentMatches.push(matched);pairs=pairs.concat(matched.pairs);total1+=matched.total1;total2+=matched.total2;}
+    if(pairs.length<3){setStatus("Fewer than three heavy-atom correspondences could be established. Choose heavy-atom anchors within the common molecular or packed-substructure scaffold.",true);return null;}
+    return {pairs:pairs,referencePairs:componentMatches[0].pairs,total1:total1,total2:total2,referenceTotal1:componentMatches[0].total1,referenceTotal2:componentMatches[0].total2,fitType:componentMatches.length>1?"substructure":"molecule",componentMatches:componentMatches};
   }
   function refineWholeMoleculeFit() {
     var match=findMoleculeCorrespondence();if(!match||match.pairs.length<3)return;
-    symmetryBaseCorrespondence={pairs:match.pairs.slice(),total1:match.total1,total2:match.total2};
+    var referencePairs=match.referencePairs||match.pairs;
+    symmetryBaseCorrespondence={pairs:referencePairs.slice(),total1:match.referenceTotal1||match.total1,total2:match.referenceTotal2||match.total2};
     var source=match.pairs.map(function(p){return atomLocalPosition(p.a2,1);}),target=match.pairs.map(function(p){return atomAlignedPosition(p.a1,0);});var fit=rigidFitQuaternion(source,target);setAlignmentFromQuaternion(1,fit.q,fit.t);var fittedRefs=referenceMolecules();if(fittedRefs)setInflationCenterFromComponent(fittedRefs.comp2);applyAlignmentTransforms();
     var sum=0;match.pairs.forEach(function(p){sum+=atomAlignedPosition(p.a1,0).distanceToSquared(atomAlignedPosition(p.a2,1));});var rms=Math.sqrt(sum/match.pairs.length);
-    moleculeFitResult={matched:match.pairs.length,coverage1:100*match.pairs.length/match.total1,coverage2:100*match.pairs.length/match.total2,rmsd:rms,unmatched1:match.total1-match.pairs.length,unmatched2:match.total2-match.pairs.length};
-    invalidateComparisonDefinition();updateAnchorUI();updateAlignmentUI();setStatus("Whole-molecule fit used "+match.pairs.length+" corresponding heavy atoms; RMSD "+rms.toFixed(4)+" "+U.ang+". Build and lock the comparison atom set next.",false);
+    moleculeFitResult={fitType:match.fitType||"molecule",components:match.componentMatches?match.componentMatches.length:1,matched:match.pairs.length,coverage1:100*match.pairs.length/match.total1,coverage2:100*match.pairs.length/match.total2,rmsd:rms,unmatched1:match.total1-match.pairs.length,unmatched2:match.total2-match.pairs.length};recordComparisonDiagnosticEvent("anchored-reference-fitted",moleculeFitResult);
+    invalidateComparisonDefinition();updateAnchorUI();updateAlignmentUI();setStatus((moleculeFitResult.fitType==="substructure"?"Packed-substructure":"Whole-molecule")+" fit used "+match.pairs.length+" corresponding heavy atoms across "+moleculeFitResult.components+" anchored molecule pair"+(moleculeFitResult.components===1?"":"s")+"; RMSD "+rms.toFixed(4)+" "+U.ang+". The existing principal-strain stage can now refine anisotropic inflation, orientation and translation.",false);
   }
   function allMolecularComponents(slot) {
     var atoms=slot.atoms||[],bonds=K.bonds(atoms,0.45),adj=atoms.map(function(){return[];});
@@ -6756,7 +7161,7 @@ select.sel:focus{border-color:var(--accent)}
     if(!anisotropicEllipsoidGroup)return;clearGroup(anisotropicEllipsoidGroup);
     var slot=structureSlots&&structureSlots[1],visible=comparisonViewMode==="overlay"||(comparisonViewMode==="structure2"&&activeStructureIndex===1);
     if(!visible||!slot||!slot.showAnisotropicEllipsoid||!slot.anisotropicResult||!slot.anisotropicCenter)return;
-    var axes=slot.anisotropicAxes||[[1,0,0],[0,1,0],[0,0,1]],stretches=slot.anisotropicStretches||[1,1,1],centre=new THREE.Vector3(slot.anisotropicCenter[0],slot.anisotropicCenter[1],slot.anisotropicCenter[2]);
+    var axes=slot.anisotropicAxes||[[1,0,0],[0,1,0],[0,0,1]],stretches=slot.anisotropicStretches||[1,1,1],displayCentre=slot.anisotropicResult.ellipsoidCenter||slot.anisotropicCenter,centre=new THREE.Vector3(displayCentre[0],displayCentre[1],displayCentre[2]);
     var base=slot.anisotropicResult.ellipsoidRadius||3,frame=rightHandedPrincipalFrame(axes),x=frame[0],y=frame[1],z=frame[2];
     var basis=new THREE.Matrix4().makeBasis(x,y,z),q=new THREE.Quaternion().setFromRotationMatrix(basis),geo=new THREE.SphereGeometry(1,40,28);
     var ellipsoidColor=slot.anisotropicEllipsoidColor===undefined?0x4A6FA5:slot.anisotropicEllipsoidColor,ellipsoidStyle=slot.anisotropicEllipsoidStyle||"solid",ellipsoidOpacity=slot.anisotropicEllipsoidOpacity===undefined?.28:Math.max(.05,Math.min(1,slot.anisotropicEllipsoidOpacity)),surface;
@@ -6770,38 +7175,52 @@ select.sel:focus{border-color:var(--accent)}
   function determineAnisotropicInflation(){
     var refs=referenceMolecules();if(!structureSlots||!structureSlots[0].atoms||!structureSlots[1].atoms||!refs){setStatus("Fit the two reference molecules before determining anisotropic inflation.",true);return;}
     volumetricAnalysisResult=null;updateVolumetricUI();
-    saveActiveStructureState();var radius=parseFloat(document.getElementById("anisoRadius").value),cutoff=parseFloat(document.getElementById("anisoCutoff").value),refineOrientation=!!(document.getElementById("anisoRefineOrientation")&&document.getElementById("anisoRefineOrientation").checked),refineTranslation=!!(document.getElementById("anisoRefineTranslation")&&document.getElementById("anisoRefineTranslation").checked);if(!isFinite(radius)||radius<=0||!isFinite(cutoff)||cutoff<=0){setStatus("Enter positive anisotropic fitting radius and matching tolerance values.",true);return;}
+    saveActiveStructureState();var radius=parseFloat(document.getElementById("anisoRadius").value),cutoff=parseFloat(document.getElementById("anisoCutoff").value),refineOrientation=!!(document.getElementById("anisoRefineOrientation")&&document.getElementById("anisoRefineOrientation").checked),refineTranslation=!!(document.getElementById("anisoRefineTranslation")&&document.getElementById("anisoRefineTranslation").checked);if(!isFinite(radius)||radius<=0||!isFinite(cutoff)||cutoff<=0){setStatus("Enter positive anisotropic fitting radius and matching tolerance values.",true);return;}recordComparisonDiagnosticEvent("principal-strain-started",{radius:radius,cutoff:cutoff,refineOrientation:refineOrientation,refineTranslation:refineTranslation,lockedAssignments:molecularCorrespondenceResult&&molecularCorrespondenceResult.pairs?molecularCorrespondenceResult.pairs.length:0});
     var slot2=structureSlots[1];slot2.inflationScale=1;slot2.anisotropicEnabled=false;slot2.anisotropicStretches=[1,1,1];if(activeStructureIndex===1){state.inflationScale=1;state.anisotropicEnabled=false;state.anisotropicStretches=[1,1,1];}inflationCache[1]=null;
-    var central1=refs.comp1,central2=refs.comp2,O1=componentCentroidAlignedRaw(central1,0),O2w=componentCentroidAlignedRaw(central2,1),O2local=componentCentroidRaw(central2,1);if(!O1||!O2w||!O2local){setStatus("Could not determine both central molecular centroids.",true);return;}
-    function records(index,O){return allMolecularComponents(structureSlots[index]).map(function(comp){var c=componentCentroidAlignedRaw(comp,index),heavy=comp.filter(function(a){return a.el!=="H";}).length;return {comp:comp,c:c,heavy:heavy};}).filter(function(r){return r.c&&r.heavy>=3&&r.c.distanceTo(O)<=radius;});}
+    var strainAtomPairs=comparisonMaskLocked?activeComparisonAtomPairs():[],useComparableCentroids=strainAtomPairs.length>=3;
+    function strainWorldCentroid(comp,index){if(useComparableCentroids){var comparable=componentComparableCentroid(comp,index,strainAtomPairs,baseAtomWorldPosition);return comparable&&comparable.c;}return componentCentroidAlignedRaw(comp,index);}
+    function strainLocalCentroid(comp,index){if(useComparableCentroids){var comparable=componentComparableCentroid(comp,index,strainAtomPairs,rawAtomLocalPosition);return comparable&&comparable.c;}return componentCentroidRaw(comp,index);}
+    var central1=refs.comp1,central2=refs.comp2,O1=strainWorldCentroid(central1,0),O2w=strainWorldCentroid(central2,1),O2local=strainLocalCentroid(central2,1);if(!O1||!O2w||!O2local){setStatus("Could not determine both central locked-scaffold centroids.",true);return;}
+    function records(index,O){return allMolecularComponents(structureSlots[index]).map(function(comp){var c=strainWorldCentroid(comp,index),heavy=comp.filter(function(a){return a.el!=="H";}).length;return {comp:comp,c:c,heavy:heavy};}).filter(function(r){return r.c&&r.c.distanceTo(O)<=radius;});}
     var rec1=records(0,O1),rec2=records(1,O2w),S=[[1,0,0],[0,1,0],[0,0,1]],matches=[],lockedAssignments=!!(comparisonMaskLocked&&molecularCorrespondenceResult&&molecularCorrespondenceResult.pairs.length>=4);
-    function assign(M){var candidates=[];rec1.forEach(function(a,i){rec2.forEach(function(b,j){if(Math.abs(a.heavy-b.heavy)>Math.max(3,.2*Math.max(a.heavy,b.heavy)))return;var x=b.c.clone().sub(O2w),pred=O1.clone().add(applyMatrix3Vector(M,x)),d=pred.distanceTo(a.c);if(d<=cutoff)candidates.push({i:i,j:j,d:d,x:x,y:a.c.clone().sub(O1)});});});candidates.sort(function(a,b){return a.d-b.d;});var used1={},used2={},out=[];candidates.forEach(function(p){if(!used1[p.i]&&!used2[p.j]){used1[p.i]=used2[p.j]=1;out.push(p);}});return out;}
-    if(lockedAssignments){matches=molecularCorrespondenceResult.pairs.map(function(p){var c1=componentCentroidAlignedRaw(p.comp1,0),c2=componentCentroidAlignedRaw(p.comp2,1);return c1&&c2&&c1.distanceTo(O1)<=radius&&c2.distanceTo(O2w)<=radius?{x:c2.sub(O2w),y:c1.sub(O1)}:null;}).filter(Boolean);var lockedFit=fitSymmetricStretch(matches);if(matches.length<4||!lockedFit){setStatus("The locked molecular correspondences inside this radius do not constrain three independent strain directions.",true);return;}S=lockedFit;}
+    function assign(M){var candidates=[];rec1.forEach(function(a,i){rec2.forEach(function(b,j){if(!useComparableCentroids&&Math.abs(a.heavy-b.heavy)>Math.max(3,.2*Math.max(a.heavy,b.heavy)))return;var x=b.c.clone().sub(O2w),pred=O1.clone().add(applyMatrix3Vector(M,x)),d=pred.distanceTo(a.c);if(d<=cutoff)candidates.push({i:i,j:j,d:d,x:x,y:a.c.clone().sub(O1)});});});candidates.sort(function(a,b){return a.d-b.d;});var used1={},used2={},out=[];candidates.forEach(function(p){if(!used1[p.i]&&!used2[p.j]){used1[p.i]=used2[p.j]=1;out.push(p);}});return out;}
+    if(lockedAssignments){matches=molecularCorrespondenceResult.pairs.map(function(p){var c1=strainWorldCentroid(p.comp1,0),c2=strainWorldCentroid(p.comp2,1);return c1&&c2&&c1.distanceTo(O1)<=radius&&c2.distanceTo(O2w)<=radius+cutoff?{x:c2.sub(O2w),y:c1.sub(O1)}:null;}).filter(Boolean);var lockedFit=fitSymmetricStretch(matches);if(matches.length<4||!lockedFit){setStatus("The locked molecular correspondences inside this radius do not constrain three independent strain directions.",true);return;}S=lockedFit;}
     else for(var iteration=0;iteration<4;iteration++){matches=assign(S);if(matches.length<4){setStatus("Only "+matches.length+" molecular centroid pairs could be matched. Increase the radius/tolerance or grow both structures further.",true);return;}var fitted=fitSymmetricStretch(matches);if(!fitted){setStatus("The matched molecular centroids do not constrain three independent strain directions. Grow a more three-dimensional neighbourhood.",true);return;}S=fitted;}
-    var initialQ=alignmentQuaternion(ensureAlignment(slot2)).clone(),referencePairs=symmetryBaseCorrespondence&&symmetryBaseCorrespondence.pairs||[],orientationIterations=0;
+    var initialQ=alignmentQuaternion(ensureAlignment(slot2)).clone(),referencePairs=symmetryBaseCorrespondence&&symmetryBaseCorrespondence.pairs||[],orientationIterations=0,orientationRejected=false;
     function referenceRmsd(){if(!referencePairs.length)return NaN;var sum=0,n=0;referencePairs.forEach(function(p){if(p.a1&&p.a2){sum+=atomAlignedPosition(p.a1,0).distanceToSquared(atomAlignedPosition(p.a2,1));n++;}});return n?Math.sqrt(sum/n):NaN;}
     var referenceRmsdBefore=referenceRmsd();
     if(refineOrientation){
       for(var orientIter=0;orientIter<6;orientIter++){
         var rotatedSource=matches.map(function(p){return applyMatrix3Vector(S,p.x);}),rotationTarget=matches.map(function(p){return p.y;}),rotationFit=rigidFitQuaternion(rotatedSource,rotationTarget),deltaQ=rotationFit.q.clone().normalize();
         var deltaAngle=2*Math.acos(Math.max(-1,Math.min(1,Math.abs(deltaQ.w))))*180/Math.PI;if(deltaAngle<.0005)break;
-        var newQ=deltaQ.multiply(alignmentQuaternion(ensureAlignment(slot2))).normalize(),newT=O1.clone().sub(O2local.clone().applyQuaternion(newQ));setAlignmentFromQuaternion(1,newQ,newT);orientationIterations++;
-        O2w=componentCentroidAlignedRaw(central2,1);rec2=records(1,O2w);S=[[1,0,0],[0,1,0],[0,0,1]];
-        if(lockedAssignments){matches=molecularCorrespondenceResult.pairs.map(function(p){var c1=componentCentroidAlignedRaw(p.comp1,0),c2=componentCentroidAlignedRaw(p.comp2,1);return c1&&c2&&c1.distanceTo(O1)<=radius&&c2.distanceTo(O2w)<=radius?{x:c2.sub(O2w),y:c1.sub(O1)}:null;}).filter(Boolean);S=fitSymmetricStretch(matches);}
+        var previousAlignment=Object.assign({},ensureAlignment(slot2)),previousReferenceRmsd=referenceRmsd(),newQ=deltaQ.multiply(alignmentQuaternion(ensureAlignment(slot2))).normalize(),newT=O1.clone().sub(O2local.clone().applyQuaternion(newQ));setAlignmentFromQuaternion(1,newQ,newT);
+        var trialReferenceRmsd=referenceRmsd(),allowedReferenceIncrease=Math.max(.01,.05*previousReferenceRmsd);if(isFinite(previousReferenceRmsd)&&isFinite(trialReferenceRmsd)&&trialReferenceRmsd>previousReferenceRmsd+allowedReferenceIncrease){Object.assign(ensureAlignment(slot2),previousAlignment);if(activeStructureIndex===1)state.alignment=ensureAlignment(slot2);orientationRejected=true;O2w=strainWorldCentroid(central2,1);rec2=records(1,O2w);if(lockedAssignments){matches=molecularCorrespondenceResult.pairs.map(function(p){var c1=strainWorldCentroid(p.comp1,0),c2=strainWorldCentroid(p.comp2,1);return c1&&c2&&c1.distanceTo(O1)<=radius&&c2.distanceTo(O2w)<=radius+cutoff?{x:c2.sub(O2w),y:c1.sub(O1)}:null;}).filter(Boolean);S=fitSymmetricStretch(matches);}break;}orientationIterations++;
+        O2w=strainWorldCentroid(central2,1);rec2=records(1,O2w);S=[[1,0,0],[0,1,0],[0,0,1]];
+        if(lockedAssignments){matches=molecularCorrespondenceResult.pairs.map(function(p){var c1=strainWorldCentroid(p.comp1,0),c2=strainWorldCentroid(p.comp2,1);return c1&&c2&&c1.distanceTo(O1)<=radius&&c2.distanceTo(O2w)<=radius+cutoff?{x:c2.sub(O2w),y:c1.sub(O1)}:null;}).filter(Boolean);S=fitSymmetricStretch(matches);}
         else for(var refitIter=0;refitIter<3;refitIter++){matches=assign(S);if(matches.length<4)break;S=fitSymmetricStretch(matches);if(!S)break;}
         if(!S||matches.length<4){setStatus("Orientation refinement lost a stable three-dimensional molecular correspondence. Increase the tolerance or disable orientation refinement.",true);return;}
       }
     }
     var finalQ=alignmentQuaternion(ensureAlignment(slot2)).clone(),totalDelta=finalQ.clone().multiply(initialQ.clone().invert()).normalize(),additionalRotation=2*Math.acos(Math.max(-1,Math.min(1,Math.abs(totalDelta.w))))*180/Math.PI;
     var eig=symmetricEigen3(S),stretches=eig.map(function(e){return e.value;});if(stretches.some(function(v){return !isFinite(v)||v<=0||v<.5||v>1.5;})){setStatus("The fitted principal stretches are nonphysical or outside the safe 0.5–1.5 range. Check molecular correspondence and packing extent.",true);return;}
-    var translationDelta=new THREE.Vector3();if(refineTranslation){matches.forEach(function(p){translationDelta.add(p.y.clone().sub(applyMatrix3Vector(S,p.x)));});translationDelta.multiplyScalar(1/matches.length);var refinedAlignment=ensureAlignment(slot2),refinedQ=alignmentQuaternion(refinedAlignment),desiredReferenceCenter=O1.clone().add(translationDelta),absoluteTranslation=desiredReferenceCenter.sub(O2local.clone().applyQuaternion(refinedQ));refinedAlignment.tx=absoluteTranslation.x;refinedAlignment.ty=absoluteTranslation.y;refinedAlignment.tz=absoluteTranslation.z;if(activeStructureIndex===1)state.alignment=refinedAlignment;}
-    var referenceRmsdAfter=referenceRmsd(),rawSum=0,fitSum=0;matches.forEach(function(p){rawSum+=p.x.distanceToSquared(p.y);fitSum+=applyMatrix3Vector(S,p.x).add(translationDelta).distanceToSquared(p.y);});var rawRms=Math.sqrt(rawSum/matches.length),fitRms=Math.sqrt(fitSum/matches.length),qInv=alignmentQuaternion(ensureAlignment(slot2)).invert(),axesWorld=eig.map(function(e){return [e.vector.x,e.vector.y,e.vector.z];}),axesLocal=eig.map(function(e){var v=e.vector.clone().applyQuaternion(qInv).normalize();return [v.x,v.y,v.z];});
+    var translationDelta=new THREE.Vector3(),translationRejected=false;if(refineTranslation){matches.forEach(function(p){translationDelta.add(p.y.clone().sub(applyMatrix3Vector(S,p.x)));});translationDelta.multiplyScalar(1/matches.length);var refinedAlignment=ensureAlignment(slot2),previousTranslation={tx:refinedAlignment.tx,ty:refinedAlignment.ty,tz:refinedAlignment.tz},referenceBeforeTranslation=referenceRmsd(),refinedQ=alignmentQuaternion(refinedAlignment),desiredReferenceCenter=O1.clone().add(translationDelta),absoluteTranslation=desiredReferenceCenter.sub(O2local.clone().applyQuaternion(refinedQ));refinedAlignment.tx=absoluteTranslation.x;refinedAlignment.ty=absoluteTranslation.y;refinedAlignment.tz=absoluteTranslation.z;if(activeStructureIndex===1)state.alignment=refinedAlignment;var referenceAfterTranslation=referenceRmsd(),allowedTranslationIncrease=Math.max(.01,.05*referenceBeforeTranslation);if(isFinite(referenceBeforeTranslation)&&isFinite(referenceAfterTranslation)&&referenceAfterTranslation>referenceBeforeTranslation+allowedTranslationIncrease){refinedAlignment.tx=previousTranslation.tx;refinedAlignment.ty=previousTranslation.ty;refinedAlignment.tz=previousTranslation.tz;translationDelta.set(0,0,0);translationRejected=true;if(activeStructureIndex===1)state.alignment=refinedAlignment;}}
+    var strainDamping=1,scaffoldAtomicRmsdBefore=NaN,scaffoldAtomicRmsdAfter=NaN;
+    function dampedStretchMatrix(M,amount){return [[1+amount*(M[0][0]-1),amount*M[0][1],amount*M[0][2]],[amount*M[1][0],1+amount*(M[1][1]-1),amount*M[1][2]],[amount*M[2][0],amount*M[2][1],1+amount*(M[2][2]-1)]];}
+    function lockedScaffoldAtomicRmsd(M){if(!lockedAssignments||!strainAtomPairs.length)return NaN;var currentOrigin2=strainWorldCentroid(central2,1),desiredOrigin=O1.clone().add(translationDelta),sum=0,n=0;if(!currentOrigin2)return NaN;molecularCorrespondenceResult.pairs.forEach(function(pair){var c1=strainWorldCentroid(pair.comp1,0),c2=strainWorldCentroid(pair.comp2,1);if(!c1||!c2||c1.distanceTo(O1)>radius||c2.distanceTo(currentOrigin2)>radius+cutoff)return;var predicted=desiredOrigin.clone().add(applyMatrix3Vector(M,c2.clone().sub(currentOrigin2))),shift=predicted.sub(c2),directPairs=pair.atomPairs||[];directPairs.forEach(function(ap){var a1=ap.a1,a2=ap.a2;if(!a1||!a2)return;sum+=baseAtomWorldPosition(a1,0).distanceToSquared(baseAtomWorldPosition(a2,1).add(shift));n++;});});return n?Math.sqrt(sum/n):NaN;}
+    if(lockedAssignments&&strainAtomPairs.length>=3){var identity=[[1,0,0],[0,1,0],[0,0,1]],bestMatrix=identity,bestAtomic=lockedScaffoldAtomicRmsd(identity),bestAmount=0;scaffoldAtomicRmsdBefore=bestAtomic;for(var dampStep=1;dampStep<=20;dampStep++){var amount=dampStep/20,candidateMatrix=dampedStretchMatrix(S,amount),candidateAtomic=lockedScaffoldAtomicRmsd(candidateMatrix);if(isFinite(candidateAtomic)&&(!isFinite(bestAtomic)||candidateAtomic<bestAtomic-1e-10)){bestAtomic=candidateAtomic;bestMatrix=candidateMatrix;bestAmount=amount;}}S=bestMatrix;strainDamping=bestAmount;scaffoldAtomicRmsdAfter=bestAtomic;}
+    var referenceRmsdAfter=referenceRmsd(),rawSum=0,fitSum=0;matches.forEach(function(p){rawSum+=p.x.distanceToSquared(p.y);fitSum+=applyMatrix3Vector(S,p.x).add(translationDelta).distanceToSquared(p.y);});var rawRms=Math.sqrt(rawSum/matches.length),fitRms=Math.sqrt(fitSum/matches.length),eig=symmetricEigen3(S),stretches=eig.map(function(e){return e.value;}),qInv=alignmentQuaternion(ensureAlignment(slot2)).invert(),axesWorld=eig.map(function(e){return [e.vector.x,e.vector.y,e.vector.z];}),axesLocal=eig.map(function(e){var v=e.vector.clone().applyQuaternion(qInv).normalize();return [v.x,v.y,v.z];});
     var correctedFrame=rightHandedPrincipalFrame(axesLocal);axesLocal=correctedFrame.map(function(v){return [v.x,v.y,v.z];});axesWorld=correctedFrame.map(function(v){var w=v.clone().applyQuaternion(alignmentQuaternion(ensureAlignment(slot2))).normalize();return [w.x,w.y,w.z];});
     var axesCrystal=axesLocal.map(function(a){return crystallographicDirectionCoefficients(slot2,new THREE.Vector3(a[0],a[1],a[2]));}),ellipsoidRadius=referenceMoleculeRadius(slot2,central2,O2local);
-    slot2.anisotropicEnabled=true;slot2.anisotropicStretches=stretches.slice();slot2.anisotropicAxes=axesLocal;slot2.anisotropicCenter=[O2local.x,O2local.y,O2local.z];slot2.showAnisotropicEllipsoid=true;slot2.anisotropicResult={matches:matches.length,radius:radius,cutoff:cutoff,rawRmsd:rawRms,fitRmsd:fitRms,stretches:stretches.slice(),axesWorld:axesWorld,axesCrystal:axesCrystal,ellipsoidRadius:ellipsoidRadius,volumeFactor:stretches[0]*stretches[1]*stretches[2],correspondenceSource:lockedAssignments?"locked visible assignments":"automatic centroid assignment",orientationRefined:refineOrientation,orientationIterations:orientationIterations,additionalRotationDeg:additionalRotation,translationRefined:refineTranslation,additionalTranslation:[translationDelta.x,translationDelta.y,translationDelta.z],additionalTranslationMagnitude:translationDelta.length(),referenceRmsdBefore:referenceRmsdBefore,referenceRmsdAfter:referenceRmsdAfter};if(activeStructureIndex===1){state.anisotropicEnabled=true;state.anisotropicStretches=slot2.anisotropicStretches;state.anisotropicAxes=slot2.anisotropicAxes;state.anisotropicCenter=slot2.anisotropicCenter;state.anisotropicResult=slot2.anisotropicResult;state.showAnisotropicEllipsoid=true;}inflationCache[1]=null;renderStructure();renderUnitCell();renderAnchorMarkers();updateAnisotropicUI();updateInflationUI();setStatus("Anisotropic fit used "+matches.length+" molecular pairs"+(refineOrientation?" with "+additionalRotation.toFixed(3)+"° additional rotation":"")+(refineTranslation?" and "+translationDelta.length().toFixed(3)+" "+U.ang+" LS translation":"")+"; centroid RMSD "+rawRms.toFixed(3)+" to "+fitRms.toFixed(3)+" "+U.ang+".",false);
+    slot2.anisotropicEnabled=true;slot2.anisotropicStretches=stretches.slice();slot2.anisotropicAxes=axesLocal;slot2.anisotropicCenter=[O2local.x,O2local.y,O2local.z];slot2.showAnisotropicEllipsoid=true;slot2.anisotropicResult={matches:matches.length,radius:radius,cutoff:cutoff,rawRmsd:rawRms,fitRmsd:fitRms,scaffoldAtomicRmsdBefore:scaffoldAtomicRmsdBefore,scaffoldAtomicRmsdAfter:scaffoldAtomicRmsdAfter,strainDamping:strainDamping,stretches:stretches.slice(),axesWorld:axesWorld,axesCrystal:axesCrystal,ellipsoidRadius:ellipsoidRadius,volumeFactor:stretches[0]*stretches[1]*stretches[2],correspondenceSource:lockedAssignments?"locked visible assignments":"automatic centroid assignment",orientationRefined:refineOrientation&&!orientationRejected,orientationRejected:orientationRejected,orientationIterations:orientationIterations,additionalRotationDeg:additionalRotation,translationRefined:refineTranslation&&!translationRejected,translationRejected:translationRejected,additionalTranslation:[translationDelta.x,translationDelta.y,translationDelta.z],additionalTranslationMagnitude:translationDelta.length(),referenceRmsdBefore:referenceRmsdBefore,referenceRmsdAfter:referenceRmsdAfter};recordComparisonDiagnosticEvent("principal-strain-finished",slot2.anisotropicResult);if(activeStructureIndex===1){state.anisotropicEnabled=true;state.anisotropicStretches=slot2.anisotropicStretches;state.anisotropicAxes=slot2.anisotropicAxes;state.anisotropicCenter=slot2.anisotropicCenter;state.anisotropicResult=slot2.anisotropicResult;state.showAnisotropicEllipsoid=true;}inflationCache[1]=null;renderStructure();renderUnitCell();renderAnchorMarkers();updateAnisotropicUI();updateInflationUI();setStatus("Anisotropic fit used "+matches.length+" molecular pairs"+(refineOrientation&&!orientationRejected?" with "+additionalRotation.toFixed(3)+"° additional rotation":orientationRejected?"; orientation refinement rejected to protect the reference fit":"")+(refineTranslation&&!translationRejected?" and "+translationDelta.length().toFixed(3)+" "+U.ang+" LS translation":translationRejected?"; translation refinement rejected to protect the reference fit":"")+"; atomic-guided strain "+(100*strainDamping).toFixed(0)+"%; centroid RMSD "+rawRms.toFixed(3)+" to "+fitRms.toFixed(3)+" "+U.ang+".",false);
+    var fittedPairWorldCentre=new THREE.Vector3(),fittedPairAtomCount=0,fittedPairCount=0,currentO2=strainWorldCentroid(central2,1);
+    function addEllipsoidAtomPair(pair){if(!pair||!pair.a1||!pair.a2)return;fittedPairWorldCentre.add(atomAlignedPosition(pair.a1,0));fittedPairWorldCentre.add(atomAlignedPosition(pair.a2,1));fittedPairAtomCount+=2;fittedPairCount++;}
+    if(lockedAssignments)molecularCorrespondenceResult.pairs.forEach(function(pair){var c1=strainWorldCentroid(pair.comp1,0),c2=strainWorldCentroid(pair.comp2,1);if(c1&&c2&&c1.distanceTo(O1)<=radius&&c2.distanceTo(currentO2)<=radius+cutoff)(pair.atomPairs||[]).forEach(addEllipsoidAtomPair);});
+    if(!fittedPairCount)(symmetryBaseCorrespondence&&symmetryBaseCorrespondence.pairs||strainAtomPairs).forEach(addEllipsoidAtomPair);
+    if(fittedPairAtomCount){fittedPairWorldCentre.multiplyScalar(1/fittedPairAtomCount);var fittedAlignment=ensureAlignment(slot2),fittedTranslation=new THREE.Vector3(fittedAlignment.tx,fittedAlignment.ty,fittedAlignment.tz),fittedPairLocalCentre=fittedPairWorldCentre.clone().sub(fittedTranslation).applyQuaternion(alignmentQuaternion(fittedAlignment).invert());slot2.anisotropicResult.ellipsoidCenter=[fittedPairLocalCentre.x,fittedPairLocalCentre.y,fittedPairLocalCentre.z];slot2.anisotropicResult.ellipsoidCenterAtomPairs=fittedPairCount;renderAnisotropicEllipsoid();}
   }
   function setAnisotropicStretch(index,value){if(!structureSlots||!structureSlots[1]||!isFinite(value)||value<=0)return;var slot=structureSlots[1];if(!slot.anisotropicStretches)slot.anisotropicStretches=[1,1,1];slot.anisotropicStretches[index]=value;slot.anisotropicEnabled=true;if(slot.anisotropicResult){slot.anisotropicResult.stretches=slot.anisotropicStretches.slice();slot.anisotropicResult.volumeFactor=slot.anisotropicStretches[0]*slot.anisotropicStretches[1]*slot.anisotropicStretches[2];}if(activeStructureIndex===1){state.anisotropicStretches=slot.anisotropicStretches;state.anisotropicEnabled=true;state.anisotropicResult=slot.anisotropicResult;}inflationCache[1]=null;renderStructure();renderUnitCell();renderAnchorMarkers();updateAnisotropicUI();}
   function resetAnisotropicInflation(){if(!structureSlots||!structureSlots[1])return;var slot=structureSlots[1];slot.anisotropicEnabled=false;slot.anisotropicStretches=[1,1,1];slot.anisotropicAxes=[[1,0,0],[0,1,0],[0,0,1]];slot.anisotropicCenter=null;slot.anisotropicResult=null;slot.showAnisotropicEllipsoid=false;if(activeStructureIndex===1){state.anisotropicEnabled=false;state.anisotropicStretches=slot.anisotropicStretches;state.anisotropicAxes=slot.anisotropicAxes;state.anisotropicCenter=null;state.anisotropicResult=null;state.showAnisotropicEllipsoid=false;}inflationCache[1]=null;renderStructure();renderUnitCell();renderAnchorMarkers();updateAnisotropicUI();setStatus("Anisotropic inflation reset.",false);}
+  function setDeformedUnitCellDisplay(value){if(!structureSlots||!structureSlots[1])return;structureSlots[1].deformUnitCellDisplay=!!value;if(activeStructureIndex===1)state.deformUnitCellDisplay=!!value;renderUnitCell();setStatus(value?"Showing the deformed Structure 2 unit cell. This is a display-only transformation.":"Showing the original Structure 2 unit cell.",false);}
   function setAnisotropicEllipsoidVisible(value){if(!structureSlots||!structureSlots[1])return;structureSlots[1].showAnisotropicEllipsoid=!!value;if(activeStructureIndex===1)state.showAnisotropicEllipsoid=!!value;renderAnisotropicEllipsoid();updateAnisotropicUI();}
   function setAnisotropicEllipsoidStyle(value){if(!structureSlots||!structureSlots[1])return;var slot=structureSlots[1];slot.anisotropicEllipsoidStyle=value==="wireframe"?"wireframe":"solid";if(activeStructureIndex===1)state.anisotropicEllipsoidStyle=slot.anisotropicEllipsoidStyle;renderAnisotropicEllipsoid();updateAnisotropicUI();}
   function setAnisotropicEllipsoidColor(value){if(!structureSlots||!structureSlots[1])return;var slot=structureSlots[1];slot.anisotropicEllipsoidColor=value;if(activeStructureIndex===1)state.anisotropicEllipsoidColor=value;renderAnisotropicEllipsoid();updateAnisotropicUI();}
@@ -6816,11 +7235,21 @@ select.sel:focus{border-color:var(--accent)}
     var opacity=document.getElementById("anisoEllipsoidOpacity"),opacityValue=slot&&slot.anisotropicEllipsoidOpacity!==undefined?slot.anisotropicEllipsoidOpacity:.28;if(opacity&&document.activeElement!==opacity)opacity.value=opacityValue;var opacityReadout=document.getElementById("anisoEllipsoidOpacityValue");if(opacityReadout)opacityReadout.textContent=Math.round(opacityValue*100)+"%";
     var box=document.getElementById("anisoInfo");if(!box)return;var r=slot&&slot.anisotropicResult;
     if(!r){box.innerHTML="<div class='dim'>No principal-strain fit yet.</div>";return;}
-    var html="<div><b>Principal molecular-centroid strain</b></div><div>Matched molecules: "+r.matches+"</div><div>Assignments: "+(r.correspondenceSource||"automatic")+"</div><div>Centroid RMSD: "+r.rawRmsd.toFixed(4)+" to "+r.fitRmsd.toFixed(4)+" "+U.ang+"</div><div>Volume factor: "+r.volumeFactor.toFixed(5)+"</div>";
-    if(r.orientationRefined)html+="<div>Additional neighbourhood rotation: "+r.additionalRotationDeg.toFixed(4)+"° ("+r.orientationIterations+" iteration"+(r.orientationIterations===1?"":"s")+")</div>"+(isFinite(r.referenceRmsdBefore)&&isFinite(r.referenceRmsdAfter)?"<div>Reference-molecule RMSD: "+r.referenceRmsdBefore.toFixed(4)+" to "+r.referenceRmsdAfter.toFixed(4)+" "+U.ang+"</div>":"");else html+="<div class='dim'>Orientation held at the stored reference-molecule fit.</div>";
-    if(r.translationRefined)html+="<div>Additional LS translation: ["+r.additionalTranslation.map(function(v){return v.toFixed(4);}).join(", ")+"] "+U.ang+"; magnitude "+r.additionalTranslationMagnitude.toFixed(4)+" "+U.ang+"</div>";else html+="<div class='dim'>Translation held at the reference-molecule alignment.</div>";
+    var html="<div><b>Principal molecular-centroid strain</b></div><div>Matched molecules: "+r.matches+"</div><div>Assignments: "+(r.correspondenceSource||"automatic")+"</div><div>Centroid RMSD: "+r.rawRmsd.toFixed(4)+" to "+r.fitRmsd.toFixed(4)+" "+U.ang+"</div>"+(isFinite(r.scaffoldAtomicRmsdBefore)&&isFinite(r.scaffoldAtomicRmsdAfter)?"<div>Locked-scaffold atomic RMSD: "+r.scaffoldAtomicRmsdBefore.toFixed(4)+" to "+r.scaffoldAtomicRmsdAfter.toFixed(4)+" "+U.ang+"</div><div>Applied centroid strain: "+(100*r.strainDamping).toFixed(0)+"% of the unconstrained tensor</div>":"")+"<div>Volume factor: "+r.volumeFactor.toFixed(5)+"</div>";
+    if(r.orientationRefined)html+="<div>Additional neighbourhood rotation: "+r.additionalRotationDeg.toFixed(4)+"° ("+r.orientationIterations+" iteration"+(r.orientationIterations===1?"":"s")+")</div>";else html+="<div class='dim'>"+(r.orientationRejected?"Orientation refinement was rejected because it degraded the locked reference fit.":"Orientation held at the stored reference-molecule fit.")+"</div>";if(isFinite(r.referenceRmsdBefore)&&isFinite(r.referenceRmsdAfter))html+="<div>Reference-molecule RMSD: "+r.referenceRmsdBefore.toFixed(4)+" to "+r.referenceRmsdAfter.toFixed(4)+" "+U.ang+"</div>";
+    if(r.translationRefined)html+="<div>Additional LS translation: ["+r.additionalTranslation.map(function(v){return v.toFixed(4);}).join(", ")+"] "+U.ang+"; magnitude "+r.additionalTranslationMagnitude.toFixed(4)+" "+U.ang+"</div>";else html+="<div class='dim'>"+(r.translationRejected?"Translation refinement was rejected because it degraded the locked reference fit.":"Translation held at the reference-molecule alignment.")+"</div>";
     r.stretches.forEach(function(v,i){var c=r.axesCrystal&&r.axesCrystal[i];html+="<div><b>X"+(i+1)+"</b>: stretch "+v.toFixed(5)+" ("+((v-1)*100).toFixed(2)+"%)"+(c?"; [a, b, c] = ["+c.map(function(n){return n.toFixed(3);}).join(", ")+"]":"")+"</div>";});
     html+="<div class='dim'>The a/b/c crystallographic-basis components are unit-normalised: a² + b² + c² = 1.</div>";box.innerHTML=html;
+  }
+  function exportComparisonDiagnosticLog(){
+    if(!structureSlots||!structureSlots[0]||!structureSlots[1]){setStatus("Load both structures before exporting diagnostics.",true);return;}saveActiveStructureState();
+    function vec(v){return v?[v.x,v.y,v.z]:null;}
+    function atomIdentity(a,index){return {uid:a.uid,element:a.el,label:comparisonAtomLabel(a,index),auIndex:a.auIndex,opIndex:a.opIndex,cell:[a.cellI||0,a.cellJ||0,a.cellK||0],stored:[a.x,a.y,a.z],local:vec(rawAtomLocalPosition(a,index)),baseWorld:vec(baseAtomWorldPosition(a,index)),displayedWorld:vec(atomAlignedPosition(a,index))};}
+    function componentIdentity(comp,index,pairs){var base=componentComparableCentroid(comp,index,pairs,baseAtomWorldPosition),shown=componentComparableCentroid(comp,index,pairs,atomAlignedPosition),first=comp&&comp[0];return {key:first?String(first.opIndex)+":"+(first.cellI||0)+":"+(first.cellJ||0)+":"+(first.cellK||0)+":"+String(first.auIndex):null,atomCount:comp?comp.length:0,comparableAtomCount:base?base.n:0,baseScaffoldCentroid:base?vec(base.c):null,displayedScaffoldCentroid:shown?vec(shown.c):null};}
+    var pairs=activeComparisonAtomPairs(),assignments=molecularCorrespondenceResult&&molecularCorrespondenceResult.pairs||[];
+    var assignmentData=assignments.map(function(mp,mi){var observations=[],directPairs=mp.atomPairs||[];directPairs.forEach(function(ap,pi){var a1=ap.a1,a2=ap.a2;if(!a1||!a2)return;var target=baseAtomWorldPosition(a1,0),sourceBefore=baseAtomWorldPosition(a2,1),sourceAfter=atomAlignedPosition(a2,1);observations.push({pairIndex:pi,label1:comparisonAtomLabel(a1,0),label2:comparisonAtomLabel(a2,1),target:vec(target),sourceBeforeStrain:vec(sourceBefore),sourceAfterStrain:vec(sourceAfter),distanceBefore:target.distanceTo(sourceBefore),distanceAfter:target.distanceTo(sourceAfter)});});return {assignmentIndex:mi,structure1:componentIdentity(mp.comp1,0,pairs),structure2:componentIdentity(mp.comp2,1,pairs),recordedCentroidDistance:mp.centroidDistance,recordedAtomicRmsd:mp.atomicRmsd,observations:observations};});
+    var payload={format:"CrystalComparator diagnostic log",build:COMPARATOR_BUILD,created:new Date().toISOString(),page:location.href,events:comparisonDiagnosticEvents.slice(),settings:{comparisonMaskLocked:comparisonMaskLocked,comparisonRadius:molecularCorrespondenceResult&&molecularCorrespondenceResult.radius,comparisonCutoff:molecularCorrespondenceResult&&molecularCorrespondenceResult.cutoff,anisotropicRadius:document.getElementById("anisoRadius")&&document.getElementById("anisoRadius").value,anisotropicCutoff:document.getElementById("anisoCutoff")&&document.getElementById("anisoCutoff").value,refineOrientation:!!(document.getElementById("anisoRefineOrientation")&&document.getElementById("anisoRefineOrientation").checked),refineTranslation:!!(document.getElementById("anisoRefineTranslation")&&document.getElementById("anisoRefineTranslation").checked)},structures:structureSlots.map(function(slot,index){return {index:index+1,name:slot.name||"",atomCount:slot.atoms?slot.atoms.length:0,viewOffset:slot.viewOffset,alignment:Object.assign({},ensureAlignment(slot)),cell:slot.cifCell,anisotropic:index===1?{enabled:slot.anisotropicEnabled,stretches:slot.anisotropicStretches,axes:slot.anisotropicAxes,center:slot.anisotropicCenter,result:slot.anisotropicResult}:null,atoms:(slot.atoms||[]).map(function(a){return atomIdentity(a,index);})};}),anchors:anchorPairs.map(function(p,i){return {pair:i+1,a1:atomIdentity(p.a1,0),a2:atomIdentity(p.a2,1)};}),comparisonAtomPairs:pairs.map(function(p,i){return {pair:i+1,a1:{label:comparisonAtomLabel(p.a1,0),auIndex:p.a1.auIndex,element:p.a1.el},a2:{label:comparisonAtomLabel(p.a2,1),auIndex:p.a2.auIndex,element:p.a2.el}};}),moleculeFitResult:moleculeFitResult,neighbourhoodSummary:molecularCorrespondenceResult?{matched:assignments.length,available1:molecularCorrespondenceResult.count1,available2:molecularCorrespondenceResult.count2,centroidRmsd:molecularCorrespondenceResult.centroidRmsd,atomicRmsd:molecularCorrespondenceResult.atomicRmsd,matchedAtoms:molecularCorrespondenceResult.matchedAtoms}:null,assignments:assignmentData};
+    recordComparisonDiagnosticEvent("diagnostic-exported",{assignments:assignmentData.length,atoms1:payload.structures[0].atomCount,atoms2:payload.structures[1].atomCount});payload.events=comparisonDiagnosticEvents.slice();var blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"}),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="CrystalComparator_diagnostic_"+COMPARATOR_BUILD+".json";document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url);},1000);setStatus("Diagnostic log exported for build "+COMPARATOR_BUILD+".",false);
   }
   function haltonValue(index,base){var f=1,r=0;while(index>0){f/=base;r+=f*(index%base);index=Math.floor(index/base);}return r;}
   function volumeAtomRadius(atom,slot){var r=atom&&atom.r;if(!(r>0)&&slot&&slot.radii)r=slot.radii[atom.el];return r>0?r:1.7;}
@@ -6833,7 +7262,7 @@ select.sel:focus{border-color:var(--accent)}
   function cellComparisonDescriptors(){if(!structureSlots||!structureSlots[0].cifFracToCart||!structureSlots[1].cifFracToCart)return null;var A=structureSlots[0].cifFracToCart,B=structureSlots[1].cifFracToCart,Bi=matrix3Inverse(B);if(!Bi)return null;var F=matrix3Multiply(A,Bi),C=matrix3Multiply(matrix3Transpose(F),F),eig=symmetricEigen3(C),stretches=eig.map(function(e){return Math.sqrt(Math.max(0,e.value));}),v1=Math.abs(A[0][0]*(A[1][1]*A[2][2]-A[1][2]*A[2][1])-A[0][1]*(A[1][0]*A[2][2]-A[1][2]*A[2][0])+A[0][2]*(A[1][0]*A[2][1]-A[1][1]*A[2][0])),v2=Math.abs(B[0][0]*(B[1][1]*B[2][2]-B[1][2]*B[2][1])-B[0][1]*(B[1][0]*B[2][2]-B[1][2]*B[2][0])+B[0][2]*(B[1][0]*B[2][1]-B[1][1]*B[2][0])),meanLog=(Math.log(stretches[0])+Math.log(stretches[1])+Math.log(stretches[2]))/3,shear=Math.sqrt(stretches.reduce(function(s,v){return s+Math.pow(Math.log(v)-meanLog,2);},0)/3);return {volume1:v1,volume2:v2,volumeRatio:v2?v1/v2:NaN,principalStretches:stretches,meanElongation:Math.exp(meanLog)-1,shearDistortion:shear};}
   function volumetricSvgPlot(){var r=volumetricAnalysisResult;if(!r)return null,ns="http://www.w3.org/2000/svg";var ns="http://www.w3.org/2000/svg",svg=document.createElementNS(ns,"svg"),W=640,H=300,pad={l:58,r:18,t:42,b:48};svg.setAttribute("viewBox","0 0 "+W+" "+H);svg.style.width="100%";svg.style.background="rgba(255,255,255,.35)";function line(x1,y1,x2,y2,color,width){var e=document.createElementNS(ns,"line");e.setAttribute("x1",x1);e.setAttribute("y1",y1);e.setAttribute("x2",x2);e.setAttribute("y2",y2);e.setAttribute("stroke",color);e.setAttribute("stroke-width",width||1);svg.appendChild(e);}function txt(x,y,t,size,anchor){var e=document.createElementNS(ns,"text");e.setAttribute("x",x);e.setAttribute("y",y);e.setAttribute("font-size",size||11);e.setAttribute("fill","#39362f");if(anchor)e.setAttribute("text-anchor",anchor);e.textContent=t;svg.appendChild(e);}line(pad.l,H-pad.b,W-pad.r,H-pad.b,"#777");line(pad.l,pad.t,pad.l,H-pad.b,"#777");txt(pad.l,24,"Radial volumetric overlap",14);for(var i=0;i<=5;i++){var x=pad.l+(W-pad.l-pad.r)*i/5,rv=r.maxRadius*i/5;line(x,H-pad.b,x,H-pad.b+5,"#777");txt(x,H-18,rv.toFixed(r.maxRadius<10?1:0),10,"middle");var y=H-pad.b-(H-pad.t-pad.b)*i/5;line(pad.l,y,W-pad.r,y,"#ddd");txt(pad.l-7,y+4,String(i*20),10,"end");}txt(W/2,H-3,"Radius (A)",11,"middle");[{data:r.curves.rigid,color:"#4a6fa5",label:"Rigid Iv"},{data:r.curves.deformed,color:"#b3485b",label:"Deformation-assisted Iv"}].forEach(function(s,si){var pts=s.data.map(function(d){return (pad.l+(W-pad.l-pad.r)*d.radius/r.maxRadius)+","+(H-pad.b-(H-pad.t-pad.b)*d.iv/100);});var p=document.createElementNS(ns,"polyline");p.setAttribute("points",pts.join(" "));p.setAttribute("fill","none");p.setAttribute("stroke",s.color);p.setAttribute("stroke-width","2.5");svg.appendChild(p);line(pad.l+si*190,35,pad.l+si*190+25,35,s.color,3);txt(pad.l+si*190+32,39,s.label,10);});return svg;}
   function updateVolumetricUI(){var info=document.getElementById("volumetricInfo"),plots=document.getElementById("volumetricPlots");if(!info||!plots)return;plots.innerHTML="";var r=volumetricAnalysisResult;if(!r){info.innerHTML="<div class='dim'>No volumetric-overlap analysis yet.</div>";return;}var d=r.overall.deformed,rig=r.overall.rigid,cell=r.cell;info.innerHTML="<div><b>Fábián–Kálmán volumetric overlap at "+r.maxRadius.toFixed(1)+" "+U.ang+"</b></div><div>Rigid: I<sub>v</sub> = "+rig.iv.toFixed(2)+" ± "+rig.uncertainty.toFixed(2)+"%; I<sub>v</sub><sup>max</sup> = "+rig.ivmax.toFixed(2)+"%; normalized Q<sub>v</sub> = "+rig.qv.toFixed(2)+"%</div><div>Deformation-assisted: I<sub>v</sub> = "+d.iv.toFixed(2)+" ± "+d.uncertainty.toFixed(2)+"%; I<sub>v</sub><sup>max</sup> = "+d.ivmax.toFixed(2)+"%; normalized Q<sub>v</sub> = "+d.qv.toFixed(2)+"%</div><div>Volumes S1 / S2 / overlap (deformed): "+d.v1.toFixed(1)+" / "+d.v2.toFixed(1)+" / "+d.overlap.toFixed(1)+" "+U.ang+"³</div><div>Samples: "+r.samples.toLocaleString()+"; uncertainty is a 95% shifted-sequence convergence estimate.</div>"+(cell?"<div>Cell principal stretches: "+cell.principalStretches.map(function(v){return v.toFixed(5);}).join(", ")+"; mean elongation "+(100*cell.meanElongation).toFixed(2)+"%; shear distortion "+cell.shearDistortion.toFixed(5)+"</div>":"")+"<div class='dim'>I<sub>v</sub> and I<sub>v</sub><sup>max</sup>: Fábián &amp; Kálmán, Acta Cryst. B55 (1999) 1099–1108. Q<sub>v</sub> is CrystalComparator's explicitly derived normalization I<sub>v</sub>/I<sub>v</sub><sup>max</sup>.</div>";var plot=volumetricSvgPlot();if(plot)plots.appendChild(plot);}
-  function calculateVolumetricOverlap(){var radius=parseFloat(document.getElementById("volumetricRadius").value),step=parseFloat(document.getElementById("volumetricStep").value),precision=document.getElementById("volumetricPrecision").value,samples=precision==="high"?400000:precision==="quick"?30000:120000;if(!isFinite(radius)||radius<=0||!isFinite(step)||step<=0||step>radius){setStatus("Enter a positive volumetric radius and a step no greater than that radius.",true);return;}var refs=referenceMolecules();if(!refs){setStatus("Fit the reference molecules before calculating volumetric overlap.",true);return;}saveActiveStructureState();showOverlay(true,"Calculating Fábián–Kálmán volumetric overlap...");setTimeout(function(){try{var origin=baseComponentCentroid(refs.comp1,0),bins=Math.ceil(radius/step),shellSamples=new Array(bins).fill(0),models={rigid:{v1:new Array(bins).fill(0),v2:new Array(bins).fill(0),ov:new Array(bins).fill(0)},deformed:{v1:new Array(bins).fill(0),v2:new Array(bins).fill(0),ov:new Array(bins).fill(0)}},slot1=structureSlots[0],slot2=structureSlots[1];function records(slot,index,deformed){return (slot.atoms||[]).filter(function(a){return !a.isCentroid;}).map(function(a){var p=deformed?atomAlignedPosition(a,index):baseAtomWorldPosition(a,index),rr=volumeAtomRadius(a,slot);return {p:p,r:rr};}).filter(function(a){return a.p.distanceTo(origin)<=radius+a.r;});}var h1=volumeSpatialHash(records(slot1,0,false)),h2r=volumeSpatialHash(records(slot2,1,false)),h2d=volumeSpatialHash(records(slot2,1,true)),replicates=8,repCounts=[];for(var rr=0;rr<replicates;rr++)repCounts.push({rigid:[0,0,0],deformed:[0,0,0],n:0});var shifts=[[.013,.317,.619],[.127,.541,.883],[.239,.773,.071],[.353,.997,.337],[.467,.211,.557],[.581,.439,.797],[.697,.653,.149],[.811,.887,.401]];for(var i=0;i<samples;i++){var rep=i%replicates,k=Math.floor(i/replicates)+1,u=(haltonValue(k,2)+shifts[rep][0])%1,v=(haltonValue(k,3)+shifts[rep][1])%1,w=(haltonValue(k,5)+shifts[rep][2])%1,rad=radius*Math.cbrt(u),cz=1-2*v,sz=Math.sqrt(Math.max(0,1-cz*cz)),phi=2*Math.PI*w,p=new THREE.Vector3(origin.x+rad*sz*Math.cos(phi),origin.y+rad*sz*Math.sin(phi),origin.z+rad*cz),bin=Math.min(bins-1,Math.floor(rad/step)),o1=volumePointOccupied(p,h1),o2r=volumePointOccupied(p,h2r),o2d=volumePointOccupied(p,h2d);shellSamples[bin]++;repCounts[rep].n++;models.rigid.v1[bin]+=o1?1:0;models.rigid.v2[bin]+=o2r?1:0;models.rigid.ov[bin]+=o1&&o2r?1:0;models.deformed.v1[bin]+=o1?1:0;models.deformed.v2[bin]+=o2d?1:0;models.deformed.ov[bin]+=o1&&o2d?1:0;repCounts[rep].rigid[0]+=o1?1:0;repCounts[rep].rigid[1]+=o2r?1:0;repCounts[rep].rigid[2]+=o1&&o2r?1:0;repCounts[rep].deformed[0]+=o1?1:0;repCounts[rep].deformed[1]+=o2d?1:0;repCounts[rep].deformed[2]+=o1&&o2d?1:0;}var domain=4*Math.PI*Math.pow(radius,3)/3,curves={rigid:[],deformed:[]},overall={};["rigid","deformed"].forEach(function(model){var n=0,c1=0,c2=0,co=0;for(var b=0;b<bins;b++){n+=shellSamples[b];c1+=models[model].v1[b];c2+=models[model].v2[b];co+=models[model].ov[b];var idx=volumetricIndexFromCounts(c1,c2,co);curves[model].push({radius:Math.min(radius,(b+1)*step),iv:idx.iv,ivmax:idx.ivmax,qv:idx.qv});}var all=volumetricIndexFromCounts(c1,c2,co),vals=repCounts.map(function(rc){return volumetricIndexFromCounts(rc[model][0],rc[model][1],rc[model][2]).iv;}),mean=vals.reduce(function(s,x){return s+x;},0)/vals.length,variance=vals.reduce(function(s,x){return s+(x-mean)*(x-mean);},0)/Math.max(1,vals.length-1);all.uncertainty=1.96*Math.sqrt(variance/vals.length);all.v1=domain*c1/samples;all.v2=domain*c2/samples;all.overlap=domain*co/samples;overall[model]=all;});volumetricAnalysisResult={maxRadius:radius,step:step,samples:samples,curves:curves,overall:overall,cell:cellComparisonDescriptors(),hydrogenCounts:[(slot1.atoms||[]).filter(function(a){return a.el==="H";}).length,(slot2.atoms||[]).filter(function(a){return a.el==="H";}).length],method:"Shifted Halton quasi-Monte Carlo sampling of unions of van der Waals spheres"};updateVolumetricUI();showOverlay(false);setStatus("Calculated rigid and deformation-assisted Fábián–Kálmán volumetric overlap to "+radius.toFixed(1)+" "+U.ang+".",false);}catch(e){showOverlay(false);setStatus("Volumetric-overlap calculation failed: "+e.message,true);}},30);}
+  function calculateVolumetricOverlap(){var radius=parseFloat(document.getElementById("volumetricRadius").value),step=parseFloat(document.getElementById("volumetricStep").value),precision=document.getElementById("volumetricPrecision").value,samples=precision==="high"?400000:precision==="quick"?30000:120000;if(!isFinite(radius)||radius<=0||!isFinite(step)||step<=0||step>radius){setStatus("Enter a positive volumetric radius and a step no greater than that radius.",true);return;}var refs=referenceMolecules();if(!refs){setStatus("Fit the reference molecules before calculating volumetric overlap.",true);return;}saveActiveStructureState();showOverlay(true,"Calculating Fábián–Kálmán volumetric overlap...");setTimeout(function(){try{var volumePairs=comparisonMaskLocked?activeComparisonAtomPairs():[],volumeReference=volumePairs.length>=3&&componentComparableCentroid(refs.comp1,0,volumePairs,baseAtomWorldPosition),origin=volumeReference&&volumeReference.c||baseComponentCentroid(refs.comp1,0),bins=Math.ceil(radius/step),shellSamples=new Array(bins).fill(0),models={rigid:{v1:new Array(bins).fill(0),v2:new Array(bins).fill(0),ov:new Array(bins).fill(0)},deformed:{v1:new Array(bins).fill(0),v2:new Array(bins).fill(0),ov:new Array(bins).fill(0)}},slot1=structureSlots[0],slot2=structureSlots[1];function records(slot,index,deformed){return (slot.atoms||[]).filter(function(a){return !a.isCentroid;}).map(function(a){var p=deformed?atomAlignedPosition(a,index):baseAtomWorldPosition(a,index),rr=volumeAtomRadius(a,slot);return {p:p,r:rr};}).filter(function(a){return a.p.distanceTo(origin)<=radius+a.r;});}var h1=volumeSpatialHash(records(slot1,0,false)),h2r=volumeSpatialHash(records(slot2,1,false)),h2d=volumeSpatialHash(records(slot2,1,true)),replicates=8,repCounts=[];for(var rr=0;rr<replicates;rr++)repCounts.push({rigid:[0,0,0],deformed:[0,0,0],n:0});var shifts=[[.013,.317,.619],[.127,.541,.883],[.239,.773,.071],[.353,.997,.337],[.467,.211,.557],[.581,.439,.797],[.697,.653,.149],[.811,.887,.401]];for(var i=0;i<samples;i++){var rep=i%replicates,k=Math.floor(i/replicates)+1,u=(haltonValue(k,2)+shifts[rep][0])%1,v=(haltonValue(k,3)+shifts[rep][1])%1,w=(haltonValue(k,5)+shifts[rep][2])%1,rad=radius*Math.cbrt(u),cz=1-2*v,sz=Math.sqrt(Math.max(0,1-cz*cz)),phi=2*Math.PI*w,p=new THREE.Vector3(origin.x+rad*sz*Math.cos(phi),origin.y+rad*sz*Math.sin(phi),origin.z+rad*cz),bin=Math.min(bins-1,Math.floor(rad/step)),o1=volumePointOccupied(p,h1),o2r=volumePointOccupied(p,h2r),o2d=volumePointOccupied(p,h2d);shellSamples[bin]++;repCounts[rep].n++;models.rigid.v1[bin]+=o1?1:0;models.rigid.v2[bin]+=o2r?1:0;models.rigid.ov[bin]+=o1&&o2r?1:0;models.deformed.v1[bin]+=o1?1:0;models.deformed.v2[bin]+=o2d?1:0;models.deformed.ov[bin]+=o1&&o2d?1:0;repCounts[rep].rigid[0]+=o1?1:0;repCounts[rep].rigid[1]+=o2r?1:0;repCounts[rep].rigid[2]+=o1&&o2r?1:0;repCounts[rep].deformed[0]+=o1?1:0;repCounts[rep].deformed[1]+=o2d?1:0;repCounts[rep].deformed[2]+=o1&&o2d?1:0;}var domain=4*Math.PI*Math.pow(radius,3)/3,curves={rigid:[],deformed:[]},overall={};["rigid","deformed"].forEach(function(model){var n=0,c1=0,c2=0,co=0;for(var b=0;b<bins;b++){n+=shellSamples[b];c1+=models[model].v1[b];c2+=models[model].v2[b];co+=models[model].ov[b];var idx=volumetricIndexFromCounts(c1,c2,co);curves[model].push({radius:Math.min(radius,(b+1)*step),iv:idx.iv,ivmax:idx.ivmax,qv:idx.qv});}var all=volumetricIndexFromCounts(c1,c2,co),vals=repCounts.map(function(rc){return volumetricIndexFromCounts(rc[model][0],rc[model][1],rc[model][2]).iv;}),mean=vals.reduce(function(s,x){return s+x;},0)/vals.length,variance=vals.reduce(function(s,x){return s+(x-mean)*(x-mean);},0)/Math.max(1,vals.length-1);all.uncertainty=1.96*Math.sqrt(variance/vals.length);all.v1=domain*c1/samples;all.v2=domain*c2/samples;all.overlap=domain*co/samples;overall[model]=all;});volumetricAnalysisResult={maxRadius:radius,step:step,samples:samples,curves:curves,overall:overall,cell:cellComparisonDescriptors(),hydrogenCounts:[(slot1.atoms||[]).filter(function(a){return a.el==="H";}).length,(slot2.atoms||[]).filter(function(a){return a.el==="H";}).length],method:"Shifted Halton quasi-Monte Carlo sampling of unions of van der Waals spheres"};updateVolumetricUI();showOverlay(false);setStatus("Calculated rigid and deformation-assisted Fábián–Kálmán volumetric overlap to "+radius.toFixed(1)+" "+U.ang+".",false);}catch(e){showOverlay(false);setStatus("Volumetric-overlap calculation failed: "+e.message,true);}},30);}
   function prepareJointOptimModel(result,radius,cutoff,restraint) {
     var match=findMoleculeCorrespondence();if(!match)return null;var refs=referenceMolecules(),central1=refs&&refs.comp1;if(!central1)return null;
     var candidate=result.component,mapByAu={};candidate.forEach(function(a){if(a.auIndex!==undefined)mapByAu[a.auIndex]=a;});var centralPairs=[];match.pairs.forEach(function(p){var c=mapByAu[p.a2.auIndex];if(c&&c.el===p.a2.el)centralPairs.push({a1:p.a1,a2:c});});if(centralPairs.length<3){setStatus("The selected symmetry candidate does not contain enough mapped central atoms.",true);return null;}
@@ -6891,7 +7320,7 @@ select.sel:focus{border-color:var(--accent)}
       if(node.nodeType===1&&node.dataset&&node.dataset.alignmentStage){current={title:node.dataset.alignmentStage,note:node.dataset.alignmentNote,nodes:[]};groups.push(current);return;}
       if(current)current.nodes.push(node);
     });
-    var workflowOrder=["Reference-molecule alignment","Paired sphere growth","Comparison definition and neighbourhood","Principal-strain deformation","Volumetric overlap assessment","Radial similarity assessment","Symmetry-site candidate search","Interactive and manual alignment"];
+    var workflowOrder=["Reference alignment","Paired sphere growth","Comparison definition and neighbourhood","Principal-strain deformation","Volumetric overlap assessment","Radial similarity assessment","Symmetry-site candidate search","Interactive and manual alignment"];
     groups.sort(function(a,b){var ai=workflowOrder.indexOf(a.title),bi=workflowOrder.indexOf(b.title);return (ai<0?999:ai)-(bi<0?999:bi);});
     body.innerHTML="";
     groups.forEach(function(group,index){
@@ -6912,16 +7341,16 @@ select.sel:focus{border-color:var(--accent)}
     var body = section(left, "Alignment"); body.parentElement.id = "alignmentSection";
     var allSections = left.querySelectorAll(".section");
     for (var si = 0; si < allSections.length; si++) { var sh = allSections[si].querySelector(".sechead"); if (sh && sh.textContent.indexOf("Visual Effects") >= 0) { left.insertBefore(body.parentElement, allSections[si]); break; } }
-    alignmentStageMarker(body,"Reference-molecule alignment","Start here: establish corresponding atoms, then fit and store the complete molecular reference.");
+    alignmentStageMarker(body,"Reference alignment","Start here: establish corresponding atoms, then fit either one molecule or an anchored packed substructure.");
     var anchorBtn = button(body, "", "prominent ghost", toggleAnchorFit); anchorBtn.id = "anchorFitBtn";
     var anchorInfo = el("div", "readout"); anchorInfo.id = "anchorInfo"; body.appendChild(anchorInfo);
     var anchorActions = el("div", "btnrow"); button(anchorActions, "Undo anchor", "ghost", undoAnchor); button(anchorActions, "Clear anchors", "ghost", clearAnchors); body.appendChild(anchorActions);
     var twoAnchorAxisFitBtn=button(body,"Find best whole-packing rotation around 2-anchor axis","prominent ghost",optimiseTwoAnchorAxisFit);twoAnchorAxisFitBtn.id="twoAnchorAxisFitBtn";twoAnchorAxisFitBtn.disabled=true;
-    body.appendChild(el("div", "hint", "Anchor mode alternates between Structure 1 and Structure 2. One pair translates; two pairs align and lock a vector. After two pairs, either scan the complete packed heavy-atom structures for their best rotation around that axis, or select a third pair as before. The whole-packing fit treats every displayed packed structure as one point cloud. When it finishes, Find correspondence and fit whole molecule remains available as a separate next step. Anchor Fit turns off so interactive growth can use viewport clicks; re-enable it if you later want to add a third pair."));
-    var moleculeFitBtn = button(body, "Find correspondence and fit whole molecule", "prominent", refineWholeMoleculeFit); moleculeFitBtn.id = "moleculeFitBtn";
+    body.appendChild(el("div", "hint", "Anchor mode alternates between Structure 1 and Structure 2. One pair translates; two pairs align and lock a vector. After two pairs, either scan the complete packed heavy-atom structures for their best rotation around that axis, or select a third pair as before. The three pairs may all belong to one molecule or may span several corresponding molecules in a packed substructure. Anchor Fit turns off so interactive growth can use viewport clicks; re-enable it if you later want to add a third pair."));
+    var moleculeFitBtn = button(body, "Fit anchored molecule / packed substructure", "prominent", refineWholeMoleculeFit); moleculeFitBtn.id = "moleculeFitBtn";
     var moleculeFitInfo = el("div", "readout"); moleculeFitInfo.id = "moleculeFitInfo"; body.appendChild(moleculeFitInfo);
     var clearMoleculeRefRow=el("div","btnrow");button(clearMoleculeRefRow,"Clear molecular reference","ghost",clearMolecularReference);body.appendChild(clearMoleculeRefRow);
-    body.appendChild(el("div", "hint", "Uses the anchored bonded molecules, ignores hydrogen atoms, propagates matches through their common element-labelled connectivity, and leaves unmatched substituents out of the fit."));
+    body.appendChild(el("div", "hint", "If all anchors belong to one molecule, the original molecular fit is used. If they span several packed molecules, each anchor-containing molecule is paired one-to-one and their common element-labelled connectivity is fitted as one substructure. Hydrogen atoms and unmatched substituents are ignored."));
     alignmentStageMarker(body,"Paired sphere growth","Grow both fitted structures together around a corresponding atom before defining and matching their molecular neighbourhoods.");
     var pairedGrowBtn=button(body,"","prominent ghost",toggleAlignmentPairedGrow);pairedGrowBtn.id="alignmentPairedGrowBtn";
     var pairedGrowRow=el("div","ctl-inline");pairedGrowRow.appendChild(el("label","plain","Sphere of inclusion"));var pairedGrowRadius=document.createElement("input");pairedGrowRadius.type="number";pairedGrowRadius.className="num";pairedGrowRadius.id="alignmentPairedGrowRadius";pairedGrowRadius.min="0.1";pairedGrowRadius.step="0.5";pairedGrowRadius.value=alignmentPairedGrowRadius.toFixed(1);pairedGrowRadius.addEventListener("input",function(){var v=parseFloat(pairedGrowRadius.value);if(isFinite(v)&&v>0){alignmentPairedGrowRadius=v;state.sphereRadius=v;}});pairedGrowRow.appendChild(pairedGrowRadius);pairedGrowRow.appendChild(el("span","unit",U.ang));body.appendChild(pairedGrowRow);
@@ -6952,9 +7381,13 @@ select.sel:focus{border-color:var(--accent)}
     body.appendChild(el("div","hint","Automatic anisotropic principal-strain fit"));
     var anisoParams=el("div","ctl-inline");anisoParams.appendChild(el("label","plain","Radius"));var anisoRadius=document.createElement("input");anisoRadius.type="number";anisoRadius.className="num";anisoRadius.id="anisoRadius";anisoRadius.value="15.0";anisoRadius.step="1";anisoParams.appendChild(anisoRadius);anisoParams.appendChild(el("span","unit",U.ang));anisoParams.appendChild(el("label","plain","Match"));var anisoCutoff=document.createElement("input");anisoCutoff.type="number";anisoCutoff.className="num";anisoCutoff.id="anisoCutoff";anisoCutoff.value="4.0";anisoCutoff.step="0.25";anisoParams.appendChild(anisoCutoff);anisoParams.appendChild(el("span","unit",U.ang));body.appendChild(anisoParams);
     var refineOrientationToggle=toggle(body,"refine orientation together with strain",true,function(){});refineOrientationToggle.id="anisoRefineOrientation";
-    var refineTranslationToggle=toggle(body,"refine translation together with strain",false,function(){});refineTranslationToggle.id="anisoRefineTranslation";
+    var refineTranslationToggle=toggle(body,"refine translation together with strain",true,function(){});refineTranslationToggle.id="anisoRefineTranslation";
     body.appendChild(el("div","hint","Translation refinement applies the least-squares centroid shift of Structure 2 after orientation and strain refinement. It may move the original reference molecules slightly apart in order to improve the neighbourhood-wide fit."));
+    var deformCellToggle=toggle(body,"deform Structure 2 unit cell display",!!(structureSlots&&structureSlots[1]&&structureSlots[1].deformUnitCellDisplay),setDeformedUnitCellDisplay);deformCellToggle.id="deformUnitCellDisplay";
+    body.appendChild(el("div","hint","Unchecked shows the original Structure 2 cell. Checked applies the current isotropic and principal-strain deformation to the displayed cell only; crystallographic cell data and atom coordinates are unchanged."));
     button(body,"Determine principal inflation axes","prominent",determineAnisotropicInflation);
+    button(body,"Export comparison diagnostic log (JSON)","ghost",exportComparisonDiagnosticLog);
+    body.appendChild(el("div","hint","The diagnostic log stays on this computer and records the build, settings, assignments, centroids, atom-pair coordinates and before/after strain distances."));
     var showAnisoEllipsoid=toggle(body,"show principal-strain ellipsoid",!!(structureSlots&&structureSlots[1]&&structureSlots[1].showAnisotropicEllipsoid),setAnisotropicEllipsoidVisible);showAnisoEllipsoid.id="showAnisoEllipsoid";showAnisoEllipsoid.disabled=!(structureSlots&&structureSlots[1]&&structureSlots[1].anisotropicResult);
     var ellipsoidAppearance=el("div","ctl-inline");ellipsoidAppearance.appendChild(el("label","plain","Surface"));var ellipsoidStyle=document.createElement("select");ellipsoidStyle.className="sel";ellipsoidStyle.id="anisoEllipsoidStyle";[["solid","Solid"],["wireframe","Wireframe"]].forEach(function(item){var option=document.createElement("option");option.value=item[0];option.textContent=item[1];ellipsoidStyle.appendChild(option);});ellipsoidStyle.value=structureSlots&&structureSlots[1]&&structureSlots[1].anisotropicEllipsoidStyle||"solid";ellipsoidStyle.addEventListener("change",function(){setAnisotropicEllipsoidStyle(ellipsoidStyle.value);});ellipsoidAppearance.appendChild(ellipsoidStyle);ellipsoidAppearance.appendChild(el("label","plain","Colour"));var ellipsoidColour=colorSwatch(structureSlots&&structureSlots[1]&&structureSlots[1].anisotropicEllipsoidColor!==undefined?structureSlots[1].anisotropicEllipsoidColor:0x4A6FA5,setAnisotropicEllipsoidColor);ellipsoidColour.id="anisoEllipsoidColor";ellipsoidAppearance.appendChild(ellipsoidColour);body.appendChild(ellipsoidAppearance);
     var ellipsoidOpacityRow=el("div","ctl-inline");ellipsoidOpacityRow.appendChild(el("label","plain","Surface opacity"));var ellipsoidOpacity=document.createElement("input");ellipsoidOpacity.type="range";ellipsoidOpacity.id="anisoEllipsoidOpacity";ellipsoidOpacity.min="0.05";ellipsoidOpacity.max="1";ellipsoidOpacity.step="0.01";ellipsoidOpacity.value=structureSlots&&structureSlots[1]&&structureSlots[1].anisotropicEllipsoidOpacity!==undefined?structureSlots[1].anisotropicEllipsoidOpacity:.28;ellipsoidOpacity.style.flex="1";var ellipsoidOpacityValue=el("span","unit",Math.round(parseFloat(ellipsoidOpacity.value)*100)+"%");ellipsoidOpacityValue.id="anisoEllipsoidOpacityValue";ellipsoidOpacity.addEventListener("input",function(){setAnisotropicEllipsoidOpacity(parseFloat(ellipsoidOpacity.value));ellipsoidOpacityValue.textContent=Math.round(parseFloat(ellipsoidOpacity.value)*100)+"%";});ellipsoidOpacityRow.appendChild(ellipsoidOpacity);ellipsoidOpacityRow.appendChild(ellipsoidOpacityValue);body.appendChild(ellipsoidOpacityRow);
@@ -7206,9 +7639,9 @@ select.sel:focus{border-color:var(--accent)}
       "<h3>4. Structure, Grow, Display and editing menus</h3>" +
       "<p><b>Structure</b> controls ball-and-stick or stick rendering and structure-specific size settings. <b>Grow</b> provides ordinary symmetry growth by bonds or sphere of inclusion, packing ranges and individual symmetry operations. Interactive grow remains active when switching between S1 and S2. <b>Display</b> controls scene, material, lighting, unit cell and projection settings. <b>Edit Atoms &amp; Bonds</b> supports selection-based deletion, element reassignment, bond cutting and cleanup. <b>Delete all hydrogen atoms</b> removes hydrogen atoms from both loaded structures.</p>" +
       "<h3>5. Recommended alignment workflow</h3>" +
-      "<p>The Alignment panel is divided into collapsible stages. The normal sequence is Reference-molecule alignment, Paired sphere growth, Comparison definition and neighbourhood, Principal-strain deformation, Volumetric overlap assessment and Radial similarity assessment. Symmetry-site candidate search and Interactive/manual alignment are optional diagnostic stages near the end.</p>" +
-      "<h3>6. Reference-molecule alignment</h3>" +
-      "<ul><li>Turn on <b>Anchor fit</b>. The diagonal-cross cursor indicates this mode. Select an atom in S1 and its counterpart in S2, repeating for up to three non-collinear heavy-atom pairs.</li><li>One pair translates S2 and two align a vector. After two pairs, either select the third pair exactly as before or click <b>Find best whole-packing rotation around 2-anchor axis</b>. This optional action treats every displayed non-hydrogen atom in each packed structure as part of one point cloud. It incrementally scans rotations of S2 around the fixed two-anchor vector and minimises a symmetric, element-aware nearest-neighbour score without moving that axis. It does not itself create a molecular correspondence. Anchor Fit is then turned off so ordinary interactive Grow can receive viewport clicks; re-enable it if you later want to add a third pair.</li><li>Three pairs perform the existing least-squares rigid fit and turn anchor mode off automatically.</li><li><b>Find correspondence and fit whole molecule</b> remains a separate molecular step, but stays available after a successful two-anchor whole-packing fit. It uses anchors belonging to the first anchored reference molecule, propagates correspondence through element-labelled connectivity, ignores hydrogen atoms and unmatched substituents, and performs a heavy-atom least-squares fit. The original three-anchor route remains available.</li><li><b>Anchor RMSD</b> is the residual of the manually chosen pairs. Whole-molecule RMSD and coverage describe the automatically matched common molecular core.</li></ul>" +
+      "<p>The Alignment panel is divided into collapsible stages. The normal sequence is Reference alignment, Paired sphere growth, Comparison definition and neighbourhood, Principal-strain deformation, Volumetric overlap assessment and Radial similarity assessment. Symmetry-site candidate search and Interactive/manual alignment are optional diagnostic stages near the end.</p>" +
+      "<h3>6. Reference alignment</h3>" +
+      "<ul><li>Turn on <b>Anchor fit</b>. The diagonal-cross cursor indicates this mode. Select an atom in S1 and its counterpart in S2, repeating for three non-collinear heavy-atom pairs. The three atoms may belong to one molecule or span several molecules in an already packed substructure.</li><li>One pair translates S2 and two align a vector. After two pairs, either select the third pair exactly as before or click <b>Find best whole-packing rotation around 2-anchor axis</b>. This optional action treats every displayed non-hydrogen atom in each packed structure as part of one point cloud. It incrementally scans rotations of S2 around the fixed two-anchor vector and minimises a symmetric, element-aware nearest-neighbour score without moving that axis. It does not itself create a molecular correspondence. Anchor Fit is then turned off so ordinary interactive Grow can receive viewport clicks; re-enable it if you later want to add a third pair.</li><li>Three pairs perform the least-squares rigid anchor fit and turn anchor mode off automatically.</li><li><b>Fit anchored molecule / packed substructure</b> propagates correspondence through the element-labelled connectivity of every anchor-containing molecule. With one anchored molecule it preserves the original molecular fit. With several, it enforces a one-to-one molecular pairing and fits their combined common heavy-atom scaffold. Hydrogen atoms and unmatched substituents are ignored.</li><li><b>Anchor RMSD</b> is the residual of the manually chosen pairs. The fit RMSD and coverage describe the automatically propagated common scaffold.</li></ul>" +
       "<h3>7. Paired sphere growth</h3>" +
       "<p>This stage grows comparable packed regions immediately after the reference fit. Enter a sphere radius, turn on interactive growth, and click a matched atom in either reference molecule. The app finds its corresponding atom in the other structure and grows whole asymmetric units around both centres using the same radius. Collapsing this stage turns paired growth off. The ordinary Grow menu remains available for independent or more specialised growth.</p>" +
       "<h3>8. Comparison atom definition</h3>" +
@@ -7217,7 +7650,7 @@ select.sel:focus{border-color:var(--accent)}
       "<ul><li><b>Radius</b> is the S1 molecular-centroid distance from the shared reference origin. S2 is searched to radius plus tolerance so boundary counterparts are not lost.</li><li><b>Tolerance</b> is the maximum centroid separation used to generate candidate molecular pairs. Assignments are one-to-one and favour small centroid and atomic residuals.</li><li><b>Matched</b> is the number of unique molecular pairs. <b>Available</b> gives the S1/S2 search-pool sizes; <b>Unmatched</b> gives unused molecules.</li><li><b>Centroid RMSD</b> measures molecular-centre disagreement. <b>Atomic RMSD</b> combines residuals of the locked corresponding atoms. <b>Matched atom observations</b> is the number of atom-pair measurements contributing.</li><li>Centroid tie lines can be displayed. <b>Trim unmatched</b> deletes unmatched molecules from both structures and is enabled only when they exist.</li></ul>" +
       "<h3>10. Principal-strain deformation</h3>" +
       "<p>The app fits a symmetric strain tensor to matched molecular centroids. Molecules move as rigid bodies: their internal geometry and orientation are not distorted by scaling. <b>X1, X2 and X3</b> are orthogonal principal directions; their stretch factors are dimensionless (1 unchanged, above 1 expansion, below 1 contraction). The volume factor is X1 × X2 × X3. Crystallographic [a,b,c] components are unit-normalised.</p>" +
-      "<ul><li><b>Refine orientation together with strain</b> is on by default and permits an additional rigid rotation of S2 to improve the neighbourhood fit.</li><li><b>Refine translation together with strain</b> optionally applies the least-squares global centroid shift of S2. This can improve the overall neighbourhood while slightly separating the original reference molecules.</li><li>The result reports RMSD before/after deformation, additional rotation, translation vector and magnitude, principal stretches and volume factor.</li><li>The principal-strain ellipsoid may be hidden, solid or wireframe, recoloured and given adjustable opacity. Its red, green and blue axes represent X1, X2 and X3.</li></ul>" +
+      "<ul><li><b>Refine orientation together with strain</b> is on by default and permits an additional rigid rotation of S2 to improve the neighbourhood fit.</li><li><b>Refine translation together with strain</b> is also on by default and applies the least-squares global centroid shift of S2. It may be turned off when preserving the original reference position is more important than the neighbourhood-wide fit.</li><li><b>Deform Structure 2 unit cell display</b> switches the drawn cell between its original geometry and the current isotropic/principal-strain deformation. This is visual only: the stored crystallographic cell and atom coordinates are not rewritten.</li><li>The result reports RMSD before/after deformation, additional rotation, translation vector and magnitude, principal stretches and volume factor.</li><li>The principal-strain ellipsoid is centred on the fitted atom-pair observations and may be hidden, solid or wireframe, recoloured and given adjustable opacity. Its red, green and blue axes represent X1, X2 and X3.</li></ul>" +
       "<h3>11. Fábián–Kálmán volumetric overlap</h3>" +
       "<p>This complementary stage measures overlap of the actual van der Waals volumes and therefore does not require atom-to-atom correspondence. It reports <b>Iᵥ = 2V∩/(V₁+V₂)</b>, the size-limited maximum <b>Iᵥmax = 2min(V₁,V₂)/(V₁+V₂)</b>, and <b>Qᵥ = Iᵥ/Iᵥmax</b>, an explicitly derived CrystalComparator normalization. Rigid and deformation-assisted values and radial profiles are kept separately so deformation is never mistaken for inherent agreement.</p>" +
       "<ul><li><b>Maximum radius</b> defines the spherical comparison domain about the shared reference origin; <b>Step</b> controls the radial profile.</li><li><b>Sampling precision</b> selects 30,000, 120,000 or 400,000 reproducible shifted-Halton points. The reported ± value is a 95% between-sequence convergence estimate.</li><li>Atoms are treated as unions of van der Waals spheres using the app's internal radii. Hydrogen atoms contribute when present, and their counts are reported. If they were deleted, the comparison is explicitly hydrogen-free.</li><li>Cell context reports volume ratio, three principal cell stretches, mean elongation and shear distortion. These are contextual and are not folded into a single structural score.</li><li>Attribution: L. Fábián and A. Kálmán, <i>Volumetric measure of isostructurality</i>, Acta Cryst. B55 (1999) 1099–1108. Iᵥ and Iᵥmax follow their equations 5 and 6; shifted Halton integration is the app's modernized sampling implementation. Correlated disorder is not modelled.</li></ul>" +
@@ -7231,7 +7664,7 @@ select.sel:focus{border-color:var(--accent)}
       "<h3>15. Redesignating asymmetric units</h3>" +
       "<p>A single grown molecule can be made the asymmetric unit when the selected atoms are unique and match the asymmetric-unit atom count. The command appears only when the selection is valid. This is useful for centring a preferred symmetry-generated molecule before deleting the remaining generated packing.</p>" +
       "<h3>16. Export and reporting</h3>" +
-      "<ul><li><b>Export image (PNG)</b> renders a high-detail figure at the chosen resolution and can use a transparent background. The current image can also be copied to the clipboard.</li><li><b>Generate analysis report (PDF)</b> creates a local multi-page report containing the structural overlay, reference and neighbourhood statistics, principal-strain results, full-width radial plots, criterion assessment, settings and a method/parameter guide.</li><li><b>Export radial data (CSV)</b> writes the numerical curves for independent plotting or archival analysis. <b>Copy concise report</b> copies the criterion summary as text.</li></ul>" +
+      "<ul><li><b>Export image (PNG)</b> renders a high-detail figure at the chosen resolution and can use a transparent background. The current image can also be copied to the clipboard.</li><li><b>Export Structure 1/2 overlay PDB</b> writes the retained atoms in the final shared Cartesian frame.</li><li><b>Export complete overlay (JSON)</b> saves a portable two-structure session containing the structures, overlay transformations, deformation, chosen colours, camera view, markers and completed results. <b>Load overlay session (JSON)</b>, or dropping that JSON onto the model view, restores it on another computer without the original CIF files. If work is already loaded, the app warns before replacing it and Cancel leaves it unchanged.</li><li><b>Generate analysis report (PDF)</b> creates a local multi-page report containing the structural overlay, reference and neighbourhood statistics, principal-strain results, full-width radial plots, criterion assessment, settings and a method/parameter guide.</li><li><b>Export radial data (CSV)</b> writes the numerical curves for independent plotting or archival analysis. <b>Copy concise report</b> copies the criterion summary as text.</li></ul>" +
       "<h3>17. Scientific interpretation</h3>" +
       "<p>Results depend on the chosen reference molecule, atom mask, growth extent, matching radius and tolerance, deformation options, RMSD threshold and coverage target. Report these choices whenever structures are compared. Similar topology can coexist with large geometric strain, while a low local RMSD does not prove global isostructurality. Inspect the overlay, correspondence lines, shell behaviour, unmatched molecules and symmetry alternatives alongside the numerical results.</p>";
   }
@@ -7293,12 +7726,17 @@ select.sel:focus{border-color:var(--accent)}
     ["dragenter", "dragover"].forEach(function (ev) { vp.addEventListener(ev, function (e) { e.preventDefault(); vp.classList.add("dragging"); }); });
     ["dragleave", "drop"].forEach(function (ev) { vp.addEventListener(ev, function (e) { e.preventDefault(); vp.classList.remove("dragging"); }); });
     vp.addEventListener("drop", function (e) {
-      /* the main view always means "host" -- clears and loads fresh, no guessing */
-      var item = e.dataTransfer.items && e.dataTransfer.items[0];
-      if (item && item.getAsFileSystemHandle) item.getAsFileSystemHandle().then(function (h) { state.lastSourceHandle = h; }).catch(function () {});
+      /* A portable overlay JSON restores both structures; all other accepted
+         files retain the existing main-view meaning of replacing the active
+         structure. The session loader itself owns the destructive warning so
+         file-picker and drag-and-drop loading behave identically. */
       var f = e.dataTransfer.files[0]; if (!f) return;
+      var isOverlaySession = /\.json$/i.test(f.name || "");
+      var item = e.dataTransfer.items && e.dataTransfer.items[0];
+      if (!isOverlaySession && item && item.getAsFileSystemHandle) item.getAsFileSystemHandle().then(function (h) { state.lastSourceHandle = h; }).catch(function () {});
       var rd = new FileReader();
-      rd.onload = function () { loadHostFile(rd.result, f.name); };
+      rd.onload = function () { if (isOverlaySession) loadOverlaySessionText(rd.result, f.name); else loadHostFile(rd.result, f.name); };
+      rd.onerror = function () { setStatus("Could not read the dropped " + (isOverlaySession ? "overlay-session" : "structure") + " file.", true); };
       rd.readAsText(f);
     });
     var gbox = document.getElementById("guestDropbox");
@@ -7315,6 +7753,14 @@ select.sel:focus{border-color:var(--accent)}
     });
     var radiiInput = document.getElementById("elementCsvInput");
     radiiInput.addEventListener("change", function (e) { var f = e.target.files[0]; if (!f) return; var rd = new FileReader(); rd.onload = function () { loadElementSettingsCsv(rd.result); }; rd.readAsText(f); });
+    var overlaySessionInput = document.getElementById("overlaySessionInput");
+    overlaySessionInput.addEventListener("change", function (e) {
+      var f = e.target.files[0]; if (!f) return;
+      var rd = new FileReader();
+      rd.onload = function () { loadOverlaySessionText(rd.result, f.name); overlaySessionInput.value = ""; };
+      rd.onerror = function () { setStatus("Could not read the selected overlay-session file.", true); overlaySessionInput.value = ""; };
+      rd.readAsText(f);
+    });
     var segBtns = document.querySelectorAll("#modeSeg button");
     for (var i = 0; i < segBtns.length; i++) segBtns[i].addEventListener("click", function (e) { setPage(e.currentTarget.getAttribute("data-page")); });
 
