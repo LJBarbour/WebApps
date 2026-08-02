@@ -140,6 +140,15 @@ main{flex:1 1 auto;display:flex;min-height:0}
 .subtabs button:not(.on):hover{color:var(--ink-mid)}
 .subtab-body{display:none}
 .subtab-body.active{display:flex;flex-direction:column;gap:13px}
+.subsec{border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.subhead2{padding:6px 9px;display:flex;align-items:center;justify-content:space-between;
+  cursor:pointer;user-select:none;font-family:var(--sans);font-size:11.5px;font-weight:600;color:var(--ink-mid)}
+.subhead2:hover{background:var(--accent-soft);color:var(--accent)}
+.tri2{font-size:10px;transition:transform .2s;color:var(--ink-faint)}
+.subsec.open > .subhead2 .tri2{transform:rotate(90deg);color:var(--accent)}
+.subsec.open > .subhead2{border-bottom:1px solid var(--line)}
+.subbody{padding:8px 9px 10px;display:none;flex-direction:column;gap:8px;background:var(--bg)}
+.subsec.open > .subbody{display:flex}
 .ctl-inline{display:flex;align-items:center;gap:8px}
 .ctl-inline .toggle{flex-shrink:0}
 .ctl-inline .inline-label{font-size:11.5px;color:var(--ink-mid);flex-shrink:0}
@@ -223,7 +232,7 @@ select.sel:focus{border-color:var(--accent)}
 <body>
 <header>
   <h1>CrystalComparator</h1>
-  <span class="sub" id="buildStamp">Build 2026-07-29.24</span>
+  <span class="sub" id="buildStamp">Build 2026-08-02.25</span>
   <span class="spacer"></span>
   <button class="hbtn" id="guideBtn">Guide</button>
 </header>
@@ -6136,6 +6145,19 @@ select.sel:focus{border-color:var(--accent)}
     }
     return bodies;
   }
+  function subsection(parent, title, startOpen, onToggle) {
+    var s = el("div", "subsec" + (startOpen ? " open" : ""));
+    var h = el("div", "subhead2");
+    h.appendChild(el("span", null, title)); h.appendChild(el("span", "tri2", "›"));
+    s.appendChild(h);
+    var b = el("div", "subbody"); s.appendChild(b);
+    h.addEventListener("click", function () {
+      s.classList.toggle("open");
+      if (onToggle) onToggle(s.classList.contains("open"));
+    });
+    parent.appendChild(s);
+    return b;
+  }
   function checkboxSlider(p, checkLabel, checkVal, onCheck, min, max, step, sliderVal, onSlide, extraLabel) {
     /* one compact row: a checkbox (with its own label) plus a bare slider,
        optionally with a small text label between them -- no numeric readout */
@@ -6299,8 +6321,23 @@ select.sel:focus{border-color:var(--accent)}
     forgetBtn.id = "forgetSymmetryBtn";
     symC.appendChild(forgetRow);
 
-    var growTabs = tabbedPanel(symC, ["Mouse", "Pack", "Symmetry"]);
-    var mouseTab = growTabs[0], packTab = growTabs[1], symOpTab = growTabs[2];
+    function closeOtherGrowSubs(keepWrap) {
+      [mouseTab, packTab, symOpTab].forEach(function (body) {
+        if (body && body.parentElement !== keepWrap) body.parentElement.classList.remove("open");
+      });
+    }
+    var mouseTab = subsection(symC, "Mouse", false, function (isOpen) {
+      exitGrowMode();
+      if (isOpen) closeOtherGrowSubs(mouseTab.parentElement);
+    });
+    var packTab = subsection(symC, "Pack", false, function (isOpen) {
+      exitGrowMode();
+      if (isOpen) closeOtherGrowSubs(packTab.parentElement);
+    });
+    var symOpTab = subsection(symC, "Symmetry", false, function (isOpen) {
+      exitGrowMode();
+      if (isOpen) closeOtherGrowSubs(symOpTab.parentElement);
+    });
 
     var growModeBtn = button(mouseTab, "", null, function () {
       state.growMode = !state.growMode;
@@ -6537,8 +6574,8 @@ select.sel:focus{border-color:var(--accent)}
 
     var cifDispC = section(left, "Display");
     cifDispC.parentElement.id = "cifDisplaySection";
-    var cifDispTabs = tabbedPanel(cifDispC, ["View", "Unit cell"]);
-    var cifViewTab = cifDispTabs[0], cifCellTab = cifDispTabs[1];
+    var cifViewTab = subsection(cifDispC, "View", false);
+    var cifCellTab = subsection(cifDispC, "Unit cell", false);
 
     var asuTg = toggle(cifViewTab, "ASU only", state.showOnlyAsu, function (b) { state.showOnlyAsu = b; renderStructure(); });
     asuTg.id = "showOnlyAsuTg";
@@ -6575,8 +6612,8 @@ select.sel:focus{border-color:var(--accent)}
     labelSlider(cifCellTab, "line thickness", 0.01, 0.15, 0.005, state.unitCellThickness, function (v) { state.unitCellThickness = v; renderUnitCell(); });
 
     var ec = section(left, "Edit atoms and bonds");
-    var ebTabs = tabbedPanel(ec, ["Atoms", "Bonds"]);
-    var atomsTab = ebTabs[0], bondsTab = ebTabs[1];
+    var atomsTab = subsection(ec, "Atoms", false);
+    var bondsTab = subsection(ec, "Bonds", false);
 
     var selInfo = el("div", "readout"); selInfo.id = "selInfo"; selInfo.innerHTML = "<div class='dim'>No atoms selected.</div>"; atomsTab.appendChild(selInfo);
     var erow = el("div", "atoms-btn-grid");
@@ -6655,8 +6692,9 @@ select.sel:focus{border-color:var(--accent)}
     var resetAllRow = el("div", "btnrow");
     button(resetAllRow, "Reset all visual settings", "ghost", resetAllVisualSettings);
     dispC.appendChild(resetAllRow);
-    var tabs = tabbedPanel(dispC, ["Scene", "Material", "Lighting"]);
-    var sceneTab = tabs[0], materialTab = tabs[1], lightingTab = tabs[2];
+    var sceneTab = subsection(dispC, "Scene", false);
+    var materialTab = subsection(dispC, "Material", false);
+    var lightingTab = subsection(dispC, "Lighting", false);
 
     var bgSw = colorControl(sceneTab, "background colour", state.bgColor, function (hex) { state.bgColor = hex; scene.background = new THREE.Color(hex); updateFog(); renderUnitCell(); persistPreferences(); });
     bgSw.id = "dispBg";
@@ -6701,19 +6739,21 @@ select.sel:focus{border-color:var(--accent)}
     var lightResetRow = el("div", "btnrow resettop"); button(lightResetRow, "Restore Lighting defaults", "ghost", resetLightingSettings); lightingTab.appendChild(lightResetRow);
 
     var xc = section(left, "Export");
-    select(xc, "export resolution", [["1", "Current size"], ["2", "2x"], ["4", "4x"]], "2", function (v) { state.exportScale = parseInt(v, 10); });
-    toggle(xc, "transparent background", state.exportTransparent, function (b) { state.exportTransparent = b; });
-    var exrow = el("div", "btnrow"); button(exrow, "Export image (PNG)", null, exportImage); xc.appendChild(exrow);
-    var cprow = el("div", "btnrow"); button(cprow, "Copy image to clipboard", "ghost", copyImageToClipboard); xc.appendChild(cprow);
-    var pdfrow=el("div","btnrow");button(pdfrow,"Generate analysis report (PDF)","prominent",generatePdfReport);xc.appendChild(pdfrow);
-    var rtfrow=el("div","btnrow");button(rtfrow,"Generate editable report (RTF)","ghost",generateRtfReport);xc.appendChild(rtfrow);
-    xc.appendChild(el("div","hint","The PDF uses proper selectable text throughout. The formatted RTF opens directly in Word and is designed for editing and copy/paste. Every file-export dialog begins in the folder containing the most recently loaded CIF or overlay JSON, where the browser permits this."));
-    var pdb1row=el("div","btnrow");button(pdb1row,"Export Structure 1 overlay PDB","ghost",function(){exportOverlayMockPdb(0);});xc.appendChild(pdb1row);
-    var pdb2row=el("div","btnrow");button(pdb2row,"Export Structure 2 overlay PDB","ghost",function(){exportOverlayMockPdb(1);});xc.appendChild(pdb2row);
-    xc.appendChild(el("div","hint","Exports the current retained atoms using their final Cartesian positions in the shared overlay frame. Alignment, isotropic inflation and principal-strain deformation are included; unit-cell coordinates are not."));
-    var sessionSaveRow=el("div","btnrow");button(sessionSaveRow,"Export complete overlay (JSON)","prominent",exportOverlaySession);xc.appendChild(sessionSaveRow);
-    var sessionLoadRow=el("div","btnrow");button(sessionLoadRow,"Load overlay session (JSON)","ghost",chooseOverlaySessionFile);xc.appendChild(sessionLoadRow);
-    xc.appendChild(el("div","hint","The portable JSON session restores both structures, their shared-space overlay, colours, camera view, deformation, correspondence markers and completed analysis results."));
+    var imageTab = subsection(xc, "Image", false);
+    select(imageTab, "export resolution", [["1", "Current size"], ["2", "2x"], ["4", "4x"]], "2", function (v) { state.exportScale = parseInt(v, 10); });
+    toggle(imageTab, "transparent background", state.exportTransparent, function (b) { state.exportTransparent = b; });
+    var exrow = el("div", "btnrow"); button(exrow, "Export image (PNG)", null, exportImage); imageTab.appendChild(exrow);
+    var cprow = el("div", "btnrow"); button(cprow, "Copy image to clipboard", "ghost", copyImageToClipboard); imageTab.appendChild(cprow);
+
+    var reportTab = subsection(xc, "Report", false);
+    var pdfrow=el("div","btnrow");button(pdfrow,"Generate analysis report (PDF)","prominent",generatePdfReport);reportTab.appendChild(pdfrow);
+    var rtfrow=el("div","btnrow");button(rtfrow,"Generate editable report (RTF)","ghost",generateRtfReport);reportTab.appendChild(rtfrow);
+
+    var overlayTab = subsection(xc, "Overlay", false);
+    var pdb1row=el("div","btnrow");button(pdb1row,"Export Structure 1 overlay PDB","ghost",function(){exportOverlayMockPdb(0);});overlayTab.appendChild(pdb1row);
+    var pdb2row=el("div","btnrow");button(pdb2row,"Export Structure 2 overlay (PDB)","ghost",function(){exportOverlayMockPdb(1);});overlayTab.appendChild(pdb2row);
+    var sessionSaveRow=el("div","btnrow");button(sessionSaveRow,"Export complete overlay (JSON)","prominent",exportOverlaySession);overlayTab.appendChild(sessionSaveRow);
+    var sessionLoadRow=el("div","btnrow");button(sessionLoadRow,"Load overlay session (JSON)","ghost",chooseOverlaySessionFile);overlayTab.appendChild(sessionLoadRow);
   }
 
   var STRUCTURE_STATE_KEYS = [
@@ -7727,13 +7767,15 @@ select.sel:focus{border-color:var(--accent)}
     for (var i = 0; i < sections.length; i++) {
       var title = panelSectionTitle(sections[i]);
       if (!title) continue;
-      var item = { open: sections[i].classList.contains("open"), tabs: [] };
+      var item = { open: sections[i].classList.contains("open"), tabs: [], subsecs: [] };
       var tabBars = sections[i].querySelectorAll(".subtabs");
       for (var t = 0; t < tabBars.length; t++) {
         var buttons = tabBars[t].querySelectorAll("button"), active = 0;
         for (var b = 0; b < buttons.length; b++) if (buttons[b].classList.contains("on")) { active = b; break; }
         item.tabs.push(active);
       }
+      var subsecs = sections[i].querySelectorAll(".subsec");
+      for (var u = 0; u < subsecs.length; u++) item.subsecs.push(subsecs[u].classList.contains("open"));
       /* Grow controls are deliberately global: preserve their live DOM values
          instead of replacing them with the newly selected structure's values. */
       if (title === "Grow") {
@@ -7758,6 +7800,8 @@ select.sel:focus{border-color:var(--accent)}
         for (var b = 0; b < buttons.length; b++) buttons[b].classList.toggle("on", b === active);
         if (wraps[t]) { var bodies = wraps[t].children; for (var d = 0; d < bodies.length; d++) bodies[d].classList.toggle("active", d === active); }
       }
+      var subsecs = sections[i].querySelectorAll(".subsec");
+      for (var u = 0; u < subsecs.length; u++) if (item.subsecs[u] != null) subsecs[u].classList.toggle("open", !!item.subsecs[u]);
       if (title === "Grow" && item.controls) {
         var controls = sections[i].querySelectorAll("input,select,textarea");
         for (var c = 0; c < controls.length && c < item.controls.length; c++) {
