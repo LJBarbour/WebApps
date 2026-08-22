@@ -2194,7 +2194,7 @@ select.sel:focus{border-color:var(--accent)}
        style history in that project) ---- */
     voidMode: "cell", probeRadius: 1.5, voidQuality: 0.2, voidSurfaceOpacity: 1, voidAutoAssemble: true, voidAccurateVolumes: false,
     voidCalculating: false, voidAbortRequested: false,
-    voidNetwork: null, voidComponents: [], voidVisible: {},
+    voidNetwork: null, voidComponents: [], voidVisible: {}, _voidRestoredMeshById: {},
     voidFragments: {}, voidFragmentVisible: {}, voidFragmentMove: {}, voidChannelCopies: [],
     voidUiMode: null, voidSelectedFragments: {}, voidSelectedChannels: {}, voidUiVector: [0, 0, 0],
     voidFragGroupOpen: {}, voidComponentColors: {}, voidColorLinkAll: false, voidLinkedColor: { outer: null, inner: null },
@@ -4936,6 +4936,20 @@ select.sel:focus{border-color:var(--accent)}
         geo.setAttribute("position", new THREE.Float32BufferAttribute(merged.positions, 3));
         geo.setAttribute("normal", new THREE.Float32BufferAttribute(merged.normals, 3));
         geo.setIndex(merged.indices);
+      } else if (state._voidRestoredMeshById && state._voidRestoredMeshById[comp.id]) {
+        /* A mesh persisted at save time (see buildVoidComponentMeshesForSave)
+           for a component that was never consolidated -- always true for
+           "grown"/visible-atoms mode. Rebuilding this component's grid
+           from the restored atom set (rebuildVoidSweptGridsForRender)
+           isn't reliable enough to prefer over the exact mesh that was
+           actually on screen when the project was saved, so use that
+           directly instead of re-extracting from any rebuilt grid. */
+        iso = state._voidRestoredMeshById[comp.id];
+        if (!iso.positions.length) continue;
+        geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.Float32BufferAttribute(iso.positions, 3));
+        geo.setAttribute("normal", new THREE.Float32BufferAttribute(iso.normals, 3));
+        geo.setIndex(iso.indices);
       } else {
         var grid = state._voidSweptGrids && state._voidSweptGrids[comp.id];
         if (!grid || !grid.accessibleCount) continue;
@@ -5654,6 +5668,7 @@ select.sel:focus{border-color:var(--accent)}
           state._voidLastWarnings = [];
         }
         state.voidComponents = components;
+        state._voidRestoredMeshById = {}; /* a fresh calculation always re-extracts from its own grid -- never fall back to a stale mesh restored from a previous project load, whose component ids could collide with these new ones */
         var prevVisible = state.voidVisible;
         state.voidVisible = {};
         components.forEach(function (c) { state.voidVisible[c.id] = prevVisible.hasOwnProperty(c.id) ? prevVisible[c.id] : true; });
@@ -5710,7 +5725,7 @@ select.sel:focus{border-color:var(--accent)}
   }
   function clearVoidResultsSilent() {
     state.voidComponents = []; state.voidVisible = {}; state.voidNetwork = null;
-    state._voidSweptGrids = {}; state._voidPaddedAtoms = null;
+    state._voidSweptGrids = {}; state._voidPaddedAtoms = null; state._voidRestoredMeshById = {};
     state.voidUiMode = null;
     resetVoidFragmentState();
     clearVoidMeshes();
@@ -8047,7 +8062,70 @@ select.sel:focus{border-color:var(--accent)}
     chunks.push("}");
     return chunks;
   }
+  /* JSON.stringify on a typed array (Float32Array/Float64Array) does NOT
+     produce a JSON array -- it produces a plain OBJECT keyed "0","1","2"...
+     (Array.isArray is false for typed arrays, so JSON.stringify falls back
+     to enumerating own properties). Reading that back with e.g.
+     Float32Array.from() then silently yields an EMPTY array, since a plain
+     object has no .length for it to iterate against. Every place that
+     saves typed-array geometry has to convert to a plain Array first, or
+     it round-trips into nothing. */
+  function plainArrayFrom(a) { return a ? Array.prototype.slice.call(a) : a; }
+  /* Molecular surfaces persist their positions/normals as real typed
+     arrays in memory (smoothIsoMesh hands back Float32Arrays) -- converted
+     here, once, at save time, rather than leaving it to the restore side to
+     cope with whatever shape JSON.parse happens to produce. */
+  function buildMolSurfaceIsoForSave() {
+    var out = {};
+    Object.keys(state._molSurfaceIsoById).forEach(function (k) {
+      var iso = state._molSurfaceIsoById[k];
+      out[k] = { positions: plainArrayFrom(iso.positions), normals: plainArrayFrom(iso.normals), indices: plainArrayFrom(iso.indices) };
+    });
+    return out;
+  }
+  /* Non-consolidated void/channel components (which, for "grown"/visible-
+     atoms mode, is EVERY component -- see voidCellBundle()'s own note that
+     Option 2 never has more than one fragment, so consolidateVoidComponent
+     always no-ops on it) render from state._voidSweptGrids at draw time,
+     not from a persisted mesh. On restore, rebuildVoidSweptGridsForRender
+     tries to reconstruct that grid from the saved topology plus the
+     current atom set -- but a "grown" calculation is often right at the
+     edge of what the probe radius resolves (critical radii sitting only
+     hundredths of an Angstrom above the threshold are common, per this
+     app's own extrapolation work), so a grid rebuilt after the fact doesn't
+     reliably reproduce the exact accessible region the original calculation
+     found: flood-fill seeding from the saved vertex positions can land on
+     cells the rebuilt clearance/ownership test doesn't actually mark
+     accessible, giving a torn, partial-looking surface instead of the
+     smooth one that was on screen when the project was saved -- reported
+     directly as "the cavity was not a cavity but apparently a negative
+     surface of the cavity." The robust fix is the same one already used
+     for molecular surfaces and for already-consolidated void components:
+     don't rebuild, persist the actual mesh. This extracts that mesh once,
+     at save time, from whatever grid the ORIGINAL calculation already
+     built (still live in state._voidSweptGrids, not yet touched by any
+     restore-time reconstruction), mirroring renderVoidMeshes()'s own
+     non-consolidated extraction exactly so the saved mesh matches pixel-
+     for-pixel what was on screen. */
+  function buildVoidComponentMeshesForSave() {
+    var out = {};
+    (state.voidComponents || []).forEach(function (comp) {
+      if (state.voidConsolidated[comp.id]) return; /* already covered by voidMergedGeometry */
+      var grid = state._voidSweptGrids && state._voidSweptGrids[comp.id];
+      if (!grid || !grid.accessibleCount) return;
+      var field = voidFieldFnFromGrid(grid);
+      var boxMin = grid.bboxMin;
+      var boxMax = [boxMin[0] + (grid.nx - 1) * grid.h, boxMin[1] + (grid.ny - 1) * grid.h, boxMin[2] + (grid.nz - 1) * grid.h];
+      var iso;
+      try { iso = IsoSurface.extract(field, boxMin, boxMax, grid.h, state.probeRadius); } catch (e) { return; }
+      if (!iso.positions.length) return;
+      out[comp.id] = { positions: plainArrayFrom(iso.positions), normals: plainArrayFrom(iso.normals), indices: plainArrayFrom(iso.indices) };
+    });
+    return out;
+  }
   function buildProjectSnapshot() {
+    var molSurfaceIsoForSave = buildMolSurfaceIsoForSave();
+    var voidComponentMeshesForSave = buildVoidComponentMeshesForSave();
     return {
       appName: "CrystalVoidChannel", formatVersion: 1, savedAt: new Date().toISOString(),
       name: state.name, guestName: state.guestName,
@@ -8082,7 +8160,8 @@ select.sel:focus{border-color:var(--accent)}
       voidChannelCopies: state.voidChannelCopies, voidFragGroupOpen: state.voidFragGroupOpen,
       molSurfaceProbeRadius: state.molSurfaceProbeRadius, molSurfaceOpacity: state.molSurfaceOpacity,
       molSurfaces: state.molSurfaces, molSurfaceColorLinkAll: state.molSurfaceColorLinkAll, molSurfaceLinkedColor: state.molSurfaceLinkedColor,
-      molSurfaceIsoById: state._molSurfaceIsoById, nextMolSurfaceId: nextMolSurfaceId,
+      molSurfaceIsoById: molSurfaceIsoForSave, nextMolSurfaceId: nextMolSurfaceId,
+      voidComponentMeshes: voidComponentMeshesForSave,
       camera: { camDist: camDist, camOrient: [camOrient.x, camOrient.y, camOrient.z, camOrient.w], camTarget: [camTarget.x, camTarget.y, camTarget.z] },
       bgColor: state.bgColor, depthScaling: state.depthScaling, highDetail: state.highDetail,
       fogOn: state.fogOn, fogDensity: state.fogDensity,
@@ -8331,6 +8410,7 @@ select.sel:focus{border-color:var(--accent)}
     state.voidFragGroupOpen = data.voidFragGroupOpen || {};
     state.voidUiMode = null; state.voidSelectedFragments = {}; state.voidSelectedChannels = {}; state.voidUiVector = [0, 0, 0];
     state.voidNetwork = null; state._voidSweptGrids = {};
+    state._voidRestoredMeshById = data.voidComponentMeshes || {};
     try {
       var isCellMode = state.voidMode === "cell";
       var rawAtoms = isCellMode ? buildCellModeAtoms() : buildGrownModeAtoms();
