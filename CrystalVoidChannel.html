@@ -261,7 +261,7 @@ select.sel:focus{border-color:var(--accent)}
 </main>
 <div id="elementsPage" class="page"></div>
 <div id="guideModal"><div class="guidebox"><button class="close" id="guideClose">&times;</button><div id="guideBody"></div></div></div>
-<input type="file" id="cifInput" accept=".cif,.txt" style="display:none">
+<input type="file" id="cifInput" accept=".cif,.txt,.res,.ins" style="display:none">
 <input type="file" id="elementCsvInput" accept=".csv,.txt" style="display:none">
 <input type="file" id="modelJsonInput" accept=".json" style="display:none">
 <script>
@@ -1406,7 +1406,7 @@ select.sel:focus{border-color:var(--accent)}
   };
   var COV_DEFAULT = 1.50;
   var CPK = {
-    H: 0xffffff, C: 0x909090, N: 0x3050f8, O: 0xff0d0d, F: 0x90e050, Cl: 0x1ff01f,
+    H: 0xffffff, C: 0x4a4a4a, N: 0x00178a, O: 0x850000, F: 0x357500, Cl: 0x1ff01f,
     Br: 0xa62929, I: 0x940094, P: 0xff8000, S: 0xffff30, B: 0xffb5b5, Na: 0xab5cf2,
     Mg: 0x8aff00, Al: 0xbfa6a6, Si: 0xf0c8a0, K: 0x8f40d4, Ca: 0x3dff00, Ti: 0xbfc2c7,
     Cr: 0x8a99c7, Mn: 0x9c7ac7, Fe: 0xe06633, Co: 0xf090a0, Ni: 0x50d050, Cu: 0xc88033,
@@ -1769,6 +1769,233 @@ select.sel:focus{border-color:var(--accent)}
       return { cell: cell, symops: symops, atoms: atoms, tags: tags };
     }
 
+    /* ---------------- SHELX .res / .ins ----------------
+     * Ported from MolecularGraphics (34 MolecularGraphics/MolecularGraphics.html),
+     * which already solved this: reads CELL, LATT/SYMM, SFAC and the atom
+     * lines, stopping at HKLF or END (where the atom list ends in every
+     * well-formed file). Unlike a CIF's own symmetry loop -- which always
+     * lists every operator explicitly -- a SHELX SYMM instruction lists only
+     * the *generators* beyond identity (x,y,z is always implied and never
+     * written), and LATT's lattice centering and (if positive) its implied
+     * inversion centre are never spelled out as SYMM lines either. buildShelxSymops()
+     * below expands LATT+SYMM into the space group's COMPLETE operator list,
+     * so a RES/INS-loaded structure feeds this app's own symmetry-driven
+     * features (Grow > Symmetry, cell-mode void/channel analysis, ...)
+     * exactly like a CIF's explicit symop loop does -- see its own comment. */
+    var SHELX_COMMANDS = ("TITL CELL ZERR LATT SYMM SFAC UNIT TEMP SIZE OMIT SHEL BASF TWIN EXTI SWAT " +
+      "HOPE MERG SPEC FMAP GRID PLAN MOLE ACTA HKLF END REM L.S. LIST FVAR WGHT WPDB " +
+      "DISP EQIV FREE BIND DFIX DANG BUMP SAME SADI CHIV FLAT DELU SIMU DEFS ISOR CONN " +
+      "PART AFIX RESI RTAB HFIX ANIS LAUE CGLS BLOC DAMP STIR SUMP EADP EXYZ NCSY " +
+      "MPLA MORE TIME SPEC RIGU MERG ABIN ANSC ANSR SPEC XNPD SLIM SPEC HTAB SPEC").split(/\s+/);
+    var SHELX_CMD_SET = {};
+    for (var shcI = 0; shcI < SHELX_COMMANDS.length; shcI++) SHELX_CMD_SET[SHELX_COMMANDS[shcI]] = true;
+    function joinShelxContinuations(lines) {
+      /* SHELX continues a long instruction or atom line with a trailing "=" */
+      var out = [], buf = null;
+      for (var jsi = 0; jsi < lines.length; jsi++) {
+        var ln = lines[jsi].replace(/\r$/, "");
+        var trimmed = ln.replace(/\s+$/, "");
+        if (buf !== null) { trimmed = buf + " " + trimmed.replace(/^\s+/, ""); buf = null; }
+        if (/=$/.test(trimmed)) { buf = trimmed.slice(0, -1); continue; }
+        out.push(trimmed);
+      }
+      if (buf !== null) out.push(buf);
+      return out;
+    }
+    function shelxOccupancy(sof) {
+      /* SHELX writes a site occupation factor with a free-variable code added
+         on: 11.0 means "fixed at 1.0", 10.5 means "fixed at 0.5", and a
+         negative or larger code refers to a free variable. Only the
+         occupancy part is wanted here. */
+      var v = sof;
+      if (v < 0) v = -v;
+      while (v > 1.5) v -= 10;
+      if (v < 0) v += 10;
+      return Math.max(0, Math.min(1, v));
+    }
+    function resolveShelxRidingU(atoms) {
+      /* A negative Uiso in SHELX means "this many times the Uiso/Ueq of the
+         preceding non-hydrogen atom" -- almost always a riding hydrogen at
+         -1.2 or -1.5. Left unresolved it would come out as a negative,
+         non-physical ellipsoid, so it is expanded here where the preceding
+         atom is still in scope. */
+      var lastHeavyU = 0.03;
+      for (var i = 0; i < atoms.length; i++) {
+        var a = atoms[i];
+        if (a.uij) { lastHeavyU = (a.uij[0] + a.uij[1] + a.uij[2]) / 3; continue; }
+        if (a.uiso === null) continue;
+        if (a.uiso < 0) a.uiso = Math.abs(a.uiso) * lastHeavyU;
+        else if (a.el !== "H") lastHeavyU = a.uiso;
+      }
+    }
+    /* SHELX's LATT N instruction gives the lattice centering (by |N|) and
+       whether an inversion centre is implied (by the sign of N). N absent
+       defaults to 1 (primitive, centrosymmetric), the documented SHELX
+       default. */
+    var SHELX_LATT_CENTERING = {
+      1: [[0, 0, 0]],
+      2: [[0, 0, 0], [0.5, 0.5, 0.5]],
+      3: [[0, 0, 0], [2 / 3, 1 / 3, 1 / 3], [1 / 3, 2 / 3, 2 / 3]],
+      4: [[0, 0, 0], [0, 0.5, 0.5], [0.5, 0, 0.5], [0.5, 0.5, 0]],
+      5: [[0, 0, 0], [0, 0.5, 0.5]],
+      6: [[0, 0, 0], [0.5, 0, 0.5]],
+      7: [[0, 0, 0], [0.5, 0.5, 0]]
+    };
+    /* Builds the space group's COMPLETE operator list from LATT+SYMM -- a
+       reader that only prepends identity and parses the SYMM lines verbatim
+       silently under-counts the true operator set: e.g. a primitive
+       centrosymmetric space group with 3 SYMM lines actually has 8 operators
+       once identity, inversion and their composition with the 3 generators
+       and the LATT centering are all accounted for (Pbca is exactly this
+       case). A CIF's own symmetry loop is unaffected by any of this -- it
+       already lists every operator explicitly. */
+    function buildShelxSymops(rawStrings, latt) {
+      var identity = { rot: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], trans: [0, 0, 0] };
+      var generators = [identity];
+      for (var i = 0; i < (rawStrings || []).length; i++) {
+        var op = parseSymop(rawStrings[i]);
+        if (op) generators.push(op);
+      }
+      var lattVal = (latt === null || latt === undefined) ? 1 : latt;
+      var centerings = SHELX_LATT_CENTERING[Math.abs(lattVal)] || SHELX_LATT_CENTERING[1];
+      var centrosymmetric = lattVal > 0;
+      var out = [], seen = {};
+      function addOp(rot, trans) {
+        var wrapped = [wrapFrac(trans[0]), wrapFrac(trans[1]), wrapFrac(trans[2])];
+        var key = rot[0].join(",") + ";" + rot[1].join(",") + ";" + rot[2].join(",") + "|" +
+          Math.round(wrapped[0] * 1e6) + "," + Math.round(wrapped[1] * 1e6) + "," + Math.round(wrapped[2] * 1e6);
+        if (seen[key]) return;
+        seen[key] = true;
+        out.push({ rot: rot, trans: wrapped });
+      }
+      for (var g = 0; g < generators.length; g++) {
+        var gen = generators[g];
+        var invRot = [
+          [-gen.rot[0][0], -gen.rot[0][1], -gen.rot[0][2]],
+          [-gen.rot[1][0], -gen.rot[1][1], -gen.rot[1][2]],
+          [-gen.rot[2][0], -gen.rot[2][1], -gen.rot[2][2]]
+        ];
+        for (var c = 0; c < centerings.length; c++) {
+          var cv = centerings[c];
+          addOp(gen.rot, [gen.trans[0] + cv[0], gen.trans[1] + cv[1], gen.trans[2] + cv[2]]);
+          if (centrosymmetric) addOp(invRot, [-gen.trans[0] + cv[0], -gen.trans[1] + cv[1], -gen.trans[2] + cv[2]]);
+        }
+      }
+      return out;
+    }
+    /* SHELX itself gives no documented way to recover a space-group SYMBOL
+       from LATT/SYMM alone (only the operators). In practice, though, most
+       .res/.ins files carry the symbol as free text at the end of their
+       TITL line (e.g. "TITL sk1 in P2(1)/c", or just "TITL compound P-1") --
+       an authoring convention, not a SHELX format rule, so this is a
+       best-effort heuristic: it looks at the LAST token of TITL (or the last
+       two, if the file happens to separate the lattice letter from the rest
+       with a space) and accepts it only if it's shaped like a real H-M
+       symbol -- starts with a lattice letter (P/A/B/C/I/F/R) followed only by
+       digits, the glide/mirror letters a/b/c/d/e/m/n, "/", "-" or a
+       parenthesised screw-axis subscript. Returns null (shown as "Not
+       given") rather than guess when nothing at the end of TITL fits. */
+    function extractShelxTitleSpaceGroup(title) {
+      if (!title) return null;
+      function stripParenSubscripts(tok) { return tok.replace(/(\d)\((\d+)\)/g, "$1$2"); }
+      function stripPunct(tok) { return tok.replace(/[.,;:]+$/, ""); }
+      function bodyOk(rest) { return rest.length > 0 && /^[0-9abcdemn()\/-]+$/.test(rest); }
+      var toks = title.trim().split(/\s+/).filter(Boolean);
+      if (!toks.length) return null;
+      var last = stripPunct(toks[toks.length - 1]);
+      if (/^[PABCIFR]/.test(last) && bodyOk(last.slice(1))) return stripParenSubscripts(last);
+      if (toks.length >= 2) {
+        var secondLast = toks[toks.length - 2];
+        if (/^[PABCIFR]$/.test(secondLast) && bodyOk(last)) return stripParenSubscripts(secondLast + last);
+      }
+      return null;
+    }
+    function parseSHELX(text) {
+      var lines = joinShelxContinuations(text.split(/\r?\n/));
+      var cell = null, sfac = [], atoms = [], title = "", latt = null, symms = [];
+      var currentPart = 0; /* SHELXL semantics: atoms belong to PART 0 until a
+        PART n instruction is read; that part number then applies to every
+        following atom line until the next PART instruction ("PART 0" is
+        used to return to the non-disordered part of the structure) -- see
+        partsCanBond()/sameSymmetryImage() further down in the app's own
+        script for how this is later used to restrict which atoms bond. */
+      var i, j;
+      for (i = 0; i < lines.length; i++) {
+        var line = lines[i];
+        if (!line.replace(/\s/g, "")) continue;
+        var toks = line.trim().split(/\s+/);
+        var cmd = toks[0].toUpperCase();
+        if (cmd === "HKLF") break;
+        if (cmd === "END") break;
+        if (cmd === "TITL") { title = toks.slice(1).join(" "); continue; }
+        if (cmd === "REM" || cmd.charAt(0) === "!") continue;
+        if (cmd === "CELL") {
+          /* CELL wavelength a b c alpha beta gamma */
+          var cv = [];
+          for (j = 1; j < toks.length; j++) { var v = parseFloat(toks[j]); if (isFinite(v)) cv.push(v); }
+          if (cv.length >= 7) cell = { a: cv[1], b: cv[2], c: cv[3], alpha: cv[4], beta: cv[5], gamma: cv[6] };
+          else if (cv.length === 6) cell = { a: cv[0], b: cv[1], c: cv[2], alpha: cv[3], beta: cv[4], gamma: cv[5] };
+          continue;
+        }
+        if (cmd === "LATT") { latt = parseFloat(toks[1]); continue; }
+        if (cmd === "SYMM") { symms.push(toks.slice(1).join(" ")); continue; }
+        if (cmd === "SFAC") {
+          /* Two forms exist: a bare list of element symbols ("SFAC C H N O"),
+             and a single element followed by its scattering coefficients.
+             Only the leading symbols matter here, so anything numeric is
+             ignored. */
+          for (j = 1; j < toks.length; j++) {
+            if (/^[A-Za-z]{1,2}[0-9]*$/.test(toks[j])) sfac.push(cleanElementSymbol(toks[j]));
+          }
+          continue;
+        }
+        if (cmd === "PART") {
+          /* PART n [sof] -- only n (an integer, possibly negative) matters
+             here; the optional site-occupation-factor override is a
+             refinement detail this app has no use for. A malformed/missing
+             n (e.g. a bare "PART" line, not valid SHELX but seen in the
+             wild) falls back to 0, the same as if no PART had been read. */
+          var pv = parseFloat(toks[1]);
+          currentPart = isFinite(pv) ? Math.round(pv) : 0;
+          continue;
+        }
+        if (SHELX_CMD_SET[cmd]) continue;
+        /* Anything left that looks like "label index x y z ..." is an atom.
+           The label is required to start with a letter, and at least four
+           numbers must follow, which is enough to reject stray text without
+           needing a complete list of every SHELX instruction ever added. */
+        if (!/^[A-Za-z]/.test(toks[0])) continue;
+        if (toks.length < 5) continue;
+        var nums = [], bad = false;
+        for (j = 1; j < toks.length; j++) {
+          var nv = parseFloat(toks[j]);
+          if (!isFinite(nv)) { bad = true; break; }
+          nums.push(nv);
+        }
+        if (bad || nums.length < 4) continue;
+        var sfIndex = Math.round(nums[0]);
+        var sym = (sfIndex >= 1 && sfIndex <= sfac.length) ? sfac[sfIndex - 1] : labelToElement(toks[0]);
+        var atom = {
+          label: toks[0], el: sym,
+          fx: nums[1], fy: nums[2], fz: nums[3],
+          occ: nums.length > 4 ? shelxOccupancy(nums[4]) : 1,
+          uiso: null, uij: null, part: currentPart
+        };
+        if (nums.length >= 11) {
+          /* U11 U22 U33 U23 U13 U12 -- SHELX order, which is not the CIF order */
+          atom.uij = [nums[5], nums[6], nums[7], nums[8], nums[9], nums[10]];
+        } else if (nums.length >= 6) {
+          atom.uiso = nums[5];
+        }
+        atoms.push(atom);
+      }
+      if (!cell) return { error: "No CELL instruction found -- this does not look like a SHELX .res or .ins file." };
+      if (!atoms.length) return { error: "The CELL was read, but no atom lines were found." };
+      resolveShelxRidingU(atoms);
+      var symops = buildShelxSymops(symms, latt);
+      return { cell: cell, symops: symops, atoms: atoms, title: title, latt: latt, rawSymm: symms, titleSpaceGroup: extractShelxTitleSpaceGroup(title) };
+    }
+
     function labelToElement(label) {
       var m = /^([A-Za-z]{1,2})/.exec(label || "");
       return m ? cleanElementSymbol(m[1]) : "C";
@@ -2061,7 +2288,7 @@ select.sel:focus{border-color:var(--accent)}
     VDW: VDW, COV: COV, CPK: CPK, vdw: vdw, cov: cov, cpk: cpk, cleanElement: cleanElement,
     ELEMENTS: ELEMENTS, BONDI: BONDI, ALVAREZ: ALVAREZ,
     bonds: bonds, unionSphereVolume: unionSphereVolume,
-    parseCIF: parseCIF, parseSymop: parseSymop, applySymop: applySymop, fracEsdToCartesian: fracEsdToCartesian,
+    parseCIF: parseCIF, parseSHELX: parseSHELX, parseSymop: parseSymop, applySymop: applySymop, fracEsdToCartesian: fracEsdToCartesian,
     mat3Mul: mat3Mul, mat3VecMul: mat3VecMul, mat3Inverse: mat3Inverse,
     invertSymop: invertSymop, composeSymops: composeSymops, symopToString: symopToString,
     numToDecText: numToDecText,
@@ -2074,6 +2301,27 @@ select.sel:focus{border-color:var(--accent)}
   root.Connolly = API;
 })(typeof window !== "undefined" ? window : this);
 
+</script>
+<script>
+/* ffmpeg.wasm JS wrapper (@ffmpeg/ffmpeg 0.12.15, UMD build), inlined
+ * directly rather than kept as a separate vendor/ffmpeg.js file loaded via
+ * <script src> -- a previous version did that, and it broke MP4 export
+ * entirely for a user who had a copy of just this HTML file without that
+ * extra folder alongside it. Inlining removes the dependency; see the big
+ * comment further down (search "ffmpeg.wasm JS wrapper") for the full
+ * rationale, including why two small spots below are patched from the
+ * stock upstream build: one replaces the auto-derived Worker URL inside
+ * load(), the other stops a separate top-level "Automatic publicPath is
+ * not supported in this browser" throw that only ever fires because this
+ * script has no document.currentScript.src of its own once inlined --
+ * harmless to skip, since nothing downstream still reads the path it
+ * would have computed (that's exactly what the load() patch removed).
+ * Only those two spots differ from the real, unminified dist/umd/
+ * ffmpeg.js -- everything else is byte-identical. */
+!function(e,t){"object"==typeof exports&&"object"==typeof module?module.exports=t():"function"==typeof define&&define.amd?define([],t):"object"==typeof exports?exports.FFmpegWASM=t():e.FFmpegWASM=t()}(self,(()=>(()=>{"use strict";var e={m:{},d:(t,s)=>{for(var r in s)e.o(s,r)&&!e.o(t,r)&&Object.defineProperty(t,r,{enumerable:!0,get:s[r]})},u:e=>e+".ffmpeg.js"};e.g=function(){if("object"==typeof globalThis)return globalThis;try{return this||new Function("return this")()}catch(e){if("object"==typeof window)return window}}(),e.o=(e,t)=>Object.prototype.hasOwnProperty.call(e,t),e.r=e=>{"undefined"!=typeof Symbol&&Symbol.toStringTag&&Object.defineProperty(e,Symbol.toStringTag,{value:"Module"}),Object.defineProperty(e,"__esModule",{value:!0})},(()=>{var t;e.g.importScripts&&(t=e.g.location+"");var s=e.g.document;if(!t&&s&&(s.currentScript&&(t=s.currentScript.src),!t)){var r=s.getElementsByTagName("script");if(r.length)for(var a=r.length-1;a>-1&&!t;)t=r[a--].src}if(!t)t="";t=t.replace(/#.*$/,"").replace(/\?.*$/,"").replace(/\/[^\/]+$/,"/"),e.p=t})(),e.b=document.baseURI||self.location.href;var t,s={};e.r(s),e.d(s,{FFFSType:()=>n,FFmpeg:()=>i}),function(e){e.LOAD="LOAD",e.EXEC="EXEC",e.FFPROBE="FFPROBE",e.WRITE_FILE="WRITE_FILE",e.READ_FILE="READ_FILE",e.DELETE_FILE="DELETE_FILE",e.RENAME="RENAME",e.CREATE_DIR="CREATE_DIR",e.LIST_DIR="LIST_DIR",e.DELETE_DIR="DELETE_DIR",e.ERROR="ERROR",e.DOWNLOAD="DOWNLOAD",e.PROGRESS="PROGRESS",e.LOG="LOG",e.MOUNT="MOUNT",e.UNMOUNT="UNMOUNT"}(t||(t={}));const r=(()=>{let e=0;return()=>e++})(),a=(new Error("unknown message type"),new Error("ffmpeg is not loaded, call `await ffmpeg.load()` first")),o=new Error("called FFmpeg.terminate()");new Error("failed to import ffmpeg-core.js");class i{#e=null;#t={};#s={};#r=[];#a=[];loaded=!1;#o=()=>{this.#e&&(this.#e.onmessage=({data:{id:e,type:s,data:r}})=>{switch(s){case t.LOAD:this.loaded=!0,this.#t[e](r);break;case t.MOUNT:case t.UNMOUNT:case t.EXEC:case t.FFPROBE:case t.WRITE_FILE:case t.READ_FILE:case t.DELETE_FILE:case t.RENAME:case t.CREATE_DIR:case t.LIST_DIR:case t.DELETE_DIR:this.#t[e](r);break;case t.LOG:this.#r.forEach((e=>e(r)));break;case t.PROGRESS:this.#a.forEach((e=>e(r)));break;case t.ERROR:this.#s[e](r)}delete this.#t[e],delete this.#s[e]})};#i=({type:e,data:t},s=[],o)=>this.#e?new Promise(((a,i)=>{const n=r();this.#e&&this.#e.postMessage({id:n,type:e,data:t},s),this.#t[n]=a,this.#s[n]=i,o?.addEventListener("abort",(()=>{i(new DOMException(`Message # ${n} was aborted`,"AbortError"))}),{once:!0})})):Promise.reject(a);on(e,t){"log"===e?this.#r.push(t):"progress"===e&&this.#a.push(t)}off(e,t){"log"===e?this.#r=this.#r.filter((e=>e!==t)):"progress"===e&&(this.#a=this.#a.filter((e=>e!==t)))}load=({classWorkerURL:s,...r}={},{signal:a}={})=>(this.#e||(this.#e=s?new Worker(new URL(s,"file:///Users/focus/Projects/ffmpeg.wasm/packages/ffmpeg/dist/esm/classes.js"),{type:"module"}):new Worker(window.__cvcFfmpegWorkerUrl,{type:void 0}),this.#o()),this.#i({type:t.LOAD,data:r},void 0,a));exec=(e,s=-1,{signal:r}={})=>this.#i({type:t.EXEC,data:{args:e,timeout:s}},void 0,r);ffprobe=(e,s=-1,{signal:r}={})=>this.#i({type:t.FFPROBE,data:{args:e,timeout:s}},void 0,r);terminate=()=>{const e=Object.keys(this.#s);for(const t of e)this.#s[t](o),delete this.#s[t],delete this.#t[t];this.#e&&(this.#e.terminate(),this.#e=null,this.loaded=!1)};writeFile=(e,s,{signal:r}={})=>{const a=[];return s instanceof Uint8Array&&a.push(s.buffer),this.#i({type:t.WRITE_FILE,data:{path:e,data:s}},a,r)};mount=(e,s,r)=>this.#i({type:t.MOUNT,data:{fsType:e,options:s,mountPoint:r}},[]);unmount=e=>this.#i({type:t.UNMOUNT,data:{mountPoint:e}},[]);readFile=(e,s="binary",{signal:r}={})=>this.#i({type:t.READ_FILE,data:{path:e,encoding:s}},void 0,r);deleteFile=(e,{signal:s}={})=>this.#i({type:t.DELETE_FILE,data:{path:e}},void 0,s);rename=(e,s,{signal:r}={})=>this.#i({type:t.RENAME,data:{oldPath:e,newPath:s}},void 0,r);createDir=(e,{signal:s}={})=>this.#i({type:t.CREATE_DIR,data:{path:e}},void 0,s);listDir=(e,{signal:s}={})=>this.#i({type:t.LIST_DIR,data:{path:e}},void 0,s);deleteDir=(e,{signal:s}={})=>this.#i({type:t.DELETE_DIR,data:{path:e}},void 0,s)}var n;return function(e){e.MEMFS="MEMFS",e.NODEFS="NODEFS",e.NODERAWFS="NODERAWFS",e.IDBFS="IDBFS",e.WORKERFS="WORKERFS",e.PROXYFS="PROXYFS"}(n||(n={})),s})()));
+</script>
+<script type="text/plain" id="cvc-ffmpeg-worker-src">
+!function(e,t){"object"==typeof exports&&"object"==typeof module?module.exports=t():"function"==typeof define&&define.amd?define([],t):"object"==typeof exports?exports.FFmpegWASM=t():e.FFmpegWASM=t()}(self,(()=>(()=>{var e={454:e=>{function t(e){return Promise.resolve().then((()=>{var t=new Error("Cannot find module '"+e+"'");throw t.code="MODULE_NOT_FOUND",t}))}t.keys=()=>[],t.resolve=t,t.id=454,e.exports=t}},t={};function r(o){var s=t[o];if(void 0!==s)return s.exports;var a=t[o]={exports:{}};return e[o](a,a.exports,r),a.exports}return r.o=(e,t)=>Object.prototype.hasOwnProperty.call(e,t),(()=>{"use strict";const e="https://unpkg.com/@ffmpeg/core@0.12.9/dist/umd/ffmpeg-core.js";var t;!function(e){e.LOAD="LOAD",e.EXEC="EXEC",e.FFPROBE="FFPROBE",e.WRITE_FILE="WRITE_FILE",e.READ_FILE="READ_FILE",e.DELETE_FILE="DELETE_FILE",e.RENAME="RENAME",e.CREATE_DIR="CREATE_DIR",e.LIST_DIR="LIST_DIR",e.DELETE_DIR="DELETE_DIR",e.ERROR="ERROR",e.DOWNLOAD="DOWNLOAD",e.PROGRESS="PROGRESS",e.LOG="LOG",e.MOUNT="MOUNT",e.UNMOUNT="UNMOUNT"}(t||(t={}));const o=new Error("unknown message type"),s=new Error("ffmpeg is not loaded, call `await ffmpeg.load()` first"),a=(new Error("called FFmpeg.terminate()"),new Error("failed to import ffmpeg-core.js"));let n;self.onmessage=async({data:{id:E,type:c,data:i}})=>{const p=[];let f;try{if(c!==t.LOAD&&!n)throw s;switch(c){case t.LOAD:f=await(async({coreURL:o,wasmURL:s,workerURL:E})=>{const c=!n;try{o||(o=e),importScripts(o)}catch{if(o&&o!==e||(o=e.replace("/umd/","/esm/")),self.createFFmpegCore=(await r(454)(o)).default,!self.createFFmpegCore)throw a}const i=o,p=s||o.replace(/.js$/g,".wasm"),f=E||o.replace(/.js$/g,".worker.js");return n=await self.createFFmpegCore({mainScriptUrlOrBlob:`${i}#${btoa(JSON.stringify({wasmURL:p,workerURL:f}))}`}),n.setLogger((e=>self.postMessage({type:t.LOG,data:e}))),n.setProgress((e=>self.postMessage({type:t.PROGRESS,data:e}))),c})(i);break;case t.EXEC:f=(({args:e,timeout:t=-1})=>{n.setTimeout(t),n.exec(...e);const r=n.ret;return n.reset(),r})(i);break;case t.FFPROBE:f=(({args:e,timeout:t=-1})=>{n.setTimeout(t),n.ffprobe(...e);const r=n.ret;return n.reset(),r})(i);break;case t.WRITE_FILE:f=(({path:e,data:t})=>(n.FS.writeFile(e,t),!0))(i);break;case t.READ_FILE:f=(({path:e,encoding:t})=>n.FS.readFile(e,{encoding:t}))(i);break;case t.DELETE_FILE:f=(({path:e})=>(n.FS.unlink(e),!0))(i);break;case t.RENAME:f=(({oldPath:e,newPath:t})=>(n.FS.rename(e,t),!0))(i);break;case t.CREATE_DIR:f=(({path:e})=>(n.FS.mkdir(e),!0))(i);break;case t.LIST_DIR:f=(({path:e})=>{const t=n.FS.readdir(e),r=[];for(const o of t){const t=n.FS.stat(`${e}/${o}`),s=n.FS.isDir(t.mode);r.push({name:o,isDir:s})}return r})(i);break;case t.DELETE_DIR:f=(({path:e})=>(n.FS.rmdir(e),!0))(i);break;case t.MOUNT:f=(({fsType:e,options:t,mountPoint:r})=>{const o=e,s=n.FS.filesystems[o];return!!s&&(n.FS.mount(s,t,r),!0)})(i);break;case t.UNMOUNT:f=(({mountPoint:e})=>(n.FS.unmount(e),!0))(i);break;default:throw o}}catch(e){return void self.postMessage({id:E,type:t.ERROR,data:e.toString()})}f instanceof Uint8Array&&p.push(f.buffer),self.postMessage({id:E,type:c,data:f},p)}})(),{}})()));
 </script>
 <script>
 /* voidapp.js  -  UI + three.js rendering for CrystalVoidChannel's structure
@@ -2089,14 +2337,30 @@ select.sel:focus{border-color:var(--accent)}
   var U = { ang: "\u00C5", cube: "\u00B3", sq: "\u00B2" };
 
   var scene, camera, orthoCam, activeCam, renderer;
-  var atomsGroup, bondsGroup, surfaceGroup, guestAtomsGroup, guestBondsGroup, hbondsGroup, selectionGroup, unitCellGroup, bondEditGroup, voidGroup, ringGroup, molSurfaceGroup;
+  var atomsGroup, bondsGroup, surfaceGroup, guestAtomsGroup, guestBondsGroup, hbondsGroup, selectionGroup, unitCellGroup, bondEditGroup, voidGroup, ringGroup, molSurfaceGroup, labelGroup;
   var voidMeshes = {}; /* compId -> array of THREE.Mesh currently in voidGroup, for the cheap visibility-toggle path */
   var nextMolSurfaceId = 1;
+  var autoRotateLastT = null; /* last requestAnimationFrame timestamp seen while autorotating, for frame-rate-independent speed; not part of state, purely transient */
   var nextVoidCopyId = 1;
   var VOID_SELECT_COLOR_ACTIVE = 0xFACC15, VOID_SELECT_COLOR_INACTIVE = 0x3B82F6;
   var lightRig, keyLight, fillLight, rimLight;
   var sphereGeo = null, selSphereGeo = null, highlightCylGeo = null, matCache = {}, npdCubeGeo = null;
   var ELLIPSOID_PROB_SCALE = { "10": 0.7679, "30": 1.1953, "50": 1.5382, "75": 2.0275, "90": 2.5003, "95": 2.7955, "99": 3.3682 };
+  /* every choice here is either a common system font needing no loading at
+     all, or Fraunces (already loaded -- see the Google Fonts link in <head>),
+     so switching never has to wait on a network request or risk a fallback
+     flash */
+  var FONT_OPTIONS = [
+    ["Arial, Helvetica, sans-serif", "Arial (default)"],
+    ["Calibri, Candara, sans-serif", "Calibri"],
+    ["'Times New Roman', Times, serif", "Times New Roman"],
+    ["Helvetica, Arial, sans-serif", "Helvetica"],
+    ["Georgia, 'Times New Roman', serif", "Georgia"],
+    ["Garamond, 'Times New Roman', serif", "Garamond"],
+    ["'Palatino Linotype', Palatino, 'Book Antiqua', serif", "Palatino"],
+    ["'Century Schoolbook', 'Century Schoolbook L', Georgia, serif", "Century Schoolbook"],
+    ["'Fraunces', Georgia, serif", "Fraunces (serif)"]
+  ];
   function isEllipsoidAtom(a) { return !!(a && a.ellipsoidOn && a.adp && !a.npd); }
   function isNpdCubeAtom(a) { return !!(a && a.ellipsoidOn && a.npd); }
   /* ---------------- principal section outlines ----------------
@@ -2180,16 +2444,39 @@ select.sel:focus{border-color:var(--accent)}
       ringGroup.add(jm);
     }
   }
+  /* Single source of truth for every display/lighting/material setting's
+     default value -- read by state's own initializer just below (so a
+     fresh, never-saved session starts on exactly these values) AND by
+     resetDisplaySettings()/resetLightingSettings()/resetMaterialSettings()
+     (so their "Restore ... defaults" buttons produce that same state).
+     Previously these were two independent, hand-maintained literals (one
+     here, one further down) that had quietly drifted apart -- bgColor,
+     highDetail, fogDensity, fillIntensity, atomRoughness, atomMetalness,
+     and atomReflectivity all differed between a fresh load and pressing
+     the matching "restore defaults" button. Declaring this before state
+     and having state read from it directly (rather than duplicating the
+     numbers) makes that drift structurally impossible going forward. */
+  var DISPLAY_DEFAULTS = {
+    bgColor: 0xffffff, depthScaling: false, highDetail: true,
+    fogOn: false, fogDensity: 0.3, lightHeadlight: true, lightAngle: 0,
+    keyEnabled: true, keyIntensity: 0.95, fillEnabled: true, fillIntensity: 0, rimEnabled: true, rimIntensity: 0.35,
+    atomRoughness: 0.35, atomMetalness: 0.55, atomReflectivity: 0
+  };
   var state = {
     atoms: null, name: "", everLoaded: false, viewOffset: [0, 0, 0],
     showHost: true,
     atomScale: 1.0,
-    depthScaling: false, bgColor: 0xe9edf2,
-    lightHeadlight: true, lightAngle: 0,
-    keyEnabled: true, keyIntensity: 0.95, fillEnabled: true, fillIntensity: 0.40, rimEnabled: true, rimIntensity: 0.35,
-    highDetail: false, fogOn: false, fogDensity: 0.32, exportScale: 2, rotateSensitivity: 1.0,
+    depthScaling: DISPLAY_DEFAULTS.depthScaling, bgColor: DISPLAY_DEFAULTS.bgColor,
+    lightHeadlight: DISPLAY_DEFAULTS.lightHeadlight, lightAngle: DISPLAY_DEFAULTS.lightAngle,
+    keyEnabled: DISPLAY_DEFAULTS.keyEnabled, keyIntensity: DISPLAY_DEFAULTS.keyIntensity,
+    fillEnabled: DISPLAY_DEFAULTS.fillEnabled, fillIntensity: DISPLAY_DEFAULTS.fillIntensity,
+    rimEnabled: DISPLAY_DEFAULTS.rimEnabled, rimIntensity: DISPLAY_DEFAULTS.rimIntensity,
+    highDetail: DISPLAY_DEFAULTS.highDetail, fogOn: DISPLAY_DEFAULTS.fogOn, fogDensity: DISPLAY_DEFAULTS.fogDensity,
+    exportScale: 2, rotateSensitivity: 1.0,
     lastSourceHandle: null, exportTransparent: false,
     isCif: false, cifCell: null, cifSymops: null, cifAsymUnit: null, cifFracToCart: null, cifTags: null,
+    cifBlocks: null, cifBlockIndex: 0, cifMultiSourceName: "",
+    cifOriginalText: null, cifOriginalLabel: null,
     /* ---- void/channel analysis (ported from VoidChannelLab, see CLAUDE.md-
        style history in that project) ---- */
     voidMode: "cell", probeRadius: 1.5, voidQuality: 0.2, voidSurfaceOpacity: 1, voidAutoAssemble: true, voidAccurateVolumes: false,
@@ -2205,9 +2492,13 @@ select.sel:focus{border-color:var(--accent)}
     molSurfaceProbeRadius: 1.0, molSurfaceOpacity: 1.0,
     molSurfaces: [], molSurfaceColorLinkAll: false, molSurfaceLinkedColor: null, _molSurfaceIsoById: {},
     ellipsoidProb: "50", showPrincipalAxes: true, principalAxisColor: 0xFFFFFF, principalAxisWidth: 0.008,
+    /* ---- labels (ported from MolecularGraphics, see its own history for
+       the drag-to-place/repositionLabels() design) ---- */
+    showLabels: false, labelSize: 2.6, labelColor: 0x2C2416, labelHalo: true,
+    labelFont: "Arial, Helvetica, sans-serif",
     showUnitCell: true, growMode: false, growUnit: "frag", growBySphere: false, sphereRadius: 4.0,
     unitCellColor: 0x8a7a5c, unitCellThickness: 0.04, unitCellAxisColors: true, showUnitCellLabels: true, showOnlyAsu: false, symmetryForgotten: false,
-    atomRoughness: 0.42, atomMetalness: 0.15, atomReflectivity: 0.9,
+    atomRoughness: DISPLAY_DEFAULTS.atomRoughness, atomMetalness: DISPLAY_DEFAULTS.atomMetalness, atomReflectivity: DISPLAY_DEFAULTS.atomReflectivity,
     guestAtoms: null, guestName: "", guestScale: 1.0, guestBatch: 0, showGuest: true,
     guestGroups: [], cutBonds: {}, cutBondSignatures: {}, extraBonds: {}, extraBondSignatures: {}, bondEditMode: false, bondEditPair: [],
     bondSelectionEnabled: false,
@@ -2218,8 +2509,9 @@ select.sel:focus{border-color:var(--accent)}
     hostBondColorMode: "split", hostBondColor: 0xFFFFFF, guestBondColorMode: "split", guestBondColor: 0xFFFFFF, showHBonds: false,
     radii: {},
     hostGrowStyle: "default", guestGrowStyle: "default", showHydrogens: true, centeringMode: "all",
-    videoAxis: "y", videoSteps: 120, videoScale: 100, videoExporting: false, videoDirection: 1, videoFormat: "mp4",
-    videoFps: 30, videoQuality: "medium"
+    videoAxis: "y", videoSteps: 120, videoScale: 100, videoExporting: false, videoDirection: 1, videoFormat: "avi", dontWarnAviSize: false,
+    autoRotateAxis: "y", autoRotateDir: 1, autoRotateSpeed: 30, autoRotating: false,
+    videoFps: 30
   };
 
   /* ---------------- camera controller ----------------
@@ -2247,6 +2539,7 @@ select.sel:focus{border-color:var(--accent)}
   var ROTATE_SPEED = 0.006, ZOOM_SPEED = 0.004;
   var dragMode = null, lastX = 0, lastY = 0;
   var pickDownX = 0, pickDownY = 0, pickMoved = false;
+  var draggedLabel = null, draggedLabelDepth = 0, draggedLabelGrabOffset = null;
 
   function syncControllerFromCamera() {
     var offset = new THREE.Vector3().subVectors(camera.position, camTarget);
@@ -2278,6 +2571,7 @@ select.sel:focus{border-color:var(--accent)}
     if (orthoCam) { orthoCam.position.copy(pos); orthoCam.quaternion.copy(camOrient); }
     updateOrthoFrustum();
     if (state.fogOn) updateFog();
+    updateLabelScales();
     updateScaleDisplay();
   }
   function updateScaleDisplay() {
@@ -2363,11 +2657,13 @@ select.sel:focus{border-color:var(--accent)}
     camOrient.normalize();
     applyController();
     updateViewDirectionReadout();
+    repositionLabels();
   }
   var lassoPoints = [], lassoFragMode = false;
   var clickMods = { shift: false, ctrl: false, alt: false };
   function onCanvasPointerDown(e) {
     if (state.videoExporting) return;
+    if (state.autoRotating) stopAutoRotate(); /* manual interaction always wins over the auto-spin */
     /* a control (e.g. the atom style dropdown) can be left focused after use;
        without this, spacebar after rotating would reopen that dropdown
        instead of toggling select-all, since focus never actually moved */
@@ -2380,7 +2676,28 @@ select.sel:focus{border-color:var(--accent)}
         lassoPoints = [[e.clientX, e.clientY]];
         showLassoOverlay(true); updateLassoPath();
       } else {
-        dragMode = e.shiftKey ? "roll" : "rotate";
+        /* a label under the cursor takes priority over rotating -- grabbing a
+           label to move it has to work regardless of where else on the
+           structure it happens to be sitting */
+        var labelHit = pickLabelAt(e.clientX, e.clientY);
+        if (labelHit) {
+          dragMode = "label";
+          draggedLabel = labelHit;
+          var labelAtom = labelHit.userData.atom;
+          var labelOff = centroid();
+          draggedLabelDepth = new THREE.Vector3(labelAtom.x + labelOff[0], labelAtom.y + labelOff[1], labelAtom.z + labelOff[2]).project(activeCam).z;
+          /* Fixes a jump-on-first-move bug: without this, moveDraggedLabel()
+             snapped the label straight onto the unprojected cursor position,
+             which almost never coincides with wherever on the sprite it was
+             actually grabbed. Recording the offset between the label's own
+             position and the cursor's unprojected position at grab time, and
+             re-adding it every frame, keeps the grabbed point glued to the
+             cursor instead -- zero displacement on the very first move, and a
+             smooth 1:1 follow after that. */
+          draggedLabelGrabOffset = draggedLabel.position.clone().sub(ndcToWorldAtDepth(e.clientX, e.clientY, draggedLabelDepth));
+        } else {
+          dragMode = e.shiftKey ? "roll" : "rotate";
+        }
       }
     }
     else if (e.button === 2) dragMode = "zoom";
@@ -2393,6 +2710,11 @@ select.sel:focus{border-color:var(--accent)}
     if (!dragMode) return;
     if (dragMode === "lasso") {
       lassoPoints.push([e.clientX, e.clientY]); updateLassoPath();
+      if (Math.abs(e.clientX - pickDownX) > 4 || Math.abs(e.clientY - pickDownY) > 4) pickMoved = true;
+      return;
+    }
+    if (dragMode === "label") {
+      moveDraggedLabel(e.clientX, e.clientY);
       if (Math.abs(e.clientX - pickDownX) > 4 || Math.abs(e.clientY - pickDownY) > 4) pickMoved = true;
       return;
     }
@@ -2433,8 +2755,10 @@ select.sel:focus{border-color:var(--accent)}
       lassoPoints = [];
     } else if ((dragMode === "rotate" || dragMode === "roll") && !pickMoved) {
       handleLeftClick(e.clientX, e.clientY, clickMods);
+    } else if (dragMode === "label") {
+      finalizeLabelDrag();
     }
-    if ((dragMode === "rotate" || dragMode === "roll") && pickMoved) updateViewDirectionReadout();
+    if ((dragMode === "rotate" || dragMode === "roll") && pickMoved) { updateViewDirectionReadout(); repositionLabels(); }
     dragMode = null;
   }
 
@@ -2458,6 +2782,18 @@ select.sel:focus{border-color:var(--accent)}
     renderer.domElement.addEventListener("mousedown", onCanvasPointerDown);
     renderer.domElement.addEventListener("contextmenu", function (e) { e.preventDefault(); });
     renderer.domElement.addEventListener("wheel", function (e) { e.preventDefault(); }, { passive: false });
+    renderer.domElement.addEventListener("dblclick", function (e) {
+      /* double-clicking a manually-placed label releases it back to
+         automatic placement, worked out fresh on the spot rather than left
+         at the plain default until the next drag settles -- a double-click
+         is itself a settle point */
+      var hit = pickLabelAt(e.clientX, e.clientY);
+      if (!hit || !hit.userData.atom) return;
+      var atom = hit.userData.atom;
+      if (!atom.labelPinned) return;
+      delete atom.labelPinned; delete atom.labelOffset;
+      repositionLabels();
+    });
     window.addEventListener("mousemove", onWindowPointerMove);
     window.addEventListener("mouseup", onWindowPointerUp);
 
@@ -2484,6 +2820,7 @@ select.sel:focus{border-color:var(--accent)}
     voidGroup = new THREE.Group(); scene.add(voidGroup);
     ringGroup = new THREE.Group(); scene.add(ringGroup);
     molSurfaceGroup = new THREE.Group(); scene.add(molSurfaceGroup);
+    labelGroup = new THREE.Group(); scene.add(labelGroup);
     window.addEventListener("resize", onResize); onResize(); animate();
   }
   function buildEnvironment() {
@@ -2591,34 +2928,49 @@ select.sel:focus{border-color:var(--accent)}
       return (e && e.name === "AbortError") ? "CANCELLED" : null;
     });
   }
-  function writeToSaveHandle(handleResult, blob, suggestedName, w, h) {
+  function writeToSaveHandle(handleResult, blob, suggestedName, w, h, extraInfo, extraIsErr) {
     /* Pairs with requestSaveHandle(): call this once the (possibly slow)
        content is ready. The picker itself was already requested earlier, so
-       there's no remaining race with the user-activation window here. */
+       there's no remaining race with the user-activation window here.
+       extraInfo (optional) is appended to whichever final message this ends
+       up setting -- success or fallback alike -- rather than a caller
+       following up with its own separate, later setStatus() call, which
+       previously clobbered whatever this function had just said (in
+       particular, silently erasing the ONE thing that told the user a save
+       had quietly fallen back to a plain Downloads-folder download instead
+       of the picker they asked for -- see legacyDownload()). extraIsErr
+       marks that extraInfo itself is a warning (e.g. exportRotationVideo's
+       own rotation self-check) worth the error styling even though the
+       save itself succeeded. */
     var dims = (w && h) ? (" (" + w + "\u00d7" + h + " px)") : "";
+    var tail = extraInfo ? (" -- " + extraInfo) : "";
     if (handleResult === "CANCELLED") { setStatus("Export cancelled.", false); return; }
     if (handleResult) {
       handleResult.createWritable().then(function (writable) {
         return writable.write(blob).then(function () { return writable.close(); });
       }).then(function () {
-        setStatus("Saved " + suggestedName + dims + ".", false);
+        setStatus("Saved " + suggestedName + dims + tail + ".", !!extraIsErr);
       }).catch(function () {
-        legacyDownload(blob, suggestedName, dims, "writing to the chosen location failed");
+        legacyDownload(blob, suggestedName, dims, "writing to the chosen location failed", tail);
       });
     } else {
-      legacyDownload(blob, suggestedName, dims);
+      legacyDownload(blob, suggestedName, dims, null, tail);
     }
   }
-  function legacyDownload(blob, suggestedName, dims, reason) {
+  function legacyDownload(blob, suggestedName, dims, reason, tail) {
     /* fallback for browsers without showSaveFilePicker (e.g. Firefox, Safari),
-       or where it's unavailable/failed for some other reason -- downloads to
-       the browser's default download location instead of letting the user
-       pick a folder */
+       or where it's unavailable/failed for some other reason (no picker
+       offered at all, the user's OS/browser rejected the request, a picker
+       call already in flight, ...) -- downloads to the browser's default
+       download location instead of letting the user pick a folder. Always
+       says so explicitly (never silently swapped out for a plain success
+       message afterward -- see writeToSaveHandle() above), so a fallback is
+       never mistaken for "the folder picker actually worked". */
     var url = URL.createObjectURL(blob);
     var a = document.createElement("a"); a.href = url; a.download = suggestedName;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
-    setStatus("Downloaded " + suggestedName + (dims || "") + " (" + (reason || "this browser can't offer a folder picker for saving") + ").", false);
+    setStatus("Downloaded " + suggestedName + (dims || "") + (tail || "") + " (" + (reason || "this browser can't offer a folder picker for saving") + ").", false);
   }
   /* ---------------- uncompressed AVI writer (no codec involved at all) ----------------
    * PowerPoint's own video playback (and Windows Media Player's) uses a
@@ -2735,50 +3087,257 @@ select.sel:focus{border-color:var(--accent)}
     return aviCat([aviFourcc("RIFF"), aviU32(4 + riffInner.length), aviFourcc("AVI "), riffInner]);
   }
 
-  function exportRotationVideo() {
+  /* ---------------- optional MP4 (H.264) export via ffmpeg.wasm ----------------
+   * AVI above is the reliable default (see exportRotationVideo()'s own
+   * comment) -- no encoder, no dropped frames, but a large file. MP4 is
+   * offered as an opt-in alternative for a much smaller file with the SAME
+   * frame-accuracy guarantee: it encodes the exact same already-rendered
+   * frame sequence AVI would have written, as a plain PNG image sequence
+   * fed to a real x264 encoder running in this page (via WebAssembly) --
+   * never through MediaRecorder's live capture stream, which is what
+   * dropped/duplicated frames in every earlier attempt at compressed
+   * export (see git history / the app's own past comments on this). Since
+   * ffmpeg.wasm's core is a ~30 MB download not otherwise needed by this
+   * app, it's fetched from a CDN lazily, ONLY the first time MP4 export is
+   * actually used, and cached via the Cache Storage API afterward so every
+   * later MP4 export is instant and offline-capable -- exportRotationVideo()
+   * checks isMp4EncoderCached() first and only prompts for the download
+   * when it's actually needed. */
+  /* The ffmpeg.wasm JS wrapper (~4 KB) and its own worker-loader chunk
+     (~3 KB) are INLINED directly into this HTML file -- see the two
+     <script> blocks right before the one you're reading now ("ffmpeg.wasm
+     JS wrapper" and id="cvc-ffmpeg-worker-src"). An earlier version instead
+     kept them as separate ./vendor/ffmpeg.js and ./vendor/814.ffmpeg.js
+     files loaded via <script src>, which broke MP4 export entirely for a
+     user who had a copy of just this HTML file without that folder
+     alongside it -- this file is meant to be self-contained, like every
+     other app in this project family, so that dependency had to go.
+     Inlining creates a new problem the vendor/ layout didn't have, though:
+     the wrapper's own load() constructs a real Worker() to run the
+     worker-loader script, and its OWN default logic for finding that
+     script auto-detects a "public path" from wherever ffmpeg.js's own
+     <script> tag was loaded from (document.currentScript.src) -- which is
+     meaningless once ffmpeg.js has no real external URL of its own (same
+     problem would hit loading it from a CDN, or via file://, both tried
+     and rejected earlier in this feature's development for unrelated
+     reasons of their own). Fixed by patching that ONE line in the inlined
+     wrapper (see its own inline comment) to build the worker from
+     window.__cvcFfmpegWorkerUrl instead -- a blob: URL loadMp4Encoder()
+     below constructs, once, from the worker-loader source text sitting in
+     the "cvc-ffmpeg-worker-src" block, entirely in-page with no network or
+     file request for either of these two small files at all. The seemingly
+     obvious alternative -- pass classWorkerURL to the wrapper's load()
+     instead of patching it -- does NOT work here: this wrapper only honors
+     classWorkerURL by constructing a MODULE worker (new Worker(url,
+     {type:"module"})), and the worker-loader script itself unconditionally
+     tries a classic-worker importScripts() first, which is unavailable at
+     all inside a module worker and throws immediately -- forcing a
+     fallback path that turns out to be a dead webpack stub in this exact
+     build, always failing with "Cannot find module" regardless of what URL
+     is involved. All of this was confirmed directly (not assumed) while
+     building this feature, including reading the actual unminified source
+     of both files. A plain classic worker (this patch's approach)
+     sidesteps all of it: importScripts() on a classic worker succeeds
+     outright, no fallback ever needed. (Re-generate both inlined blocks --
+     and re-apply this same one-line patch -- only if the pinned version
+     below is ever bumped: download dist/umd/ffmpeg.js and
+     dist/umd/NNN.ffmpeg.js from @ffmpeg/ffmpeg on jsdelivr/npm; the numeric
+     chunk name, 814 at the version pinned here, can change between
+     versions -- check the actual filename in the package's own dist/umd/
+     listing, don't assume it carries over.) */
+  /* @ffmpeg/core (the actual wasm engine, ~30 MB) is NOT inlined -- that's
+     the one-time download this feature is explicitly opt-in about. It's
+     fetched from jsdelivr lazily and cached via the Cache Storage API (see
+     isMp4EncoderCached()/prefetchAndCache()) so every later MP4 export is
+     instant and offline-capable. The UMD build (not ESM) is deliberate and
+     load-bearing here: the vendored worker-loader chunk's own core-loading
+     logic is importScripts(coreURL) with NO working fallback in this build
+     (see the comment above) -- importScripts() only accepts a classic,
+     non-ES-module script, which is exactly what the UMD build is. */
+  var FFMPEG_CORE_JS_URL = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.js";
+  var FFMPEG_CORE_WASM_URL = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.wasm";
+  var FFMPEG_CACHE_NAME = "cvc-ffmpeg-core-v1";
+  /* the loaded FFmpeg instance, kept alive for the rest of this page's
+     session once loaded once -- a second MP4 export in the same session
+     reuses it instead of re-fetching/re-initializing anything. Rejects are
+     cleared (see the .catch below) so a failed attempt (e.g. no network)
+     can simply be retried later rather than staying permanently broken for
+     the rest of the session. */
+  var ffmpegLoadPromise = null;
+  function syncVideoFormatHint() {
+    var e = document.getElementById("videoFormatHint");
+    if (!e) return;
+    if (state.videoFormat !== "mp4") {
+      e.textContent = "";
+      return;
+    }
+    e.textContent = "";
+    isMp4EncoderCached().then(function (cached) {
+      var e2 = document.getElementById("videoFormatHint"); if (!e2) return; /* panel may have closed/rebuilt while this was pending */
+      e2.textContent = cached ? "MP4 encoder already downloaded." : "";
+    });
+  }
+  function isMp4EncoderCached() {
+    if (!window.caches) return Promise.resolve(false);
+    return caches.open(FFMPEG_CACHE_NAME).then(function (cache) {
+      return Promise.all([cache.match(FFMPEG_CORE_JS_URL), cache.match(FFMPEG_CORE_WASM_URL)]);
+    }).then(function (hits) {
+      return !!(hits[0] && hits[1]);
+    }).catch(function () { return false; });
+  }
+  /* Populates this app's own cache (for isMp4EncoderCached()'s bookkeeping)
+     AND, as a side effect, the browser's ordinary HTTP cache for this exact
+     URL -- but unlike fetchAndCacheAsBlobUrl above, deliberately returns
+     nothing: coreURL/wasmURL must be handed to ffmpeg.load() as their real
+     https: URLs, not blob: ones (see loadMp4Encoder()'s own comment on
+     why), so this exists purely to make that later, internal fetch (issued
+     by the worker/wasm loader, not by this code) resolve from cache instead
+     of hitting the network again. */
+  function prefetchAndCache(url, cache) {
+    if (!cache) return Promise.resolve();
+    return cache.match(url).then(function (resp) {
+      if (resp) return;
+      return fetch(url).then(function (fresh) {
+        if (!fresh.ok) throw new Error("HTTP " + fresh.status + " fetching " + url);
+        return cache.put(url, fresh);
+      });
+    });
+  }
+  function loadMp4Encoder() {
+    if (ffmpegLoadPromise) return ffmpegLoadPromise;
+    ffmpegLoadPromise = (async function () {
+      if (!window.__cvcFfmpegWorkerUrl) {
+        var workerSrcEl = document.getElementById("cvc-ffmpeg-worker-src");
+        var workerSrc = workerSrcEl ? workerSrcEl.textContent : "";
+        if (!workerSrc) throw new Error("Could not find the inlined MP4 encoder worker script -- this HTML file may be corrupted or was edited incorrectly.");
+        window.__cvcFfmpegWorkerUrl = URL.createObjectURL(new Blob([workerSrc], { type: "application/javascript" }));
+      }
+      if (!window.FFmpegWASM) throw new Error("The inlined MP4 encoder script did not run -- this HTML file may be corrupted or was edited incorrectly.");
+      var cache = window.caches ? await caches.open(FFMPEG_CACHE_NAME) : null;
+      /* coreURL/wasmURL are handed to ffmpeg.load() as their real https: CDN
+         URLs, not blob: ones -- prefetchAndCache() below still pulls them
+         through this app's own cache first (for isMp4EncoderCached()'s
+         bookkeeping) and, as a side effect, the browser's own ordinary HTTP
+         cache, so the worker's own subsequent fetch of the same URL costs
+         no extra real network transfer in practice. classWorkerURL is
+         deliberately NOT passed at all -- see the big comment above; the
+         default (no override) is the one path that actually works here. */
+      await prefetchAndCache(FFMPEG_CORE_JS_URL, cache);
+      await prefetchAndCache(FFMPEG_CORE_WASM_URL, cache);
+      var ffmpeg = new window.FFmpegWASM.FFmpeg();
+      await ffmpeg.load({ coreURL: FFMPEG_CORE_JS_URL, wasmURL: FFMPEG_CORE_WASM_URL });
+      return ffmpeg;
+    })();
+    ffmpegLoadPromise.catch(function () { ffmpegLoadPromise = null; });
+    return ffmpegLoadPromise;
+  }
+  var nextMp4ExportId = 1; /* a fresh, unique frame/output filename prefix per export -- the loaded
+     FFmpeg instance (and its virtual filesystem) persists across exports within the same session,
+     so a later export with fewer frames than an earlier one must never risk picking up that
+     earlier export's own leftover frame files under the same names */
+  async function encodeFramesToMp4(ffmpeg, frames, targetW, targetH, fps, onProgress) {
+    var exportId = nextMp4ExportId++;
+    var digits = Math.max(4, String(frames.length).length);
+    var offCanvas = document.createElement("canvas");
+    offCanvas.width = targetW; offCanvas.height = targetH;
+    var ctx2d = offCanvas.getContext("2d");
+    for (var i = 0; i < frames.length; i++) {
+      ctx2d.drawImage(frames[i], 0, 0);
+      var blob = await new Promise(function (resolve) { offCanvas.toBlob(resolve, "image/png"); });
+      var buf = new Uint8Array(await blob.arrayBuffer());
+      await ffmpeg.writeFile("f" + exportId + "_" + String(i).padStart(digits, "0") + ".png", buf);
+      if (onProgress) onProgress((i + 1) / frames.length);
+    }
+    var pattern = "f" + exportId + "_%0" + digits + "d.png";
+    var outName = "out" + exportId + ".mp4";
+    if (onProgress) onProgress(null); /* sentinel: writing is done, the (unmeasured) encode pass is starting */
+    /* -fps_mode cfr -r <fps>, matching input exactly: input here is already
+       frame-accurate by construction (a fixed loop of "steps" frames, not
+       anything wall-clock-timed -- see exportRotationVideo()'s phase 1), so
+       this locks the encoder to a constant rate with no resampling that
+       could drop or duplicate a frame trying to reconcile a mismatch. */
+    await ffmpeg.exec([
+      "-framerate", String(fps), "-i", pattern,
+      "-c:v", "libx264", "-profile:v", "high", "-level", "4.1",
+      "-pix_fmt", "yuv420p", "-preset", "medium", "-crf", "20",
+      "-fps_mode", "cfr", "-r", String(fps),
+      "-an", "-movflags", "+faststart",
+      outName
+    ]);
+    var data = await ffmpeg.readFile(outName);
+    return new Blob([data], { type: "video/mp4" });
+  }
+
+  async function exportRotationVideo() {
+    /* Two formats: AVI (uncompressed, the default) never had a dropped- or
+       duplicated-frame problem to begin with -- it writes every rendered
+       frame's raw pixels directly, with no encoder pacing to go wrong --
+       but the file is huge. MP4 (opt-in) is much smaller, encoded by a real
+       x264 encoder running in this page via WebAssembly (ffmpeg.wasm),
+       fed the exact same already-rendered frame sequence as a plain PNG
+       image sequence -- never through MediaRecorder's live capture stream,
+       which is what dropped/duplicated frames in every earlier attempt at
+       compressed export in this app's history. See loadMp4Encoder()/
+       encodeFramesToMp4() above for that path; this function itself is
+       otherwise identical for both formats. */
     if (state.videoExporting) { setStatus("A video export is already running.", true); return; }
+    var isMp4 = state.videoFormat === "mp4";
+    var fmt = isMp4 ? { ext: "mp4", blobType: "video/mp4" } : { ext: "avi", blobType: "video/avi" };
+    var base = state.name ? state.name.replace(/\.[^./\\]+$/, "") : "CrystalVoid";
+    var suggestedName = base + "_rotation_" + state.videoAxis + "." + fmt.ext;
+    /* request the save location FIRST, before ANYTHING else -- including,
+       for MP4, the encoder-cache check and confirm() dialog just below.
+       showSaveFilePicker() itself consumes the click's transient user-
+       activation, so anything awaited (or, worse, a confirm() dialog that
+       pauses for the user's own input) before this call risks that
+       activation expiring, at which point showSaveFilePicker() silently
+       fails and requestSaveHandle() falls back to null -- which
+       writeToSaveHandle() then, correctly but invisibly to the user,
+       treats as "no picker available" and quietly downloads to the
+       browser's default Downloads folder instead, with no dialog and no
+       chance to rename. That silent fallback is exactly what a previous
+       version of this function did by checking the MP4 confirm() dialog
+       BEFORE requestSaveHandle() -- reasonable-looking (skip the save
+       dialog entirely if the user is about to decline the download
+       anyway), but confirm() is precisely the kind of user-paced wait
+       that voids transient activation, so it broke the save dialog for
+       every first-time MP4 export. One user-visible side effect of fixing
+       it this way: the very first MP4 export ever (before the encoder is
+       cached) now asks where to save BEFORE asking to confirm the
+       one-time ~30 MB download, rather than after -- if the user then
+       declines the download, the handle this already obtained is simply
+       never written to (no stray file appears). A one-time quirk, and a
+       small price for the save dialog working reliably every time after. */
+    var handlePromise = requestSaveHandle(suggestedName, { description: fmt.ext.toUpperCase() + " video", accept: (function () { var a = {}; a[fmt.blobType] = ["." + fmt.ext]; return a; })() });
+
+    if (isMp4) {
+      var cached = await isMp4EncoderCached();
+      if (!cached) {
+        var proceed = window.confirm("This needs a one-time ~30 MB download. Continue and export as MP4?");
+        if (!proceed) { setStatus("MP4 export cancelled -- the encoder wasn't downloaded (export as AVI instead, or try MP4 again later).", false); return; }
+      }
+    } else {
+      await showAviSizeWarning();
+    }
+    stopAutoRotate();
     var vp = document.getElementById("viewport"); if (!vp) return;
     var canvas = renderer.domElement;
-    var isAvi = state.videoFormat === "avi";
-    if (!isAvi && !canvas.captureStream) { setStatus("This browser does not support recording video from the 3D view (captureStream is unavailable).", true); return; }
-    if (!isAvi && !window.MediaRecorder) { setStatus("This browser does not support video recording (MediaRecorder is unavailable).", true); return; }
 
-    var qualityMap = {
-      low: { bitrate: 2500000 },
-      medium: { bitrate: 8000000 },
-      high: { bitrate: 20000000 }
-    };
-    var quality = qualityMap[state.videoQuality] || qualityMap.medium;
-
-    var formatCandidates = {
-      webm: { ext: "webm", blobType: "video/webm", mimeList: ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"] },
-      mp4: { ext: "mp4", blobType: "video/mp4", mimeList: ["video/mp4;codecs=avc1.42E01E", "video/mp4;codecs=avc1.4D401E", "video/mp4;codecs=h264", "video/mp4;codecs=avc1"] },
-      avi: { ext: "avi", blobType: "video/avi", mimeList: [] }
-    };
-    var fmt = formatCandidates[state.videoFormat] || formatCandidates.webm;
-    var mimeType = null;
-    if (!isAvi) {
-      for (var mi = 0; mi < fmt.mimeList.length; mi++) if (MediaRecorder.isTypeSupported(fmt.mimeList[mi])) { mimeType = fmt.mimeList[mi]; break; }
-      if (!mimeType) {
-        var otherFmt = (fmt === formatCandidates.webm) ? "MP4" : "WebM";
-        setStatus("This browser can't record " + (fmt === formatCandidates.webm ? "WebM" : "MP4") + " video -- try " + otherFmt + " instead.", true);
-        return;
-      }
-    }
-
-    var dir = (state.videoDirection === -1) ? -1 : 1;
+    /* This rotates the CAMERA (orbiting it around the target), not the
+       model -- and an orbiting camera's own rotation is the exact inverse
+       of what it makes the scene APPEAR to do. Camera orbiting by a
+       mathematically-correct right-handed +angle around +axis makes the
+       model on screen appear to turn the opposite (left-handed) way, which
+       is exactly the "feels backwards" the dropdown's own +x/-x labels were
+       reported to have. Negating here is what makes "+x" in the UI actually
+       produce a right-hand-rule-positive APPARENT rotation of the model
+       (what the user watches), rather than of the otherwise-invisible
+       camera doing the orbiting. */
+    var dir = (state.videoDirection === -1) ? 1 : -1;
     var axisVec = state.videoAxis === "x" ? new THREE.Vector3(1, 0, 0) : state.videoAxis === "z" ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
     var steps = Math.max(4, Math.min(1440, Math.round(state.videoSteps)));
     var scalePct = Math.max(0.1, Math.min(2, state.videoScale / 100));
     var fps = Math.max(1, Math.min(60, Math.round(state.videoFps) || 30));
-
-    var base = state.name ? state.name.replace(/\.[^./\\]+$/, "") : "CrystalVoid";
-    var suggestedName = base + "_rotation_" + state.videoAxis + "." + fmt.ext;
-    /* request the save location FIRST, before any of the (potentially slow,
-       several-second) recording work -- the same reasoning as saveModelToFile:
-       showSaveFilePicker() itself consumes the click's user-activation, so
-       requesting it up front means the slow part can't cause it to expire */
-    var handlePromise = requestSaveHandle(suggestedName, { description: fmt.ext.toUpperCase() + " video", accept: (function () { var a = {}; a[fmt.blobType] = ["." + fmt.ext]; return a; })() });
 
     state.videoExporting = true;
     var videoBtn = document.getElementById("exportVideoBtn"); if (videoBtn) videoBtn.disabled = true;
@@ -2799,8 +3358,18 @@ select.sel:focus{border-color:var(--accent)}
     var savedOrient = camOrient.clone();
 
     (async function () {
-      var recorder = null, offCanvas = null, frames = [];
+      var frames = [];
+      var ffmpeg = null;
       try {
+        if (isMp4) {
+          /* Loaded (or, if already loaded this session, reused) here, AFTER
+             requestSaveHandle() already ran above -- this can be a genuinely
+             slow, multi-second-or-more step (WASM instantiation, and a real
+             fetch the very first time), which is exactly why it must NOT
+             happen before the save picker is requested. */
+          showOverlay(true, "Preparing MP4 encoder...");
+          ffmpeg = await loadMp4Encoder();
+        }
         /* Every earlier attempt at this feature tried to render each
            orientation LIVE, in real time, while MediaRecorder watched the
            canvas -- so correctness depended on 120 individual WebGL renders
@@ -2893,88 +3462,36 @@ select.sel:focus{border-color:var(--accent)}
         }
 
         var blob;
-        if (isAvi) {
+        if (isMp4) {
+          blob = await encodeFramesToMp4(ffmpeg, frames, targetW, targetH, fps, function (frac) {
+            if (frac === null) { showOverlay(true, "Encoding to MP4 (this can take a while)..."); return; }
+            showOverlay(true, "Writing frames to encoder (" + Math.round(frac * frames.length) + "/" + frames.length + ")...");
+            setCalcProgress(0.5 + frac * 0.5);
+          });
+        } else {
           /* No live capture, no encoder, no waiting -- every frame's raw
              pixels are already in hand from phase 1, so the file can be
              assembled synchronously right now. */
           showOverlay(true, "Building AVI file...");
           blob = new Blob([buildUncompressedAvi(frames, targetW, targetH, fps)], { type: fmt.blobType });
-        } else {
-          showOverlay(true, "Encoding rotation video...");
-          offCanvas = document.createElement("canvas");
-          offCanvas.width = targetW; offCanvas.height = targetH;
-          offCanvas.style.position = "fixed"; offCanvas.style.left = "-99999px"; offCanvas.style.top = "0";
-          document.body.appendChild(offCanvas);
-          var ctx2d = offCanvas.getContext("2d");
-          ctx2d.drawImage(frames[0], 0, 0);
-
-          var stream = offCanvas.captureStream(0);
-          var track = stream.getVideoTracks()[0];
-          var manualCapture = !!(track && track.requestFrame);
-          if (!manualCapture) stream = offCanvas.captureStream(fps);
-          var chunks = [];
-          recorder = new MediaRecorder(stream, { mimeType: mimeType, videoBitsPerSecond: quality.bitrate });
-          recorder.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
-          var stopped = new Promise(function (resolve) { recorder.onstop = resolve; });
-          recorder.start();
-
-          /* A continuous elapsed-time-driven loop (an earlier version of
-             this code) redraws on every requestAnimationFrame tick (~60Hz)
-             but only advances to a new cached frame roughly every
-             1000/fps ms -- so most ticks re-request the SAME still-unchanged
-             content before moving on. Fed a stream like that, a real-world
-             encoder's own redundant-frame heuristics can decide several of
-             those repeats "don't need" a fresh encode and skip/merge them to
-             save bitrate, then catch up once real motion resumes -- exactly
-             the reported "rotates a bit, freezes, jumps, rotates, stops
-             short" pattern. None of that is under this code's control once
-             MediaRecorder owns the pacing decision.
-             Fix: go back to one discrete step per distinct frame, each held
-             for exactly one fixed real-time interval -- but unlike the
-             original live-WebGL-render version of this idea, every step here
-             is now a cheap, near-constant-time 2D blit of an already-rendered
-             still (rendering was already done in phase 1), so there's no
-             per-step cost left to vary and cause drift. Every one of "steps"
-             frames gets exactly one, and only one, request -- nothing for an
-             encoder's own redundancy heuristic to selectively skip. */
-          var frameIntervalMs = 1000 / fps;
-          for (var j = 0; j < frames.length; j++) {
-            ctx2d.drawImage(frames[j], 0, 0);
-            if (manualCapture) track.requestFrame();
-            setCalcProgress(0.5 + (j + 1) / frames.length * 0.5);
-            await new Promise(function (resolve) { setTimeout(resolve, frameIntervalMs); });
-          }
-          /* Hold the true final frame for one extra interval and request it
-             again before stop() -- stop() can otherwise fire before the
-             browser finishes flushing the very last requested frame into the
-             stream, truncating the tail by a frame or more. */
-          ctx2d.drawImage(frames[frames.length - 1], 0, 0);
-          if (manualCapture) track.requestFrame();
-          await new Promise(function (resolve) { setTimeout(resolve, Math.max(200, 3 * frameIntervalMs)); });
-          if (manualCapture) track.requestFrame();
-          recorder.stop();
-          await stopped;
-
-          blob = new Blob(chunks, { type: fmt.blobType });
         }
 
+        /* The frame count/file size (and the self-check's own warning, if
+           it tripped) are folded into writeToSaveHandle()'s own final
+           message via extraInfo, rather than a separate later setStatus()
+           call -- a separate call, even a deliberately delayed one, risks
+           racing writeToSaveHandle()'s own async write and overwriting
+           whatever it just said, which is exactly what previously erased
+           the one message that would have told the user a save had
+           quietly fallen back to a plain Downloads-folder download instead
+           of the picker they asked for. */
         handlePromise.then(function (h) {
-          writeToSaveHandle(h, blob, suggestedName);
-          /* Always follow up with the concrete numbers (frame count, file
-             size), not just when the self-check trips -- if the video
-             still isn't right on some machine this doesn't catch, these
-             are the first things needed to tell why, without anyone having
-             to inspect the file by hand. */
-          setTimeout(function () {
-            setStatus("Exported " + suggestedName + " -- " + frames.length + " frames, " + (blob.size / 1024).toFixed(0) + " KB" + rotationWarning, !!rotationWarning);
-          }, 400);
+          writeToSaveHandle(h, blob, suggestedName, null, null, frames.length + " frames, " + (blob.size / 1024).toFixed(0) + " KB" + rotationWarning, !!rotationWarning);
         });
       } catch (e) {
         setStatus("Video export failed: " + (e && e.message ? e.message : e), true);
-        if (recorder && recorder.state !== "inactive") { try { recorder.stop(); } catch (e2) { /* already stopped */ } }
       } finally {
         frames.forEach(function (f) { f.close(); });
-        if (offCanvas && offCanvas.parentNode) offCanvas.parentNode.removeChild(offCanvas);
         camOrient.copy(savedOrient);
         renderer.setPixelRatio(oldRatio);
         renderer.setSize(cw, ch, false);
@@ -3018,6 +3535,23 @@ select.sel:focus{border-color:var(--accent)}
     activeCam = on ? camera : orthoCam;
     onResize();
   }
+  function startAutoRotate() {
+    if (state.videoExporting) { setStatus("A video export is in progress -- can't autorotate at the same time.", true); return; }
+    state.autoRotating = true;
+    autoRotateLastT = null;
+    syncAutoRotateButtons();
+  }
+  function stopAutoRotate() {
+    state.autoRotating = false;
+    autoRotateLastT = null;
+    syncAutoRotateButtons();
+  }
+  function syncAutoRotateButtons() {
+    var playBtn = document.getElementById("autoRotatePlayBtn");
+    var stopBtn = document.getElementById("autoRotateStopBtn");
+    if (playBtn) playBtn.disabled = state.autoRotating;
+    if (stopBtn) stopBtn.disabled = !state.autoRotating;
+  }
   function animate() {
     requestAnimationFrame(animate);
     /* Video export drives its own precisely-timed sequence of render() +
@@ -3031,6 +3565,26 @@ select.sel:focus{border-color:var(--accent)}
        steps further round than intended. Suppressing this loop's own
        redraft while an export is running leaves the canvas showing only
        what the export explicitly rendered, eliminating the race. */
+    if (state.autoRotating && !state.videoExporting) {
+      var arNow = performance.now();
+      var arDt = (autoRotateLastT !== null) ? (arNow - autoRotateLastT) / 1000 : 0;
+      autoRotateLastT = arNow;
+      if (arDt > 0) {
+        var arAxisVec = state.autoRotateAxis === "x" ? new THREE.Vector3(1, 0, 0) : state.autoRotateAxis === "z" ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+        /* Orbiting the camera by +angle makes the MODEL appear to turn the
+           opposite way -- same fact exportRotationVideo's own direction fix
+           relies on -- so this negates state.autoRotateDir for the same
+           reason, keeping "+x" here meaning the same right-hand-rule
+           apparent rotation of the model as "+x" does for the rotation
+           video, not the otherwise-invisible camera doing the orbiting. */
+        var arAngle = -state.autoRotateDir * (state.autoRotateSpeed * Math.PI / 180) * arDt;
+        camOrient.multiply(new THREE.Quaternion().setFromAxisAngle(arAxisVec, arAngle));
+        camOrient.normalize();
+        applyController();
+      }
+    } else {
+      autoRotateLastT = null;
+    }
     if (!state.videoExporting) renderer.render(scene, activeCam);
   }
 
@@ -3046,6 +3600,37 @@ select.sel:focus{border-color:var(--accent)}
     overlay.appendChild(box);
     overlay.addEventListener("click", function (e) { if (e.target === overlay) document.body.removeChild(overlay); });
     document.body.appendChild(overlay);
+  }
+  function showAviSizeWarning() {
+    /* One-time-per-export heads-up before an AVI save actually happens --
+       never a yes/no gate (AVI always proceeds either way), just an
+       up-front nudge toward MP4 for anyone who hasn't noticed it yet.
+       Returns a promise that resolves once the user has acknowledged it
+       (immediately, if they've already opted out via the checkbox below on
+       a previous export). Follows showInfoPopup()'s own overlay/box
+       pattern, with a "don't show again" toggle added and persisted the
+       same way every other display preference already is. */
+    if (state.dontWarnAviSize) return Promise.resolve();
+    return new Promise(function (resolve) {
+      var overlay = el("div", "modal-overlay");
+      var box = el("div", "modal-box");
+      box.appendChild(el("h3", null, "Exporting as AVI"));
+      var body = el("div");
+      body.innerHTML = "<p>Uncompressed AVI can be very large -- often hundreds of MB for a rotation video. A much smaller <b>MP4</b> is available: choose MP4 from the format dropdown before exporting. The first MP4 export needs a one-time ~30 MB download of a video encoder; every export after that is instant.</p>";
+      box.appendChild(body);
+      var dontShowChk = toggle(box, "Don't show this message again", false, function () {});
+      var btnRow = el("div", "btnrow"); btnRow.style.marginTop = "12px";
+      function finish() {
+        if (dontShowChk.checked) { state.dontWarnAviSize = true; persistPreferences(); }
+        document.body.removeChild(overlay);
+        resolve();
+      }
+      button(btnRow, "OK", null, finish);
+      box.appendChild(btnRow);
+      overlay.appendChild(box);
+      overlay.addEventListener("click", function (e) { if (e.target === overlay) finish(); });
+      document.body.appendChild(overlay);
+    });
   }
   function calculateMolecularVolume() {
     var sel = getSelectedAtomObjects();
@@ -3099,12 +3684,6 @@ select.sel:focus{border-color:var(--accent)}
      real MG-saved project's prefs object), not CV's original placeholder
      numbers -- "Reset ... defaults" should land on the same look in both
      apps, not on whatever CV happened to ship with. */
-  var DISPLAY_DEFAULTS = {
-    bgColor: 0xffffff, depthScaling: false, highDetail: true,
-    fogOn: false, fogDensity: 0.3, lightHeadlight: true, lightAngle: 0,
-    keyEnabled: true, keyIntensity: 0.95, fillEnabled: true, fillIntensity: 0, rimEnabled: true, rimIntensity: 0.35,
-    atomRoughness: 0.35, atomMetalness: 0.55, atomReflectivity: 0
-  };
   function syncDisplayControlsUI() {
     function setVal(id, v) { var e = document.getElementById(id); if (e) e.value = v; }
     function setChecked(id, v) { var e = document.getElementById(id); if (e) e.checked = v; }
@@ -3245,6 +3824,7 @@ select.sel:focus{border-color:var(--accent)}
     if (state.showGuest) renderMoleculeInto(hydrogenFilter(hideFilter(asuFilter(visibleGuestAtoms()))), "ballstick", state.guestScale, state.guestBondRadius, guestAtomsGroup, guestBondsGroup, off, true, state.guestBondColorMode, state.guestBondColor, ringData);
     if (state.showPrincipalAxes && ringData.length) renderPrincipalRings(ringData);
     renderHBonds(off);
+    renderLabels();
     renderSelection();
   }
   var HBOND_ELEMENTS = { N: 1, O: 1, S: 1, Cl: 1 };
@@ -3369,6 +3949,50 @@ select.sel:focus{border-color:var(--accent)}
     }
     return out;
   }
+  function sameSymmetryImage(a, b) {
+    /* true if a and b are two different atoms within the SAME symmetry-
+       generated copy of the asymmetric unit (same operator + same unit-cell
+       translation) -- i.e. bonding between them does not cross a symmetry
+       operation. Also true (deliberately) whenever either atom has no
+       symmetry tracking at all (opIndex undefined -- an atom not sourced
+       from a CIF/RES load), since there is then no "crossing a symmetry
+       operation" concept to apply; this makes the function a no-op outside
+       CIF/RES-derived structures. */
+    if (a.opIndex === undefined || b.opIndex === undefined) return true;
+    return a.opIndex === b.opIndex && a.cellI === b.cellI && a.cellJ === b.cellJ && a.cellK === b.cellK;
+  }
+  function partsCanBond(a, b) {
+    /* SHELXL's own PART bonding rule (see the SHELX manual's PART entry):
+       automatic bond generation ignores a bond between two atoms with
+       DIFFERENT non-zero PART numbers -- PART 0 (the default, and every
+       CIF-sourced atom, which has no PART concept at all and so reads as
+       undefined here, same as 0) bonds to anything. A negative PART number
+       additionally excludes bonds to a symmetry-GENERATED atom (a different
+       symmetry operator/cell translation, not merely a different
+       asymmetric-unit atom) that has any non-zero PART number, same or
+       different -- this is what lets a group disordered across a special
+       position (e.g. a solvent molecule on an inversion centre) avoid being
+       auto-bonded to its own symmetry mate. Within one symmetry image (no
+       operation crossed) the sign of a PART number has no effect: only the
+       base same-or-zero rule applies there. */
+    var pa = a.part || 0, pb = b.part || 0;
+    if (pa !== 0 && pb !== 0 && pa !== pb) return false;
+    if ((pa < 0 || pb < 0) && !sameSymmetryImage(a, b)) {
+      if (pa < 0 && pb !== 0) return false;
+      if (pb < 0 && pa !== 0) return false;
+    }
+    return true;
+  }
+  function partBlockedBonds(atoms, bondList) {
+    /* mirrors crossBatchBonds' own shape -- see partsCanBond() for the rule */
+    var out = [];
+    for (var i = 0; i < bondList.length; i++) {
+      var b = bondList[i], a1 = atoms[b[0]], a2 = atoms[b[1]];
+      if (!partsCanBond(a1, a2)) continue;
+      out.push(b);
+    }
+    return out;
+  }
   function addExtraBondCandidates(atoms, bondList) {
     /* appends a manually force-added bond (Interactive bond editor) as a
        candidate, regardless of distance -- indices into the same atoms
@@ -3416,7 +4040,7 @@ select.sel:focus{border-color:var(--accent)}
        connectivity, bulk cleanup) goes through: real distance-based bonds,
        plus manually forced ones and their symmetry cascade, minus anything
        manually cut (an explicit cut always wins last) */
-    var bondList = crossBatchBonds(atoms, K.bonds(atoms, 0.45));
+    var bondList = partBlockedBonds(atoms, crossBatchBonds(atoms, K.bonds(atoms, 0.45)));
     bondList = addExtraBondCandidates(atoms, bondList);
     bondList = addExtraBondSignatureCandidates(atoms, bondList);
     return filterCutBonds(atoms, bondList);
@@ -3554,6 +4178,398 @@ select.sel:focus{border-color:var(--accent)}
     var dist = r / Math.tan(camera.fov * Math.PI / 360) * 1.6;
     camera.position.set(dist * 0.55, dist * 0.42, dist * 0.78);
     camTarget.set(0, 0, 0); syncControllerFromCamera(); applyController();
+    repositionLabels();
+  }
+
+  /* ================= labels (ported from MolecularGraphics) =================
+   * Every atom carries its own label, positioned either at a plain default
+   * (just above the atom, cheap enough to use while the camera is actively
+   * moving) or -- once the view has settled -- at whichever of 8 compass
+   * directions around the atom keeps the label's screen rectangle clear of
+   * every atom and bond currently on screen (see repositionLabels()). A
+   * manually dragged label is pinned by recording its offset from the atom
+   * in world space, on the atom itself (labelPinned/labelOffset) rather than
+   * the sprite, so it survives a full label rebuild the same way atom.hidden
+   * already does. */
+  var labelTexCache = {};
+  function makeLabelSprite(text, colorInt, italic) {
+    var key = text + "|" + colorInt + "|" + (italic ? 1 : 0) + "|" + (state.labelHalo ? 1 : 0) + "|" + state.labelFont;
+    var entry = labelTexCache[key];
+    if (!entry) {
+      var fontPx = 64;
+      var c = document.createElement("canvas");
+      var ctx = c.getContext("2d");
+      var font = (italic ? "italic " : "") + "500 " + fontPx + "px " + state.labelFont;
+      ctx.font = font;
+      var w = Math.ceil(ctx.measureText(text).width) + 24;
+      c.width = Math.max(16, w); c.height = Math.round(fontPx * 1.45);
+      ctx = c.getContext("2d");
+      ctx.font = font;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      if (state.labelHalo) {
+        /* an outline in the contrasting shade keeps a label legible whether it
+           lands on a pale atom or a dark one -- without it, labels vanish
+           against whatever happens to be behind them */
+        var lum = ((colorInt >> 16 & 255) * 0.299 + (colorInt >> 8 & 255) * 0.587 + (colorInt & 255) * 0.114) / 255;
+        ctx.strokeStyle = lum > 0.5 ? "rgba(20,18,12,0.85)" : "rgba(255,255,255,0.9)";
+        ctx.lineWidth = fontPx * 0.13;
+        ctx.lineJoin = "round";
+        ctx.strokeText(text, c.width / 2, c.height / 2);
+      }
+      ctx.fillStyle = hexToCss(colorInt);
+      ctx.fillText(text, c.width / 2, c.height / 2);
+      var tex = new THREE.CanvasTexture(c);
+      if (THREE.sRGBEncoding) tex.encoding = THREE.sRGBEncoding;
+      tex.minFilter = THREE.LinearFilter;
+      tex.generateMipmaps = false;
+      entry = { tex: tex, aspect: c.width / c.height };
+      labelTexCache[key] = entry;
+    }
+    var spm = new THREE.SpriteMaterial({ map: entry.tex, transparent: true, depthWrite: false, sizeAttenuation: false, fog: false });
+    var sp = new THREE.Sprite(spm);
+    sp.userData.aspect = entry.aspect;
+    return sp;
+  }
+  /* Every atom this app can currently show a label for, host and guest alike
+     -- the exact same visibility chain renderStructure() itself renders,
+     since a label for an atom that isn't drawn would be a label with nothing
+     to point at. */
+  function labelableAtoms() {
+    var out = [];
+    if (state.showHost) out = out.concat(hydrogenFilter(hideFilter(asuFilter(state.atoms))) || []);
+    if (state.showGuest) out = out.concat(hydrogenFilter(hideFilter(asuFilter(visibleGuestAtoms()))) || []);
+    return out;
+  }
+  /* The scalar radius labels (and repositionLabels()'s occlusion test) treat
+     an atom's on-screen footprint as -- mirrors exactly how renderMoleculeInto
+     actually sizes each of the three things an atom can be drawn as (a plain
+     sphere, a genuine ellipsoid, or an NPD cube marker), just computed here
+     rather than read back off a rendered mesh. */
+  function atomOcclusionRadius(a) {
+    if (a.isCentroid) return 0.2;
+    var inHost = state.atoms && state.atoms.indexOf(a) >= 0;
+    var bondRadius = inHost ? state.hostBondRadius : state.guestBondRadius;
+    var scaleMult = inHost ? state.atomScale : state.guestScale;
+    if (isNpdCubeAtom(a)) return Math.max(0.18, atomDisplayRadius("ballstick", a.r, a.el, bondRadius, scaleMult, a) * 0.6);
+    if (isEllipsoidAtom(a)) {
+      var k = ELLIPSOID_PROB_SCALE[state.ellipsoidProb] || ELLIPSOID_PROB_SCALE["50"];
+      return k * Math.sqrt(Math.max(a.adp.values[0], 1e-8));
+    }
+    return atomDisplayRadius("ballstick", a.r, a.el, bondRadius, scaleMult, a);
+  }
+  /* The world-unit radius a drawn bond occupies -- each half is really its
+     own atom's bond radius (host or guest), but for label avoidance the bond
+     as a whole only needs one representative thickness, so the two ends are
+     simply averaged. */
+  function bondOcclusionRadius(A, B) {
+    var aInHost = state.atoms && state.atoms.indexOf(A) >= 0;
+    var bInHost = state.atoms && state.atoms.indexOf(B) >= 0;
+    return ((aInHost ? state.hostBondRadius : state.guestBondRadius) + (bInHost ? state.hostBondRadius : state.guestBondRadius)) / 2;
+  }
+  /* CrystalVoidChannel atoms carry no .label string of their own (unlike
+     MG's) -- element + auIndex is what actually identifies one, so the
+     text a label shows is the CIF's own _atom_site_label for that
+     asymmetric-unit position (the same one Save CIF writes back out),
+     falling back to the bare element symbol for anything untracked (an
+     unreassigned promoted centroid, or a structure loaded with symmetry
+     already forgotten). Every symmetry-generated copy of an atom shows the
+     same label as its asymmetric-unit original -- there is no separate
+     per-copy label, matching how this app already treats auIndex elsewhere
+     (selectSymmetryRelated, Save CIF). */
+  function atomLabelText(a) {
+    if (a.auIndex !== undefined && state.cifAsymUnit && state.cifAsymUnit[a.auIndex] && state.cifAsymUnit[a.auIndex].label) {
+      return state.cifAsymUnit[a.auIndex].label;
+    }
+    return a.el || "?";
+  }
+  function renderLabels() {
+    clearGroup(labelGroup);
+    if (!state.showLabels) return;
+    var atoms = labelableAtoms();
+    var off = centroid();
+    for (var j = 0; j < atoms.length; j++) {
+      var a = atoms[j];
+      /* per-atom label visibility is independent of, and layered underneath,
+         the master Show labels checkbox -- true (a label) unless an atom has
+         been explicitly unlabelled via the Labels panel's Unlabel selected */
+      if (a.showLabel === false) continue;
+      var sp = makeLabelSprite(atomLabelText(a), state.labelColor, false);
+      sp.userData.atom = a;
+      if (a.labelPinned && a.labelOffset) {
+        /* a manual drag overrides the default outright, and survives this
+           rebuild -- the offset lives on the atom, not the sprite */
+        sp.position.set(a.x + off[0] + a.labelOffset.x, a.y + off[1] + a.labelOffset.y, a.z + off[2] + a.labelOffset.z);
+      } else {
+        /* lift the label along world +y so it sits beside the atom rather
+           than buried inside it -- a plain, cheap default, good enough while
+           the camera is actively moving; repositionLabels() replaces this
+           with a placement that accounts for what else is on screen, once
+           the camera settles */
+        var r = atomOcclusionRadius(a);
+        sp.position.set(a.x + off[0], a.y + off[1] + r * 0.55, a.z + off[2]);
+      }
+      labelGroup.add(sp);
+    }
+    updateLabelScales();
+  }
+  function updateLabelScales() {
+    /* sizeAttenuation is off, so the sprite scale has to be converted into
+       whatever units the shader actually uses -- and those differ between the
+       two cameras. The perspective shader multiplies the scale by the view
+       depth, so a constant value already gives a constant screen size; the
+       orthographic path does not, so the frustum height has to be folded in
+       by hand. Doing both here means a label keeps the same size on screen at
+       any zoom, under either projection, and comes out the same in an
+       exported image. */
+    if (!labelGroup) return;
+    var f = state.labelSize / 100;
+    var factor = state.depthScaling
+      ? (2 * Math.tan(camera.fov * Math.PI / 360))
+      : (2 * camDist * Math.tan(camera.fov * Math.PI / 360));
+    for (var i = 0; i < labelGroup.children.length; i++) {
+      var sp = labelGroup.children[i];
+      if (!sp.isSprite) continue;
+      var h = f * factor;
+      sp.scale.set(h * (sp.userData.aspect || 1), h, 1);
+    }
+  }
+  /* Raycasts against the label sprites specifically -- separate from the
+     atom/bond picking above, since a label is a distinct kind of target
+     (grab-to-move, not click-to-select). */
+  function pickLabelAt(clientX, clientY) {
+    if (!state.showLabels || !labelGroup || !labelGroup.children.length) return null;
+    var rect = renderer.domElement.getBoundingClientRect();
+    var ndc = new THREE.Vector2(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1);
+    if (!raycaster) raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(ndc, activeCam);
+    var hits = raycaster.intersectObjects(labelGroup.children, false);
+    return hits.length ? hits[0].object : null;
+  }
+  function ndcToWorldAtDepth(clientX, clientY, depth) {
+    var rect = renderer.domElement.getBoundingClientRect();
+    var ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
+    var ndcY = -((clientY - rect.top) / rect.height) * 2 + 1;
+    return new THREE.Vector3(ndcX, ndcY, depth).unproject(activeCam);
+  }
+  function moveDraggedLabel(clientX, clientY) {
+    draggedLabel.position.copy(ndcToWorldAtDepth(clientX, clientY, draggedLabelDepth).add(draggedLabelGrabOffset));
+  }
+  function finalizeLabelDrag() {
+    if (draggedLabel && pickMoved) {
+      var atom = draggedLabel.userData.atom;
+      if (atom) {
+        var off = centroid();
+        var atomPos = new THREE.Vector3(atom.x + off[0], atom.y + off[1], atom.z + off[2]);
+        var offVec = draggedLabel.position.clone().sub(atomPos);
+        atom.labelPinned = true;
+        atom.labelOffset = { x: offVec.x, y: offVec.y, z: offVec.z };
+      }
+    }
+    draggedLabel = null;
+    draggedLabelGrabOffset = null;
+  }
+  /* Re-anchors every unpinned atom label to whichever of 8 compass directions
+     around its atom keeps the label's screen rectangle clear of every atom's
+     projected disc and every bond's projected band -- both the ones touching
+     the labelled atom and every other currently visible one. Depth is not
+     considered at all; it doesn't need to be, since occlusion is only
+     possible where two things project to the same pixels.
+       Called only at the moments the view actually settles -- mouse-up after
+     a drag, the view-direction shortcuts, and frameCamera -- and deliberately
+     NOT from renderLabels(), so an unrelated change (nudging a slider,
+     toggling a style) doesn't make already-well-placed labels jump around;
+     they simply keep whatever placement the last settled view gave them
+     until the next one. */
+  function repositionLabels() {
+    if (!state.showLabels || !labelGroup || !labelGroup.children.length) return;
+    var vp = document.getElementById("viewport");
+    var w = vp.clientWidth, h = vp.clientHeight;
+    if (!w || !h) return;
+    activeCam.updateMatrixWorld(true);
+    var rightVec = new THREE.Vector3(1, 0, 0).applyQuaternion(camOrient);
+    var upVec = new THREE.Vector3(0, 1, 0).applyQuaternion(camOrient);
+    function project(v3) {
+      var p = v3.clone().project(activeCam);
+      return { x: (p.x * 0.5 + 0.5) * w, y: (-p.y * 0.5 + 0.5) * h, z: p.z };
+    }
+    var off = centroid();
+    var atoms = labelableAtoms();
+    var atomScreens = [];
+    for (var ai = 0; ai < atoms.length; ai++) {
+      var a = atoms[ai], p0 = new THREE.Vector3(a.x + off[0], a.y + off[1], a.z + off[2]);
+      var c = project(p0);
+      var edge = project(p0.clone().addScaledVector(rightVec, atomOcclusionRadius(a)));
+      var r = Math.max(Math.hypot(edge.x - c.x, edge.y - c.y), 2);
+      atomScreens.push({ a: a, x: c.x, y: c.y, z: c.z, r: r });
+    }
+    /* every visible bond, as a screen-space segment with a thickness -- host
+       and guest bonds separately, since computeBondsWithOverrides()'s index
+       pairs are only meaningful within the atom list they were computed from */
+    var bondScreens = [];
+    function addBondScreens(list) {
+      if (!list || !list.length) return;
+      var bonds = computeBondsWithOverrides(list);
+      for (var bi = 0; bi < bonds.length; bi++) {
+        var A = list[bonds[bi][0]], B = list[bonds[bi][1]];
+        var p1 = project(new THREE.Vector3(A.x + off[0], A.y + off[1], A.z + off[2]));
+        var p2 = project(new THREE.Vector3(B.x + off[0], B.y + off[1], B.z + off[2]));
+        var bondWorldR = bondOcclusionRadius(A, B);
+        var mid = new THREE.Vector3((A.x + B.x) / 2 + off[0], (A.y + B.y) / 2 + off[1], (A.z + B.z) / 2 + off[2]);
+        var mc = project(mid), me = project(mid.clone().addScaledVector(rightVec, bondWorldR));
+        var br = Math.max(Math.hypot(me.x - mc.x, me.y - mc.y), 1);
+        bondScreens.push({ x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, r: br });
+      }
+    }
+    if (state.showHost) addBondScreens(hydrogenFilter(hideFilter(asuFilter(state.atoms))));
+    if (state.showGuest) addBondScreens(hydrogenFilter(hideFilter(asuFilter(visibleGuestAtoms()))));
+    /* up, down, right, left, then the four diagonals -- up first so an atom
+       with a clear view in every direction keeps the plain, familiar
+       above-the-atom placement rather than an arbitrary one */
+    var DIRS = [[0, -1], [0, 1], [1, 0], [-1, 0], [0.7071, -0.7071], [-0.7071, -0.7071], [0.7071, 0.7071], [-0.7071, 0.7071]];
+    var GAP = 2; /* px breathing room between an obstacle's edge and the label's -- kept small deliberately, so a label reads as clearly attached to its atom rather than floating */
+    var placedRects = [];
+    function overlapsCircle(cx, cy, halfW, halfH, circ) {
+      var dx = Math.max(Math.abs(circ.x - cx) - halfW, 0);
+      var dy = Math.max(Math.abs(circ.y - cy) - halfH, 0);
+      return (dx * dx + dy * dy) < circ.r * circ.r;
+    }
+    function overlapsRect(cx, cy, halfW, halfH, rect) {
+      return Math.abs(cx - rect.x) < (halfW + rect.halfW) && Math.abs(cy - rect.y) < (halfH + rect.halfH);
+    }
+    /* a bond is a thick segment, not a point -- approximated by sampling it
+       at a handful of points along its length and reusing the circle test
+       above for each, which is simple and, for anything as short as a bond
+       between two atoms, plenty accurate */
+    var SEG_STEPS = 5;
+    function overlapsSegment(cx, cy, halfW, halfH, seg) {
+      for (var t = 0; t <= SEG_STEPS; t++) {
+        var f = t / SEG_STEPS;
+        var px = seg.x1 + (seg.x2 - seg.x1) * f, py = seg.y1 + (seg.y2 - seg.y1) * f;
+        if (overlapsCircle(cx, cy, halfW, halfH, { x: px, y: py, r: seg.r })) return true;
+      }
+      return false;
+    }
+    /* The offset distance along a candidate direction that gives exactly R
+       (an obstacle's radius plus GAP) of clearance to the label rectangle.
+       For up/down/left/right this is exact and trivial (the obstacle faces an
+       edge midpoint). For a diagonal it faces the rectangle's CORNER instead,
+       and the diagonal's own 1/sqrt(2) foreshortening means a naive
+       max(halfW,halfH) offset can still leave that corner inside R -- so this
+       solves for the true minimum distance at which the corner is exactly R
+       away, via the closest-point-on-rect-to-circle quadratic (falling back
+       to a generous, always-safe bound when the two half-extents are so
+       different that the corner case's own assumptions break down). */
+    function offsetDistance(dx, dy, halfW, halfH, R) {
+      if (Math.abs(dx) < 0.001) return R + halfH;
+      if (Math.abs(dy) < 0.001) return R + halfW;
+      var sum = halfW + halfH;
+      var disc = 2 * R * R - (halfW - halfH) * (halfW - halfH);
+      if (disc < 0) return R + sum;
+      return (sum + Math.sqrt(disc)) / 2 * Math.SQRT2;
+    }
+    function labelHalfExtents(sp, screen) {
+      var atom = sp.userData.atom;
+      var atomPos = new THREE.Vector3(atom.x + off[0], atom.y + off[1], atom.z + off[2]);
+      var wEdge = project(atomPos.clone().addScaledVector(rightVec, sp.scale.x / 2));
+      var hEdge = project(atomPos.clone().addScaledVector(upVec, sp.scale.y / 2));
+      return {
+        halfW: Math.max(Math.hypot(wEdge.x - screen.x, wEdge.y - screen.y), 4),
+        halfH: Math.max(Math.hypot(hEdge.x - screen.x, hEdge.y - screen.y), 4)
+      };
+    }
+    /* Pinned (manually dragged) labels are never moved here -- but they are
+       exactly as real an obstacle to everyone else's placement as an atom or
+       a bond is, so their current rectangle is seeded into placedRects up
+       front, before any unpinned label's own direction is scored. */
+    for (var pli = 0; pli < labelGroup.children.length; pli++) {
+      var pinnedSp = labelGroup.children[pli];
+      var pinnedAtom = pinnedSp.userData.atom;
+      if (!pinnedAtom || !pinnedAtom.labelPinned) continue;
+      var pc = project(pinnedSp.position);
+      var pExt = labelHalfExtents(pinnedSp, pc);
+      placedRects.push({ x: pc.x, y: pc.y, halfW: pExt.halfW, halfH: pExt.halfH });
+    }
+    for (var li = 0; li < labelGroup.children.length; li++) {
+      var sp = labelGroup.children[li];
+      var atom = sp.userData.atom;
+      if (!atom || !sp.isSprite || atom.labelPinned) continue;
+      var screen = null;
+      for (var si = 0; si < atomScreens.length; si++) if (atomScreens[si].a === atom) { screen = atomScreens[si]; break; }
+      if (!screen) continue;
+      var ext = labelHalfExtents(sp, screen);
+      var halfW = ext.halfW, halfH = ext.halfH;
+      var R = screen.r + GAP;
+      var bestCx = screen.x, bestCy = screen.y - (R + halfH), bestPenalty = Infinity;
+      for (var d = 0; d < DIRS.length; d++) {
+        var dx = DIRS[d][0], dy = DIRS[d][1];
+        var dist = offsetDistance(dx, dy, halfW, halfH, R);
+        var cx = screen.x + dx * dist, cy = screen.y + dy * dist;
+        var penalty = 0;
+        for (var oi = 0; oi < atomScreens.length; oi++) {
+          if (atomScreens[oi].a === atom) continue;
+          if (overlapsCircle(cx, cy, halfW, halfH, atomScreens[oi])) penalty += 1000;
+        }
+        for (var bsi = 0; bsi < bondScreens.length; bsi++) {
+          if (overlapsSegment(cx, cy, halfW, halfH, bondScreens[bsi])) penalty += 1000;
+        }
+        /* a label is exactly as important to keep clear of as an atom or a
+           bond -- weighted the same, not treated as a lesser, tie-breaking
+           concern */
+        for (var pi = 0; pi < placedRects.length; pi++) {
+          if (overlapsRect(cx, cy, halfW, halfH, placedRects[pi])) penalty += 1000;
+        }
+        if (penalty < bestPenalty) { bestPenalty = penalty; bestCx = cx; bestCy = cy; }
+      }
+      placedRects.push({ x: bestCx, y: bestCy, halfW: halfW, halfH: halfH });
+      var ndcX = (bestCx / w) * 2 - 1, ndcY = -((bestCy / h) * 2 - 1);
+      sp.position.copy(new THREE.Vector3(ndcX, ndcY, screen.z).unproject(activeCam));
+    }
+  }
+  /* Per-atom label visibility, independent of the master Show labels
+     checkbox -- every atom defaults to labelled (showLabel is only ever set
+     to false explicitly, never true, so an atom that has never been touched
+     behaves exactly as if the property didn't exist). Operates on whatever
+     is currently selected, host and guest together. */
+  function setLabelVisibilityForSelected(show) {
+    var sel = getSelectedAtomObjects();
+    if (!sel.length) { setStatus("Select one or more atoms first.", true); return; }
+    for (var i = 0; i < sel.length; i++) {
+      if (show) delete sel[i].showLabel;
+      else sel[i].showLabel = false;
+    }
+    renderLabels();
+    setStatus((show ? "Labelled " : "Unlabelled ") + sel.length + " atom" + (sel.length === 1 ? "" : "s") + ".", false);
+  }
+  /* Releases every manually-dragged label in scope back to automatic
+     placement, then immediately runs that placement rather than leaving them
+     at the plain default until the next drag settles -- a deliberate "undo
+     the pinning" action is itself a settle point, the same as a double-click
+     on a single label already is. */
+  function unfixLabels(scope) {
+    var n = 0;
+    for (var i = 0; i < scope.length; i++) {
+      if (!scope[i].labelPinned) continue;
+      delete scope[i].labelPinned; delete scope[i].labelOffset;
+      n++;
+    }
+    if (!n) { setStatus("No fixed labels to release" + (scope === state.atoms ? "" : " among the selected atoms") + ".", false); return; }
+    renderLabels();
+    repositionLabels();
+    setStatus("Released " + n + " fixed label" + (n === 1 ? "" : "s") + " back to automatic placement.", false);
+  }
+  function unfixAllLabels() { unfixLabels((state.atoms || []).concat(state.guestAtoms || [])); }
+  function unfixSelectedLabels() {
+    var sel = getSelectedAtomObjects();
+    if (!sel.length) { setStatus("Select one or more atoms first.", true); return; }
+    unfixLabels(sel);
+  }
+  function toggleLabelDisplay() {
+    state.showLabels = !state.showLabels;
+    renderLabels();
+    var cb = document.getElementById("showLabelsTg"); if (cb) cb.checked = state.showLabels;
+    setStatus(state.showLabels ? "Showing atom labels." : "Hiding atom labels.", false);
   }
 
   /* ---------------- void/channel analysis: input construction ----------------
@@ -4278,6 +5294,8 @@ select.sel:focus{border-color:var(--accent)}
   function buildMolSurfaceTable() {
     var body = document.getElementById("molSurfaceResultsBody");
     if (!body) return;
+    var clearBtn2 = document.getElementById("molSurfClearBtn");
+    if (clearBtn2) clearBtn2.disabled = !state.molSurfaces.length;
     body.innerHTML = "";
     if (!state.molSurfaces.length) {
       var tr0 = document.createElement("tr");
@@ -5349,6 +6367,19 @@ select.sel:focus{border-color:var(--accent)}
     var body = document.getElementById("voidMoveCopyBody");
     if (!body) return;
     body.innerHTML = "";
+    if (!voidCellBundle()) {
+      /* Every quick button and typed vector here is expressed in whole
+         unit-cell steps (a/b/c) -- meaningless in "Use visible atoms only"
+         mode, which has no unit cell at all. Without this gate, applying a
+         "+a" nudge there still silently succeeds, but voidShiftToCartesian
+         is skipped for lack of a cell and the raw [1,0,0] shift vector gets
+         used directly as a Cartesian offset -- a barely-visible ~1 unit
+         (not one full cell's worth of Å) displacement that reads exactly
+         like "translating by a full unit cell only moves it a little". */
+      body.appendChild(el("div", "hint", "Move/Copy only applies in “Fill unit cell” mode — there is no unit cell to translate by in “Use visible atoms only” mode."));
+      if (state.voidUiMode) { state.voidUiMode = null; state.voidSelectedFragments = {}; state.voidSelectedChannels = {}; renderVoidMeshes(); }
+      return;
+    }
     /* Full-size .btn, not the tiny mono/uppercase .btn.mini used for
        compact nudge buttons elsewhere -- these two are the primary mode
        switches for this whole panel, not an incidental detail, so they
@@ -6009,6 +7040,13 @@ select.sel:focus{border-color:var(--accent)}
       renderSelection(); updateBondSelectionInfo();
       return;
     }
+    if (mods.shift && mods.ctrl && mods.alt) {
+      /* checked before the plain ctrl+alt branch below, which would
+         otherwise also match (it never excludes shift) */
+      if (hit.atom.part !== undefined) selectSamePart(hit.atom);
+      else setStatus("This atom has no PART number to select by (only atoms loaded from a SHELX .res/.ins file with PART instructions have one).", true);
+      return;
+    }
     if (mods.ctrl && mods.alt) {
       if (state.isCif && hit.atom.auIndex !== undefined) selectSymmetryRelated(hit.atom);
       else if (state.isCif) setStatus("This atom has no symmetry information to select by.", true);
@@ -6062,6 +7100,21 @@ select.sel:focus{border-color:var(--accent)}
     }
     renderSelection(); updateSelectionInfo();
     setStatus(makeSelected ? ("Selected " + count + " symmetry-related atom" + (count === 1 ? "" : "s") + ".") : "Deselected symmetry-related atoms.", false);
+  }
+  function selectSamePart(clickedAtom) {
+    /* mirrors selectSymmetryRelated() above -- toggle-select/deselect every
+       atom (host and guest together) sharing the clicked atom's PART number.
+       Only meaningful for a SHELX .res/.ins-derived structure (see the
+       "part !== undefined" gate at the call site); a CIF-sourced atom never
+       reaches here at all. */
+    var allAtoms = (state.atoms || []).concat(state.guestAtoms || []);
+    var targetPart = clickedAtom.part || 0;
+    var makeSelected = !clickedAtom.selected, count = 0;
+    for (var i = 0; i < allAtoms.length; i++) {
+      if ((allAtoms[i].part || 0) === targetPart && (!makeSelected || isSelectable(allAtoms[i]))) { allAtoms[i].selected = makeSelected; if (makeSelected) count++; }
+    }
+    renderSelection(); updateSelectionInfo();
+    setStatus(makeSelected ? ("Selected " + count + " atom" + (count === 1 ? "" : "s") + " in PART " + targetPart + ".") : ("Deselected PART " + targetPart + " atoms."), false);
   }
   function generateCentroid() {
     var sel = getSelectedAtomObjects();
@@ -6221,10 +7274,12 @@ select.sel:focus{border-color:var(--accent)}
     var vecBtn = document.getElementById("viewVecBtn"), planeBtn = document.getElementById("viewPlaneBtn");
     var centroidBtn = document.getElementById("centroidBtn");
     var molVolBtn = document.getElementById("molVolBtn");
+    var molSurfCalcBtn2 = document.getElementById("molSurfCalcBtn");
     if (vecBtn) vecBtn.disabled = (c.host + c.guest !== 2);
     if (planeBtn) planeBtn.disabled = (c.host + c.guest !== 3);
     if (centroidBtn) centroidBtn.disabled = (c.host + c.guest < 2);
     if (molVolBtn) molVolBtn.disabled = (c.host + c.guest < 1);
+    if (molSurfCalcBtn2) molSurfCalcBtn2.disabled = (c.host + c.guest < 1);
     var moveToAsuBtn2 = document.getElementById("moveToAsuBtn");
     if (moveToAsuBtn2) moveToAsuBtn2.disabled = (c.host + c.guest === 0) || !!state.symmetryForgotten;
     var reassignElBtn = document.getElementById("reassignElBtn");
@@ -6590,7 +7645,8 @@ select.sel:focus{border-color:var(--accent)}
       el: au.el, x: c[0], y: c[1], z: c[2],
       r: isCentroid ? 0.2 : K.vdw(au.el), cr: isCentroid ? 0 : K.cov(au.el), color: isCentroid ? 0xffffff : K.cpk(au.el),
       isCentroid: isCentroid, hidden: false,
-      auIndex: auIndex, opIndex: opIndex, cellI: ci, cellJ: cj, cellK: ck, fx: f[0], fy: f[1], fz: f[2]
+      auIndex: auIndex, opIndex: opIndex, cellI: ci, cellJ: cj, cellK: ck, fx: f[0], fy: f[1], fz: f[2],
+      part: au.part /* undefined for a CIF-sourced au -- see loadResText()'s own comment on atomObj.part */
     };
     if (!isCentroid) applyAdpToAtom(atomObj, au, state.cifSymops[opIndex], state.cifCell, state.cifFracToCart);
     return atomObj;
@@ -6679,7 +7735,7 @@ select.sel:focus{border-color:var(--accent)}
           if (d2 < 1e-6) continue; /* coincides with the seed itself */
           var lim = cand.cr + seedAtom.cr + 0.45;
           var minD = (cand.el === "H" || seedAtom.el === "H") ? 0.4 : 1.0;
-          var naturallyBonded = d2 > minD * minD && d2 < lim * lim;
+          var naturallyBonded = d2 > minD * minD && d2 < lim * lim && partsCanBond(cand, seedAtom);
           if (naturallyBonded || enforcedGrowthBondMatches(seedAtom.auIndex, cand.auIndex, Math.sqrt(d2))) out.push(cand);
         }
       }
@@ -6728,7 +7784,7 @@ select.sel:focus{border-color:var(--accent)}
     function bonded(a, b) {
       var dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z, d2 = dx * dx + dy * dy + dz * dz;
       var lim = a.cr + b.cr + 0.45, minD = (a.el === "H" || b.el === "H") ? 0.4 : 1.0;
-      if (d2 > minD * minD && d2 < lim * lim) return true;
+      if (d2 > minD * minD && d2 < lim * lim && partsCanBond(a, b)) return true;
       return enforcedGrowthBondMatches(a.auIndex, b.auIndex, Math.sqrt(d2));
     }
     for (var i = 0; i < candidates.length; i++) {
@@ -6884,7 +7940,7 @@ select.sel:focus{border-color:var(--accent)}
     if (!ok) { setStatus("Forget symmetry cancelled.", false); return; }
     exitGrowMode();
     state.showOnlyAsu = false;
-    function stripAtom(a) { delete a.auIndex; delete a.opIndex; delete a.cellI; delete a.cellJ; delete a.cellK; delete a.fx; delete a.fy; delete a.fz; }
+    function stripAtom(a) { delete a.auIndex; delete a.opIndex; delete a.cellI; delete a.cellJ; delete a.cellK; delete a.fx; delete a.fy; delete a.fz; delete a.part; }
     if (state.atoms) state.atoms.forEach(stripAtom);
     if (state.guestAtoms) state.guestAtoms.forEach(stripAtom);
     state.cutBondSignatures = {};
@@ -7050,6 +8106,8 @@ select.sel:focus{border-color:var(--accent)}
     var moveToAsuBtn = document.getElementById("moveToAsuBtn");
     if (moveToAsuBtn) { var moveToAsuSel = countSelected(); moveToAsuBtn.disabled = state.symmetryForgotten || (moveToAsuSel.host + moveToAsuSel.guest === 0); }
     var forgetBtn = document.getElementById("forgetSymmetryBtn"); if (forgetBtn) forgetBtn.disabled = state.symmetryForgotten;
+    var saveCifBtn = document.getElementById("saveCifBtn");
+    if (saveCifBtn) saveCifBtn.disabled = !state.isCif || state.symmetryForgotten || !state.cifOriginalText;
     var auInfo = document.getElementById("auInfo");
     if (auInfo && state.isCif) {
       auInfo.innerHTML = "<div>Asymmetric unit: " + state.cifAsymUnit.length + " atom" + (state.cifAsymUnit.length === 1 ? "" : "s") +
@@ -7387,6 +8445,333 @@ select.sel:focus{border-color:var(--accent)}
     loadAtoms(atoms, name, { cell: cif.cell, symops: cif.symops, asymUnit: reduced, M: M, tags: cif.tags });
     setStatus("Loaded " + (name || "structure") + ": asymmetric unit, " + atoms.length + " atom" + (atoms.length === 1 ? "" : "s") + reducedNote + ". Use the Grow panel to build out the structure.", false);
   }
+  /* SHELX .res/.ins -- shares loadAtoms()'s own cifMeta shape with loadCIFText()
+     above (cell/symops/asymUnit/M/tags) so every symmetry-driven feature that
+     already works off state.cifCell/cifSymops/cifAsymUnit (Grow > Symmetry,
+     cell-mode void/channel analysis, ...) works identically regardless of
+     which format the structure came from; K.parseSHELX()'s own buildShelxSymops()
+     is what turns LATT+SYMM into the complete operator list that populates
+     cifSymops here. The one thing a RES/INS load can never provide is the
+     CIF text Save CIF needs to splice edits back into -- cifOriginalText is
+     deliberately left null (see refreshSymmetryUI()'s own gate on it), which
+     is what keeps Save CIF correctly disabled for a RES-loaded structure. */
+  function loadResText(text, name) {
+    var res;
+    try { res = K.parseSHELX(text); } catch (e) { setStatus("Could not parse this SHELX .res/.ins file.", true); return; }
+    if (res.error) { setStatus(res.error, true); return; }
+    if (!(res.cell.a > 0 && res.cell.b > 0 && res.cell.c > 0)) { setStatus("No usable unit cell parameters found in this SHELX file.", true); return; }
+    var reduced = K.reduceToAsymmetricUnit(res.atoms, res.symops, 0.01);
+    var M = K.fracToCartMatrix(res.cell);
+    var atoms = [];
+    for (var i = 0; i < reduced.length; i++) {
+      var a = reduced[i];
+      var c = K.fracToCart(M, [a.fx, a.fy, a.fz]);
+      var atomObj = {
+        el: a.el, x: c[0], y: c[1], z: c[2], r: K.vdw(a.el), cr: K.cov(a.el), color: K.cpk(a.el),
+        auIndex: i, opIndex: 0, cellI: 0, cellJ: 0, cellK: 0, fx: a.fx, fy: a.fy, fz: a.fz, hidden: false,
+        /* SHELX PART number (0 if the file never used a PART instruction) --
+           see partsCanBond()/sameSymmetryImage() for how this restricts
+           bonding, and handleLeftClick()'s shift-ctrl-alt-click branch for
+           select-by-part. Deliberately absent (undefined) on a CIF-sourced
+           atom (loadCIFText() above never sets it) -- that absence is what
+           lets both of those features tell a RES/INS-derived structure apart
+           from a CIF one without a separate flag. */
+        part: a.part
+      };
+      /* SHELX .res/.ins never carries coordinate esds, unlike a CIF -- so
+         atomObj.sx/sy/sz are simply never set here (every downstream reader
+         of those already treats their absence as "no esd available"). */
+      applyAdpToAtom(atomObj, a, res.symops[0], res.cell, M);
+      atoms.push(atomObj);
+    }
+    var reducedNote = reduced.length < res.atoms.length ? (" (reduced from " + res.atoms.length + " atoms in the file to " + reduced.length + " symmetry-independent ones)") : "";
+    var sgNote = res.titleSpaceGroup ? (", space group " + res.titleSpaceGroup + " read from TITL") : ", space group not given in TITL";
+    loadAtoms(atoms, name, {
+      cell: res.cell, symops: res.symops, asymUnit: reduced, M: M,
+      /* _res_titl_space_group is this app's own key, not a real CIF tag --
+         updateStructuralParamsInfo() checks for it specifically so a RES
+         load always shows a "Space group" row (the parsed symbol, or "Not
+         given"), where a CIF simply omits that row when the tag is absent. */
+      tags: { _res_titl_space_group: res.titleSpaceGroup || "" }
+    });
+    setStatus("Loaded " + (name || "structure") + ": asymmetric unit, " + atoms.length + " atom" + (atoms.length === 1 ? "" : "s") + reducedNote + sgNote + ". Use the Grow panel to build out the structure.", false);
+  }
+  /* Sniffs a dropped/browsed structure file's actual content rather than
+     trusting its extension (a .txt is common for a renamed .res, and a
+     browser's own file-open dialog can't always be trusted to preserve the
+     original extension either) -- same test MolecularGraphics itself uses. */
+  function looksLikeShelxRes(text) {
+    var head = text.slice(0, 4000);
+    return /(^|\n)\s*CELL\s+[-0-9.]/i.test(head) && /(^|\n)\s*(SFAC|LATT|ZERR|TITL|UNIT)\b/i.test(head);
+  }
+  /* Single entry point for both the file-input <input type=file> "change"
+     handler and the drag-and-drop handler (see wireIO()) for any structure
+     file (CIF or SHELX .res/.ins) -- neither needs to know the format itself,
+     they just hand the raw text here. */
+  function handleStructureFileText(text, name) {
+    if (/\.(res|ins)$/i.test(name || "") || looksLikeShelxRes(text)) handleResFileText(text, name);
+    else handleCifFileText(text, name);
+  }
+  function handleResFileText(text, name) {
+    state.cifBlocks = null; state.cifBlockIndex = 0; state.cifMultiSourceName = "";
+    syncCifNavigatorUI();
+    state.cifOriginalText = null; state.cifOriginalLabel = null;
+    loadResText(text, name);
+  }
+  /* A CIF exported for multiple entries (e.g. a CSD Conquest search result)
+     concatenates several complete "data_XXXX ... " blocks in one file.
+     parseCIF() itself has no concept of block boundaries -- a bare data_
+     line just falls through its line-by-line scan and is skipped (see the
+     final `i++` in the tag-parsing loop above), so tags/loops from every
+     block would silently pile into the SAME accumulators, e.g. a later
+     block's _cell_length_a overwriting an earlier one's, and every block's
+     _atom_site rows concatenated into one loop -- garbage in, garbage out,
+     with no error to signal it. Splitting into individual single-block
+     substrings first, each fed through parseCIF exactly like a standalone
+     file, is what actually lets each structure load correctly. */
+  function splitCifBlocks(text) {
+    var lines = text.split(/\r?\n/);
+    var starts = [];
+    for (var i = 0; i < lines.length; i++) {
+      var m = /^\s*data_(\S+)/i.exec(lines[i]);
+      if (m) starts.push({ line: i, rawLabel: m[1] });
+    }
+    if (starts.length < 2) return null; /* 0 or 1 data_ blocks -- nothing to split, caller loads the text exactly as before */
+    var blocks = [];
+    for (var b = 0; b < starts.length; b++) {
+      var endLine = (b + 1 < starts.length) ? starts[b + 1].line : lines.length;
+      var rawLabel = starts[b].rawLabel;
+      /* CSD/Conquest exports name each block "CSD_CIF_<REFCODE>" -- show
+         just the refcode, which is what the user actually recognizes a
+         structure by; anything else (a file that merely happens to have
+         several data_ blocks but isn't a CSD export) falls back to
+         whatever the block itself is actually called. */
+      var csdMatch = /^CSD_CIF_(.+)$/i.exec(rawLabel);
+      blocks.push({ label: csdMatch ? csdMatch[1] : rawLabel, rawLabel: rawLabel, text: lines.slice(starts[b].line, endLine).join("\n") });
+    }
+    return blocks;
+  }
+  /* Single entry point for both the file-input <input type=file> "change"
+     handler and the drag-and-drop handler (see wireIO()) -- neither needs
+     to know about multi-block files itself, they just hand the raw text
+     here instead of straight to loadCIFText(). */
+  function handleCifFileText(text, name) {
+    var blocks = splitCifBlocks(text);
+    if (!blocks) {
+      state.cifBlocks = null; state.cifBlockIndex = 0; state.cifMultiSourceName = "";
+      syncCifNavigatorUI();
+      /* the exact raw text of THIS structure, retained so "Save CIF" can
+         later splice just the _atom_site (and any aniso) loop back into
+         it rather than generating a whole new file from nothing -- see
+         saveCifFile(). No refcode context for a plain single-structure
+         file, so the save filename falls back to the loaded name instead. */
+      state.cifOriginalText = text;
+      state.cifOriginalLabel = null;
+      loadCIFText(text, name);
+      return;
+    }
+    state.cifBlocks = blocks;
+    state.cifMultiSourceName = name || "";
+    loadCifBlockAtIndex(0);
+  }
+  function loadCifBlockAtIndex(idx) {
+    if (!state.cifBlocks || idx < 0 || idx >= state.cifBlocks.length) return;
+    state.cifBlockIndex = idx;
+    var blk = state.cifBlocks[idx];
+    state.cifOriginalText = blk.text;
+    state.cifOriginalLabel = blk.label;
+    loadCIFText(blk.text, blk.label + ".cif");
+    syncCifNavigatorUI();
+  }
+  function syncCifNavigatorUI() {
+    var wrap = document.getElementById("cifNavigatorSection");
+    if (!wrap) return;
+    var blocks = state.cifBlocks;
+    wrap.style.display = (blocks && blocks.length > 1) ? "" : "none";
+    if (!blocks || blocks.length < 2) return;
+    var sel = document.getElementById("cifNavigatorSelect");
+    if (sel) {
+      if (sel.options.length !== blocks.length) {
+        sel.innerHTML = "";
+        blocks.forEach(function (b, i) {
+          var opt = document.createElement("option"); opt.value = String(i); opt.textContent = b.label;
+          sel.appendChild(opt);
+        });
+      }
+      sel.value = String(state.cifBlockIndex);
+    }
+    var prevBtn = document.getElementById("cifNavigatorPrevBtn"), nextBtn = document.getElementById("cifNavigatorNextBtn");
+    if (prevBtn) prevBtn.disabled = state.cifBlockIndex <= 0;
+    if (nextBtn) nextBtn.disabled = state.cifBlockIndex >= blocks.length - 1;
+    var countEl = document.getElementById("cifNavigatorCount");
+    if (countEl) countEl.textContent = (state.cifBlockIndex + 1) + " of " + blocks.length;
+  }
+
+  /* ---------------- Save CIF ----------------
+   * Regenerates a CIF reflecting the CURRENT asymmetric unit -- element
+   * reassignment, deletion, "Move to ASU", and a promoted centroid all end
+   * up here -- while leaving the rest of the original file (comments, cell
+   * parameters, symmetry operators, any other loop) untouched byte-for-
+   * byte. Only the _atom_site loop's rows are replaced, and the
+   * _atom_site_aniso_* loop's rows if the original file had one; both
+   * loops keep their ORIGINAL column list exactly as declared, so this
+   * never invents a column the file didn't already have. There is
+   * deliberately no attempt to preserve esd digits on the regenerated
+   * coordinates -- an experimental uncertainty from the original
+   * refinement is meaningless once the atom set has been hand-edited. */
+  function buildCurrentAsuAtomsForSave() {
+    var out = [];
+    if (state.cifAsymUnit) {
+      for (var i = 0; i < state.cifAsymUnit.length; i++) {
+        var au = state.cifAsymUnit[i];
+        if (au.deleted || au.el === "Xx") continue; /* Xx = a centroid marker never promoted to a real element */
+        out.push({ label: au.label, el: au.el, fx: au.fx, fy: au.fy, fz: au.fz, occ: (au.occ != null ? au.occ : 1.0), uiso: au.uiso, uij: au.uij });
+      }
+    }
+    /* Defensive fallback: a promoted centroid built without fractional
+       tracking (generateCentroid(), when the selection it was averaged
+       from lacked fx/fy/fz) never gets an auIndex or a cifAsymUnit entry
+       at all -- it would otherwise silently vanish from the saved file. */
+    if (state.atoms && state.cifFracToCart) {
+      for (var j = 0; j < state.atoms.length; j++) {
+        var a = state.atoms[j];
+        if (a.isCentroid || a.auIndex !== undefined) continue;
+        var f = K.cartToFrac(state.cifFracToCart, [a.x, a.y, a.z]);
+        out.push({ label: null, el: a.el, fx: f[0], fy: f[1], fz: f[2], occ: 1.0, uiso: null, uij: null });
+      }
+    }
+    return out;
+  }
+  function cifFmt5(v) { return isFinite(v) ? v.toFixed(5) : "?"; }
+  function cifFmt4(v) { return isFinite(v) ? v.toFixed(4) : "?"; }
+  function cifToken(s) {
+    s = (s === null || s === undefined) ? "" : String(s);
+    if (!s.length) return "?";
+    return /\s/.test(s) ? ("'" + s + "'") : s;
+  }
+  /* Finds a loop_ block by one required header (case-insensitive) and
+     returns the line ranges needed to splice its data rows -- headerEnd
+     doubles as rowStart, since a loop's header list runs straight into its
+     first data row with no blank line required between them. rowEnd is
+     trimmed back past any trailing blank/comment lines so those are left
+     OUTSIDE the replaced range (preserving the file's own spacing);
+     afterEnd is where the NEXT construct (loop_/data_/a bare tag) actually
+     starts, matching the same boundary rule parseCIF's own loop-row scan
+     uses, so the two stay consistent about where a loop's data legitimately
+     ends. */
+  function findCifLoopLineRange(lines, mustContainHeaderLower) {
+    for (var i = 0; i < lines.length; i++) {
+      if (!/^\s*loop_\s*$/i.test(lines[i])) continue;
+      var j = i + 1, headers = [];
+      while (j < lines.length && /^\s*_/.test(lines[j])) { headers.push(lines[j].trim().split(/\s+/)[0]); j++; }
+      if (!headers.length) continue;
+      var headersLower = headers.map(function (h) { return h.toLowerCase(); });
+      if (headersLower.indexOf(mustContainHeaderLower) < 0) continue;
+      var k = j;
+      while (k < lines.length) {
+        var l = lines[k];
+        if (/^\s*loop_/i.test(l) || /^\s*data_/i.test(l) || /^\s*_/.test(l)) break;
+        if (/^\s*;/.test(l)) { k++; while (k < lines.length && !/^\s*;/.test(lines[k])) k++; }
+        k++;
+      }
+      var rowEnd = k;
+      while (rowEnd > j && /^\s*(#.*)?$/.test(lines[rowEnd - 1])) rowEnd--;
+      return { headers: headers, rowStart: j, rowEnd: rowEnd };
+    }
+    return null;
+  }
+  function buildAtomSiteLoopLines(headers, atoms) {
+    return atoms.map(function (atom, idx) {
+      return headers.map(function (h) {
+        var hl = h.toLowerCase();
+        if (hl === "_atom_site_label") return cifToken(atom.label || (atom.el + (idx + 1)));
+        if (hl === "_atom_site_type_symbol") return cifToken(atom.el);
+        if (hl === "_atom_site_fract_x") return cifFmt5(atom.fx);
+        if (hl === "_atom_site_fract_y") return cifFmt5(atom.fy);
+        if (hl === "_atom_site_fract_z") return cifFmt5(atom.fz);
+        if (hl === "_atom_site_occupancy") return cifFmt4(atom.occ != null ? atom.occ : 1.0);
+        if (hl === "_atom_site_u_iso_or_equiv" || hl === "_atom_site_u_equiv_geom_mean") return atom.uiso != null ? cifFmt4(atom.uiso) : "?";
+        if (hl === "_atom_site_adp_type") return atom.uij ? "Uani" : (atom.uiso != null ? "Uiso" : "?");
+        return "?"; /* any column this app has no data for -- a safe, valid CIF placeholder, never fabricated */
+      }).join("  ");
+    });
+  }
+  function buildAnisoLoopLines(headers, atoms, isB) {
+    var withUij = atoms.filter(function (a) { return a.uij; });
+    return withUij.map(function (atom) {
+      var uMap = { "11": atom.uij[0], "22": atom.uij[1], "33": atom.uij[2], "23": atom.uij[3], "13": atom.uij[4], "12": atom.uij[5] };
+      return headers.map(function (h) {
+        var hl = h.toLowerCase();
+        if (hl.indexOf("label") >= 0 || hl.indexOf("_id") >= 0) return cifToken(atom.label);
+        var m = /_(?:u|b)_?(11|22|33|23|13|12)$/.exec(hl);
+        if (!m) return "?";
+        var v = uMap[m[1]];
+        return cifFmt4(isB ? v * 8 * Math.PI * Math.PI : v);
+      }).join("  ");
+    });
+  }
+  function regenerateCifText(originalText, atoms) {
+    /* split() on /\r?\n/ discards whichever line ending was actually there
+       -- rejoining with a hardcoded "\n" would silently convert a CRLF
+       file (the common case; CSD/Conquest exports are CRLF) to LF
+       throughout, including every untouched line, which is exactly the
+       kind of formatting change "preserve the original formatting" rules
+       out even though it's semantically invisible to any CIF parser. */
+    var eol = /\r\n/.test(originalText) ? "\r\n" : "\n";
+    var lines = originalText.split(/\r?\n/);
+    var atomInfo = findCifLoopLineRange(lines, "_atom_site_fract_x");
+    if (!atomInfo) throw new Error("could not find the _atom_site loop in the original CIF text");
+    var newLines = lines.slice(0, atomInfo.rowStart)
+      .concat(buildAtomSiteLoopLines(atomInfo.headers, atoms))
+      .concat(lines.slice(atomInfo.rowEnd));
+    /* re-located on the ALREADY-spliced lines, since the atom-site
+       replacement above shifts every line number after it */
+    var anisoInfo = findCifLoopLineRange(newLines, "_atom_site_aniso_u_11") || findCifLoopLineRange(newLines, "_atom_site_aniso_b_11");
+    if (anisoInfo) {
+      var isB = anisoInfo.headers.some(function (h) { return /_b_?11$/i.test(h); });
+      newLines = newLines.slice(0, anisoInfo.rowStart)
+        .concat(buildAnisoLoopLines(anisoInfo.headers, atoms, isB))
+        .concat(newLines.slice(anisoInfo.rowEnd));
+    }
+    return newLines.join(eol);
+  }
+  function legacyDownloadText(text, suggestedName, mimeType) {
+    var blob = new Blob([text], { type: mimeType || "text/plain" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a"); a.href = url; a.download = suggestedName;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+    setStatus("Downloaded " + suggestedName + " (this browser can't offer a folder picker for saving).", false);
+  }
+  function saveCifFile() {
+    if (!state.isCif) { setStatus("Load a CIF file first.", true); return; }
+    if (state.symmetryForgotten) { setStatus("Can't save a CIF once symmetry information has been forgotten -- there's no longer any way to tell an independent atom from a symmetry-generated copy.", true); return; }
+    if (!state.cifOriginalText) { setStatus("The original CIF text isn't available to save from (this can happen after loading a saved .json project instead of a CIF).", true); return; }
+    var base = state.cifOriginalLabel || (state.name ? state.name.replace(/\.[^./\\]+$/, "") : "structure");
+    var suggestedName = (state.cifOriginalLabel ? base : (base + "_edited")) + ".cif";
+    /* requestSaveHandle() must be the very first thing called in response
+       to the click, before any of the work below -- same reasoning as
+       every other save path in this app: showSaveFilePicker() itself
+       consumes the click's transient user-activation, so anything slow
+       happening first risks that activation expiring before the picker is
+       even requested. */
+    var handlePromise = requestSaveHandle(suggestedName, { description: "CIF file", accept: { "chemical/x-cif": [".cif"] } });
+    var atoms = buildCurrentAsuAtomsForSave();
+    if (!atoms.length) { setStatus("No atoms to save -- the asymmetric unit is empty.", true); return; }
+    var newText;
+    try { newText = regenerateCifText(state.cifOriginalText, atoms); }
+    catch (e) { setStatus("Could not regenerate the CIF file: " + e.message, true); return; }
+    handlePromise.then(function (h) {
+      if (h === "CANCELLED") { setStatus("Save cancelled.", false); return; }
+      if (h) {
+        h.createWritable().then(function (w) { return w.write(newText).then(function () { return w.close(); }); })
+          .then(function () { setStatus("Saved " + suggestedName + ".", false); })
+          .catch(function () { legacyDownloadText(newText, suggestedName, "chemical/x-cif"); });
+      } else {
+        legacyDownloadText(newText, suggestedName, "chemical/x-cif");
+      }
+    });
+  }
   var GROUP_PALETTE = [0xE07A5F, 0x3D5A80, 0x81B29A, 0xE9C46A, 0x9B5DE5, 0xEE6C4D, 0x2A9D8F, 0xF2CC8F];
   function createGuestGroup(name) {
     state.guestBatch += 1;
@@ -7510,20 +8895,48 @@ select.sel:focus{border-color:var(--accent)}
     var e = document.getElementById("structuralParamsInfo"); if (!e) return;
     if (!state.isCif || !state.cifCell) { e.innerHTML = "<div class='dim'>Load a CIF to see metadata.</div>"; return; }
     var cell = state.cifCell, tags = state.cifTags || {};
-    function row(label, value) { return "<div class='rrow'><span>" + label + "</span><b>" + value + "</b></div>"; }
+    function row(label, value, title) { return "<div class='rrow'" + (title ? " title=\"" + title + "\"" : "") + "><span>" + label + "</span><b>" + value + "</b></div>"; }
     var html = "";
     html += row("File", state.name || "&mdash;");
     if (state.cifAsymUnit) html += row("Formula", formula(state.cifAsymUnit));
     var sg = tags["_symmetry_space_group_name_H-M"] || tags["_space_group_name_H-M_alt"];
     if (sg) html += row("Space group", formatSpaceGroupSymbol(sg));
+    /* _res_titl_space_group is this app's own key (see loadResText()), set
+       for every RES/INS load, never for a CIF -- so a RES-loaded structure
+       always gets an explicit row, unlike a CIF which simply omits it when
+       absent. SHELX has no format-level way to store a space-group symbol at
+       all; this is whatever loadResText() could pick out of the free-text
+       TITL line, "Not given" if nothing there fit. */
+    else if (tags.hasOwnProperty("_res_titl_space_group")) {
+      html += row("Space group", tags["_res_titl_space_group"] ? formatSpaceGroupSymbol(tags["_res_titl_space_group"]) : "Not given");
+    }
     html += row("a, b, c", cell.a.toFixed(3) + ", " + cell.b.toFixed(3) + ", " + cell.c.toFixed(3) + " " + U.ang);
-    html += row("&alpha;, &beta;, &gamma;", cell.alpha.toFixed(2) + ", " + cell.beta.toFixed(2) + ", " + cell.gamma.toFixed(2) + "&deg;");
+    var angleConstraints = constrainedCellAngles(state.cifSymops);
+    html += row("&alpha;, &beta;, &gamma;",
+      formatCellAngle(cell.alpha, angleConstraints.alpha) + ", " +
+      formatCellAngle(cell.beta, angleConstraints.beta) + ", " +
+      formatCellAngle(cell.gamma, angleConstraints.gamma) + "&deg;");
     html += row("Cell volume", cellVolume(cell).toFixed(1) + " " + U.ang + U.cube);
     var density = tags["_exptl_crystal_density_diffrn"] || tags["_exptl_crystal_density_meas"];
     html += row("Density", density ? (parseFloat(density).toFixed(3) + " g/cm" + U.cube) : "not recorded");
     var temp = tags["_diffrn_ambient_temperature"] || tags["_cell_measurement_temperature"];
     html += row("Temperature", temp ? (parseFloat(temp).toFixed(0) + " K") : "unknown");
-    if (state.cifAsymUnit) html += row("Atoms in ASU", state.cifAsymUnit.length);
+    if (state.cifAsymUnit) {
+      html += row("Atoms in ASU", state.cifAsymUnit.length);
+      var anisoCount = 0, npdCount = 0;
+      for (var ai = 0; ai < state.cifAsymUnit.length; ai++) {
+        var auAtom = state.cifAsymUnit[ai];
+        if (!auAtom.uij) continue;
+        anisoCount++;
+        if (state.cifSymops && state.cifSymops[0] && state.cifFracToCart) {
+          var npdProbe = {};
+          applyAdpToAtom(npdProbe, auAtom, state.cifSymops[0], cell, state.cifFracToCart);
+          if (npdProbe.npd) npdCount++;
+        }
+      }
+      if (anisoCount) html += row("Anisotropic atoms", anisoCount);
+      if (npdCount) html += row("NPD atoms", npdCount, "Non-positive-definite anisotropic displacement parameters -- a refinement warning, not a display error.");
+    }
     e.innerHTML = html;
   }
   function elementsOf(atoms) {
@@ -7563,7 +8976,9 @@ select.sel:focus{border-color:var(--accent)}
         keyEnabled: state.keyEnabled, keyIntensity: state.keyIntensity,
         fillEnabled: state.fillEnabled, fillIntensity: state.fillIntensity,
         rimEnabled: state.rimEnabled, rimIntensity: state.rimIntensity,
-        atomRoughness: state.atomRoughness, atomMetalness: state.atomMetalness, atomReflectivity: state.atomReflectivity
+        atomRoughness: state.atomRoughness, atomMetalness: state.atomMetalness, atomReflectivity: state.atomReflectivity,
+        labelSize: state.labelSize, labelColor: state.labelColor, labelHalo: state.labelHalo, labelFont: state.labelFont,
+        dontWarnAviSize: state.dontWarnAviSize
       };
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(payload));
     } catch (e) { /* localStorage unavailable or full -- settings just won't persist this session */ }
@@ -7592,6 +9007,11 @@ select.sel:focus{border-color:var(--accent)}
       if (data.hasOwnProperty("atomRoughness")) state.atomRoughness = clamp(data.atomRoughness, 0, 1, state.atomRoughness);
       if (data.hasOwnProperty("atomMetalness")) state.atomMetalness = clamp(data.atomMetalness, 0, 0.9, state.atomMetalness);
       if (data.hasOwnProperty("atomReflectivity")) state.atomReflectivity = clamp(data.atomReflectivity, 0, 2, state.atomReflectivity);
+      if (data.hasOwnProperty("labelSize")) state.labelSize = clamp(data.labelSize, 1.0, 6.0, state.labelSize);
+      if (typeof data.labelColor === "number") state.labelColor = data.labelColor;
+      if (typeof data.labelHalo === "boolean") state.labelHalo = data.labelHalo;
+      if (typeof data.labelFont === "string") state.labelFont = data.labelFont;
+      if (typeof data.dontWarnAviSize === "boolean") state.dontWarnAviSize = data.dontWarnAviSize;
       /* every light effectively off would leave only the fixed 0.6-intensity
          hemisphere light -- not literally invisible, but dim enough on some
          monitors to look like nothing loaded. Force at least one real light
@@ -7778,6 +9198,60 @@ select.sel:focus{border-color:var(--accent)}
     var k = 1 - ca * ca - cb * cb - cg * cg + 2 * ca * cb * cg;
     return cell.a * cell.b * cell.c * Math.sqrt(Math.max(0, k));
   }
+  function constrainedCellAngles(symops) {
+    /* Which of alpha/beta/gamma are forced to an exact value by the
+       structure's own symmetry, as opposed to merely refining numerically
+       close to 90/120 -- derived directly from the rotation part of the
+       symmetry operators themselves (state.cifSymops), not from parsing
+       the space-group symbol text, so this works identically for a CIF or
+       a SHELX .res/.ins load (the latter has no reliable symbol at all).
+       Returns {alpha, beta, gamma}, each either null (not symmetry-forced)
+       or the forced value (90 or 120).
+
+       The 90 test: a fractional-coordinate basis vector transforms under a
+       symmetry rotation R the same way a translation does -- axis i's
+       image, expressed in the original a/b/c basis, is column i of R. If
+       some operation maps axis i to exactly -axis i and axis j to +/-axis j
+       with no mixing between the two (R[i][j] = R[j][i] = 0), the lattice
+       metric's dot(axis_i, axis_j) term must equal its own negative under
+       that mapping -- forcing it to zero, i.e. that angle is exactly 90
+       degrees. This is exactly the standard monoclinic/orthorhombic/
+       tetragonal/cubic mechanism (a 2-fold or mirror forces the two angles
+       perpendicular to it) and needs no assumption about which axis is
+       "unique" -- every operation actually present is tested against all
+       three angle pairs directly, so any axis convention is handled the
+       same way.
+
+       The 120 test (gamma only, standard hexagonal-axes setting): a 3-fold
+       or 6-fold rotation has an integer-matrix trace of 0 or 2 respectively
+       (trace is basis-independent), and in the conventional setting leaves
+       c fixed (its row and column are otherwise all zero) while mixing a
+       and b -- exactly the operation that forces the hexagonal metric
+       relation gamma = 120 degrees. */
+    var AXES = [[1, 2, "alpha"], [0, 2, "beta"], [0, 1, "gamma"]];
+    var result = { alpha: null, beta: null, gamma: null };
+    if (!symops || !symops.length) return result;
+    var TOL = 1e-6;
+    for (var s = 0; s < symops.length; s++) {
+      var R = symops[s].rot; if (!R) continue;
+      for (var k = 0; k < 3; k++) {
+        var i = AXES[k][0], j = AXES[k][1], name = AXES[k][2];
+        if (result[name] !== null) continue;
+        if (Math.abs(R[i][j]) < TOL && Math.abs(R[j][i]) < TOL && Math.abs(R[i][i] * R[j][j] + 1) < TOL) result[name] = 90;
+      }
+    }
+    if (result.gamma === null) {
+      for (var s2 = 0; s2 < symops.length; s2++) {
+        var R2 = symops[s2].rot; if (!R2) continue;
+        var trace = R2[0][0] + R2[1][1] + R2[2][2];
+        var isThreeOrSixFold = Math.abs(trace) < TOL || Math.abs(trace - 2) < TOL;
+        var cFixed = Math.abs(R2[2][0]) < TOL && Math.abs(R2[2][1]) < TOL && Math.abs(R2[0][2]) < TOL && Math.abs(R2[1][2]) < TOL && Math.abs(Math.abs(R2[2][2]) - 1) < TOL;
+        if (isThreeOrSixFold && cFixed) { result.gamma = 120; break; }
+      }
+    }
+    return result;
+  }
+  function formatCellAngle(value, forced) { return forced !== null ? String(forced) : value.toFixed(2); }
   /* Formats a Hermann-Mauguin space-group symbol per standard crystallographic
      typesetting: lattice/glide/mirror letters italic, rotation-order digits
      upright, a screw-axis translation digit (e.g. the "1" in "21") subscript,
@@ -8146,11 +9620,13 @@ select.sel:focus{border-color:var(--accent)}
       centeringMode: state.centeringMode,
       videoAxis: state.videoAxis, videoSteps: state.videoSteps, videoScale: state.videoScale,
       videoDirection: state.videoDirection, videoFormat: state.videoFormat,
-      videoFps: state.videoFps, videoQuality: state.videoQuality,
+      videoFps: state.videoFps,
       showUnitCell: state.showUnitCell, unitCellColor: state.unitCellColor,
       unitCellThickness: state.unitCellThickness, unitCellAxisColors: state.unitCellAxisColors,
       ellipsoidProb: state.ellipsoidProb,
       showPrincipalAxes: state.showPrincipalAxes, principalAxisColor: state.principalAxisColor, principalAxisWidth: state.principalAxisWidth,
+      showLabels: state.showLabels, labelSize: state.labelSize, labelColor: state.labelColor,
+      labelHalo: state.labelHalo, labelFont: state.labelFont,
       voidMode: state.voidMode, probeRadius: state.probeRadius, voidQuality: state.voidQuality,
       voidSurfaceOpacity: state.voidSurfaceOpacity, voidAutoAssemble: state.voidAutoAssemble, voidAccurateVolumes: state.voidAccurateVolumes,
       voidComponents: state.voidComponents, voidVisible: state.voidVisible,
@@ -8231,6 +9707,14 @@ select.sel:focus{border-color:var(--accent)}
   function restoreProjectSnapshot(data) {
     exitGrowMode();
     state.undoStack = [];
+    /* a restored .json project never carries the original CIF text (out of
+       scope for that format), so "Save CIF" has to stay unavailable after
+       this -- otherwise it would go on quietly splicing whatever atoms this
+       project has into some earlier, unrelated structure's leftover CIF
+       text from before the project was loaded. */
+    state.cifOriginalText = null; state.cifOriginalLabel = null;
+    state.cifBlocks = null; state.cifBlockIndex = 0; state.cifMultiSourceName = "";
+    syncCifNavigatorUI();
     state.name = data.name || ""; state.guestName = data.guestName || "";
     state.atoms = data.atoms || null; state.guestAtoms = data.guestAtoms || null;
     (function normalizeHidden(arr) { if (arr) for (var i = 0; i < arr.length; i++) if (arr[i].hidden === undefined) arr[i].hidden = false; })(state.atoms);
@@ -8292,9 +9776,8 @@ select.sel:focus{border-color:var(--accent)}
     if (typeof data.videoSteps === "number" && isFinite(data.videoSteps)) state.videoSteps = data.videoSteps;
     if (typeof data.videoScale === "number" && isFinite(data.videoScale)) state.videoScale = data.videoScale;
     if (data.videoDirection === 1 || data.videoDirection === -1) state.videoDirection = data.videoDirection;
-    if (data.videoFormat === "webm" || data.videoFormat === "mp4") state.videoFormat = data.videoFormat;
+    if (data.videoFormat === "avi" || data.videoFormat === "mp4") state.videoFormat = data.videoFormat;
     if (typeof data.videoFps === "number" && isFinite(data.videoFps)) state.videoFps = data.videoFps;
-    if (data.videoQuality === "low" || data.videoQuality === "medium" || data.videoQuality === "high") state.videoQuality = data.videoQuality;
     (function clearUnselectable(arr) { if (arr) for (var i = 0; i < arr.length; i++) if (arr[i].selected && !isSelectable(arr[i])) arr[i].selected = false; })(state.atoms);
     (function clearUnselectable(arr) { if (arr) for (var i = 0; i < arr.length; i++) if (arr[i].selected && !isSelectable(arr[i])) arr[i].selected = false; })(state.guestAtoms);
     if (typeof data.showUnitCell === "boolean") state.showUnitCell = data.showUnitCell;
@@ -8309,6 +9792,16 @@ select.sel:focus{border-color:var(--accent)}
     var paxCbEl = document.getElementById("principalAxesToggle"); if (paxCbEl) paxCbEl.checked = state.showPrincipalAxes;
     var paxColorSwEl = document.getElementById("principalAxisColorSwatch"); if (paxColorSwEl) paxColorSwEl.value = hexToCss(state.principalAxisColor);
     var paxWidthRngEl = document.getElementById("principalAxisWidthRange"); if (paxWidthRngEl) paxWidthRngEl.value = state.principalAxisWidth;
+
+    /* labelSize/labelColor/labelHalo/labelFont are deliberately NOT restored
+       from the file -- like radii/defaultColors above, they're a global,
+       browser-persisted look-and-feel preference (see persistPreferences()),
+       not project-specific data. showLabels (whether labels are on at all
+       right now) and every atom's own showLabel/labelPinned/labelOffset --
+       already carried along verbatim inside data.atoms/data.guestAtoms --
+       ARE project-specific, and are restored. */
+    if (typeof data.showLabels === "boolean") state.showLabels = data.showLabels;
+    var showLabelsTgEl = document.getElementById("showLabelsTg"); if (showLabelsTgEl) showLabelsTgEl.checked = state.showLabels;
 
     if (typeof data.bgColor === "number") { state.bgColor = data.bgColor; scene.background = new THREE.Color(state.bgColor); }
     if (typeof data.depthScaling === "boolean") { state.depthScaling = data.depthScaling; setDepthScaling(state.depthScaling); }
@@ -8385,6 +9878,7 @@ select.sel:focus{border-color:var(--accent)}
     renderSelection(); updateSelectionInfo(); updateBondSelectionInfo();
     refreshSymmetryUI();
     updateViewDirectionReadout();
+    repositionLabels();
   }
   /* Restores a previously-calculated void/channel result set from a saved
      project. The swept-grid geometry used to render each non-consolidated
@@ -8560,6 +10054,23 @@ select.sel:focus{border-color:var(--accent)}
     var left = document.getElementById("leftPanel");
 
     var structC = section(left, "Structure", false);
+    var navigatorTab = subsection(structC, "Navigator", false);
+    navigatorTab.parentElement.id = "cifNavigatorSection";
+    navigatorTab.parentElement.style.display = "none"; /* hidden until a multi-structure CIF is actually loaded */
+    var navigatorCount = el("div", "hint"); navigatorCount.id = "cifNavigatorCount"; navigatorTab.appendChild(navigatorCount);
+    var navigatorRow = el("div", "ctl-inline");
+    var navigatorPrevBtn = document.createElement("button"); navigatorPrevBtn.type = "button"; navigatorPrevBtn.className = "icon-btn"; navigatorPrevBtn.id = "cifNavigatorPrevBtn"; navigatorPrevBtn.textContent = "←";
+    navigatorPrevBtn.title = "Previous structure";
+    navigatorPrevBtn.addEventListener("click", function () { loadCifBlockAtIndex(state.cifBlockIndex - 1); });
+    navigatorRow.appendChild(navigatorPrevBtn);
+    var navigatorSel = document.createElement("select"); navigatorSel.className = "sel"; navigatorSel.id = "cifNavigatorSelect";
+    navigatorSel.addEventListener("change", function () { loadCifBlockAtIndex(parseInt(navigatorSel.value, 10)); });
+    navigatorRow.appendChild(navigatorSel);
+    var navigatorNextBtn = document.createElement("button"); navigatorNextBtn.type = "button"; navigatorNextBtn.className = "icon-btn"; navigatorNextBtn.id = "cifNavigatorNextBtn"; navigatorNextBtn.textContent = "→";
+    navigatorNextBtn.title = "Next structure";
+    navigatorNextBtn.addEventListener("click", function () { loadCifBlockAtIndex(state.cifBlockIndex + 1); });
+    navigatorRow.appendChild(navigatorNextBtn);
+    navigatorTab.appendChild(navigatorRow);
     var paramsTab = subsection(structC, "Metadata", false);
     var atomsTab = subsection(structC, "Edit atoms", false);
     var bondsTab = subsection(structC, "Edit bonds", false, function (isOpen) { if (!isOpen) exitBondEditMode(); });
@@ -8967,8 +10478,8 @@ select.sel:focus{border-color:var(--accent)}
 
     /* -- general settings -- */
     /* Two even columns per row (not a fixed-width first column), matching
-       MG's own toggle-row2 layout -- CV has no "Show atom labels" toggle
-       (no Labels feature), so row 2 is just Show unit cell on its own. */
+       MG's own toggle-row2 layout, so columns line up left edges across rows
+       regardless of how long any one row's own first label happens to be. */
     var showRow1 = el("div", "toggle-row2");
     var showHTg = toggle(showRow1, "Show hydrogen atoms", state.showHydrogens !== false, function () { toggleHydrogenDisplay(); });
     showHTg.id = "showHTg";
@@ -8984,6 +10495,10 @@ select.sel:focus{border-color:var(--accent)}
     ucShowTg.id = "showUnitCellTg";
     toggle(ucShowRow, "Show H bonds", state.showHBonds, function (b) { state.showHBonds = b; renderStructure(); });
     cifDispC.appendChild(ucShowRow);
+    var labelShowRow = el("div", "toggle-row2");
+    var showLabelsTg = toggle(labelShowRow, "Show atom labels", state.showLabels, function (b) { state.showLabels = b; renderLabels(); });
+    showLabelsTg.id = "showLabelsTg";
+    cifDispC.appendChild(labelShowRow);
 
     var scaleBgRow = el("div", "ctl-inline");
     scaleBgRow.appendChild(el("label", "plain", "Set scale"));
@@ -9079,6 +10594,53 @@ select.sel:focus{border-color:var(--accent)}
     directionBody.appendChild(hklWrap);
     var viewVecBtn = button(directionBody, "View along vector", "ghost", viewAlongTwoAtoms); viewVecBtn.id = "viewVecBtn"; viewVecBtn.disabled = true;
     var viewPlaneBtn = button(directionBody, "View perpendicular to plane", "ghost", viewPerpendicularToPlane); viewPlaneBtn.id = "viewPlaneBtn"; viewPlaneBtn.disabled = true;
+
+    var labelsBody = subsection(cifDispC, "Labels", false);
+    toggle(labelsBody, "Contrasting outline", state.labelHalo, function (v) {
+      state.labelHalo = v; labelTexCache = {}; renderLabels(); persistPreferences();
+    });
+    var labelFontColorRow = el("div", "ctl-inline");
+    labelFontColorRow.appendChild(el("label", "plain", "Font"));
+    var labelFontSel = document.createElement("select"); labelFontSel.className = "sel";
+    FONT_OPTIONS.forEach(function (opt) {
+      var o = document.createElement("option"); o.value = opt[0]; o.textContent = opt[1];
+      if (String(opt[0]) === String(state.labelFont)) o.selected = true;
+      labelFontSel.appendChild(o);
+    });
+    labelFontSel.addEventListener("change", function () {
+      state.labelFont = labelFontSel.value; labelTexCache = {}; renderLabels(); persistPreferences();
+    });
+    labelFontColorRow.appendChild(labelFontSel);
+    var labelColorLbl = el("label", "plain", "Colour"); labelColorLbl.style.marginLeft = "10px";
+    labelFontColorRow.appendChild(labelColorLbl);
+    labelFontColorRow.appendChild(colorSwatch(state.labelColor, function (c) {
+      state.labelColor = c; labelTexCache = {}; renderLabels(); persistPreferences();
+    }));
+    labelsBody.appendChild(labelFontColorRow);
+    labelSlider(labelsBody, "Size", 1.0, 6.0, 0.1, state.labelSize, function (v) {
+      state.labelSize = v; updateLabelScales(); persistPreferences();
+    });
+    var labelBtnRow = el("div", "btnrow");
+    button(labelBtnRow, "Label selected", "ghost", function () { setLabelVisibilityForSelected(true); });
+    button(labelBtnRow, "Unlabel selected", "ghost", function () { setLabelVisibilityForSelected(false); });
+    labelsBody.appendChild(labelBtnRow);
+    var labelUnfixBtnRow = el("div", "btnrow");
+    button(labelUnfixBtnRow, "Unfix all labels", "ghost", function () { unfixAllLabels(); });
+    button(labelUnfixBtnRow, "Unfix selected", "ghost", function () { unfixSelectedLabels(); });
+    labelsBody.appendChild(labelUnfixBtnRow);
+
+    var autorotateBody = subsection(cifDispC, "Autorotate", false, function (isOpen) { if (!isOpen) stopAutoRotate(); });
+    var autoRotateAxisRow = radioRow(autorotateBody, "autoRotateAxisDir",
+      [["+x", "+X"], ["-x", "−X"], ["+y", "+Y"], ["-y", "−Y"], ["+z", "+Z"], ["-z", "−Z"]],
+      (state.autoRotateDir === -1 ? "-" : "+") + state.autoRotateAxis,
+      function (v) { state.autoRotateDir = (v[0] === "-") ? -1 : 1; state.autoRotateAxis = v[1]; });
+    slider(autorotateBody, "speed", 5, 180, 5, state.autoRotateSpeed, "°/s", function (v) { state.autoRotateSpeed = v; });
+    var autoRotatePlayRow = el("div", "btnrow");
+    var autoRotatePlayBtn = button(autoRotatePlayRow, "Play", null, function () { startAutoRotate(); });
+    var autoRotateStopBtn = button(autoRotatePlayRow, "Stop", "ghost", function () { stopAutoRotate(); });
+    autoRotatePlayBtn.id = "autoRotatePlayBtn"; autoRotateStopBtn.id = "autoRotateStopBtn";
+    autorotateBody.appendChild(autoRotatePlayRow);
+    syncAutoRotateButtons();
 
     var symC = section(left, "Grow", false, function (isOpen) {
       if (!isOpen) exitGrowMode();
@@ -9368,7 +10930,7 @@ select.sel:focus{border-color:var(--accent)}
 
     var vcC = section(left, "Void / Channel Analysis", false, function (isOpen) { if (!isOpen && state.voidUiMode) setVoidUiMode(null); });
     vcC.parentElement.id = "voidAnalysisSection";
-    var voidModeRow = radioRow(vcC, "voidMode", [["cell", "Fill unit cell"], ["grown", "Use visible atoms only"]], state.voidMode, function (v) { state.voidMode = v; buildVoidResultsTable(); });
+    var voidModeRow = radioRow(vcC, "voidMode", [["cell", "Fill unit cell"], ["grown", "Use visible atoms only"]], state.voidMode, function (v) { state.voidMode = v; buildVoidResultsTable(); buildVoidFragmentsPanel(); });
     voidModeRow.inputs.cell.id = "voidModeCellRadio"; voidModeRow.inputs.grown.id = "voidModeGrownRadio";
     voidModeRow.wrap.style.justifyContent = "space-between";
     var voidProbeGridRow = el("div", "ctl-inline");
@@ -9408,14 +10970,14 @@ select.sel:focus{border-color:var(--accent)}
     var molSurfProbeInput = numberOnly(molSurfC, "probe radius", 0.01, 3.0, 0.05, state.molSurfaceProbeRadius, U.ang, function (v) { state.molSurfaceProbeRadius = v; });
     molSurfProbeInput.id = "molSurfProbeRadiusInput";
     var molSurfRow = el("div", "btnrow");
-    button(molSurfRow, "Calculate", null, runMolSurfaceCalculate);
-    button(molSurfRow, "Clear all", "ghost", clearAllMolSurfaces);
+    var molSurfCalcBtn = button(molSurfRow, "Calculate", null, runMolSurfaceCalculate); molSurfCalcBtn.id = "molSurfCalcBtn"; molSurfCalcBtn.disabled = true;
+    var molSurfClearBtn = button(molSurfRow, "Clear all", "ghost", clearAllMolSurfaces); molSurfClearBtn.id = "molSurfClearBtn"; molSurfClearBtn.disabled = true;
     molSurfC.appendChild(molSurfRow);
     var molSurfOpacitySlider = labelSlider(molSurfC, "surface opacity", 0.05, 1.0, 0.05, state.molSurfaceOpacity, function (v) { state.molSurfaceOpacity = v; renderMolSurfaceMeshes(); });
     molSurfOpacitySlider.id = "molSurfOpacitySlider";
     var molSurfColorLinkRow = el("div"); molSurfColorLinkRow.id = "molSurfaceColorLinkRow"; molSurfC.appendChild(molSurfColorLinkRow);
     var molSurfTable = document.createElement("table"); molSurfTable.id = "molSurfaceResultsTable";
-    molSurfTable.innerHTML = "<thead><tr><th></th><th>Surface</th><th>Colour</th><th></th></tr></thead><tbody id=\"molSurfaceResultsBody\"></tbody>";
+    molSurfTable.innerHTML = "<thead><tr><th></th><th></th><th></th><th></th></tr></thead><tbody id=\"molSurfaceResultsBody\"></tbody>";
     molSurfC.appendChild(molSurfTable);
     buildMolSurfaceColorLinkRow();
     buildMolSurfaceTable();
@@ -9498,15 +11060,15 @@ select.sel:focus{border-color:var(--accent)}
       state.videoAxis = videoAxisDirSel.value[1];
     });
     videoRow1.appendChild(videoAxisDirSel);
-    videoRow1.appendChild(el("label", "plain", "format"));
-    var videoFormatSel = document.createElement("select"); videoFormatSel.className = "sel sel-narrow"; videoFormatSel.id = "videoFormatSelect";
-    [["webm", "WebM"], ["mp4", "MP4"], ["avi", "AVI (uncompressed)"]].forEach(function (o) {
-      var opt = document.createElement("option"); opt.value = o[0]; opt.textContent = o[1];
-      if (o[0] === state.videoFormat) opt.selected = true;
-      videoFormatSel.appendChild(opt);
+    videoRow1.appendChild(el("label", "plain", "fps"));
+    var videoFpsSel = document.createElement("select"); videoFpsSel.className = "sel sel-narrow"; videoFpsSel.id = "videoFpsSelect";
+    [15, 24, 30, 60].forEach(function (f) {
+      var opt = document.createElement("option"); opt.value = String(f); opt.textContent = String(f);
+      if (f === state.videoFps) opt.selected = true;
+      videoFpsSel.appendChild(opt);
     });
-    videoFormatSel.addEventListener("change", function () { state.videoFormat = videoFormatSel.value; });
-    videoRow1.appendChild(videoFormatSel);
+    videoFpsSel.addEventListener("change", function () { state.videoFps = parseInt(videoFpsSel.value, 10); });
+    videoRow1.appendChild(videoFpsSel);
     videoBody.appendChild(videoRow1);
 
     var videoRow2 = el("div", "ctl-inline");
@@ -9527,26 +11089,26 @@ select.sel:focus{border-color:var(--accent)}
     videoBody.appendChild(videoRow2);
 
     var videoRow3 = el("div", "ctl-inline");
-    videoRow3.appendChild(el("label", "plain", "fps"));
-    var videoFpsSel = document.createElement("select"); videoFpsSel.className = "sel sel-narrow"; videoFpsSel.id = "videoFpsSelect";
-    [15, 24, 30, 60].forEach(function (f) {
-      var opt = document.createElement("option"); opt.value = String(f); opt.textContent = String(f);
-      if (f === state.videoFps) opt.selected = true;
-      videoFpsSel.appendChild(opt);
-    });
-    videoFpsSel.addEventListener("change", function () { state.videoFps = parseInt(videoFpsSel.value, 10); });
-    videoRow3.appendChild(videoFpsSel);
-    videoRow3.appendChild(el("label", "plain", "quality"));
-    var videoQualSel = document.createElement("select"); videoQualSel.className = "sel sel-narrow"; videoQualSel.id = "videoQualitySelect";
-    [["low", "Low"], ["medium", "Medium"], ["high", "High"]].forEach(function (o) {
+    videoRow3.appendChild(el("label", "plain", "format"));
+    var videoFormatSel = document.createElement("select"); videoFormatSel.className = "sel"; videoFormatSel.id = "videoFormatSelect";
+    videoFormatSel.style.minWidth = "150px";
+    [["avi", "AVI (uncompressed)"], ["mp4", "MP4 (smaller file)"]].forEach(function (o) {
       var opt = document.createElement("option"); opt.value = o[0]; opt.textContent = o[1];
-      if (o[0] === state.videoQuality) opt.selected = true;
-      videoQualSel.appendChild(opt);
+      if (o[0] === state.videoFormat) opt.selected = true;
+      videoFormatSel.appendChild(opt);
     });
-    videoQualSel.addEventListener("change", function () { state.videoQuality = videoQualSel.value; });
-    videoRow3.appendChild(videoQualSel);
+    videoFormatSel.addEventListener("change", function () { state.videoFormat = videoFormatSel.value; syncVideoFormatHint(); });
+    videoRow3.appendChild(videoFormatSel);
     videoBody.appendChild(videoRow3);
+    var videoFormatHint = el("div", "hint"); videoFormatHint.id = "videoFormatHint"; videoBody.appendChild(videoFormatHint);
     var videoRow = el("div", "btnrow"); var videoBtn = button(videoRow, "Export rotation video", null, exportRotationVideo); videoBtn.id = "exportVideoBtn"; videoBody.appendChild(videoRow);
+    syncVideoFormatHint();
+
+    var cifSaveBody = subsection(xc, "CIF", false);
+    cifSaveBody.appendChild(el("div", "hint", "Saves the current structure -- element/ASU edits, deletions, and any promoted centroid included -- back out as a CIF, preserving everything else in the original file untouched."));
+    var cifSaveRow = el("div", "btnrow");
+    var saveCifBtn = button(cifSaveRow, "Save CIF...", null, saveCifFile); saveCifBtn.id = "saveCifBtn"; saveCifBtn.disabled = true;
+    cifSaveBody.appendChild(cifSaveRow);
 
     var modelBody = subsection(xc, "Model", false);
     var modelSaveRow = el("div", "btnrow"); button(modelSaveRow, "Save model...", null, saveModelToFile); modelBody.appendChild(modelSaveRow);
@@ -9615,14 +11177,42 @@ select.sel:focus{border-color:var(--accent)}
         if (e.code === "Delete" || e.code === "Backspace") {
           e.preventDefault();
           if (state.voidUiMode === "move") {
-            Object.keys(state.voidSelectedFragments).forEach(function (fragKey) { state.voidFragmentVisible[fragKey] = false; });
+            /* Deleting a selected fragment this way must be identical to
+               pressing the Results table's own "x" button for its void/
+               channel (deleteVoidComponent) -- this used to instead only
+               hide the one clicked fragment's mesh
+               (voidFragmentVisible[fragKey]=false), leaving the component
+               itself, every OTHER fragment it has, and its Results table
+               row fully intact. That's exactly the "deleted but not
+               really" bug reported: the row stayed checked visible,
+               unchecking/rechecking it resurrected the mesh, and
+               reselecting + Copy-moding it produced a phantom duplicate of
+               the same half-deleted state. Resolving each selected
+               fragment to its owning component and calling
+               deleteVoidComponent(compId) removes the WHOLE void/channel
+               in one consistent step -- component, every fragment, channel
+               copies, selections, colours -- and rebuilds the Results
+               table too (which this branch never did before), regardless
+               of which one of its fragments was actually selected. */
+            /* An array, not an object-keyed set -- compId is a number
+               (matching c.id on each state.voidComponents entry, and what
+               the "x" button itself passes straight through), and object
+               property keys always coerce to strings, which would silently
+               turn deleteVoidComponent's own strict `c.id !== compId`
+               component-removal check into a permanent no-op. */
+            var compIds = [];
+            Object.keys(state.voidSelectedFragments).forEach(function (fragKey) {
+              var frag = state.voidFragments[fragKey];
+              if (frag && compIds.indexOf(frag.compId) === -1) compIds.push(frag.compId);
+            });
             state.voidSelectedFragments = {};
+            compIds.forEach(function (compId) { deleteVoidComponent(compId); });
           } else {
             var removeIds = Object.keys(state.voidSelectedChannels).map(function (k) { return state.voidSelectedChannels[k].copyId; }).filter(Boolean);
             if (removeIds.length) state.voidChannelCopies = state.voidChannelCopies.filter(function (c) { return removeIds.indexOf(c.id) === -1; });
             state.voidSelectedChannels = {};
+            renderVoidMeshes(); buildVoidFragmentsPanel();
           }
-          renderVoidMeshes(); buildVoidFragmentsPanel();
           return;
         }
       }
@@ -9650,6 +11240,7 @@ select.sel:focus{border-color:var(--accent)}
       if (!e.ctrlKey && !e.altKey && !e.metaKey && e.code === "KeyA") { e.preventDefault(); toggleShowOnlyAsu(); return; }
       if (!e.ctrlKey && !e.altKey && !e.metaKey && e.code === "KeyC") { e.preventDefault(); toggleUnitCellDisplay(); return; }
       if (!e.ctrlKey && !e.altKey && !e.metaKey && e.code === "KeyH") { e.preventDefault(); toggleHydrogenDisplay(); return; }
+      if (!e.ctrlKey && !e.altKey && !e.metaKey && e.code === "KeyL") { e.preventDefault(); toggleLabelDisplay(); return; }
       if (!e.ctrlKey && !e.altKey && !e.metaKey && (e.key === "-" || e.key === "=")) {
         e.preventDefault();
         var curScale = Math.round(SCALE_REF / Math.max(camDist, 1e-6));
@@ -9674,7 +11265,7 @@ select.sel:focus{border-color:var(--accent)}
       }
     });
     var input = document.getElementById("cifInput");
-    input.addEventListener("change", function (e) { var f = e.target.files[0]; if (!f) return; var rd = new FileReader(); rd.onload = function () { loadCIFText(rd.result, f.name); }; rd.readAsText(f); });
+    input.addEventListener("change", function (e) { var f = e.target.files[0]; if (!f) return; var rd = new FileReader(); rd.onload = function () { handleStructureFileText(rd.result, f.name); }; rd.readAsText(f); });
     var vp = document.getElementById("viewport");
     ["dragenter", "dragover"].forEach(function (ev) { vp.addEventListener(ev, function (e) { e.preventDefault(); vp.classList.add("dragging"); }); });
     ["dragleave", "drop"].forEach(function (ev) { vp.addEventListener(ev, function (e) { e.preventDefault(); vp.classList.remove("dragging"); }); });
@@ -9689,7 +11280,7 @@ select.sel:focus{border-color:var(--accent)}
       var f = e.dataTransfer.files[0]; if (!f) return;
       var isJson = /\.json$/i.test(f.name) || f.type === "application/json";
       var rd = new FileReader();
-      rd.onload = function () { if (isJson) confirmAndLoadModelFromFile(rd.result); else loadCIFText(rd.result, f.name); };
+      rd.onload = function () { if (isJson) confirmAndLoadModelFromFile(rd.result); else handleStructureFileText(rd.result, f.name); };
       rd.readAsText(f);
     });
     var radiiInput = document.getElementById("elementCsvInput");
@@ -9781,6 +11372,7 @@ select.sel:focus{border-color:var(--accent)}
       "<p><b>Save model...</b> and <b>Load model...</b>, at the bottom of the <b>Export</b> panel, save or restore the complete working state to a single file -- every atom including everything Grow has added, the CIF symmetry data, colour and radius overrides, bond and display settings, and the camera's exact position -- so a session can be closed and reopened later exactly where it was left, without repeating the grow steps. This is a separate, deliberate snapshot of one specific piece of work, distinct from the automatic per-browser memory of element radii and display settings described below -- a saved model file is portable and permanent, and is the one to keep if the work needs to survive a change of computer or browser.</p>" +
       "<h3>Loading structures</h3>" +
       "<p>Dropping a <b>.cif</b> onto the 3D view loads it as the <b>host</b> and starts symmetry mode, described below -- it's a fresh structure to build outward from by growth, not a fixed set of coordinates, and replaces any previously loaded host, clearing the current guest along with it. There is no separate guest file or drop box: a <b>guest</b> (e.g. an included gas molecule) is created from the same loaded structure by selecting the atoms that belong to it and using \"Move selection to\" &gt; New guest group (Structure &gt; Edit atoms). \"Remove all guests\" clears every guest component so you can start over.</p>" +
+      "<p>A SHELX <b>.res</b> or <b>.ins</b> file drops in exactly the same way and works identically from that point on -- same host/guest handling, same Grow panel, same everything -- since both formats are read into the same unit cell + symmetry operators + asymmetric unit shape internally; the one difference is that Save CIF stays disabled afterwards, since there's no original CIF text to splice edits back into. A <b>PART n</b> instruction in the file is read and remembered per atom: automatic bond generation never bonds two atoms that have different, both non-zero PART numbers, since SHELX uses PART specifically to mark alternative, mutually-exclusive disorder components that are never really present together -- PART 0 (the default, before any PART instruction, and every CIF-loaded atom, which has no PART concept at all) still bonds to anything. A negative PART number additionally stops bonds forming, across a symmetry operation, to a grown copy with any non-zero PART number -- the standard way of handling a group disordered across a special position (e.g. a solvent molecule sitting on an inversion centre) without it bonding to its own symmetry mate. <b>Shift+Ctrl+Alt+click</b> selects every currently-displayed atom sharing the clicked atom's PART number (a second click on the same part deselects them) -- only available for a PART-tagged, .res/.ins-derived structure; it does nothing on a CIF-loaded one, which has no PART numbers to select by.</p>" +
       "<h3>CIF and symmetry (Symmetry panel)</h3>" +
       "<p>Dropping a CIF reads the unit cell, the symmetry operators (from the file's own symmetry loop), and the asymmetric unit, then displays just the asymmetric unit -- not a complete molecule -- as the starting point. If the file actually contains more atoms than the true asymmetric unit (Mercury sometimes exports a whole completed molecule this way), the extra symmetry-equivalent copies are automatically detected and removed first, so what's displayed is always just the independent set. An atom sitting exactly on a special position (a mirror plane, an inversion centre, a rotation axis) is never duplicated when a symmetry operation maps it onto itself or onto another copy already present -- this is handled automatically throughout, not something to manage by hand.</p>" +
       "<p>The <b>Grow</b> section appears once a CIF has been loaded, with the asymmetric unit and current atom count shown at the top, and its controls split into three submenus -- <b>Mouse</b>, <b>Pack</b>, and <b>Symmetry</b>.</p>" +
@@ -9831,7 +11423,7 @@ select.sel:focus{border-color:var(--accent)}
       "<h3>Viewing along a vector or a plane</h3>" +
       "<p>Select exactly two atoms and \"View along vector\" (Display &gt; Direction) becomes available, orienting the camera to look straight along the line through them. Select exactly three and \"View perpendicular to plane\" becomes available instead, orienting the camera face-on to the plane they define. Both only ever rotate the view -- they never move the zoom level or what the camera is centred on -- and each is disabled again the moment the selection count isn't exactly right for it.</p>" +
       "<h3>Metadata</h3>" +
-      "<p>The <b>Metadata</b> tab, at the top of Structure, is a read-only summary of a loaded CIF's own crystallographic data: file name, chemical formula, space group symbol (typeset with italic letters and proper subscripts), unit cell parameters and volume, density, temperature (\"unknown\" if the CIF doesn't record one), and the number of atoms in the asymmetric unit. Nothing here can be edited; it just reads back what the CIF itself contains.</p>" +
+      "<p>The <b>Metadata</b> tab, at the top of Structure, is a read-only summary of a loaded CIF's own crystallographic data: file name, chemical formula, space group symbol (typeset with italic letters and proper subscripts), unit cell parameters and volume, density, temperature (\"unknown\" if the CIF doesn't record one), and the number of atoms in the asymmetric unit -- followed by how many of those are anisotropic and how many of those are NPD (non-positive-definite -- a refinement warning, not a display error), each row shown only when its count is above zero. A cell angle exactly fixed at 90 or 120 degrees by the structure's own symmetry (not just numerically close) is shown as a plain \"90\"/\"120\", with no decimal places, rather than the two decimal places used for a genuinely free angle. Nothing here can be edited; it just reads back what the CIF itself contains.</p>" +
       "<h3>Void / channel analysis</h3>" +
       "<p>This section finds the empty space -- voids (finite pockets) and channels (space that repeats endlessly along one cell axis) -- inside a loaded structure, using van der Waals radii and a probe radius exactly the way <b>Structure &gt; Edit atoms</b>' own molecular volume calculation does, but reporting the space itself rather than the atoms' own volume. Guest atoms are always excluded from the calculation in both modes, so a guest sitting in a cavity doesn't hide it. <b>Fill unit cell</b> silently completes the whole unit cell from the CIF's own symmetry and searches that, regardless of how much is actually grown on screen. <b>Use grown atoms only</b> searches only whatever host atoms are currently displayed (<b>Structure &gt; Grow</b>) -- no unit cell boundary, no periodicity -- so growing more or less of the structure changes what it finds; a probe that can escape the grown structure entirely is never reported as an enclosed void.</p>" +
       "<p><b>Calculate</b> populates the results table (one row per void/channel, with its critical radius, swept volume, and node count) and draws the corresponding surfaces in the 3D view; <b>Clear</b> removes them. Loading a new structure, or a saved project, always clears any previous void/channel results automatically, since they'd no longer match the new atoms. <b>Crit. R</b> is the critical radius: the largest probe radius that still finds this exact void/channel as one connected piece of space -- the radius of the tightest bottleneck (the narrowest point of clearance between atoms) that a probe has to pass through to reach every corner of it. Raise the probe radius above a component's own Crit. R and it either shrinks, splits into smaller pieces, or disappears from the results entirely, since the bottleneck that once let a probe of that size through no longer does.</p>" +
@@ -9842,8 +11434,17 @@ select.sel:focus{border-color:var(--accent)}
     document.getElementById("guideClose").addEventListener("click", function () { document.getElementById("guideModal").classList.remove("open"); });
     document.getElementById("guideModal").addEventListener("click", function (e) { if (e.target.id === "guideModal") e.currentTarget.classList.remove("open"); });
   }
-  function boot() {
+  async function boot() {
     var restored = loadPersistedPreferences();
+    /* Default the video export format to whichever one needs nothing further
+       from the user: MP4 if its encoder is already cached from a previous
+       session (instant, much smaller file), AVI otherwise (always available,
+       no download). This only runs here, once, before the very first
+       buildUI() -- videoFormat itself is deliberately not part of the
+       persisted-preferences payload (see persistPreferences()' own comment),
+       so a mid-session project load overwriting state.videoFormat later is
+       unaffected by this. */
+    state.videoFormat = (await isMp4EncoderCached()) ? "mp4" : "avi";
     initThree(document.getElementById("viewport")); buildUI(); buildElementsPage(); buildGuide(); wireIO(); buildGuestGroupsUI(); refreshBondCleanupElements();
     setDepthScaling(state.depthScaling); updateFog();
     if (restored) setStatus("Restored your saved element, display, lighting, and material settings. Load a host structure to begin.", false);
