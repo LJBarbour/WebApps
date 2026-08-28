@@ -115,9 +115,9 @@ main{flex:1 1 auto;display:flex;min-height:0}
    .sechead, so a submenu reads as "inside" its parent section at a glance */
 .subsec{border:1px solid var(--line);border-radius:4px;overflow:hidden}
 .subhead2{padding:6px 9px;display:flex;align-items:center;justify-content:space-between;
-  cursor:pointer;user-select:none;background:var(--paper2);
+  cursor:pointer;user-select:none;background:var(--accent-soft);
   font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-mid)}
-.subhead2:hover{background:var(--accent-soft);color:var(--accent)}
+.subhead2:hover{filter:brightness(.95);color:var(--accent)}
 .tri2{font-size:10px;transition:transform .2s;color:var(--ink-faint)}
 .subsec.open>.subhead2 .tri2{transform:rotate(90deg);color:var(--accent)}
 .subsec.open>.subhead2{border-bottom:1px solid var(--line)}
@@ -127,10 +127,13 @@ main{flex:1 1 auto;display:flex;min-height:0}
 /* -- buttons -- */
 .btnrow{display:flex;gap:5px;flex-wrap:wrap}
 .btn{width:100%;font-family:var(--sans);font-size:12px;font-weight:500;border-radius:4px;padding:5.5px 9px;
-  background:var(--accent);color:#fff;border:none;cursor:pointer;transition:opacity .15s}
-.btn:hover{opacity:.88}
+  background:var(--accent);color:#fff;border:none;cursor:pointer;transition:opacity .15s,background .15s,filter .1s}
+.btn:hover{opacity:.78}
+.btn:active{filter:brightness(.82)}
 .btnrow .btn{width:auto;flex:1 1 0}
 .btn.ghost{background:transparent;color:var(--accent);border:1.5px solid var(--accent);padding:4.5px 9px}
+.btn.ghost:hover{background:var(--accent-soft);opacity:1}
+.btn.ghost:active{background:var(--accent-soft);filter:brightness(.92);opacity:1}
 .btn.grow-active{background:#c0392b}
 .btn.mini.grow-active{background:#c0392b;color:#fff;border-color:#c0392b}
 .btn:disabled{opacity:.35;cursor:default;pointer-events:none}
@@ -141,8 +144,9 @@ main{flex:1 1 auto;display:flex;min-height:0}
 .hklrow input.num{width:54px;text-align:center;flex:0 0 auto;height:26px}
 .hklrow .btn.mini{flex:1 1 auto;height:26px}
 .btn.mini:hover{background:var(--accent-soft);border-color:var(--accent);opacity:1}
-.btn.mini.blue-fill{background:var(--accent);color:#fff;border-color:var(--accent)}
-.btn.mini.blue-fill:hover{background:var(--accent);border-color:var(--accent);opacity:.85}
+.btn.mini:active{filter:brightness(.92)}
+.btn.mini.grow-active:hover{opacity:.78}
+.btn.mini.grow-active:active{filter:brightness(.82)}
 .btn.mini.axis-nudge{padding:3px 4px;flex:0 0 auto;text-transform:none}
 
 .hint{font-size:11px;color:var(--ink-faint);line-height:1.5}
@@ -208,6 +212,8 @@ select.sel:focus{border-color:var(--accent)}
 #calcProgressTrack{width:200px;height:6px;background:var(--paper2);border-radius:3px;overflow:hidden;display:none}
 #calcProgressFill{height:100%;width:0%;background:var(--accent);transition:width .15s linear}
 #calcAbortBtn{width:auto;padding:5px 14px;background:var(--danger);display:none}
+#noAtomsOverlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+  font-family:var(--sans);font-size:14px;color:var(--ink-mid);pointer-events:none;z-index:1}
 
 /* -- guide modal -- */
 #guideModal{position:fixed;inset:0;background:rgba(44,36,22,.35);display:none;
@@ -256,6 +262,7 @@ select.sel:focus{border-color:var(--accent)}
     <div id="viewport" tabindex="-1"></div>
     <svg id="lassoSvg"><polyline id="lassoPath"></polyline></svg>
     <div id="calcOverlay"><div class="spinner"></div><div id="calcText">Working...</div><div id="calcProgressTrack"><div id="calcProgressFill"></div></div><button id="calcAbortBtn" class="btn">Abort calculation</button></div>
+    <div id="noAtomsOverlay">No atoms to display.</div>
     <div id="statusLine" class="statusline">Load a host structure to begin.</div>
   </div>
 </main>
@@ -2336,7 +2343,7 @@ select.sel:focus{border-color:var(--accent)}
   var K = window.Connolly;
   var U = { ang: "\u00C5", cube: "\u00B3", sq: "\u00B2" };
 
-  var scene, camera, orthoCam, activeCam, renderer;
+  var scene, camera, trueOrthoCam, pseudoOrthoCam, activeCam, renderer;
   var atomsGroup, bondsGroup, surfaceGroup, guestAtomsGroup, guestBondsGroup, hbondsGroup, selectionGroup, unitCellGroup, bondEditGroup, voidGroup, ringGroup, molSurfaceGroup, labelGroup;
   var voidMeshes = {}; /* compId -> array of THREE.Mesh currently in voidGroup, for the cheap visibility-toggle path */
   var nextMolSurfaceId = 1;
@@ -2457,7 +2464,7 @@ select.sel:focus{border-color:var(--accent)}
      and having state read from it directly (rather than duplicating the
      numbers) makes that drift structurally impossible going forward. */
   var DISPLAY_DEFAULTS = {
-    bgColor: 0xffffff, depthScaling: false, highDetail: true,
+    bgColor: 0xffffff, pseudoOrtho: false, highDetail: true,
     fogOn: false, fogDensity: 0.3, lightHeadlight: true, lightAngle: 0,
     keyEnabled: true, keyIntensity: 0.95, fillEnabled: true, fillIntensity: 0, rimEnabled: true, rimIntensity: 0.35,
     atomRoughness: 0.35, atomMetalness: 0.55, atomReflectivity: 0
@@ -2466,7 +2473,18 @@ select.sel:focus{border-color:var(--accent)}
     atoms: null, name: "", everLoaded: false, viewOffset: [0, 0, 0],
     showHost: true,
     atomScale: 1.0,
-    depthScaling: DISPLAY_DEFAULTS.depthScaling, bgColor: DISPLAY_DEFAULTS.bgColor,
+    /* pseudoOrtho off (default) = the original literal orthographic camera --
+       exact parallel projection, so unit cell edges viewed down an axis
+       overlay exactly, at the cost of the known close-up "z-clipping"
+       artifact (see ORTHO_DIST_MULT's own comment for the mechanism -- a
+       true orthographic camera has no eye point, so zooming its shared
+       reference plane through a solid atom is unavoidable). pseudoOrtho on =
+       the narrow-FOV/far-camera emulation that eliminates that clipping
+       entirely, at the cost of a very slight (usually imperceptible)
+       perspective non-overlap of near/far cell edges when viewing exactly
+       down an axis -- a real trade-off, not a strict improvement, which is
+       why this is a user choice rather than always-on. */
+    pseudoOrtho: DISPLAY_DEFAULTS.pseudoOrtho, bgColor: DISPLAY_DEFAULTS.bgColor,
     lightHeadlight: DISPLAY_DEFAULTS.lightHeadlight, lightAngle: DISPLAY_DEFAULTS.lightAngle,
     keyEnabled: DISPLAY_DEFAULTS.keyEnabled, keyIntensity: DISPLAY_DEFAULTS.keyIntensity,
     fillEnabled: DISPLAY_DEFAULTS.fillEnabled, fillIntensity: DISPLAY_DEFAULTS.fillIntensity,
@@ -2501,7 +2519,7 @@ select.sel:focus{border-color:var(--accent)}
     atomRoughness: DISPLAY_DEFAULTS.atomRoughness, atomMetalness: DISPLAY_DEFAULTS.atomMetalness, atomReflectivity: DISPLAY_DEFAULTS.atomReflectivity,
     guestAtoms: null, guestName: "", guestScale: 1.0, guestBatch: 0, showGuest: true,
     guestGroups: [], cutBonds: {}, cutBondSignatures: {}, extraBonds: {}, extraBondSignatures: {}, bondEditMode: false, bondEditPair: [],
-    bondSelectionEnabled: false,
+    bondSelectionEnabled: false, atomEditUiMode: null,
     undoStack: [], selectedBonds: {}, guestColorMode: "component",
     hostBondRadius: 0.12, guestBondRadius: 0.12,
     hostColors: {}, guestColors: {}, defaultColors: {}, page: "model",
@@ -2509,6 +2527,7 @@ select.sel:focus{border-color:var(--accent)}
     hostBondColorMode: "split", hostBondColor: 0xFFFFFF, guestBondColorMode: "split", guestBondColor: 0xFFFFFF, showHBonds: false,
     radii: {},
     hostGrowStyle: "default", guestGrowStyle: "default", showHydrogens: true, centeringMode: "all",
+    autoCompleteMolecules: false, _autoCompleting: false,
     videoAxis: "y", videoSteps: 120, videoScale: 100, videoExporting: false, videoDirection: 1, videoFormat: "avi", dontWarnAviSize: false,
     autoRotateAxis: "y", autoRotateDir: 1, autoRotateSpeed: 30, autoRotating: false,
     videoFps: 30
@@ -2531,6 +2550,45 @@ select.sel:focus{border-color:var(--accent)}
   var camTarget = new THREE.Vector3(0, 0, 0);
   var camOrient = new THREE.Quaternion();
   var camDist = 1;
+  /* Two mutually-exclusive "orthographic-look" cameras, toggled by
+     state.pseudoOrtho (see setPseudoOrtho/DISPLAY_DEFAULTS):
+
+     trueOrthoCam -- a literal THREE.OrthographicCamera. Exact parallel
+     projection: viewed straight down a crystallographic axis, near and far
+     unit cell edges overlay exactly, which matters for crystallography.
+     But a true orthographic camera has no eye point -- every view ray
+     shares one common reference PLANE (at the camera's own position)
+     instead of converging on a point -- so zooming it in on a structure
+     inevitably drags that plane through the middle of some solid atom
+     sooner or later. Confirmed directly: the resulting flat, perfectly
+     circular "hole" persisted unchanged from near=0.05 down to near=1e-6,
+     and even with the frustum widened 20x -- neither near/far tuning nor
+     frustum width was ever the actual cause, so this is accepted as a known
+     trade-off in this mode rather than something currentNearPlane() below
+     can fix.
+
+     pseudoOrthoCam -- a genuine PerspectiveCamera at a very small FOV,
+     parked correspondingly far from the target instead. A real perspective
+     camera's rays diverge from one point, so there is no shared plane to
+     slice through anything -- eliminating the clipping above entirely -- at
+     the cost of a very slight (usually imperceptible) perspective
+     convergence, so cell edges down an axis no longer overlay EXACTLY the
+     way trueOrthoCam's do. "Zoom" here means narrowing the angle while the
+     actual distance scales up to match -- unlike a real zoom-in, this
+     camera never actually approaches the structure, which is what keeps it
+     out of solid geometry no matter how "zoomed in" the view appears.
+     camDist keeps its existing meaning (the semantic zoom level, matching
+     MG/the Scale readout) for BOTH cameras -- only pseudoOrthoCam's OWN
+     distance (see updateOrthoFrustum) is derived from it via
+     ORTHO_DIST_MULT, never used directly as its position. */
+  var ORTHO_EMULATION_FOV_DEG = 1.5;
+  var ORTHO_DIST_MULT = Math.tan(45 * Math.PI / 360) / Math.tan(ORTHO_EMULATION_FOV_DEG * Math.PI / 360);
+  var sceneBoundRadius = 50; /* max distance from the view-space origin to any currently-loaded
+     atom, +margin -- recomputed by renderStructure() below. Used to keep the far clip plane just
+     past whatever's actually loaded instead of a fixed 6000, so shrinking near for close-up
+     zoom (see currentNearPlane()) doesn't blow the near:far ratio out to where nearby overlapping
+     atoms/bonds start z-fighting -- a fixed 6000 was never a problem on its own, only once near
+     had to shrink to a small fraction of a thousandth of camDist to actually stop clipping. */
   var SCALE_REF = 10000; /* the displayed "scale" number is a plain, unit-less integer where
      bigger = more zoomed in (the inverse of camDist, which is a real distance where bigger means
      further away) -- scale = round(SCALE_REF / camDist). It carries no physical meaning; it's a
@@ -2540,6 +2598,7 @@ select.sel:focus{border-color:var(--accent)}
   var dragMode = null, lastX = 0, lastY = 0;
   var pickDownX = 0, pickDownY = 0, pickMoved = false;
   var draggedLabel = null, draggedLabelDepth = 0, draggedLabelGrabOffset = null;
+  var draggedAtom = null, draggedAtomIsGuest = false, draggedAtomDepth = 0, draggedAtomGrabOffset = null, draggedAtomMoved = false;
 
   function syncControllerFromCamera() {
     var offset = new THREE.Vector3().subVectors(camera.position, camTarget);
@@ -2552,23 +2611,74 @@ select.sel:focus{border-color:var(--accent)}
     var m = new THREE.Matrix4().makeBasis(right, up, dir);
     camOrient.setFromRotationMatrix(m);
   }
+  function currentNearPlane() {
+    /* fixed near=0.05 clips the near face off an atom/bond whenever camDist
+       shrinks enough on zooming in that 0.05 is no longer small next to it
+       (camDist can go as low as 0.3, well within a single atom's own
+       rendered radius) -- scaling near down with camDist keeps the near
+       plane well behind the camera at any zoom level instead. Capped at the
+       original 0.05 so nothing changes at ordinary zoomed-out distances,
+       only when zoomed in close enough for the old fixed value to start
+       biting. The coefficient is deliberately tiny, not just "smaller than
+       0.05" -- confirmed directly (camera grazing an atom's own surface,
+       the worst realistic case short of being inside it) that a near an
+       order of magnitude looser than this still clipped a visible wedge out
+       of the sphere; only once near dropped to a small fraction of a
+       thousandth of camDist did that artifact fully disappear. Always
+       applied now (previously behind a "Prevent close-up clipping" toggle,
+       removed once pseudo-orthographic became available as the real fix) --
+       this alone doesn't solve trueOrthoCam's reference-plane-through-a-
+       sphere case (nothing short of pseudoOrthoCam does), but it does fix
+       the distinct, simpler "camera grazing one atom's own surface" case,
+       with no downside at ordinary zoomed-out distances. */
+    return Math.min(0.05, Math.max(0.00005, camDist * 0.0005));
+  }
+  function currentFarPlane() {
+    /* a fixed far=6000 was fine on its own, but paired with the tiny near
+       currentNearPlane() needs for real close-up zoom it stretches the
+       near:far ratio out so far that the depth buffer runs out of precision
+       for geometry that's actually on screen -- overlapping nearby atoms/
+       bonds start z-fighting, which looks exactly like more clipping. Since
+       nothing genuinely needs to be visible past whatever's actually loaded,
+       bracket far to the loaded structure's own extent (camDist +
+       sceneBoundRadius, so it still covers the far side of the structure
+       from any camera position) instead of a number far bigger than any
+       real structure. */
+    return camDist + sceneBoundRadius;
+  }
   function updateOrthoFrustum() {
-    var vp = document.getElementById("viewport"); if (!vp || !orthoCam) return;
+    var vp = document.getElementById("viewport"); if (!vp) return;
     var aspect = vp.clientWidth / vp.clientHeight;
-    /* match the orthographic view size to what the perspective camera would
-       show at the target plane, so toggling depth scaling doesn't jump the
-       apparent size of the structure */
-    var halfH = camDist * Math.tan(camera.fov * Math.PI / 360);
-    var halfW = halfH * aspect;
-    orthoCam.left = -halfW; orthoCam.right = halfW; orthoCam.top = halfH; orthoCam.bottom = -halfH;
-    orthoCam.near = 0.05; orthoCam.far = 6000;
-    orthoCam.updateProjectionMatrix();
+    if (trueOrthoCam) {
+      var halfH = camDist * Math.tan(camera.fov * Math.PI / 360), halfW = halfH * aspect;
+      trueOrthoCam.left = -halfW; trueOrthoCam.right = halfW; trueOrthoCam.top = halfH; trueOrthoCam.bottom = -halfH;
+      trueOrthoCam.near = currentNearPlane(); trueOrthoCam.far = currentFarPlane();
+      trueOrthoCam.updateProjectionMatrix();
+    }
+    if (pseudoOrthoCam) {
+      pseudoOrthoCam.aspect = aspect;
+      /* pseudoOrthoCam sits at camDist * ORTHO_DIST_MULT, not camDist itself
+         -- see ORTHO_DIST_MULT's own comment. Its near/far only need to
+         bracket a narrow band around THAT distance (the loaded structure's
+         own extent, sceneBoundRadius, plus a small margin) -- nowhere near
+         the tiny-near/huge-far spread trueOrthoCam needs. This is also why
+         this camera never needs that spread in the first place: it's never
+         close to anything. */
+      var orthoDist = camDist * ORTHO_DIST_MULT;
+      pseudoOrthoCam.near = Math.max(0.01, orthoDist - sceneBoundRadius - 5);
+      pseudoOrthoCam.far = orthoDist + sceneBoundRadius + 5;
+      pseudoOrthoCam.updateProjectionMatrix();
+    }
   }
   function applyController() {
     var dir = new THREE.Vector3(0, 0, 1).applyQuaternion(camOrient);
     var pos = camTarget.clone().addScaledVector(dir, camDist);
     camera.position.copy(pos); camera.quaternion.copy(camOrient);
-    if (orthoCam) { orthoCam.position.copy(pos); orthoCam.quaternion.copy(camOrient); }
+    if (trueOrthoCam) { trueOrthoCam.position.copy(pos); trueOrthoCam.quaternion.copy(camOrient); }
+    if (pseudoOrthoCam) {
+      var orthoPos = camTarget.clone().addScaledVector(dir, camDist * ORTHO_DIST_MULT);
+      pseudoOrthoCam.position.copy(orthoPos); pseudoOrthoCam.quaternion.copy(camOrient);
+    }
     updateOrthoFrustum();
     if (state.fogOn) updateFog();
     updateLabelScales();
@@ -2661,6 +2771,25 @@ select.sel:focus{border-color:var(--accent)}
   }
   var lassoPoints = [], lassoFragMode = false;
   var clickMods = { shift: false, ctrl: false, alt: false };
+  function tryGrabAtomForMove(clientX, clientY) {
+    /* "Move atom" mode grabs whichever atom is under the cursor, taking
+       priority over the label pick and the default rotate/roll drag -- an
+       explicitly active mode should win over those defaults. Returns false
+       (grabbing nothing) if the click didn't land on an atom, so the
+       caller falls through to the normal label/rotate logic and the
+       camera can still be orbited without leaving Move mode first. */
+    var hit = resolveClickTarget(clientX, clientY);
+    if (!hit || !hit.atom) return false;
+    dragMode = "atomMove";
+    draggedAtom = hit.atom; draggedAtomIsGuest = !!hit.isGuest; draggedAtomMoved = false;
+    var off = centroid();
+    var world = new THREE.Vector3(draggedAtom.x + off[0], draggedAtom.y + off[1], draggedAtom.z + off[2]);
+    draggedAtomDepth = world.clone().project(activeCam).z;
+    /* same jump-on-first-move fix ndcToWorldAtDepth's label-drag caller
+       uses -- see its own comment in onCanvasPointerDown below */
+    draggedAtomGrabOffset = world.clone().sub(ndcToWorldAtDepth(clientX, clientY, draggedAtomDepth));
+    return true;
+  }
   function onCanvasPointerDown(e) {
     if (state.videoExporting) return;
     if (state.autoRotating) stopAutoRotate(); /* manual interaction always wins over the auto-spin */
@@ -2675,6 +2804,9 @@ select.sel:focus{border-color:var(--accent)}
         dragMode = "lasso"; lassoFragMode = e.ctrlKey;
         lassoPoints = [[e.clientX, e.clientY]];
         showLassoOverlay(true); updateLassoPath();
+      } else if (state.atomEditUiMode === "move" && tryGrabAtomForMove(e.clientX, e.clientY)) {
+        /* handled entirely inside tryGrabAtomForMove() -- dragMode is
+           already set to "atomMove" */
       } else {
         /* a label under the cursor takes priority over rotating -- grabbing a
            label to move it has to work regardless of where else on the
@@ -2709,12 +2841,41 @@ select.sel:focus{border-color:var(--accent)}
     if (state.videoExporting) return;
     if (!dragMode) return;
     if (dragMode === "lasso") {
-      lassoPoints.push([e.clientX, e.clientY]); updateLassoPath();
+      /* only add a new vertex once the pointer has actually moved a few
+         pixels -- without this, a slow, careful lasso drag (exactly the
+         kind used to trace a precise outline) can rack up thousands of
+         near-duplicate points from nothing but pointermove's own sampling
+         rate (which on some systems fires in the hundreds of Hz), and
+         finishLasso()'s pointInPolygon test costs O(atoms x polygon
+         vertices) -- a bloated polygon multiplies straight through onto
+         every atom in the structure. 3px is well under what the eye can
+         tell apart in the drawn outline. */
+      var lastPt = lassoPoints.length ? lassoPoints[lassoPoints.length - 1] : null;
+      if (!lastPt || Math.abs(e.clientX - lastPt[0]) > 3 || Math.abs(e.clientY - lastPt[1]) > 3) {
+        lassoPoints.push([e.clientX, e.clientY]); updateLassoPath();
+      }
       if (Math.abs(e.clientX - pickDownX) > 4 || Math.abs(e.clientY - pickDownY) > 4) pickMoved = true;
       return;
     }
     if (dragMode === "label") {
       moveDraggedLabel(e.clientX, e.clientY);
+      if (Math.abs(e.clientX - pickDownX) > 4 || Math.abs(e.clientY - pickDownY) > 4) pickMoved = true;
+      return;
+    }
+    if (dragMode === "atomMove") {
+      /* Depth-locked to wherever the atom was grabbed (draggedAtomDepth) --
+         only its screen-parallel (lateral) position changes, exactly the
+         "drag in the screen's x-y plane" behaviour requested; reaching a
+         position along the view direction means rotating the model ~90
+         degrees first and continuing to drag, same as this file's other
+         depth-locked drag (moveDraggedLabel). pushUndo() fires once, lazily,
+         on the first real movement -- not on every mousemove frame, and not
+         at all for a plain click that never actually drags. */
+      if (!draggedAtomMoved) { pushUndo(); draggedAtomMoved = true; }
+      var world = ndcToWorldAtDepth(e.clientX, e.clientY, draggedAtomDepth).add(draggedAtomGrabOffset);
+      var off2 = centroid();
+      moveAtomTo(draggedAtom, world.x - off2[0], world.y - off2[1], world.z - off2[2]);
+      renderStructure(); /* recomputes bonds from the atom's new position every frame, so bonding updates live while dragging */
       if (Math.abs(e.clientX - pickDownX) > 4 || Math.abs(e.clientY - pickDownY) > 4) pickMoved = true;
       return;
     }
@@ -2757,6 +2918,21 @@ select.sel:focus{border-color:var(--accent)}
       handleLeftClick(e.clientX, e.clientY, clickMods);
     } else if (dragMode === "label") {
       finalizeLabelDrag();
+    } else if (dragMode === "atomMove") {
+      if (draggedAtomMoved) {
+        /* heavier refreshes (element list, radii/colour editors, host atom
+           count) deferred to here rather than every mousemove frame --
+           renderStructure() already kept positions/bonds live throughout.
+           Labels are the same story: renderLabels() (called every frame via
+           renderStructure()) deliberately skips repositioning while
+           dragMode is still "atomMove" (see its own comment), so this is
+           its settle point instead, now that the atom has actually stopped
+           moving. */
+        updateHostInfo(); buildRadiiEditor(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
+        repositionLabels();
+        setStatus("Moved " + draggedAtom.el + " atom.", false);
+      }
+      draggedAtom = null; draggedAtomGrabOffset = null;
     }
     if ((dragMode === "rotate" || dragMode === "roll") && pickMoved) { updateViewDirectionReadout(); repositionLabels(); }
     dragMode = null;
@@ -2766,10 +2942,19 @@ select.sel:focus{border-color:var(--accent)}
   function initThree(container) {
     scene = new THREE.Scene();
     scene.background = new THREE.Color(state.bgColor);
+    /* "camera" is now purely a reference object -- it's never assigned to
+       activeCam (the real-perspective "Perspective (depth scaling)" viewing
+       mode this used to back was removed; no scientific merit for a
+       crystallographic viewer). Its .fov still anchors the "apparent size at
+       camDist" formulas both ortho-look cameras below match themselves to
+       (updateOrthoFrustum, updateLabelScales, frameCamera). */
     camera = new THREE.PerspectiveCamera(45, 1, 0.05, 6000);
     camera.position.set(22, 15, 26);
-    orthoCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.05, 6000);
-    activeCam = orthoCam;
+    trueOrthoCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.05, 6000);
+    /* near/far/aspect get set for real in updateOrthoFrustum() on the first
+       applyController() call. */
+    pseudoOrthoCam = new THREE.PerspectiveCamera(ORTHO_EMULATION_FOV_DEG, 1, 0.05, 6000);
+    activeCam = state.pseudoOrtho ? pseudoOrthoCam : trueOrthoCam;
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     renderer.localClippingEnabled = true; /* required for void/channel Option 1's per-axis cell-boundary clip planes (cellBoundaryPlanes) */
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -2878,8 +3063,16 @@ select.sel:focus{border-color:var(--accent)}
        fraction exp(-amount^2) at the structure itself -- consistent no
        matter how big the structure is or how zoomed in the view currently
        is. Recomputed on every camera move (see applyController) so zooming
-       in or out doesn't suddenly intensify or relax the fog. */
-    scene.fog = state.fogOn ? new THREE.FogExp2(state.bgColor, state.fogDensity / Math.max(camDist, 1)) : null;
+       in or out doesn't suddenly intensify or relax the fog. Divides by the
+       ACTIVE camera's own real distance from the target -- camDist itself
+       for trueOrthoCam, but camDist * ORTHO_DIST_MULT for pseudoOrthoCam,
+       which actually sits much farther away (see ORTHO_DIST_MULT's own
+       comment) even though camDist's semantic zoom level is unchanged.
+       Using camDist alone here would scale fog for a camera distance the
+       pseudo-orthographic view never actually has, making it look far
+       denser than the density slider says. */
+    var fogRefDist = state.pseudoOrtho ? camDist * ORTHO_DIST_MULT : camDist;
+    scene.fog = state.fogOn ? new THREE.FogExp2(state.bgColor, state.fogDensity / Math.max(fogRefDist, 1)) : null;
   }
   function renderExportBlob(callback) {
     var vp = document.getElementById("viewport"); if (!vp) { callback(null); return; }
@@ -3531,9 +3724,20 @@ select.sel:focus{border-color:var(--accent)}
     sphereGeo = new THREE.SphereGeometry(1, on ? 48 : 20, on ? 36 : 16);
     renderStructure();
   }
-  function setDepthScaling(on) {
-    activeCam = on ? camera : orthoCam;
+  function setPseudoOrtho(on) {
+    activeCam = on ? pseudoOrthoCam : trueOrthoCam;
     onResize();
+    if (state.fogOn) updateFog();
+    /* labels use sizeAttenuation:false -- for a PERSPECTIVE camera (both
+       pseudoOrthoCam and the old, now-removed "depth scaling" camera) the
+       sprite shader itself multiplies scale by the actual view-space depth,
+       which trueOrthoCam's own (depth-independent) scale formula never
+       accounts for. Without recomputing this immediately on toggle, a scale
+       value computed for trueOrthoCam gets rendered through pseudoOrthoCam
+       at its own, much larger, real distance -- multiplying it out into
+       enormous sprites until the next unrelated camera move happened to
+       refresh it. */
+    updateLabelScales();
   }
   function startAutoRotate() {
     if (state.videoExporting) { setStatus("A video export is in progress -- can't autorotate at the same time.", true); return; }
@@ -3595,7 +3799,7 @@ select.sel:focus{border-color:var(--accent)}
     var body = el("div"); body.innerHTML = bodyHtml;
     box.appendChild(body);
     var closeRow = el("div", "btnrow"); closeRow.style.marginTop = "12px";
-    button(closeRow, "Close", null, function () { document.body.removeChild(overlay); });
+    button(closeRow, "Close", "ghost", function () { document.body.removeChild(overlay); });
     box.appendChild(closeRow);
     overlay.appendChild(box);
     overlay.addEventListener("click", function (e) { if (e.target === overlay) document.body.removeChild(overlay); });
@@ -3625,7 +3829,7 @@ select.sel:focus{border-color:var(--accent)}
         document.body.removeChild(overlay);
         resolve();
       }
-      button(btnRow, "OK", null, finish);
+      button(btnRow, "OK", "ghost", finish);
       box.appendChild(btnRow);
       overlay.appendChild(box);
       overlay.addEventListener("click", function (e) { if (e.target === overlay) finish(); });
@@ -3641,12 +3845,14 @@ select.sel:focus{border-color:var(--accent)}
       "<p style='font-size:18px;font-weight:600'>" + f1(result.volume) + " " + U.ang + U.cube + "</p>" +
       "<p class='hint'>This value is shown here only -- it isn't saved or recorded anywhere.</p>");
   }
-  function refreshReassignElementOptions() {
-    var sel = document.getElementById("reassignEl"); if (!sel) return;
+  function buildElementSelectOptions(sel, present) {
+    /* shared by refreshReassignElementOptions() below for both the "Reassign
+       element to" (Edit atoms) and "Create atom" (Create/Move Atoms)
+       dropdowns -- structure's own elements first, a divider, then the full
+       periodic table -- so the two stay identical and in sync automatically
+       from this one place. */
+    if (!sel) return;
     var prev = sel.value;
-    var present = {};
-    function add(atoms) { if (!atoms) return; for (var i = 0; i < atoms.length; i++) { if (!atoms[i].isCentroid) present[atoms[i].el] = true; } }
-    add(state.atoms); add(state.guestAtoms);
     sel.innerHTML = "";
     var i;
     for (i = 1; i < K.ELEMENTS.length; i++) {
@@ -3665,9 +3871,31 @@ select.sel:focus{border-color:var(--accent)}
       for (i = 0; i < opts.length; i++) if (opts[i].value === prev && !opts[i].disabled) { sel.selectedIndex = i; break; }
     }
   }
+  function refreshReassignElementOptions() {
+    var present = {};
+    function add(atoms) { if (!atoms) return; for (var i = 0; i < atoms.length; i++) { if (!atoms[i].isCentroid) present[atoms[i].el] = true; } }
+    add(state.atoms); add(state.guestAtoms);
+    buildElementSelectOptions(document.getElementById("reassignEl"), present);
+    buildElementSelectOptions(document.getElementById("createAtomEl"), present);
+  }
   function elMaterial(colorInt) {
     if (!matCache[colorInt]) matCache[colorInt] = new THREE.MeshStandardMaterial({
-      color: colorInt, metalness: state.atomMetalness, roughness: state.atomRoughness, envMapIntensity: state.atomReflectivity });
+      color: colorInt, metalness: state.atomMetalness, roughness: state.atomRoughness, envMapIntensity: state.atomReflectivity,
+      /* Orthographic projection has no eye point -- every view ray at a given
+         screen position is parallel, referenced to the camera's own depth-0
+         plane rather than a point. When that plane passes through the middle
+         of a solid atom/bond (unavoidable while zooming an orthographic
+         camera in past it -- no near/far tuning changes this, it's a
+         property of parallel projection itself), FrontSide-only culling
+         leaves a flat, perfectly circular hole showing whatever is behind,
+         which reads as "still clipping" even after near/far were already
+         fixed for the ordinary near-plane case. DoubleSide costs nothing in
+         the normal case (the far side of a closed shape always loses the
+         depth test to the near side anyway) and turns this one edge case
+         into a filled cross-section instead of a hole into empty space --
+         confirmed directly by toggling it live against the same reproduction
+         that still showed the hole with near pushed all the way to 1e-6. */
+      side: THREE.DoubleSide });
     return matCache[colorInt];
   }
   function updateMaterialAppearance() {
@@ -3689,7 +3917,7 @@ select.sel:focus{border-color:var(--accent)}
     function setChecked(id, v) { var e = document.getElementById(id); if (e) e.checked = v; }
     var s = state, d = DISPLAY_DEFAULTS;
     var sw = document.getElementById("dispBg"); if (sw) sw.value = hexToCss(s.bgColor);
-    setChecked("dispDepthScaling", s.depthScaling);
+    setChecked("dispPseudoOrtho", s.pseudoOrtho);
     setChecked("dispHighDetail", s.highDetail);
     setChecked("dispFogTg", s.fogOn); setVal("dispFogRange", s.fogDensity);
     setChecked("lightHeadlightTg", s.lightHeadlight);
@@ -3704,7 +3932,7 @@ select.sel:focus{border-color:var(--accent)}
   function resetDisplaySettings() {
     var d = DISPLAY_DEFAULTS;
     state.bgColor = d.bgColor; scene.background = new THREE.Color(d.bgColor);
-    state.depthScaling = d.depthScaling; setDepthScaling(d.depthScaling);
+    state.pseudoOrtho = d.pseudoOrtho; setPseudoOrtho(d.pseudoOrtho);
     setHighDetail(d.highDetail);
     state.fogOn = d.fogOn; state.fogDensity = d.fogDensity; updateFog();
     renderStructure(); renderSurface();
@@ -3795,9 +4023,10 @@ select.sel:focus{border-color:var(--accent)}
     if (!any) return state.guestAtoms;
     return state.guestAtoms.filter(function (a) { return !hidden[a.batch]; });
   }
+  function isAsuAtom(a) { return a.opIndex === 0 && a.cellI === 0 && a.cellJ === 0 && a.cellK === 0; }
   function asuFilter(atoms) {
     if (!state.isCif || !state.showOnlyAsu || !atoms) return atoms;
-    return atoms.filter(function (a) { return a.opIndex === 0 && a.cellI === 0 && a.cellJ === 0 && a.cellK === 0; });
+    return atoms.filter(isAsuAtom);
   }
   function hideFilter(atoms) {
     /* atoms individually hidden via "Hide selected" (Model > Atoms) are left
@@ -3815,9 +4044,39 @@ select.sel:focus{border-color:var(--accent)}
     if (!atoms || state.showHydrogens !== false) return atoms;
     return atoms.filter(function (a) { return a.el !== "H"; });
   }
+  function updateSceneBoundRadius() {
+    /* max distance from the view-space origin (where camTarget always sits)
+       to any currently-loaded atom or unit cell corner, +margin for atom
+       display radii/bond overshoot/labels -- see sceneBoundRadius's own
+       comment for why this matters (keeping the far clip plane tight to
+       what's actually loaded, instead of a fixed 6000, is what keeps
+       currentNearPlane()'s tiny near from wrecking depth precision).
+       Recomputed on every atom/cell change rather than every frame -- cheap
+       relative to the render itself, and camera moves (rotate/zoom, every
+       frame) don't change WHERE the atoms are, only where the camera is. */
+    var off = centroid(), maxD2 = 0, arrs = [state.atoms, state.guestAtoms];
+    for (var ai = 0; ai < arrs.length; ai++) {
+      var arr = arrs[ai]; if (!arr) continue;
+      for (var i = 0; i < arr.length; i++) {
+        var a = arr[i], x = a.x + off[0], y = a.y + off[1], z = a.z + off[2];
+        var d2 = x * x + y * y + z * z;
+        if (d2 > maxD2) maxD2 = d2;
+      }
+    }
+    if (state.isCif && state.cifFracToCart) {
+      for (var ci = 0; ci < 8; ci++) {
+        var c = K.fracToCart(state.cifFracToCart, [(ci & 1) ? 1 : 0, (ci & 2) ? 1 : 0, (ci & 4) ? 1 : 0]);
+        var cx = c[0] + off[0], cy = c[1] + off[1], cz = c[2] + off[2];
+        var cd2 = cx * cx + cy * cy + cz * cz;
+        if (cd2 > maxD2) maxD2 = cd2;
+      }
+    }
+    sceneBoundRadius = Math.sqrt(maxD2) + 5;
+  }
   function renderStructure() {
     clearGroup(atomsGroup); clearGroup(bondsGroup); clearGroup(guestAtomsGroup); clearGroup(guestBondsGroup); clearGroup(ringGroup);
     if (!sphereGeo) sphereGeo = new THREE.SphereGeometry(1, state.highDetail ? 48 : 20, state.highDetail ? 36 : 16);
+    updateSceneBoundRadius(); applyController();
     var off = centroid(); /* host-based offset, applied to guest too so their relative geometry stays correct */
     var ringData = [];
     if (state.showHost) renderMoleculeInto(hydrogenFilter(hideFilter(asuFilter(state.atoms))), "ballstick", state.atomScale, state.hostBondRadius, atomsGroup, bondsGroup, off, false, state.hostBondColorMode, state.hostBondColor, ringData);
@@ -3826,6 +4085,19 @@ select.sel:focus{border-color:var(--accent)}
     renderHBonds(off);
     renderLabels();
     renderSelection();
+    syncNoAtomsOverlay();
+  }
+  function syncNoAtomsOverlay() {
+    /* Shown whenever there's genuinely nothing to look at -- the initial
+       blank state before anything's ever been loaded, and (see
+       clearStructure()) a load attempt that recognized the file's format
+       but found no usable atom coordinates in it. Called from
+       renderStructure() itself so it always reflects the true current
+       state regardless of which code path got there, rather than needing
+       to be remembered at every individual call site. */
+    var el = document.getElementById("noAtomsOverlay"); if (!el) return;
+    var hasAtoms = (state.atoms && state.atoms.length) || (state.guestAtoms && state.guestAtoms.length);
+    el.style.display = hasAtoms ? "none" : "flex";
   }
   var HBOND_ELEMENTS = { N: 1, O: 1, S: 1, Cl: 1 };
   function findHydrogenBonds(atoms) {
@@ -4311,6 +4583,26 @@ select.sel:focus{border-color:var(--accent)}
       labelGroup.add(sp);
     }
     updateLabelScales();
+    /* Every unpinned label above just got the plain, cheap "float above the
+       atom" default -- rebuilding here (a fresh sprite per atom) has no way
+       to know what repositionLabels() worked out last time, so without this
+       call every rebuild would silently forget it and fall back to that
+       default, no matter how unrelated the change that triggered the
+       rebuild was (label size/colour/font, style changes, growth, a fresh
+       structure load, turning labels on for the first time -- all of these
+       call renderLabels(), directly or via renderStructure()). Since the
+       camera itself is never what's moving in any of those cases, this is
+       exactly a moment the view has "settled" by repositionLabels()'s own
+       standard, so it's always safe to run again here -- with one
+       exception: dragging an atom re-renders on every single mousemove
+       frame (see the dragMode === "atomMove" branch of
+       onWindowPointerMove), and repositionLabels() is expensive enough
+       (O(atoms x bonds x 8 directions) with real projections) that doing
+       it every such frame would be janky, not just wasteful -- labels
+       snapping between compass directions as the dragged atom sweeps past
+       others. That one case already has its own proper settle point at
+       drag-release instead (onWindowPointerUp's atomMove branch). */
+    if (dragMode !== "atomMove") repositionLabels();
   }
   function updateLabelScales() {
     /* sizeAttenuation is off, so the sprite scale has to be converted into
@@ -4320,11 +4612,17 @@ select.sel:focus{border-color:var(--accent)}
        orthographic path does not, so the frustum height has to be folded in
        by hand. Doing both here means a label keeps the same size on screen at
        any zoom, under either projection, and comes out the same in an
-       exported image. */
+       exported image. pseudoOrthoCam is a REAL PerspectiveCamera (see its
+       own comment) -- sizeAttenuation-off sprites need ITS OWN (tiny,
+       ORTHO_EMULATION_FOV_DEG) fov in the perspective-shaped formula, not
+       the reference camera's 45°, and NOT the camDist-scaled orthographic
+       formula (only trueOrthoCam, a real literal ortho projection, needs
+       that one). Using the wrong branch/fov here is what made labels come
+       out wildly wrong-sized in pseudo-ortho mode. */
     if (!labelGroup) return;
     var f = state.labelSize / 100;
-    var factor = state.depthScaling
-      ? (2 * Math.tan(camera.fov * Math.PI / 360))
+    var factor = state.pseudoOrtho
+      ? (2 * Math.tan(ORTHO_EMULATION_FOV_DEG * Math.PI / 360))
       : (2 * camDist * Math.tan(camera.fov * Math.PI / 360));
     for (var i = 0; i < labelGroup.children.length; i++) {
       var sp = labelGroup.children[i];
@@ -4376,12 +4674,19 @@ select.sel:focus{border-color:var(--accent)}
      the labelled atom and every other currently visible one. Depth is not
      considered at all; it doesn't need to be, since occlusion is only
      possible where two things project to the same pixels.
-       Called only at the moments the view actually settles -- mouse-up after
-     a drag, the view-direction shortcuts, and frameCamera -- and deliberately
-     NOT from renderLabels(), so an unrelated change (nudging a slider,
-     toggling a style) doesn't make already-well-placed labels jump around;
-     they simply keep whatever placement the last settled view gave them
-     until the next one. */
+       Called at every moment the view has settled: mouse-up after a
+     rotate/roll or atom-move drag, the view-direction shortcuts, frameCamera,
+     and -- via renderLabels(), see its own comment -- any rebuild triggered
+     by something other than the camera itself moving (label/style settings,
+     growth, a fresh structure load, turning labels on for the first time).
+     A rebuild mid-camera-drag never reaches here at all (rotate/roll don't
+     call renderStructure() per frame; only their own mouse-up does), and an
+     atom-drag's own per-frame renderStructure() calls explicitly skip it
+     (see renderLabels()'s dragMode check) since re-running this on every
+     mousemove frame while dragging an atom would be genuinely expensive
+     (O(atoms x bonds x 8 directions) with real projections) and would look
+     like labels jittering between compass points as the dragged atom sweeps
+     past others, rather than settling once the drag actually stops. */
   function repositionLabels() {
     if (!state.showLabels || !labelGroup || !labelGroup.children.length) return;
     var vp = document.getElementById("viewport");
@@ -4543,10 +4848,9 @@ select.sel:focus{border-color:var(--accent)}
     setStatus((show ? "Labelled " : "Unlabelled ") + sel.length + " atom" + (sel.length === 1 ? "" : "s") + ".", false);
   }
   /* Releases every manually-dragged label in scope back to automatic
-     placement, then immediately runs that placement rather than leaving them
-     at the plain default until the next drag settles -- a deliberate "undo
-     the pinning" action is itself a settle point, the same as a double-click
-     on a single label already is. */
+     placement -- renderLabels() below runs that placement itself now (see
+     its own comment), so a released label never sits at the plain default
+     even for one frame. */
   function unfixLabels(scope) {
     var n = 0;
     for (var i = 0; i < scope.length; i++) {
@@ -4556,7 +4860,6 @@ select.sel:focus{border-color:var(--accent)}
     }
     if (!n) { setStatus("No fixed labels to release" + (scope === state.atoms ? "" : " among the selected atoms") + ".", false); return; }
     renderLabels();
-    repositionLabels();
     setStatus("Released " + n + " fixed label" + (n === 1 ? "" : "s") + " back to automatic placement.", false);
   }
   function unfixAllLabels() { unfixLabels((state.atoms || []).concat(state.guestAtoms || [])); }
@@ -6431,7 +6734,7 @@ select.sel:focus{border-color:var(--accent)}
       vecInputs.push(inp);
       grid.appendChild(inp);
     });
-    var actionBtn = button(grid, "Apply", null, function () {
+    var actionBtn = button(grid, "Apply", "ghost", function () {
       if (state.voidUiMode === "move") applyVoidMoveVector(state.voidUiVector.slice());
       else applyVoidCopyVector(state.voidUiVector.slice());
     });
@@ -6493,7 +6796,7 @@ select.sel:focus{border-color:var(--accent)}
       grp.header.appendChild(el("span", null, voidCompLabel(compId)));
       grp.header.appendChild(el("span", "tri2", "›"));
       if (frags.length > 1 && !state.voidConsolidated[compId]) {
-        var assembleBtn = el("button", "btn mini blue-fill", "Assemble");
+        var assembleBtn = el("button", "btn mini", "Assemble");
         assembleBtn.addEventListener("click", function () { assembleVoidComponent(compId); });
         grp.body.appendChild(assembleBtn);
         var consolidateBtn = el("button", "btn mini", "Consolidate");
@@ -6807,7 +7110,19 @@ select.sel:focus{border-color:var(--accent)}
     var off = centroid();
     if (!selMat) selMat = new THREE.MeshBasicMaterial({ color: 0xffcc00, wireframe: true, transparent: true, opacity: 0.9 });
     if (!selGlowMat) selGlowMat = new THREE.MeshBasicMaterial({ color: 0xffcc00, transparent: true, opacity: 0.16, depthWrite: false });
-    function addHighlights(atoms, style, scaleMult, bondRadius) {
+    /* collect transforms first, THEN build a handful of InstancedMeshes --
+       the previous version created two individual THREE.Mesh objects (glow +
+       wireframe) PER selected atom, i.e. two separate draw calls each. That's
+       invisible in the JS timing around finishLasso() itself (building the
+       Mesh objects is cheap) but shows up as real, severe cost on the NEXT
+       render frame -- thousands of atoms selected means thousands of draw
+       calls, which is exactly the kind of cost a synchronous performance.now()
+       bracket around the selection logic never catches, only the frame after.
+       Matching the main atom renderer's own InstancedMesh approach collapses
+       this to at most 4 draw calls total (regular glow/wire, ellipsoid
+       glow/wire), regardless of selection size. */
+    var regularMatrices = [], ellipsoidMatrices = [];
+    function collectHighlights(atoms, style, scaleMult, bondRadius) {
       if (!atoms) return;
       var ellK = ELLIPSOID_PROB_SCALE[state.ellipsoidProb] || ELLIPSOID_PROB_SCALE["50"];
       for (var i = 0; i < atoms.length; i++) {
@@ -6830,12 +7145,7 @@ select.sel:focus{border-color:var(--accent)}
             new THREE.Vector3(e[0][2], e[1][2], e[2][2]));
           var m = new THREE.Matrix4().copy(basis).scale(new THREE.Vector3(s0, s1, s2));
           m.setPosition(pos[0], pos[1], pos[2]);
-          var glowE = new THREE.Mesh(selSphereGeo, selGlowMat);
-          m.decompose(glowE.position, glowE.quaternion, glowE.scale);
-          selectionGroup.add(glowE);
-          var meshE = new THREE.Mesh(selSphereGeo, selMat);
-          m.decompose(meshE.position, meshE.quaternion, meshE.scale);
-          selectionGroup.add(meshE);
+          ellipsoidMatrices.push(m);
           continue;
         }
         var dispR = a.isCentroid ? 0.2 : atomDisplayRadius(style, a.r, a.el, bondRadius, scaleMult, a);
@@ -6843,24 +7153,43 @@ select.sel:focus{border-color:var(--accent)}
            so the margin stays visible on the smallest spheres (e.g. Stick's
            joint caps) without ballooning into a loose halo on large ones */
         var r = dispR * 1.06 + 0.025;
-        /* a faint solid shell in addition to the wireframe -- unlit like the
-           wireframe, so it's unaffected by scene lighting or atom material,
-           and gives the highlight some visibility even where a bright,
-           glossy atom would otherwise make thin wireframe lines hard to see */
-        var glow = new THREE.Mesh(selSphereGeo, selGlowMat);
-        glow.scale.setScalar(r); glow.position.set(pos[0], pos[1], pos[2]);
-        selectionGroup.add(glow);
-        var mesh = new THREE.Mesh(selSphereGeo, selMat);
-        mesh.scale.setScalar(r);
-        mesh.position.set(pos[0], pos[1], pos[2]);
-        selectionGroup.add(mesh);
+        var m2 = new THREE.Matrix4().makeScale(r, r, r);
+        m2.setPosition(pos[0], pos[1], pos[2]);
+        regularMatrices.push(m2);
       }
     }
-    if (state.showHost) addHighlights(hydrogenFilter(hideFilter(asuFilter(state.atoms))), "ballstick", state.atomScale, state.hostBondRadius);
-    if (state.showGuest) addHighlights(hydrogenFilter(hideFilter(asuFilter(visibleGuestAtoms()))), "ballstick", state.guestScale, state.guestBondRadius);
+    if (state.showHost) collectHighlights(hydrogenFilter(hideFilter(asuFilter(state.atoms))), "ballstick", state.atomScale, state.hostBondRadius);
+    if (state.showGuest) collectHighlights(hydrogenFilter(hideFilter(asuFilter(visibleGuestAtoms()))), "ballstick", state.guestScale, state.guestBondRadius);
+    function addInstancedHighlights(matrices, mat) {
+      if (!matrices.length) return;
+      /* a faint solid shell in addition to the wireframe -- unlit like the
+         wireframe, so it's unaffected by scene lighting or atom material,
+         and gives the highlight some visibility even where a bright,
+         glossy atom would otherwise make thin wireframe lines hard to see */
+      var im = new THREE.InstancedMesh(selSphereGeo, mat, matrices.length);
+      for (var i = 0; i < matrices.length; i++) im.setMatrixAt(i, matrices[i]);
+      im.instanceMatrix.needsUpdate = true;
+      selectionGroup.add(im);
+    }
+    addInstancedHighlights(regularMatrices, selGlowMat);
+    addInstancedHighlights(regularMatrices, selMat);
+    addInstancedHighlights(ellipsoidMatrices, selGlowMat);
+    addInstancedHighlights(ellipsoidMatrices, selMat);
     if (!highlightCylGeo) highlightCylGeo = new THREE.CylinderGeometry(1, 1, 1, 12, 1, true);
     function addBondHighlights(atoms, style, bondRadius) {
       if (!atoms || (style !== "ballstick" && style !== "stick")) return;
+      /* selectedBonds (the Edit-bonds selection, not atom/lasso selection)
+         is almost always empty when this runs -- an atom lasso-select in
+         particular never touches it at all. computeBondsWithOverrides()
+         recomputes distance-based connectivity for the WHOLE array from
+         scratch every call; on a large, heavily-grown structure that's real,
+         non-trivial work, and running it here just to immediately discard
+         every result (nothing in selectedBonds to match against) was the
+         actual cost behind "lasso select is slow after releasing the mouse"
+         -- finishLasso() only ever touches atom .selected flags, never
+         selectedBonds, so this whole function had nothing to contribute on
+         that path and was paying for a full bond recompute anyway. */
+      if (!Object.keys(state.selectedBonds).length) return;
       var bonds = computeBondsWithOverrides(atoms);
       for (var i = 0; i < bonds.length; i++) {
         var A = atoms[bonds[i][0]], B = atoms[bonds[i][1]];
@@ -6971,16 +7300,59 @@ select.sel:focus{border-color:var(--accent)}
     var poly = lassoPoints; lassoPoints = [];
     if (poly.length < 3) return; /* too small to enclose anything -- treat as an accidental drag */
     var off = centroid();
+    /* a screen-space bounding-box test is O(1) per atom vs. pointInPolygon's
+       O(polygon vertices) -- cheap enough to run for every atom first and
+       skip the expensive test entirely for anything trivially outside the
+       lasso's own extent (typically most of a large structure, for any
+       lasso that doesn't span the whole view) */
+    var boxMinX = poly[0][0], boxMaxX = poly[0][0], boxMinY = poly[0][1], boxMaxY = poly[0][1];
+    for (var pi = 1; pi < poly.length; pi++) {
+      var px = poly[pi][0], py = poly[pi][1];
+      if (px < boxMinX) boxMinX = px; else if (px > boxMaxX) boxMaxX = px;
+      if (py < boxMinY) boxMinY = py; else if (py > boxMaxY) boxMaxY = py;
+    }
     function processLayer(atoms) {
       if (!atoms) return;
+      /* lassoFragMode (Ctrl-drag -- select whole fragments/molecules, not
+         just the atoms literally under the lasso) used to call
+         fragmentIndices(atoms, i) separately for EVERY atom that lands
+         inside the polygon -- and fragmentIndices() rebuilds the WHOLE
+         atom array's bond list from scratch internally
+         (computeBondsWithOverrides) every single call. A lasso that catches
+         even a few hundred atoms in a large, heavily-grown structure meant
+         a few hundred full bond recomputations, compounding into the
+         actual multi-second-to-half-a-minute delay reported -- not the
+         polygon math or the plain per-atom case, which were already fast.
+         Fixed by building the bond adjacency ONCE per layer and reusing it
+         for a single BFS per newly-discovered fragment, skipping any atom
+         already covered by an earlier one in this same pass. */
+      var adj = null;
+      if (lassoFragMode) {
+        var bonds = computeBondsWithOverrides(atoms);
+        adj = {};
+        for (var bi = 0; bi < bonds.length; bi++) {
+          var b = bonds[bi];
+          (adj[b[0]] = adj[b[0]] || []).push(b[1]);
+          (adj[b[1]] = adj[b[1]] || []).push(b[0]);
+        }
+      }
+      var fragHandled = lassoFragMode ? {} : null;
       for (var i = 0; i < atoms.length; i++) {
         var a = atoms[i];
         if (!isSelectable(a)) continue;
+        if (lassoFragMode && fragHandled[i]) continue;
         var sp = worldToScreen(a.x + off[0], a.y + off[1], a.z + off[2]);
+        if (sp[0] < boxMinX || sp[0] > boxMaxX || sp[1] < boxMinY || sp[1] > boxMaxY) continue;
         if (!pointInPolygon(sp[0], sp[1], poly)) continue;
         if (lassoFragMode) {
-          var frag = fragmentIndices(atoms, i);
-          for (var k = 0; k < frag.length; k++) if (isSelectable(atoms[frag[k]])) atoms[frag[k]].selected = true;
+          var stack = [i], seen = {}; seen[i] = 1;
+          while (stack.length) {
+            var k = stack.pop();
+            fragHandled[k] = true;
+            if (isSelectable(atoms[k])) atoms[k].selected = true;
+            var nb = adj[k] || [];
+            for (var ni = 0; ni < nb.length; ni++) if (!seen[nb[ni]]) { seen[nb[ni]] = 1; stack.push(nb[ni]); }
+          }
         } else {
           a.selected = true;
         }
@@ -7010,14 +7382,31 @@ select.sel:focus{border-color:var(--accent)}
   }
   function isSelectable(a) {
     /* an atom can only be selected if it's actually currently displayed --
-       either individually hidden (Hide selected/Unhide all), or a hydrogen
-       while the plain-H display toggle has hydrogens switched off. Applies
-       everywhere selection can happen: single click, ctrl/alt/shift scoped
-       click, lasso, select-all, and ctrl-alt symmetry-related select. */
+       individually hidden (Hide selected/Unhide all), a hydrogen while the
+       plain-H display toggle has hydrogens switched off, or excluded by
+       "Show ASU only" (mirrors asuFilter's own condition via isAsuAtom, so
+       the two can't drift apart). Applies everywhere selection can happen:
+       single click, ctrl/alt/shift scoped click, lasso, select-all, and
+       ctrl-alt symmetry-related select -- a click can't normally reach a
+       non-rendered atom at all (nothing there to hit), but lasso and
+       select-all/invert work from the full atom list regardless of what's
+       actually drawn, so they need this check explicitly. */
     if (!a) return false;
     if (a.hidden) return false;
     if (a.el === "H" && state.showHydrogens === false) return false;
+    if (state.isCif && state.showOnlyAsu && !isAsuAtom(a)) return false;
     return true;
+  }
+  function clearUnselectableSelections() {
+    /* keeps ".selected" in sync with "actually displayed" the instant
+       something becomes non-selectable -- e.g. turning "Show ASU only" on
+       while a grown (non-ASU) atom is selected, exactly like Hide selected
+       already explicitly clears .selected on the atoms it hides. Without
+       this, a selection could sit invisibly on atoms the user can no longer
+       even see to confirm, ready to surprise them via Delete/Move selection
+       to/etc. the next time "Show ASU only" (or similar) toggles off again. */
+    (function clearOne(arr) { if (arr) for (var i = 0; i < arr.length; i++) if (arr[i].selected && !isSelectable(arr[i])) arr[i].selected = false; })(state.atoms);
+    (function clearOne(arr) { if (arr) for (var i = 0; i < arr.length; i++) if (arr[i].selected && !isSelectable(arr[i])) arr[i].selected = false; })(state.guestAtoms);
   }
   function sameComponentPredicate(atom, isGuest) {
     /* host has no sub-components, so "same component" for a host atom just
@@ -7028,6 +7417,7 @@ select.sel:focus{border-color:var(--accent)}
   }
   function handleLeftClick(clientX, clientY, mods) {
     if (state.voidUiMode) { handleVoidSelectClick(clientX, clientY, mods); return; }
+    if (state.atomEditUiMode === "create") { createAtomAtClick(clientX, clientY); return; }
     var hit = resolveClickTarget(clientX, clientY);
     if (!hit) return;
     if (state.bondEditMode) {
@@ -7049,6 +7439,18 @@ select.sel:focus{border-color:var(--accent)}
     }
     if (mods.ctrl && mods.alt) {
       if (state.isCif && hit.atom.auIndex !== undefined) selectSymmetryRelated(hit.atom);
+      else if (state.isCif) setStatus("This atom has no symmetry information to select by.", true);
+      return;
+    }
+    if (mods.shift && mods.alt) {
+      /* checked before the plain ctrl/alt/shift scope block further down --
+         without this, shift+alt would silently fall into the alt branch
+         there (same component) with shift's element filter layered on top,
+         a combination that was never a deliberate feature. The dual of
+         ctrl+alt's "same asymmetric-unit atom, every symmetry copy": every
+         atom this one specific symmetry OPERATOR produced, regardless of
+         which asymmetric-unit atom it came from. */
+      if (state.isCif && hit.atom.opIndex !== undefined) selectSameSymop(hit.atom);
       else if (state.isCif) setStatus("This atom has no symmetry information to select by.", true);
       return;
     }
@@ -7101,6 +7503,21 @@ select.sel:focus{border-color:var(--accent)}
     renderSelection(); updateSelectionInfo();
     setStatus(makeSelected ? ("Selected " + count + " symmetry-related atom" + (count === 1 ? "" : "s") + ".") : "Deselected symmetry-related atoms.", false);
   }
+  function selectSameSymop(clickedAtom) {
+    /* the dual of selectSymmetryRelated() above: that one fixes the
+       asymmetric-unit atom (auIndex) and selects every symmetry copy of it;
+       this one fixes the symmetry OPERATOR (opIndex) and selects every
+       atom -- from any asymmetric-unit position, host or guest -- that this
+       one operator generated. Cell (cellI/J/K) is deliberately not part of
+       the match: the operator is the same wherever it's been translated to. */
+    var allAtoms = (state.atoms || []).concat(state.guestAtoms || []);
+    var makeSelected = !clickedAtom.selected, count = 0;
+    for (var i = 0; i < allAtoms.length; i++) {
+      if (allAtoms[i].opIndex === clickedAtom.opIndex && (!makeSelected || isSelectable(allAtoms[i]))) { allAtoms[i].selected = makeSelected; if (makeSelected) count++; }
+    }
+    renderSelection(); updateSelectionInfo();
+    setStatus(makeSelected ? ("Selected " + count + " atom" + (count === 1 ? "" : "s") + " generated by the same symmetry operator.") : "Deselected atoms generated by the same symmetry operator.", false);
+  }
   function selectSamePart(clickedAtom) {
     /* mirrors selectSymmetryRelated() above -- toggle-select/deselect every
        atom (host and guest together) sharing the clicked atom's PART number.
@@ -7144,6 +7561,94 @@ select.sel:focus{border-color:var(--accent)}
     renderSelection();
     renderStructure(); updateHostInfo(); buildRadiiEditor(); buildHostColorEditor(); refreshReassignElementOptions(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
     setStatus("Generated a centroid from " + sel.length + " selected atoms.", false);
+  }
+  /* ---------------- Create/Move Atoms ----------------
+   * Two mutually exclusive click-driven modes, following the exact
+   * red/ghost toggle convention the void/channel analysis panel's own
+   * Move mode/Copy mode buttons use (see setVoidUiMode() and the
+   * "grow-active" CSS class) -- pressing one activates it and turns it
+   * red; pressing it again, pressing the other, closing the
+   * Create/Move Atoms subsection, or clicking any other control all
+   * cancel it (see exitAtomEditMode() and its call sites). */
+  function setAtomEditUiMode(mode) {
+    state.atomEditUiMode = (state.atomEditUiMode === mode) ? null : mode;
+    syncAtomEditButtons();
+  }
+  function syncAtomEditButtons() {
+    var createBtn = document.getElementById("createAtomBtn"), moveBtn = document.getElementById("moveAtomBtn");
+    if (createBtn) createBtn.className = "btn" + (state.atomEditUiMode === "create" ? " grow-active" : " ghost");
+    if (moveBtn) moveBtn.className = "btn" + (state.atomEditUiMode === "move" ? " grow-active" : " ghost");
+  }
+  function exitAtomEditMode() {
+    if (!state.atomEditUiMode) return;
+    state.atomEditUiMode = null;
+    syncAtomEditButtons();
+  }
+  function createAtomAtClick(clientX, clientY) {
+    /* Placed on the plane through the camera's own orbit pivot (camTarget),
+       facing the camera -- i.e. wherever the view currently happens to be
+       focused, at screen depth zero -- not a plane fixed in the crystal's
+       own coordinate frame, so the same click position always lands
+       predictably regardless of which way the model has been rotated.
+       ndcToWorldAtDepth() (already used for dragging labels) does the
+       actual screen-to-3D unprojection; camTarget's own NDC depth is what
+       picks the plane. */
+    var sel = document.getElementById("createAtomEl");
+    var newEl = sel ? sel.value : null;
+    if (!newEl) { setStatus("Choose an element to create first.", true); return; }
+    var depth = camTarget.clone().project(activeCam).z;
+    var world = ndcToWorldAtDepth(clientX, clientY, depth);
+    var off = centroid(); /* atoms are stored WITHOUT this render-time offset -- see renderStructure() */
+    var x = world.x - off[0], y = world.y - off[1], z = world.z - off[2];
+    pushUndo();
+    var newAtom = { el: newEl, x: x, y: y, z: z, r: K.vdw(newEl), cr: K.cov(newEl), color: K.cpk(newEl), isCentroid: false, selected: false, hidden: false };
+    /* Mirrors generateCentroid()'s own CIF-registration branch exactly, so
+       a hand-created atom is grow-able by symmetry the same way a centroid
+       already is -- see that function's comment for the precedent. */
+    if (state.isCif && !state.symmetryForgotten && state.cifFracToCart) {
+      var f = K.cartToFrac(state.cifFracToCart, [x, y, z]);
+      var auIndex = state.cifAsymUnit.length;
+      state.cifAsymUnit.push({ label: newEl + (auIndex + 1), el: newEl, fx: f[0], fy: f[1], fz: f[2], occ: 1.0 });
+      newAtom.auIndex = auIndex; newAtom.opIndex = 0; newAtom.cellI = 0; newAtom.cellJ = 0; newAtom.cellK = 0;
+      newAtom.fx = f[0]; newAtom.fy = f[1]; newAtom.fz = f[2];
+    }
+    assignUids([newAtom]);
+    state.atoms = (state.atoms || []).concat([newAtom]); /* always host -- see this feature's own design note */
+    renderStructure(); updateHostInfo(); buildRadiiEditor(); buildHostColorEditor(); refreshReassignElementOptions(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
+    setStatus("Created a new " + newEl + " atom.", false);
+  }
+  function moveAtomTo(atom, x, y, z) {
+    /* For a CIF/RES-tracked atom, a drag moves the whole asymmetric-unit
+       position, not just this one displayed copy -- every symmetry-related
+       copy (atomsWithSameAuIndex) moves together, keeping the structure's
+       symmetry intact, the same principle reassignSelectedElement() already
+       applies to an element change. The ASU record is the single source of
+       truth (updated once); every copy, including the one actually being
+       dragged, is then re-derived from it via its OWN opIndex/cell shift --
+       exactly generateSymmetryAtom()'s own math, just applied in place so
+       bonds/selection/uid identity survive instead of replacing the atom
+       object. Given x,y,z is the target Cartesian position for THIS
+       specific copy, recovering the ASU fractional position needs this
+       copy's own symmetry operator inverted (undo its cell shift, then undo
+       its rotation+translation) -- see invertSymop()'s own comment. */
+    if (state.isCif && atom.auIndex !== undefined && !state.symmetryForgotten && state.cifFracToCart) {
+      var newFGlobal = K.cartToFrac(state.cifFracToCart, [x, y, z]);
+      var newFOp = [newFGlobal[0] - atom.cellI, newFGlobal[1] - atom.cellJ, newFGlobal[2] - atom.cellK];
+      var invOp = K.invertSymop(state.cifSymops[atom.opIndex]);
+      if (invOp) {
+        var newAuFrac = K.applySymop(invOp, newFOp);
+        var au = state.cifAsymUnit[atom.auIndex];
+        au.fx = newAuFrac[0]; au.fy = newAuFrac[1]; au.fz = newAuFrac[2];
+        atomsWithSameAuIndex(atom.auIndex).forEach(function (s) {
+          var f = K.applySymop(state.cifSymops[s.opIndex], newAuFrac);
+          f = [f[0] + s.cellI, f[1] + s.cellJ, f[2] + s.cellK];
+          var c = K.fracToCart(state.cifFracToCart, f);
+          s.x = c[0]; s.y = c[1]; s.z = c[2]; s.fx = f[0]; s.fy = f[1]; s.fz = f[2];
+        });
+        return;
+      }
+    }
+    atom.x = x; atom.y = y; atom.z = z;
   }
   function reassignSelectedElement(newEl) {
     if (!newEl) return;
@@ -7856,6 +8361,275 @@ select.sel:focus{border-color:var(--accent)}
       setStatus("Extended fragments: added " + n + " atom" + (n === 1 ? "" : "s") + ".", false);
     }, 30);
   }
+  /* Standard metal/non-metal staircase: every element except this list is
+     treated as a metal. Metalloids (B, Si, Ge, As, Sb, Te, Po) are grouped
+     with the non-metals here -- for a coordination polymer/MOF, these behave
+     like ordinary ligand atoms, not the bridging metal centre the ligand-
+     completion logic below needs to stop at. */
+  var NONMETAL_ELEMENTS = { H: 1, He: 1, B: 1, C: 1, N: 1, O: 1, F: 1, Ne: 1, Si: 1, P: 1, S: 1, Cl: 1, Ar: 1,
+    Ge: 1, As: 1, Se: 1, Br: 1, Kr: 1, Sb: 1, Te: 1, I: 1, Xe: 1, Po: 1, At: 1, Rn: 1, Og: 1 };
+  function isMetalElement(el) { return !NONMETAL_ELEMENTS.hasOwnProperty(el); }
+  function groupIntoLigandFragments(atoms) {
+    /* Like groupIntoFragments, but cuts every bond that touches a metal atom
+       before grouping, and never includes a metal atom in any group --
+       every group here is a maximal connected piece of pure ligand (organic
+       or otherwise non-metal) chemistry, bounded on all sides by wherever it
+       coordinates to a metal centre. Used by completeTruncatedLigands() to
+       find ligands truncated by Pack/growth's own box or bond-distance
+       cutoff, independently of whether the metal-including whole structure
+       closes as a discrete molecule at all -- a MOF's framework never does,
+       but each individual ligand still has its own complete, finite shape. */
+    var bonds = computeBondsWithOverrides(atoms), adj = {};
+    for (var bi = 0; bi < bonds.length; bi++) {
+      var b = bonds[bi], ia = b[0], ib = b[1];
+      if (isMetalElement(atoms[ia].el) || isMetalElement(atoms[ib].el)) continue;
+      (adj[ia] = adj[ia] || []).push(ib);
+      (adj[ib] = adj[ib] || []).push(ia);
+    }
+    var claimed = {}, groups = [];
+    for (var i = 0; i < atoms.length; i++) {
+      if (claimed[i] || atoms[i].isCentroid || atoms[i].auIndex === undefined || isMetalElement(atoms[i].el)) continue;
+      var stack = [i], seen = {}, group = [];
+      seen[i] = 1;
+      while (stack.length) {
+        var k = stack.pop(); claimed[k] = true; group.push(atoms[k]);
+        var nb = adj[k] || [];
+        for (var j = 0; j < nb.length; j++) if (!seen[nb[j]]) { seen[nb[j]] = 1; stack.push(nb[j]); }
+      }
+      groups.push(group);
+    }
+    return groups;
+  }
+  function groupIntoFragments(atoms) {
+    /* every currently-displayed CIF atom in this one array (host OR guest,
+       never mixed -- callers pass one at a time), partitioned into its
+       distinct covalently-bonded connected components. Each component is
+       tested for molecule-completion independently in
+       completeMoleculeFragments() below -- a structure can perfectly well
+       contain both a discrete molecule (closes) and an extended framework
+       (doesn't) at once, and testing them together would let one mask the
+       other. */
+    var claimed = {}, groups = [];
+    for (var i = 0; i < atoms.length; i++) {
+      if (claimed[i] || atoms[i].isCentroid || atoms[i].auIndex === undefined) continue;
+      var idxs = fragmentIndices(atoms, i), group = [];
+      for (var j = 0; j < idxs.length; j++) { claimed[idxs[j]] = true; group.push(atoms[idxs[j]]); }
+      groups.push(group);
+    }
+    return groups;
+  }
+  function buildBaseSymmetryImages() {
+    /* Every (asymmetric-unit atom, symmetry operator) combination, evaluated
+       once at cell (0,0,0) -- computed ONCE per completeMoleculeFragments()
+       call and shared across every fragment's test, rather than recomputing
+       K.applySymop()/K.fracToCart() from scratch every time a candidate is
+       considered (the dominant cost of the previous, much slower version of
+       this feature). There are only asymUnit.length * symops.length of
+       these, typically a few hundred at most, so this is cheap even for a
+       large structure. */
+    var au = state.cifAsymUnit, symops = state.cifSymops, out = [];
+    for (var auI = 0; auI < au.length; auI++) {
+      if (au[auI].deleted) continue;
+      for (var opI = 0; opI < symops.length; opI++) out.push(generateSymmetryAtom(auI, opI, 0, 0, 0));
+    }
+    return out;
+  }
+  function tryBondCandidate(base, seedAtom, ci, cj, ck, out, skipMetals) {
+    var M = state.cifFracToCart;
+    var shift = K.fracToCart(M, [ci, cj, ck]);
+    var x = base.x + shift[0], y = base.y + shift[1], z = base.z + shift[2];
+    var dx = x - seedAtom.x, dy = y - seedAtom.y, dz = z - seedAtom.z, d2 = dx * dx + dy * dy + dz * dz;
+    if (d2 < 1e-6) return;
+    var lim = base.cr + seedAtom.cr + 0.45;
+    var minD = (base.el === "H" || seedAtom.el === "H") ? 0.4 : 1.0;
+    if (d2 <= minD * minD || d2 >= lim * lim) return;
+    if (skipMetals && isMetalElement(base.el)) return; /* the ligand-completion boundary: never add a metal atom, don't expand past it either -- see completeTruncatedLigands() */
+    var cand = generateSymmetryAtom(base.auIndex, base.opIndex, ci, cj, ck);
+    if (!partsCanBond(cand, seedAtom)) return;
+    out.push(cand);
+  }
+  function findBondedImagesFast(seedAtom, baseImages, skipMetals) {
+    /* For a base image belonging to a DIFFERENT (auIndex,opIndex) than the
+       seed's own, the ONE cell shift that could possibly bond it to seedAtom
+       is the nearest-image shift (round the fractional-coordinate
+       difference to the nearest integer) -- a real covalent bond is always
+       minuscule next to a unit cell, so there is never a need to search a
+       whole window of neighbouring cells the way findGrowthCandidates()
+       does for its own, more general, "did the user click near something"
+       purpose. This is what removes the ~125x overhead (a 5x5x5 cell search
+       per candidate) that made the previous version of this feature slow.
+
+       The SAME (auIndex,opIndex) as the seed's own is a genuinely different
+       case, and needs its own handling: the seed IS that base image (at its
+       own current cell), so the "nearest image" of it relative to itself is
+       trivially itself, at zero distance -- which is exactly the case the
+       d2<1e-6 guard below discards, and checking ONLY that one shift would
+       silently miss the single most important pattern this feature exists
+       to catch -- an atom bonded to its own periodically-translated copy,
+       the simplest possible polymer/chain. So for this one base image (at
+       most one out of asymUnit.length*symops.length per seed atom -- still
+       cheap), all 26 immediately-neighbouring cells are checked instead of
+       just one; a real bond can't reach any further than that. */
+    var out = [];
+    for (var i = 0; i < baseImages.length; i++) {
+      var base = baseImages[i];
+      if (base.auIndex === seedAtom.auIndex && base.opIndex === seedAtom.opIndex) {
+        for (var di = -1; di <= 1; di++) for (var dj = -1; dj <= 1; dj++) for (var dk = -1; dk <= 1; dk++) {
+          if (!di && !dj && !dk) continue;
+          tryBondCandidate(base, seedAtom, seedAtom.cellI + di, seedAtom.cellJ + dj, seedAtom.cellK + dk, out, skipMetals);
+        }
+      } else {
+        var ci = Math.round(seedAtom.fx - base.fx), cj = Math.round(seedAtom.fy - base.fy), ck = Math.round(seedAtom.fz - base.fz);
+        tryBondCandidate(base, seedAtom, ci, cj, ck, out, skipMetals);
+      }
+    }
+    return out;
+  }
+  function testFragmentClosure(seedAtoms, baseImages, skipMetals) {
+    /* The dry-run half of "complete molecule(s)" -- nothing here ever
+       touches state.atoms/state.guestAtoms, so nothing is created
+       regardless of outcome; the caller commits newAtoms only if there are
+       any. Grows this one fragment by repeatedly following bonds through
+       symmetry, but a candidate is only ever ACCEPTED if its own
+       (asymmetric-unit atom, symmetry operator) pair hasn't already been
+       used elsewhere in this fragment at a DIFFERENT cell -- exactly the
+       user's own framing: never generate an atom that's there only by unit
+       cell translation relative to what's already been found. A genuinely
+       finite molecule never needs the same (auIndex,opIndex) pair twice (a
+       4-fold uses each of its 4 operators once each, not one of them
+       repeated at two different cells), so this alone is what tells a
+       closing molecule apart from an infinite chain/framework -- and unlike
+       the previous point-group-order iteration cap this replaces, it's a
+       structural bound: each (auIndex,opIndex) pair can be accepted AT MOST
+       once, ever, so the whole search is bounded by asymUnit.length *
+       symops.length regardless of whether the fragment turns out to be
+       polymeric, and never needs to "keep trying" to find that out. Blocked
+       candidates aren't an error -- per the user's own suggestion, whatever
+       WAS legitimately completable is still kept and committed; blockedCount
+       just tells the caller this fragment extends further as a polymer/
+       framework beyond that. */
+    var existingKeys = existingCifKeySet();
+    var usedAuOp = {};
+    for (var i = 0; i < seedAtoms.length; i++) {
+      var sa = seedAtoms[i]; if (sa.auIndex === undefined) continue;
+      usedAuOp[sa.auIndex + ":" + sa.opIndex] = sa.cellI + ":" + sa.cellJ + ":" + sa.cellK;
+    }
+    var frontier = seedAtoms, allNew = [], blockedCount = 0;
+    var safetyCap = state.cifAsymUnit.length * state.cifSymops.length + 5; /* structural bound, not a tuning knob -- see the comment above; this only guards against an unforeseen bug ever looping */
+    var iterations = 0;
+    while (frontier.length) {
+      var foundThisPass = [];
+      for (var s = 0; s < frontier.length; s++) {
+        var found = findBondedImagesFast(frontier[s], baseImages, skipMetals);
+        for (var f = 0; f < found.length; f++) {
+          var af = found[f];
+          var fullKey = af.auIndex + ":" + af.opIndex + ":" + af.cellI + ":" + af.cellJ + ":" + af.cellK;
+          if (existingKeys[fullKey]) continue;
+          var auOpKey = af.auIndex + ":" + af.opIndex, cellStr = af.cellI + ":" + af.cellJ + ":" + af.cellK;
+          if (usedAuOp.hasOwnProperty(auOpKey)) {
+            if (usedAuOp[auOpKey] !== cellStr) blockedCount++;
+            continue;
+          }
+          /* A different (auIndex,opIndex) pair can still land on a position
+             already occupied -- common for a disordered guest sitting on a
+             special position, where two nominally distinct symmetry images
+             coincide physically. positionOccupied() already checks
+             state.atoms/state.guestAtoms internally; passing allNew too
+             catches a coincidence with something this same test already
+             accepted. Not a "new atom" (skip it), and not a blocked/
+             polymeric direction either -- just a redundant description of a
+             position that's already there. */
+          if (positionOccupied(af.x, af.y, af.z, allNew)) continue;
+          usedAuOp[auOpKey] = cellStr;
+          existingKeys[fullKey] = true;
+          foundThisPass.push(af);
+        }
+      }
+      allNew = allNew.concat(foundThisPass);
+      frontier = foundThisPass;
+      iterations++;
+      if (iterations > safetyCap) break;
+    }
+    return { newAtoms: allNew, blockedCount: blockedCount };
+  }
+  function completeTruncatedLigands(baseImages) {
+    /* Coordination polymer/MOF companion to the whole-fragment closure
+       above: growth (Pack especially, but any grow path) routinely cuts a
+       bridging ligand off partway through -- e.g. Pack's box boundary
+       slicing a pyrazine ring in half -- because it has no notion of "this
+       atom belongs to a small, complete ligand shape" at all, it just adds
+       whatever symmetry images fall in range. Rather than trying to make
+       Pack itself ligand-aware, this runs as a follow-up pass: regroup into
+       pure-ligand fragments (groupIntoLigandFragments -- cut at every metal,
+       metals excluded entirely) and run the same symmetry-closure BFS on
+       each one, with skipMetals=true so it can discover that a bond leads
+       to a metal (and correctly stop there) without ever adding that metal
+       itself -- exactly "keep completing the organic part until a metal is
+       found, then omit the metal." A ligand's own shape is inherently
+       finite (it's the metal, excluded here, that provides the framework's
+       periodicity), so this reliably closes on its own; the au-op-reuse
+       safety check inherited from testFragmentClosure is a defensive
+       backstop, not the primary mechanism, for this call. */
+    var atomsAdded = 0, ligandsCompleted = 0;
+    [state.atoms, state.guestAtoms].forEach(function (arr) {
+      if (!arr) return;
+      groupIntoLigandFragments(arr).forEach(function (seedAtoms) {
+        var result = testFragmentClosure(seedAtoms, baseImages, true);
+        if (result.newAtoms.length) { atomsAdded += commitGrownAtoms(result.newAtoms); ligandsCompleted++; }
+      });
+    });
+    return { atomsAdded: atomsAdded, ligandsCompleted: ligandsCompleted };
+  }
+  function completeMoleculeFragments() {
+    if (!state.isCif || state.symmetryForgotten) { setStatus("This only applies to a CIF-based structure that still has its symmetry information.", true); return; }
+    if (!state.atoms && !state.guestAtoms) { setStatus("No atoms to complete.", true); return; }
+    showOverlay(true, "Completing molecules...");
+    setTimeout(function () {
+      var baseImages = buildBaseSymmetryImages();
+      var fullCount = 0, partialCount = 0, blockedOnlyCount = 0, atomsAdded = 0, ligandsCompleted = 0;
+      /* one click here can close several independent fragments, each its own
+         commitGrownAtoms() call -- suppress the extra pushUndo()s in between
+         (same reentrancy flag the auto-complete-after-growth hook uses) so
+         one Undo reverts the whole click, not one fragment at a time */
+      state._autoCompleting = true;
+      try {
+        [state.atoms, state.guestAtoms].forEach(function (arr) {
+          if (!arr) return;
+          groupIntoFragments(arr).forEach(function (seedAtoms) {
+            var result = testFragmentClosure(seedAtoms, baseImages);
+            if (result.newAtoms.length) {
+              atomsAdded += commitGrownAtoms(result.newAtoms);
+              if (result.blockedCount) partialCount++; else fullCount++;
+            } else if (result.blockedCount) {
+              blockedOnlyCount++;
+            }
+          });
+        });
+        /* run after the whole-fragment pass above, on whatever it left --
+           tops up any ligand still truncated at a metal boundary (the
+           common MOF/coordination-polymer case the whole-fragment pass
+           above can't reach, since the framework as a whole never closes) */
+        var ligandResult = completeTruncatedLigands(baseImages);
+        atomsAdded += ligandResult.atomsAdded; ligandsCompleted += ligandResult.ligandsCompleted;
+      } finally {
+        state._autoCompleting = false;
+      }
+      showOverlay(false);
+      if (!fullCount && !partialCount && !blockedOnlyCount && !ligandsCompleted) { setStatus("Every fragment is already a complete molecule -- nothing to add.", false); return; }
+      var msg;
+      if (fullCount || partialCount || ligandsCompleted) {
+        var bits = [];
+        if (fullCount) bits.push(fullCount + " molecule" + (fullCount === 1 ? "" : "s") + " completed");
+        if (partialCount) bits.push(partialCount + " fragment" + (partialCount === 1 ? "" : "s") + " partially completed (the rest extends as a polymer/framework)");
+        if (ligandsCompleted) bits.push(ligandsCompleted + " ligand" + (ligandsCompleted === 1 ? "" : "s") + " completed at its metal boundary");
+        msg = bits.join("; ") + " (+" + atomsAdded + " atom" + (atomsAdded === 1 ? "" : "s") + ")";
+      } else {
+        msg = "No fragment could be completed as a discrete molecule";
+      }
+      if (blockedOnlyCount) msg += (fullCount || partialCount ? "; " : ". ") + blockedOnlyCount + " fragment" + (blockedOnlyCount === 1 ? "" : "s") + " look" + (blockedOnlyCount === 1 ? "s" : "") + " fully polymeric/extended and " + (blockedOnlyCount === 1 ? "was" : "were") + " left alone -- use \"Extend fragment(s)\" for " + (blockedOnlyCount === 1 ? "it" : "those") + " instead";
+      setStatus(msg + ".", !fullCount && !partialCount && blockedOnlyCount > 0);
+    }, 30);
+  }
   function applyGrowStyleToAtoms(atoms, growStyle) {
     /* Matches MG's own "Settings for new atoms" exactly: "Default" leaves
        every override field unset -- a freshly grown atom renders with the
@@ -7884,7 +8658,12 @@ select.sel:focus{border-color:var(--accent)}
   }
   function commitGrownAtoms(newAtoms, skipGrowStyle) {
     if (!newAtoms.length) return 0;
-    pushUndo();
+    /* while a completion pass (manual button or the auto-complete-after-growth
+       hook below) is committing its own findings fragment by fragment, every
+       one of those commits belongs to the SAME user action -- suppress the
+       extra pushUndo()s so one Undo reverts the whole thing in one step,
+       not one step per fragment */
+    if (!state._autoCompleting) pushUndo();
     assignUids(newAtoms);
     /* if the asymmetric unit atom a grown atom derives from has already been
        designated as guest (by moving it to a guest group earlier), every
@@ -7917,7 +8696,66 @@ select.sel:focus{border-color:var(--accent)}
     }
     recomputeViewOffset();
     renderStructure(); renderUnitCell(); updateHostInfo(); buildRadiiEditor(); buildHostColorEditor(); refreshReassignElementOptions(); refreshBondCleanupElements(); refreshSymmetryUI();
+    if (state.autoCompleteMolecules && !state._autoCompleting) scheduleAutoCompleteAfterGrowth(newAtoms);
     return newAtoms.length;
+  }
+  function scheduleAutoCompleteAfterGrowth(newAtoms) {
+    /* "Generate whole molecules" policy (Grow panel checkbox): after ANY
+       grow operation (mouse click, Pack, Extend fragment(s), sphere of
+       inclusion) commits its own atoms, silently run the same symmetry-
+       closure test "Complete molecule(s)" uses, scoped to just the
+       fragment(s) this operation touched -- not the whole structure, so an
+       already-settled fragment elsewhere never gets re-tested on every
+       unrelated click. Deliberately async (matches "Complete molecule(s)"
+       own setTimeout+overlay pattern) so this commit's own status message
+       is visible first; if nothing needed completing, no second message
+       ever appears. */
+    if (!state.isCif || state.symmetryForgotten) return;
+    var newUids = {};
+    for (var i = 0; i < newAtoms.length; i++) newUids[newAtoms[i].uid] = true;
+    showOverlay(true, "Completing molecules...");
+    setTimeout(function () {
+      var baseImages = buildBaseSymmetryImages();
+      var toCommit = [];
+      /* seeded with what's already displayed, then extended as each pass
+         below accepts an atom -- both the whole-fragment pass and the
+         ligand-only pass can independently rediscover the SAME missing
+         atom (a fresh/small structure where nothing's blocked yet), so
+         without this a duplicate could slip into toCommit and get added
+         twice */
+      var seenKeys = existingCifKeySet();
+      function touchesNewAtoms(seedAtoms) {
+        for (var i = 0; i < seedAtoms.length; i++) if (newUids[seedAtoms[i].uid]) return true;
+        return false;
+      }
+      function acceptUnseen(found) {
+        for (var i = 0; i < found.length; i++) {
+          var af = found[i], key = af.auIndex + ":" + af.opIndex + ":" + af.cellI + ":" + af.cellJ + ":" + af.cellK;
+          if (seenKeys[key]) continue;
+          seenKeys[key] = true; toCommit.push(af);
+        }
+      }
+      [state.atoms, state.guestAtoms].forEach(function (arr) {
+        if (!arr) return;
+        groupIntoFragments(arr).forEach(function (seedAtoms) {
+          if (!touchesNewAtoms(seedAtoms)) return;
+          acceptUnseen(testFragmentClosure(seedAtoms, baseImages).newAtoms);
+        });
+        /* companion pass for coordination polymers/MOFs -- see
+           completeTruncatedLigands()'s own comment. Scoped the same way:
+           only a ligand fragment this grow operation actually touched. */
+        groupIntoLigandFragments(arr).forEach(function (seedAtoms) {
+          if (!touchesNewAtoms(seedAtoms)) return;
+          acceptUnseen(testFragmentClosure(seedAtoms, baseImages, true).newAtoms);
+        });
+      });
+      showOverlay(false);
+      if (!toCommit.length) return;
+      state._autoCompleting = true;
+      var n;
+      try { n = commitGrownAtoms(toCommit); } finally { state._autoCompleting = false; }
+      setStatus("Also completed the molecule(s)/ligand(s) just grown (+" + n + " atom" + (n === 1 ? "" : "s") + ").", false);
+    }, 30);
   }
   function deleteSymmetryGeneratedAtoms() {
     if (!state.isCif || state.symmetryForgotten) { setStatus("This is only meaningful for a CIF-based structure that still has its symmetry information.", true); return; }
@@ -8372,6 +9210,36 @@ select.sel:focus{border-color:var(--accent)}
   }
   var nextUid = 1;
   function assignUids(atoms) { for (var i = 0; i < atoms.length; i++) atoms[i].uid = nextUid++; }
+  function clearStructure() {
+    /* Called when a load attempt recognized the file's format (a CIF or a
+       SHELX .res/.ins) but found no usable atom coordinates in it -- e.g.
+       an incomplete or metadata-only entry. Previously these cases just
+       set an error status and returned, leaving whatever structure was
+       already on screen untouched -- which looked exactly like the new
+       file's own name/refcode had successfully loaded that leftover
+       structure, since nothing on screen said otherwise. Mirrors
+       loadAtoms()'s own reset-and-refresh list, but to "nothing loaded"
+       defaults instead of a new structure; syncNoAtomsOverlay() (via
+       renderStructure() below) is what then puts "No atoms to display" up
+       in the viewport itself. Deliberately NOT used for a file that fails
+       to parse at all (garbage/wrong format) -- that's much more likely an
+       accidental wrong-file drop, where leaving the existing structure in
+       place is the friendlier response. */
+    exitGrowMode();
+    state.atoms = null; state.name = "";
+    state.isCif = false;
+    state.cifCell = null; state.cifSymops = null; state.cifAsymUnit = null; state.cifFracToCart = null; state.cifTags = null;
+    state.symmetryForgotten = false; state.showOnlyAsu = false;
+    state.centeringMode = "all";
+    state.guestAtoms = null; state.guestName = ""; state.guestBatch = 0; state.guestGroups = [];
+    clearGroup(surfaceGroup);
+    clearVoidResultsSilent();
+    state.molSurfaces = []; state._molSurfaceIsoById = {}; clearGroup(molSurfaceGroup);
+    recomputeViewOffset();
+    renderStructure(); renderSurface(); renderUnitCell(); updateHostInfo(); updateGuestInfo(); updateStructuralParamsInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); refreshReassignElementOptions(); buildGuestGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo();
+    refreshSymmetryUI();
+    updateViewDirectionReadout();
+  }
   function loadAtoms(atoms, name, cifMeta) {
     if (!atoms || !atoms.length) { setStatus("No atoms found.", true); return; }
     exitGrowMode();
@@ -8399,16 +9267,21 @@ select.sel:focus{border-color:var(--accent)}
       var loadCenteringApplyBtn = loadCenteringSel.parentElement ? loadCenteringSel.parentElement.querySelector("button") : null;
       if (loadCenteringApplyBtn) loadCenteringApplyBtn.style.display = "none";
     }
-    recomputeViewOffset();
     /* loading a host CIF always starts fresh on a new structure to build out
        by symmetry, so any previous guest is cleared along with the old host
        -- host and guest stay independent layers otherwise (deleting or
        hiding atoms after growth trims what's displayed without reloading
-       anything). */
+       anything). This has to run BEFORE recomputeViewOffset() below, not
+       after -- centeringMode "all" averages state.atoms concat
+       state.guestAtoms, and until this clears the OLD structure's guest
+       atoms out, that average silently includes them, skewing the new
+       structure's own centroid by whatever the previous guest's position
+       happened to be. */
     if (cifMeta) {
       state.guestAtoms = null; state.guestName = ""; state.guestBatch = 0; state.guestGroups = [];
       clearGroup(surfaceGroup);
     }
+    recomputeViewOffset();
     applyRadii(atoms);
     refreshHostAtomColors(atoms);
     renderStructure(); renderSurface(); renderUnitCell(); if (firstEver) frameCamera(); updateHostInfo(); updateGuestInfo(); updateStructuralParamsInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); refreshReassignElementOptions(); buildGuestGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo();
@@ -8419,8 +9292,8 @@ select.sel:focus{border-color:var(--accent)}
   function loadCIFText(text, name) {
     var cif;
     try { cif = K.parseCIF(text); } catch (e) { setStatus("Could not parse this CIF file.", true); return; }
-    if (!cif.atoms.length) { setStatus("No atom coordinates found in the CIF (expected an _atom_site_fract_x loop).", true); return; }
-    if (!(cif.cell.a > 0 && cif.cell.b > 0 && cif.cell.c > 0)) { setStatus("No usable unit cell parameters found in the CIF.", true); return; }
+    if (!cif.atoms.length) { clearStructure(); setStatus("No atom coordinates found in the CIF (expected an _atom_site_fract_x loop).", true); return; }
+    if (!(cif.cell.a > 0 && cif.cell.b > 0 && cif.cell.c > 0)) { clearStructure(); setStatus("No usable unit cell parameters found in the CIF.", true); return; }
     var reduced = K.reduceToAsymmetricUnit(cif.atoms, cif.symops, 0.01);
     var M = K.fracToCartMatrix(cif.cell);
     var atoms = [];
@@ -8458,8 +9331,8 @@ select.sel:focus{border-color:var(--accent)}
   function loadResText(text, name) {
     var res;
     try { res = K.parseSHELX(text); } catch (e) { setStatus("Could not parse this SHELX .res/.ins file.", true); return; }
-    if (res.error) { setStatus(res.error, true); return; }
-    if (!(res.cell.a > 0 && res.cell.b > 0 && res.cell.c > 0)) { setStatus("No usable unit cell parameters found in this SHELX file.", true); return; }
+    if (res.error) { clearStructure(); setStatus(res.error, true); return; }
+    if (!(res.cell.a > 0 && res.cell.b > 0 && res.cell.c > 0)) { clearStructure(); setStatus("No usable unit cell parameters found in this SHELX file.", true); return; }
     var reduced = K.reduceToAsymmetricUnit(res.atoms, res.symops, 0.01);
     var M = K.fracToCartMatrix(res.cell);
     var atoms = [];
@@ -8970,7 +9843,7 @@ select.sel:focus{border-color:var(--accent)}
       var payload = {
         radii: state.radii, colors: state.defaultColors,
         bondSelectionEnabled: state.bondSelectionEnabled,
-        bgColor: state.bgColor, depthScaling: state.depthScaling,
+        bgColor: state.bgColor, pseudoOrtho: state.pseudoOrtho,
         highDetail: state.highDetail, fogOn: state.fogOn, fogDensity: state.fogDensity,
         lightHeadlight: state.lightHeadlight, lightAngle: state.lightAngle,
         keyEnabled: state.keyEnabled, keyIntensity: state.keyIntensity,
@@ -8992,7 +9865,8 @@ select.sel:focus{border-color:var(--accent)}
       if (typeof data.colors === "object" && data.colors) state.defaultColors = data.colors;
       if (typeof data.bondSelectionEnabled === "boolean") state.bondSelectionEnabled = data.bondSelectionEnabled;
       if (typeof data.bgColor === "number") state.bgColor = data.bgColor;
-      if (typeof data.depthScaling === "boolean") state.depthScaling = data.depthScaling;
+      if (typeof data.pseudoOrtho === "boolean") state.pseudoOrtho = data.pseudoOrtho;
+      else if (typeof data.depthScaling === "boolean") state.pseudoOrtho = false; /* migrating an older saved payload -- "Perspective (depth scaling)" no longer exists as a mode, so an old on/off value here doesn't map to anything meaningful; land on the new default rather than guess */
       if (typeof data.highDetail === "boolean") state.highDetail = data.highDetail;
       if (typeof data.fogOn === "boolean") state.fogOn = data.fogOn;
       if (data.hasOwnProperty("fogDensity")) state.fogDensity = clamp(data.fogDensity, 0, 1.0, state.fogDensity);
@@ -9615,7 +10489,7 @@ select.sel:focus{border-color:var(--accent)}
       hostBondColorMode: state.hostBondColorMode, hostBondColor: state.hostBondColor,
       guestBondColorMode: state.guestBondColorMode, guestBondColor: state.guestBondColor,
       hostBondRadius: state.hostBondRadius, guestBondRadius: state.guestBondRadius,
-      hostGrowStyle: state.hostGrowStyle, guestGrowStyle: state.guestGrowStyle,
+      hostGrowStyle: state.hostGrowStyle, guestGrowStyle: state.guestGrowStyle, autoCompleteMolecules: state.autoCompleteMolecules,
       showHost: state.showHost, showGuest: state.showGuest, showHBonds: state.showHBonds, showHydrogens: state.showHydrogens,
       centeringMode: state.centeringMode,
       videoAxis: state.videoAxis, videoSteps: state.videoSteps, videoScale: state.videoScale,
@@ -9639,7 +10513,7 @@ select.sel:focus{border-color:var(--accent)}
       molSurfaceIsoById: molSurfaceIsoForSave, nextMolSurfaceId: nextMolSurfaceId,
       voidComponentMeshes: voidComponentMeshesForSave,
       camera: { camDist: camDist, camOrient: [camOrient.x, camOrient.y, camOrient.z, camOrient.w], camTarget: [camTarget.x, camTarget.y, camTarget.z] },
-      bgColor: state.bgColor, depthScaling: state.depthScaling, highDetail: state.highDetail,
+      bgColor: state.bgColor, pseudoOrtho: state.pseudoOrtho, highDetail: state.highDetail,
       fogOn: state.fogOn, fogDensity: state.fogDensity,
       atomRoughness: state.atomRoughness, atomMetalness: state.atomMetalness, atomReflectivity: state.atomReflectivity,
       lightHeadlight: state.lightHeadlight, lightAngle: state.lightAngle,
@@ -9759,8 +10633,10 @@ select.sel:focus{border-color:var(--accent)}
     if (typeof data.guestBondRadius === "number") state.guestBondRadius = data.guestBondRadius;
     if (data.hostGrowStyle) state.hostGrowStyle = data.hostGrowStyle;
     if (data.guestGrowStyle) state.guestGrowStyle = data.guestGrowStyle;
+    state.autoCompleteMolecules = !!data.autoCompleteMolecules;
     var hostGrowSel = document.getElementById("hostGrowStyleSelect"); if (hostGrowSel) hostGrowSel.value = state.hostGrowStyle;
     var guestGrowSel = document.getElementById("guestGrowStyleSelect"); if (guestGrowSel) guestGrowSel.value = state.guestGrowStyle;
+    var autoCompleteCbRestore = document.getElementById("autoCompleteMoleculesCheckbox"); if (autoCompleteCbRestore) autoCompleteCbRestore.checked = state.autoCompleteMolecules;
     var centeringModeSel = document.getElementById("centeringModeSelect");
     if (centeringModeSel) {
       centeringModeSel.value = state.centeringMode;
@@ -9778,8 +10654,7 @@ select.sel:focus{border-color:var(--accent)}
     if (data.videoDirection === 1 || data.videoDirection === -1) state.videoDirection = data.videoDirection;
     if (data.videoFormat === "avi" || data.videoFormat === "mp4") state.videoFormat = data.videoFormat;
     if (typeof data.videoFps === "number" && isFinite(data.videoFps)) state.videoFps = data.videoFps;
-    (function clearUnselectable(arr) { if (arr) for (var i = 0; i < arr.length; i++) if (arr[i].selected && !isSelectable(arr[i])) arr[i].selected = false; })(state.atoms);
-    (function clearUnselectable(arr) { if (arr) for (var i = 0; i < arr.length; i++) if (arr[i].selected && !isSelectable(arr[i])) arr[i].selected = false; })(state.guestAtoms);
+    clearUnselectableSelections();
     if (typeof data.showUnitCell === "boolean") state.showUnitCell = data.showUnitCell;
     if (typeof data.unitCellColor === "number") state.unitCellColor = data.unitCellColor;
     if (typeof data.unitCellThickness === "number") state.unitCellThickness = data.unitCellThickness;
@@ -9804,7 +10679,8 @@ select.sel:focus{border-color:var(--accent)}
     var showLabelsTgEl = document.getElementById("showLabelsTg"); if (showLabelsTgEl) showLabelsTgEl.checked = state.showLabels;
 
     if (typeof data.bgColor === "number") { state.bgColor = data.bgColor; scene.background = new THREE.Color(state.bgColor); }
-    if (typeof data.depthScaling === "boolean") { state.depthScaling = data.depthScaling; setDepthScaling(state.depthScaling); }
+    if (typeof data.pseudoOrtho === "boolean") { state.pseudoOrtho = data.pseudoOrtho; setPseudoOrtho(state.pseudoOrtho); }
+    var pseudoOrthoTgRestore = document.getElementById("dispPseudoOrtho"); if (pseudoOrthoTgRestore) pseudoOrthoTgRestore.checked = state.pseudoOrtho;
     if (typeof data.highDetail === "boolean") setHighDetail(data.highDetail);
     if (typeof data.fogOn === "boolean") state.fogOn = data.fogOn;
     if (typeof data.fogDensity === "number") state.fogDensity = data.fogDensity;
@@ -10054,7 +10930,7 @@ select.sel:focus{border-color:var(--accent)}
     var left = document.getElementById("leftPanel");
 
     var structC = section(left, "Structure", false);
-    var navigatorTab = subsection(structC, "Navigator", false);
+    var navigatorTab = subsection(structC, "CIF Navigator", false);
     navigatorTab.parentElement.id = "cifNavigatorSection";
     navigatorTab.parentElement.style.display = "none"; /* hidden until a multi-structure CIF is actually loaded */
     var navigatorCount = el("div", "hint"); navigatorCount.id = "cifNavigatorCount"; navigatorTab.appendChild(navigatorCount);
@@ -10076,6 +10952,8 @@ select.sel:focus{border-color:var(--accent)}
     var bondsTab = subsection(structC, "Edit bonds", false, function (isOpen) { if (!isOpen) exitBondEditMode(); });
     var hostTab = subsection(structC, "Host", false);
     var guestTab = subsection(structC, "Guest", false);
+    var atomEditTab = subsection(structC, "Create/Move Atoms", false, function (isOpen) { if (!isOpen) exitAtomEditMode(); });
+    atomEditTab.parentElement.id = "atomEditSection";
 
     var styleC = section(left, "Style", false);
     var styleAtomsTab = subsection(styleC, "Atoms", false);
@@ -10115,6 +10993,29 @@ select.sel:focus{border-color:var(--accent)}
     guestColorModeSel.id = "guestColorModeSelect";
     guestTab.appendChild(el("div", "hint", "Guest components:"));
     var ggbox = el("div", "sbody"); ggbox.id = "guestGroupsBox"; ggbox.innerHTML = "<div class='dim'>No guest components yet.</div>"; guestTab.appendChild(ggbox);
+
+    /* ---- Create/Move Atoms ----
+       Click-driven, mode-based atom placement/repositioning -- see
+       setAtomEditUiMode()/createAtomAtClick()/moveAtomTo() for the mechanics.
+       Both modes always cancel when this subsection closes (its own
+       subsection() call above passes exitAtomEditMode() as the onToggle
+       callback) or when the user clicks any other control (see the
+       document-level listener in wireIO()). New atoms always join the host
+       layer, matching this app's own convention that guest membership is
+       something atoms are explicitly moved into afterwards (see "Move
+       selection to" above), not a place new atoms start out. */
+    var createRow = el("div", "ctl-inline");
+    var createBtn = document.createElement("button"); createBtn.type = "button"; createBtn.className = "btn ghost"; createBtn.textContent = "Create atom"; createBtn.id = "createAtomBtn";
+    createBtn.addEventListener("click", function () { setAtomEditUiMode("create"); });
+    var createSel = document.createElement("select"); createSel.className = "sel sel-narrow"; createSel.id = "createAtomEl";
+    createRow.appendChild(createBtn); createRow.appendChild(createSel);
+    atomEditTab.appendChild(createRow);
+    var moveRow = el("div", "btnrow"); moveRow.style.marginTop = "6px";
+    var moveBtn = document.createElement("button"); moveBtn.type = "button"; moveBtn.className = "btn ghost"; moveBtn.textContent = "Move atom"; moveBtn.id = "moveAtomBtn";
+    moveBtn.addEventListener("click", function () { setAtomEditUiMode("move"); });
+    moveRow.appendChild(moveBtn);
+    atomEditTab.appendChild(moveRow);
+    refreshReassignElementOptions(); /* populates createAtomEl too, now that it exists */
 
     /* ---- Metadata ---- */
     var paramsInfo = el("div", "readout"); paramsInfo.id = "structuralParamsInfo"; paramsInfo.innerHTML = "<div class='dim'>Load a CIF to see metadata.</div>"; paramsTab.appendChild(paramsInfo);
@@ -10328,6 +11229,13 @@ select.sel:focus{border-color:var(--accent)}
     ellipsoidBtn.addEventListener("click", function () {
       fixedCb.checked = false; if (atomDispRadiusMode === "fixed") atomDispRadiusMode = null;
       atomDispEllipsoid = true; ellipsoidCb.checked = true;
+      /* Atoms with no ADP data (almost always H, but also any non-H atom
+         refined isotropically) fall back to the vdW-multiplier radius --
+         Ellipsoid mode always wants that fallback at MG's own standard
+         0.2/0.15, regardless of whatever Ball & stick/Spacefill last left
+         these fields at */
+      atomDispNonHMult = 0.2; nonHInp.value = "0.20";
+      atomDispHMult = 0.15; hInp.value = "0.15";
     });
     quickRow.appendChild(ellipsoidBtn);
     var copyAtomSettingsBtn = document.createElement("button");
@@ -10368,7 +11276,7 @@ select.sel:focus{border-color:var(--accent)}
     styleAtomsTab.appendChild(quickRow);
 
     var applyRow = el("div", "ctl-inline");
-    button(applyRow, "Apply", "", function () {
+    button(applyRow, "Apply", "ghost", function () {
       var sel = getSelectedAtomObjects();
       if (!sel.length) { setStatus("Select one or more atoms first.", true); return; }
       if (!atomDispColorMode && !atomDispRadiusMode && !atomDispEllipsoid) { setStatus("Tick Colour, Radius, and/or Ellipsoid first -- none of them is currently set to apply.", true); return; }
@@ -10483,7 +11391,7 @@ select.sel:focus{border-color:var(--accent)}
     var showRow1 = el("div", "toggle-row2");
     var showHTg = toggle(showRow1, "Show hydrogen atoms", state.showHydrogens !== false, function () { toggleHydrogenDisplay(); });
     showHTg.id = "showHTg";
-    var asuTg = toggle(showRow1, "Show ASU only", state.showOnlyAsu, function (b) { state.showOnlyAsu = b; renderStructure(); });
+    var asuTg = toggle(showRow1, "Show ASU only", state.showOnlyAsu, function (b) { state.showOnlyAsu = b; clearUnselectableSelections(); renderStructure(); updateSelectionInfo(); });
     asuTg.id = "showOnlyAsuTg";
     cifDispC.appendChild(showRow1);
     /* same .toggle-row2 grid as showRow1 above (not .ctl-inline, which sizes
@@ -10636,7 +11544,7 @@ select.sel:focus{border-color:var(--accent)}
       function (v) { state.autoRotateDir = (v[0] === "-") ? -1 : 1; state.autoRotateAxis = v[1]; });
     slider(autorotateBody, "speed", 5, 180, 5, state.autoRotateSpeed, "°/s", function (v) { state.autoRotateSpeed = v; });
     var autoRotatePlayRow = el("div", "btnrow");
-    var autoRotatePlayBtn = button(autoRotatePlayRow, "Play", null, function () { startAutoRotate(); });
+    var autoRotatePlayBtn = button(autoRotatePlayRow, "Play", "ghost", function () { startAutoRotate(); });
     var autoRotateStopBtn = button(autoRotatePlayRow, "Stop", "ghost", function () { stopAutoRotate(); });
     autoRotatePlayBtn.id = "autoRotatePlayBtn"; autoRotateStopBtn.id = "autoRotateStopBtn";
     autorotateBody.appendChild(autoRotatePlayRow);
@@ -10675,9 +11583,15 @@ select.sel:focus{border-color:var(--accent)}
        175px leaves real margin and is identical for host and guest either way. */
     hostGrowLbl.style.flex = guestGrowLbl.style.flex = "0 0 175px";
     hostGrowLbl.style.whiteSpace = guestGrowLbl.style.whiteSpace = "nowrap";
+    var autoCompleteCb = toggle(symC, "Generate whole molecules", state.autoCompleteMolecules, function (v) { state.autoCompleteMolecules = v; });
+    autoCompleteCb.id = "autoCompleteMoleculesCheckbox";
+    autoCompleteCb.parentElement.title = "Whenever Mouse, Pack, Extend fragment(s), or Sphere of inclusion would leave a partial molecule, automatically complete it by symmetry (same test as \"Complete molecule(s)\"). Polymeric/framework fragments are left as-is, exactly like that button.";
     var extendRow = el("div", "btnrow");
     button(extendRow, "Extend fragment(s)", "ghost", extendAllFragments);
     symC.appendChild(extendRow);
+    var completeRow = el("div", "btnrow");
+    button(completeRow, "Complete molecule(s)", "ghost", completeMoleculeFragments);
+    symC.appendChild(completeRow);
     var resetGrowRow = el("div", "btnrow");
     var delSymBtn = button(resetGrowRow, "Delete all symmetry-generated atoms", "ghost", deleteSymmetryGeneratedAtoms);
     delSymBtn.id = "deleteSymAtomsBtn";
@@ -10776,7 +11690,7 @@ select.sel:focus{border-color:var(--accent)}
     var packB = packRangeRow("b", "0", "1");
     var packC = packRangeRow("c", "0", "1");
     packLayout.appendChild(packRanges);
-    var packBtn = button(packLayout, "Pack", "pack-btn", function () {
+    var packBtn = button(packLayout, "Pack", "pack-btn ghost", function () {
       var limits = {
         aMin: parseFloat(packA.min.value), aMax: parseFloat(packA.max.value),
         bMin: parseFloat(packB.min.value), bMax: parseFloat(packB.max.value),
@@ -10839,7 +11753,7 @@ select.sel:focus{border-color:var(--accent)}
       addShiftBtn("-" + axisLabel[mr], mr, 6, -1);
       addShiftBtn("+" + axisLabel[mr], mr, 7, 1);
     }
-    var symApplyBtn = button(matrixGrid, "Apply", null, function () { applySymOpTransform(); });
+    var symApplyBtn = button(matrixGrid, "Apply", "ghost", function () { applySymOpTransform(); });
     symApplyBtn.style.gridRow = "1 / span 3"; symApplyBtn.style.gridColumn = "5";
     symOpTab.appendChild(matrixGrid);
 
@@ -10944,7 +11858,7 @@ select.sel:focus{border-color:var(--accent)}
     var voidAutoAssembleToggleCb = toggle(vcC, "Assemble & Consolidate", state.voidAutoAssemble, function (b) { state.voidAutoAssemble = b; });
     voidAutoAssembleToggleCb.id = "voidAutoAssembleToggle";
     var vcRow = el("div", "btnrow");
-    button(vcRow, "Calculate", null, runVoidCalculate);
+    button(vcRow, "Calculate", "ghost", runVoidCalculate);
     button(vcRow, "Clear all", "ghost", clearVoidResults);
     vcC.appendChild(vcRow);
     var voidChannelsC = subsection(vcC, "Voids/Channels", false);
@@ -10970,7 +11884,7 @@ select.sel:focus{border-color:var(--accent)}
     var molSurfProbeInput = numberOnly(molSurfC, "probe radius", 0.01, 3.0, 0.05, state.molSurfaceProbeRadius, U.ang, function (v) { state.molSurfaceProbeRadius = v; });
     molSurfProbeInput.id = "molSurfProbeRadiusInput";
     var molSurfRow = el("div", "btnrow");
-    var molSurfCalcBtn = button(molSurfRow, "Calculate", null, runMolSurfaceCalculate); molSurfCalcBtn.id = "molSurfCalcBtn"; molSurfCalcBtn.disabled = true;
+    var molSurfCalcBtn = button(molSurfRow, "Calculate", "ghost", runMolSurfaceCalculate); molSurfCalcBtn.id = "molSurfCalcBtn"; molSurfCalcBtn.disabled = true;
     var molSurfClearBtn = button(molSurfRow, "Clear all", "ghost", clearAllMolSurfaces); molSurfClearBtn.id = "molSurfClearBtn"; molSurfClearBtn.disabled = true;
     molSurfC.appendChild(molSurfRow);
     var molSurfOpacitySlider = labelSlider(molSurfC, "surface opacity", 0.05, 1.0, 0.05, state.molSurfaceOpacity, function (v) { state.molSurfaceOpacity = v; renderMolSurfaceMeshes(); });
@@ -11002,8 +11916,9 @@ select.sel:focus{border-color:var(--accent)}
 
     var hdTg = toggle(sceneTab, "High detail spheres and tubes", state.highDetail, function (b) { setHighDetail(b); persistPreferences(); });
     hdTg.id = "dispHighDetail";
-    var depthTg = toggle(sceneTab, "Perspective (depth scaling)", state.depthScaling, function (b) { state.depthScaling = b; setDepthScaling(b); persistPreferences(); });
-    depthTg.id = "dispDepthScaling";
+    var pseudoOrthoTg = toggle(sceneTab, "Pseudo-orthographic (no z-clipping)", state.pseudoOrtho, function (b) { state.pseudoOrtho = b; setPseudoOrtho(b); persistPreferences(); });
+    pseudoOrthoTg.id = "dispPseudoOrtho";
+    pseudoOrthoTg.parentElement.title = "Off (default): a true orthographic camera -- exact parallel projection, so unit cell edges viewed down an axis overlay exactly, but zooming in close enough can clip through a solid atom (a property of orthographic projection itself, not a bug). On: a very-narrow-angle perspective camera parked far away instead -- eliminates that clipping entirely, at the cost of a very slight, usually imperceptible perspective non-overlap of near/far cell edges viewed down an axis.";
     var fogCtl = checkboxSlider(sceneTab, "Depth cueing", state.fogOn, function (b) { state.fogOn = b; updateFog(); persistPreferences(); },
       0, 1.0, 0.02, state.fogDensity, function (v) { state.fogDensity = v; updateFog(); persistPreferences(); });
     fogCtl.checkbox.id = "dispFogTg"; fogCtl.range.id = "dispFogRange";
@@ -11038,7 +11953,7 @@ select.sel:focus{border-color:var(--accent)}
     var imageBody = subsection(xc, "Image", false);
     select(imageBody, "Resolution", [["1", "1 × view"], ["2", "2 × view"], ["4", "4 × view"]], "2", function (v) { state.exportScale = parseInt(v, 10); });
     toggle(imageBody, "Transparent background", state.exportTransparent, function (b) { state.exportTransparent = b; });
-    button(imageBody, "Export image (PNG)", "", exportImage);
+    button(imageBody, "Export image (PNG)", "ghost", exportImage);
     button(imageBody, "Copy image to clipboard", "ghost", copyImageToClipboard);
 
     var videoBody = subsection(xc, "Video", false);
@@ -11101,24 +12016,26 @@ select.sel:focus{border-color:var(--accent)}
     videoRow3.appendChild(videoFormatSel);
     videoBody.appendChild(videoRow3);
     var videoFormatHint = el("div", "hint"); videoFormatHint.id = "videoFormatHint"; videoBody.appendChild(videoFormatHint);
-    var videoRow = el("div", "btnrow"); var videoBtn = button(videoRow, "Export rotation video", null, exportRotationVideo); videoBtn.id = "exportVideoBtn"; videoBody.appendChild(videoRow);
+    var videoRow = el("div", "btnrow"); var videoBtn = button(videoRow, "Export rotation video", "ghost", exportRotationVideo); videoBtn.id = "exportVideoBtn"; videoBody.appendChild(videoRow);
     syncVideoFormatHint();
 
     var cifSaveBody = subsection(xc, "CIF", false);
     cifSaveBody.appendChild(el("div", "hint", "Saves the current structure -- element/ASU edits, deletions, and any promoted centroid included -- back out as a CIF, preserving everything else in the original file untouched."));
     var cifSaveRow = el("div", "btnrow");
-    var saveCifBtn = button(cifSaveRow, "Save CIF...", null, saveCifFile); saveCifBtn.id = "saveCifBtn"; saveCifBtn.disabled = true;
+    var saveCifBtn = button(cifSaveRow, "Save CIF...", "ghost", saveCifFile); saveCifBtn.id = "saveCifBtn"; saveCifBtn.disabled = true;
     cifSaveBody.appendChild(cifSaveRow);
 
     var modelBody = subsection(xc, "Model", false);
-    var modelSaveRow = el("div", "btnrow"); button(modelSaveRow, "Save model...", null, saveModelToFile); modelBody.appendChild(modelSaveRow);
+    var modelSaveRow = el("div", "btnrow"); button(modelSaveRow, "Save model...", "ghost", saveModelToFile); modelBody.appendChild(modelSaveRow);
     var modelLoadRow = el("div", "btnrow"); button(modelLoadRow, "Load model...", "ghost", function () { document.getElementById("modelJsonInput").click(); }); modelBody.appendChild(modelLoadRow);
   }
   function toggleShowOnlyAsu() {
     if (!state.isCif || state.symmetryForgotten) { setStatus("This only applies to a CIF-based structure that still has its symmetry information.", true); return; }
     state.showOnlyAsu = !state.showOnlyAsu;
     recomputeViewOffset();
+    clearUnselectableSelections();
     renderStructure();
+    updateSelectionInfo();
     var cb = document.getElementById("showOnlyAsuTg"); if (cb) cb.checked = state.showOnlyAsu;
     setStatus(state.showOnlyAsu ? "Showing only the asymmetric unit." : "Showing all atoms.", false);
   }
@@ -11149,6 +12066,21 @@ select.sel:focus{border-color:var(--accent)}
     setStatus(state.showHydrogens ? "Showing hydrogen atoms." : "Hiding hydrogen atoms.", false);
   }
   function wireIO() {
+    /* Create/Move Atoms modes cancel on ANY click outside both the
+       Create/Move Atoms subsection itself (so pressing the other button,
+       or the element dropdown, doesn't self-cancel) and the 3D viewport
+       (where a click is the whole point of the mode) -- explicit user
+       requirement, not just "closing the subsection cancels it". Capture
+       phase so this runs before whatever the clicked control's own
+       handler does. */
+    document.addEventListener("click", function (e) {
+      if (!state.atomEditUiMode) return;
+      var sec = document.getElementById("atomEditSection");
+      var vp = document.getElementById("viewport");
+      if (sec && sec.contains(e.target)) return;
+      if (vp && vp.contains(e.target)) return;
+      exitAtomEditMode();
+    }, true);
     window.addEventListener("keydown", function (e) {
       /* spacebar and the rotation keys only act when focus isn't in a control
          (a text box, dropdown, button, etc.) -- otherwise let them behave
@@ -11241,16 +12173,22 @@ select.sel:focus{border-color:var(--accent)}
       if (!e.ctrlKey && !e.altKey && !e.metaKey && e.code === "KeyC") { e.preventDefault(); toggleUnitCellDisplay(); return; }
       if (!e.ctrlKey && !e.altKey && !e.metaKey && e.code === "KeyH") { e.preventDefault(); toggleHydrogenDisplay(); return; }
       if (!e.ctrlKey && !e.altKey && !e.metaKey && e.code === "KeyL") { e.preventDefault(); toggleLabelDisplay(); return; }
-      if (!e.ctrlKey && !e.altKey && !e.metaKey && (e.key === "-" || e.key === "=")) {
+      if (!e.ctrlKey && !e.altKey && !e.metaKey && (e.key === "-" || e.key === "=" || e.key === "+")) {
         e.preventDefault();
         var curScale = Math.round(SCALE_REF / Math.max(camDist, 1e-6));
-        var newScale = Math.max(1, Math.min(35000, curScale + (e.key === "=" ? 10 : -10)));
+        var newScale = Math.max(1, Math.min(35000, curScale + (e.key === "-" ? -10 : 10)));
         camDist = Math.max(0.3, Math.min(4000, SCALE_REF / newScale));
         applyController();
         var scaleInpEl = document.getElementById("dispScaleInput"); if (scaleInpEl) scaleInpEl.value = String(newScale);
         return;
       }
-      var deg = 5 * Math.PI / 180, axis = null, angle = 0;
+      /* Shift held turns the usual 5-degree nudge into an exact 90-degree
+         turn -- handy for snapping to a face-on view along whichever axis
+         the pressed key already rotates about. Originally Ctrl, but
+         Ctrl+PageUp/PageDown are already bound to Chrome's own previous/
+         next-tab shortcut and never reached this handler -- Shift has no
+         such conflict. */
+      var deg = (e.shiftKey ? 90 : 5) * Math.PI / 180, axis = null, angle = 0;
       if (e.code === "ArrowLeft") { axis = new THREE.Vector3(0, 1, 0); angle = deg; }
       else if (e.code === "ArrowRight") { axis = new THREE.Vector3(0, 1, 0); angle = -deg; }
       else if (e.code === "ArrowUp") { axis = new THREE.Vector3(1, 0, 0); angle = deg; }
@@ -11357,10 +12295,10 @@ select.sel:focus{border-color:var(--accent)}
       "<li><b>Shift + left drag</b> &mdash; roll (rotate in the screen plane), for straightening a figure without changing what you're looking at.</li>" +
       "<li><b>Alt + left drag</b> &mdash; lasso select: draw a freeform outline and every atom projected inside it (host and guest together, whichever are currently shown) is added to the selection.</li>" +
       "<li><b>Ctrl + Alt + left drag</b> &mdash; lasso select whole fragments: the same outline, but each atom it touches brings its entire bonded fragment into the selection, the same rule ctrl-click uses for a single atom.</li>" +
-      "<li>Lasso selection works on screen position only, not true depth: an atom behind another one, as long as its projected position falls inside the outline, is selected too, even though it's hidden from view. Rotating to a clearer angle before lassoing avoids surprises in a dense structure.</li>" +
+      "<li>Lasso selection works on screen position only, not true depth: an atom behind another one, as long as its projected position falls inside the outline, is selected too, even though it's obscured from view by whatever's in front of it. Rotating to a clearer angle before lassoing avoids surprises in a dense structure. This is separate from an atom that's actually hidden (individually hidden, a hydrogen with display switched off, or excluded by \"Show ASU only\") -- those are never selected by lasso, or by any other selection method, while they're not displayed.</li>" +
       "<li><b>Right drag, vertical</b> &mdash; zoom (up = in, down = out). The mouse wheel is disabled.</li>" +
-      "<li><b>Arrow keys</b> &mdash; rotate in fixed 5&deg; steps: left/right about the vertical axis, up/down about the horizontal axis. <b>Page Up / Page Down</b> roll in 5&deg; steps. <b>Delete</b> (or Backspace) deletes the selected atoms, or cuts the selected bond(s) if no atoms are selected. <b>Ctrl-C</b> generates a centroid from the selected atoms. <b>Escape</b> clears the whole selection; plain <b>spacebar</b> selects everything if nothing is selected, or clears it if anything is. <b>Shift+spacebar</b> inverts the atom selection; <b>Ctrl+spacebar</b> inverts the bond selection. <b>Ctrl-Z</b> hides the selected atoms (Structure &gt; Edit atoms' \"Hide selected\"); <b>Ctrl-U</b> unhides everything. For a CIF-based structure: <b>a</b> toggles between showing only the asymmetric unit and showing everything currently grown; <b>c</b> toggles the unit cell; <b>h</b> toggles hydrogen display. These only respond while focus isn't in a text box, dropdown, or button.</li>" +
-      "<li><b>Depth scaling</b> (Visual Effects panel) &mdash; switches between perspective and orthographic projection. Off is often better for a figure meant for precise alignment or measurement, since distance no longer shrinks apparent size.</li>" +
+      "<li><b>Arrow keys</b> &mdash; rotate in fixed 5&deg; steps: left/right about the vertical axis, up/down about the horizontal axis. <b>Page Up / Page Down</b> roll in 5&deg; steps. Holding <b>Shift</b> with any of the six turns that same 5&deg; nudge into an exact 90&deg; turn instead -- handy for snapping to a face-on view along whichever axis the key already rotates about (Ctrl was tried for this first, but Ctrl+Page Up/Page Down are already claimed by the browser's own previous/next-tab shortcut, so Shift is used instead throughout). <b>-</b> and <b>=</b>/<b>+</b> zoom out and in, one fixed step at a time, the same as dragging the Set scale number down or up (Display panel). <b>Delete</b> (or Backspace) deletes the selected atoms, or cuts the selected bond(s) if no atoms are selected. <b>Ctrl-C</b> generates a centroid from the selected atoms. <b>Escape</b> clears the whole selection; plain <b>spacebar</b> selects everything if nothing is selected, or clears it if anything is. <b>Shift+spacebar</b> inverts the atom selection; <b>Ctrl+spacebar</b> inverts the bond selection. <b>Ctrl-Z</b> hides the selected atoms (Structure &gt; Edit atoms' \"Hide selected\"); <b>Ctrl-U</b> unhides everything. For a CIF-based structure: <b>a</b> toggles between showing only the asymmetric unit and showing everything currently grown; <b>c</b> toggles the unit cell; <b>h</b> toggles hydrogen display; <b>l</b> toggles atom labels. These only respond while focus isn't in a text box, dropdown, or button.</li>" +
+      "<li><b>Pseudo-orthographic (no z-clipping)</b> (Visual Effects panel, Scene tab) &mdash; off by default, giving a true orthographic projection: exact parallel projection, so e.g. unit cell edges viewed straight down an axis overlay exactly, at the cost of a known artifact where zooming in close enough can clip through the middle of a solid atom (an inherent property of orthographic projection, not a bug -- a true orthographic camera has no single eye point for the near/far clipping planes to be tuned around). Switching it on trades that off the other way: a genuine but very-narrow-angle perspective camera, parked correspondingly far away, which eliminates the clipping entirely at the cost of a very slight (usually imperceptible) loss of that exact edge-on-edge overlap. There is no separate perspective-projection mode any more -- it offered no scientific advantage over these two for a crystallographic viewer.</li>" +
       "</ul>" +
       "<h3>Visual Effects and Export</h3>" +
       "<p><b>Visual Effects</b> gathers everything about how the scene looks into one panel, split into three tabs: <b>Scene</b> (background, projection, detail level, fog, rotation sensitivity), <b>Material</b> (how atoms respond to light), and <b>Lighting</b> (the three light sources). <b>Export</b> covers producing an image and isn't a look-and-feel setting in the same sense as the other three, so it has no \"retain\" box of its own -- export resolution and transparent background are export-time choices, always starting fresh (current size, opaque) each time this file is reopened. Each of the three Visual Effects tabs has its own \"restore defaults\" button, scoped to just that tab, and its own \"retain these settings\" box. With that box checked (the default), the tab's settings are remembered and restored the next time this file is opened, the same way element radii and colours already are. Unchecked, that tab quietly goes back to using the built-in defaults every time the file is opened instead, and whatever was saved for it before is forgotten immediately -- there's no partial memory of it lying around to reappear if the box is checked again later. Several sliders here (fog, rotation sensitivity, material, light angle and intensity) show no number -- the slider position is the control, without a readout to fuss over.</p>" +
@@ -11380,6 +12318,8 @@ select.sel:focus{border-color:var(--accent)}
       "<p>The <b>Pack</b> tab grows by an explicit fractional-coordinate range instead of a click: set limits for a, b, and c (each defaults to 0 to 1, one full unit cell, and can range from -5 to 5), choose whether a fragment qualifies when <b>a fragment atom</b> falls within those limits or only when its <b>centroid</b> does, then press <b>Pack</b>. Every symmetry-related copy of the asymmetric unit meeting that condition is added in one step, each still a whole covalently-connected fragment (not split by Atoms/Fragment/ASU, which are Mouse-tab-only concepts).</p>" +
       "<p>The <b>Symmetry</b> tab applies one specific, explicitly chosen symmetry operation to whichever atoms are currently selected, rather than growing by proximity or by range. The dropdown lists every operator of this structure's space group exactly as the CIF itself expresses them (e.g. <span class='mono'>x,y,z</span> for identity, <span class='mono'>-x,y+0.5,-z</span> for a 2-fold screw axis parallel to b); choosing one fills in the 3x4 matrix beside it -- three rows of a rotation coefficient triple plus a translation, e.g. a c-glide perpendicular to b would read as rows (1,0,0,0), (0,-1,0,0), (0,0,-1,0.5). The rotation coefficients (always -1, 0, or 1 for any real symmetry operation) step through those three values with the small up/down arrows; the translations accept any typed value, since a screw or glide component is usually a fraction but there's no reason to restrict it to one. Apply doesn't reset any of this afterwards -- the matrix stays exactly as set until deliberately changed again, whether by picking a different operator from the dropdown or editing a box directly. Each row also has its own <b>-a/+a</b>, <b>-b/+b</b>, or <b>-c/+c</b> pair alongside it; pressing one always applies a fresh, plain +1 or -1 cell translation along that one axis to whatever's currently selected -- not a further nudge on top of whatever the matrix happened to already show -- and, unlike the rest of the matrix, does so immediately without needing Apply, since the point of a cell shift is usually to walk straight to a neighbouring copy one step at a time (it does overwrite the displayed matrix to show that plain translation, though, so what's about to happen is always visible first). With <b>Use M<sup>-1</sup></b> checked, Apply and the shift buttons alike carry out the matrix as given in reverse instead. Each selected atom is mapped through the operation to find its image; if that image is a position not already displayed, the atom is added there (correctly tracked for further growth or symmetry-aware deletion, exactly like any other grown atom), and if it's already present, that one atom is simply left alone rather than duplicated. With <b>Select new</b> checked, the originally-selected atoms are deselected once Apply runs and each one's image -- newly added or already there -- is selected in their place, which is what makes stepping a shift button repeatedly walk outward one cell at a time rather than needing to reselect anything by hand in between. With <b>Keep source format</b> checked, each newly-generated image copies the exact display colour and radius of the specific selected atom it was generated from, atom-by-atom, instead of whatever the \"Settings for new host/guest atoms\" dropdown would otherwise give it -- distinct from that dropdown's generic brush, and scoped only to Symmetry's own Apply and shift buttons, never Mouse or Pack growth.</p>" +
       "<p>All of this only ever adds atoms; nothing is removed automatically, and everything added this way can be deleted, selected, or undone exactly like any other atom in the app. <b>Extend fragment(s)</b>, visible above the tabs regardless of which one is open, applies the Mouse tab's Bonds+Frag behaviour all at once: it snapshots every atom currently displayed and grows the connected fragment attached to each one that has a new symmetry-connected neighbour, in a single step. Only atoms present at the moment it's pressed are used as starting points -- atoms it adds during that same pass are never themselves used to grow further, which is what keeps something like a polymer or chain from running away indefinitely. \"Delete all symmetry-generated atoms\", just below it, removes everything growth has added in one step back to just the original asymmetric unit -- a guest designation on an asymmetric unit atom survives this, only the grown copies are removed.</p>" +
+      "<p><b>Complete molecule(s)</b>, next to Extend fragment(s), fills out any fragment that's only partly present into a whole discrete molecule by symmetry -- e.g. an inversion centre or a rotation axis relating one asymmetric-unit piece to the rest of the molecule. It tests each fragment first (a real molecule never needs the same asymmetric-unit-atom-plus-operator pair twice; a polymer or framework always does eventually), so it never runs away trying to complete something that's genuinely infinite -- a fragment that's fully polymeric is left alone with a note to use Extend fragment(s) for it instead, and one that's partly molecular and partly extended is completed as far as it can be, with the rest reported as continuing like a polymer. For a coordination polymer or MOF specifically, it also tops up any bridging ligand (e.g. a pyrazine ring) left truncated by ordinary growth, stopping cleanly at the metal it coordinates to rather than adding that metal itself -- so a ligand cut in half at a Pack box boundary comes back whole without also pulling in a new metal centre.</p>" +
+      "<p><b>Generate whole molecules</b>, the checkbox just above those two buttons, makes this automatic: whenever Mouse-click growth, Pack, Extend fragment(s), or Sphere of inclusion would otherwise leave a partial molecule or a truncated ligand, the same completion runs immediately afterward, silently, with its own follow-up status message only appearing when it actually added something. Off by default -- growth then leaves fragments exactly as it finds them, same as if this checkbox didn't exist.</p>" +
       "<p>The <b>Grow</b> section has a <b>Settings for new host atoms</b> and a <b>Settings for new guest atoms</b> dropdown (just under Forget symmetry), which decides the radius and colour a newly grown atom starts with in that layer. <b>Default</b> leaves no override at all -- a newly grown atom renders with the plain ball-and-stick default, exactly like a freshly loaded one. <b>Current style</b> snapshots whatever Style &gt; Atoms' Colour and Radii checkboxes are currently set to (defaulting to ball-and-stick radius and CPK colour if neither Radii option is ticked) and gives every newly grown atom in that layer exactly that look. Whichever option is chosen, this only ever sets an override at the moment an atom is grown -- it never revisits atoms already present when the dropdown is changed.</p>" +
       "<p>Guests inherit their host or guest membership from the asymmetric unit position they came from, which normally makes sense -- but there are times a guest that's currently linked to others this way needs to move independently, or join the host, without dragging its symmetry-related copies along. \"Forget symmetry\", below that, makes this possible: it permanently discards this structure's symmetry information. Afterwards, every atom present -- asymmetric unit and grown copies alike -- stays exactly where it is, but each one can be edited, deleted, reassigned, or moved between host and guest completely independently, with no symmetry tracking. Growth, ASU only, and the automatic symmetry-linked cascades (an element or host/guest change spreading to related atoms, a cut bond applying to its symmetry images) all stop -- the entire Grow panel disappears, since none of it applies any more. The Display panel's Unit cell tab is unaffected and stays fully controllable, since it doesn't depend on any of this. This cannot be undone, and asks for confirmation before doing anything.</p>" +
       "<p>Ctrl-Alt-click selects every currently-displayed atom that shares the same asymmetric unit origin as the one clicked -- every symmetry copy of that specific atom, across host and guest alike -- which is otherwise not something to find by hand once a structure has been grown out. This takes priority over grow mode, so it works the same way whether or not grow mode happens to be switched on.</p>" +
@@ -11399,7 +12339,7 @@ select.sel:focus{border-color:var(--accent)}
       "<p>Set directly in " + U.ang + " (default 0.12), independently for host and guest, on <b>Style &gt; Bonds</b>. Bonds and atom spheres are always shown together now (there is no separate Spacefill/Stick mode): each ball is sized from its own element's van der Waals radius (0.2&times;, or 0.15&times; for hydrogen) unless overridden per atom from <b>Style &gt; Atoms</b>, and is widened to match the bond thickness if that would otherwise make it narrower than the bond feeding into it -- setting a selection's radius override to 0 collapses it all the way down to exactly the bond's own thickness, for a \"stick-only\" look on just those atoms.</p>" +
       "<p>Each bond is normally drawn as two halves, one in each of its atoms' own colours -- \"Split colour\", the default, on the <b>colour by</b> control above the thickness slider on <b>Style &gt; Bonds</b>. Choosing <b>Single colour</b> instead paints every bond the one colour in the swatch beside it, independently for host and guest.</p>" +
       "<h3>Selecting and deleting atoms</h3>" +
-      "<p>Click an atom to select it (shown with a yellow wire highlight); click a selected atom again to deselect it. The modifier keys compose: <b>Shift</b> restricts to atoms of the same element, <b>Ctrl</b> restricts to the clicked atom's bonded fragment, and <b>Alt</b> restricts to the clicked atom's whole component (the host, or one specific guest group) -- \"component\" here means host, guest 1, guest 2, and so on are all counted separately. Ctrl-click selects the whole fragment regardless of element; Alt-click selects the whole component regardless of element; Shift-click selects that element everywhere, host and guest together; Shift+Ctrl-click narrows that down to just that element within the clicked atom's fragment; Shift+Alt-click narrows it to just that element within the clicked atom's component. Ctrl+Alt (with or without Shift) isn't currently defined and does nothing. Every one of these toggles based on whether the clicked atom is currently selected, so clicking the same way again on an already-selected atom deselects the matching set instead. This all works the same way on host and guest atoms. Pressing spacebar, while focus isn't in a text box or other control, selects every atom if none are currently selected, or clears the selection entirely if any are. \"Delete selection\" removes them from whichever layer they belong to.</p>" +
+      "<p>Click an atom to select it (shown with a yellow wire highlight); click a selected atom again to deselect it. The modifier keys compose: <b>Shift</b> restricts to atoms of the same element, <b>Ctrl</b> restricts to the clicked atom's bonded fragment, and <b>Alt</b> restricts to the clicked atom's whole component (the host, or one specific guest group) -- \"component\" here means host, guest 1, guest 2, and so on are all counted separately. Ctrl-click selects the whole fragment regardless of element; Alt-click selects the whole component regardless of element; Shift-click selects that element everywhere, host and guest together; Shift+Ctrl-click narrows that down to just that element within the clicked atom's fragment. <b>Ctrl+Alt-click</b> and <b>Shift+Alt-click</b> are both symmetry-scoped instead (CIF-loaded structures only -- they do nothing on an atom with no symmetry information): Ctrl+Alt selects every currently-displayed atom sharing the clicked atom's asymmetric-unit origin, i.e. every symmetry copy of that one specific atom (see \"CIF and symmetry\" above); Shift+Alt selects every atom -- from any asymmetric-unit position, host or guest -- generated by the same symmetry operator as the clicked atom, regardless of which underlying atom it came from. <b>Shift+Ctrl+Alt-click</b> selects by PART number instead (SHELX .res/.ins structures only -- see \"Loading structures\" above). Every one of these toggles based on whether the clicked atom is currently selected, so clicking the same way again on an already-selected atom deselects the matching set instead. This all works the same way on host and guest atoms. Pressing spacebar, while focus isn't in a text box or other control, selects every atom if none are currently selected, or clears the selection entirely if any are. \"Delete selection\" removes them from whichever layer they belong to.</p>" +
       "<h3>Selection &amp; geometry</h3>" +
       "<p>The <b>Selection &amp; geometry</b> section shows a live readout for whatever is currently selected. More than 4 atoms selected shows just a count and an element breakdown (C, H, O, ...), since geometry stops meaning anything specific once a selection is a bulk fragment or element rather than a handful of atoms picked in order. For 1 to 4 atoms it shows the last-selected atom's element, fractional coordinates (CIF-based structures only) and Cartesian coordinates, then builds up cumulatively: 2 atoms adds the distance between them; 3 adds the second distance and the angle at the middle atom; 4 adds the third distance, the second angle, and the torsion angle through all four. Order follows the order atoms sit in the underlying atom list (host atoms, then guest atoms), not the order they were clicked in, since atoms here are only ever flagged selected rather than tracked in a separate ordered list -- for an angle or torsion reading with a specific atom intended as the vertex, select that one first isn't guaranteed to control the result; check the readout's own labelling. Where a CIF gives coordinate uncertainties (esds) in parentheses, e.g. <span class='mono'>0.51180(12)</span>, a distance, angle, or torsion is shown in standard notation too, e.g. <span class='mono'>1.542(3)</span> -- propagated independently per coordinate (no cell-parameter or cross-atom covariance, which a CIF doesn't provide), and only for untransformed atoms (no symmetry operation or cell offset applied); a symmetry-grown copy, a SHELX .res/.ins load (which never carries esds at all), or a guest atom simply shows a plain number instead. A mixed selection shows the esd on whichever individual measurements have it and a plain number on the ones that don't.</p>" +
       "<h3>Moving atoms between host and guest</h3>" +
@@ -11416,7 +12356,7 @@ select.sel:focus{border-color:var(--accent)}
       "<h3>Keeping symmetry consistent</h3>" +
       "<p>For a CIF-based structure, three things are always kept true of every asymmetric unit position, no matter which of its symmetry images is actually acted on: its element, and whether it belongs to host or a particular guest, are properties of the position itself, not of one copy of it. Changing either one on any single image -- the original or a symmetry-grown copy -- applies the same change to every other currently-displayed image of that same position automatically. \"Reassigned 3 atoms to Cl (2 symmetry-related atoms updated automatically)\" and similar messages confirm when this has happened.</p>" +
       "<p>Deletion works slightly differently, since it's reasonable to want either behaviour depending on what's being removed. Deleting the untransformed copy of an asymmetric unit atom -- the one with no symmetry operation or cell offset applied, effectively \"the atom as it appears in the asymmetric unit itself\" -- removes it from the asymmetric unit entirely: every symmetry image of it is deleted too, and growth will never regenerate it afterwards. Deleting a symmetry-grown copy on its own, leaving the asymmetric unit atom in place, is treated as a simple local edit instead -- just that one image goes, the asymmetric unit position is untouched, and growing again from a nearby atom can still recreate that same image later. \"Delete all symmetry-generated atoms\" and Undo both work the same way regardless of which of these removed anything. Because the whole-asymmetric-unit case is easy to trigger without meaning to, deleting a selection that includes one asks for confirmation first, naming how many atoms are involved before anything is actually removed.</p>" +
-      "<p><b>Show ASU only</b> (or the <b>a</b> key) hides every symmetry-grown copy and shows just the untransformed atoms -- the ones with no symmetry operation or cell offset applied -- as a quick way to see what the asymmetric unit actually contains, separate from however far it's since been grown out. Pressing <b>a</b> again restores the full view. This is purely a display filter: it doesn't change what's selected, calculated, or grown, only what's currently drawn.</p>" +
+      "<p><b>Show ASU only</b> (or the <b>a</b> key) hides every symmetry-grown copy and shows just the untransformed atoms -- the ones with no symmetry operation or cell offset applied -- as a quick way to see what the asymmetric unit actually contains, separate from however far it's since been grown out. Pressing <b>a</b> again restores the full view. This is purely a display filter -- it doesn't change what's calculated or grown, only what's currently drawn and selectable. A hidden-by-this-filter atom can't be newly selected either (by click, lasso, or select-all) while it's hidden, the same as an individually hidden atom already couldn't -- and turning the filter on immediately clears the selection on any atom it hides, rather than leaving an invisible selection to surprise a later Delete or Move selection to.</p>" +
       "<h3>Centroids and reassigning elements</h3>" +
       "<p>Select two or more atoms and \"Generate centroid\" (or Ctrl-C) adds a marker at their average position -- useful as a reference point for measuring or for defining a plane or vector that isn't sitting on a real atom. A centroid always renders as a small white sphere (0.2 &Aring; radius), regardless of the current display style, and doesn't affect bonding in any way -- it's a geometric reference, not a real atom. Its clickable area is a bit larger than it looks, since a sphere that small would otherwise be hard to hit precisely; this doesn't change how big it appears. It can be selected, moved between host and guest, and deleted exactly like any other atom. For a CIF-based structure, a centroid becomes part of the asymmetric unit, so it can be grown by symmetry the same way as everything else.</p>" +
       "<p>\"Reassign element to\", just below \"Move selection to\", changes the element of the selected atom(s) to any element in the periodic table, whether or not that element was already present in the structure -- a new one is picked up automatically, with its own colour and radius, the moment it's assigned. Reassigning a centroid turns it into a real atom of that element from then on: it stops being a fixed white marker and starts looking and behaving like any other atom in whichever layer it belongs to.</p>" +
@@ -11446,7 +12386,8 @@ select.sel:focus{border-color:var(--accent)}
        unaffected by this. */
     state.videoFormat = (await isMp4EncoderCached()) ? "mp4" : "avi";
     initThree(document.getElementById("viewport")); buildUI(); buildElementsPage(); buildGuide(); wireIO(); buildGuestGroupsUI(); refreshBondCleanupElements();
-    setDepthScaling(state.depthScaling); updateFog();
+    syncNoAtomsOverlay(); /* nothing loaded yet -- show "No atoms to display" until a structure loads (renderStructure() keeps this in sync from here on) */
+    setPseudoOrtho(state.pseudoOrtho); updateFog();
     if (restored) setStatus("Restored your saved element, display, lighting, and material settings. Load a host structure to begin.", false);
     window.addEventListener("beforeunload", persistPreferences); /* redundant safety net -- the real saves already happen on every change */
     var abortBtn = document.getElementById("calcAbortBtn");
