@@ -410,7 +410,7 @@ select:focus{border-color:var(--accent)}
     <div class="sbody">
       <label class="toggle"><input type="checkbox" id="annShow" checked oninput="redraw()"> Show fit summary</label>
       <div class="ctl-top"><label>Position</label>
-        <select class="sel" id="annPos" oninput="redraw()">
+        <select class="sel" id="annPos" oninput="annCustom=null;redraw()">
           <option value="tl">Top left</option>
           <option value="tr">Top right</option>
           <option value="bl">Bottom left</option>
@@ -1452,6 +1452,9 @@ window.addEventListener('resize',()=>drawEq(sel.value));
 // =====================================================================
 let rawData=[],fitResult=null,chartInst=null,parsedMeta={};
 let sourceFileHandle=null; // FileSystemFileHandle of the loaded data file, so Save dialogs default to its folder
+let annCustom=null;   // {fx,fy} fractional top-left position of dragged annotation box, relative to chartArea; null = use preset
+let annBoxBounds=null; // {x,y,w,h} last-drawn annotation box bounds in canvas-pixel coords (live chart only), for hit-testing drags
+let annDrag=null;      // active drag state while the mouse button is held on the annotation box
 
 // File loading — drop anywhere on the app
 function isFileDrag(e){ return e.dataTransfer && [...e.dataTransfer.types].includes('Files'); }
@@ -1838,21 +1841,34 @@ function _roundedBox(ctx,x,y,w,h,r){
   ctx.lineTo(x,y+r);ctx.arcTo(x,y,x+r,y,r);
   ctx.closePath();
 }
-function drawLegendBox(canvas,lines,posCode,sz,font){
-  if(!canvas||!lines||!lines.length)return;
+function drawLegendBox(canvas,lines,posCode,sz,font,opts){
+  const trackBounds=opts&&opts.trackBounds;
+  if(!canvas||!lines||!lines.length){ if(trackBounds) annBoxBounds=null; return; }
   const ctx=canvas.getContext('2d');
   const chartArea=chartInst&&chartInst.chartArea;
-  if(!chartArea)return;
+  if(!chartArea){ if(trackBounds) annBoxBounds=null; return; }
   const pL=chartArea.left,pR=chartArea.right,pT=chartArea.top,pB=chartArea.bottom;
   const lineH=sz*1.55,pad=sz*0.7,margin=sz*0.8;
   let maxW=0;
   lines.forEach(segs=>{const w=_measureMixed(ctx,segs,sz,font);if(w>maxW)maxW=w;});
   const boxW=maxW+pad*2,boxH=lines.length*lineH+pad*1.2;
+  // Position — a custom drag position (fractional, relative to the chart area) overrides the preset
   let bx,by;
-  if(posCode==='tl'){bx=pL+margin;by=pT+margin;}
+  if(annCustom){
+    bx=pL+annCustom.fx*(pR-pL);
+    by=pT+annCustom.fy*(pB-pT);
+    // keep the box from being dragged fully out of the chart area
+    bx=Math.max(pL,Math.min(pR-boxW,bx));
+    by=Math.max(pT,Math.min(pB-boxH,by));
+  }
+  else if(posCode==='tl'){bx=pL+margin;by=pT+margin;}
   else if(posCode==='tr'){bx=pR-boxW-margin;by=pT+margin;}
   else if(posCode==='bl'){bx=pL+margin;by=pB-boxH-margin;}
   else{bx=pR-boxW-margin;by=pB-boxH-margin;}
+  // Record bounds (canvas-pixel coords) so mouse handlers can hit-test for dragging.
+  // Only track for the live, on-screen chart — not for offscreen export renders,
+  // which use a different canvas/pixel space (this would otherwise corrupt drag hit-testing).
+  if(trackBounds) annBoxBounds={x:bx,y:by,w:boxW,h:boxH};
   const rx=sz*0.3;
   _roundedBox(ctx,bx,by,boxW,boxH,rx);
   ctx.fillStyle='rgba(255,255,255,0.92)';ctx.fill();
@@ -1928,17 +1944,17 @@ function buildLegendLines(r,mod){
   return lines;
 }
 function drawFitLegend(){
-  if(!gb('annShow'))return;
-  if(!fitResult||!chartInst)return;
+  if(!gb('annShow')){ annBoxBounds=null; return; }
+  if(!fitResult||!chartInst){ annBoxBounds=null; return; }
   const mod=MOD[fitResult.mod||document.getElementById('modelSel').value];
-  if(!mod)return;
+  if(!mod){ annBoxBounds=null; return; }
   const canvas=document.getElementById('myChart');
-  if(!canvas)return;
+  if(!canvas){ annBoxBounds=null; return; }
   const sz=parseFloat(gv('annSz'))||24;
   const font=gv('annFont')||"'Palatino Linotype',Palatino,Georgia,serif";
   const pos=gv('annPos')||'br';
   const lines=buildLegendLines(fitResult,mod);
-  drawLegendBox(canvas,lines,pos,sz,font);
+  drawLegendBox(canvas,lines,pos,sz,font,{trackBounds:true});
 }
 
 // =====================================================================
@@ -2157,6 +2173,52 @@ function drawChart(){
   chartInst=new Chart(canvas.getContext('2d'),buildConfig());
 }
 function redraw(){if(rawData.length)drawChart()}
+
+// =====================================================================
+//  DRAG THE FIT ANNOTATION BOX
+// =====================================================================
+function _annHitTest(cx,cy){
+  return annBoxBounds && cx>=annBoxBounds.x && cx<=annBoxBounds.x+annBoxBounds.w &&
+                          cy>=annBoxBounds.y && cy<=annBoxBounds.y+annBoxBounds.h;
+}
+function setupAnnotationDrag(){
+  const canvas=document.getElementById('myChart');
+  if(!canvas||canvas.dataset.annWired)return;
+  canvas.dataset.annWired='1';
+  // Note: Chart.js already scales its drawing context for device pixel ratio internally,
+  // so chartArea (and therefore annBoxBounds, which is derived from it) is in CSS-pixel
+  // space — the same space as getBoundingClientRect()/clientX/clientY. No dpr scaling here.
+  canvas.addEventListener('mousedown',e=>{
+    if(e.button!==0||!chartInst||!chartInst.chartArea)return;
+    const rect=canvas.getBoundingClientRect();
+    const cx=e.clientX-rect.left, cy=e.clientY-rect.top;
+    if(!_annHitTest(cx,cy))return;
+    e.preventDefault();
+    const ca=chartInst.chartArea;
+    annDrag={sx:e.clientX,sy:e.clientY,boxX:annBoxBounds.x,boxY:annBoxBounds.y,
+      pL:ca.left,pR:ca.right,pT:ca.top,pB:ca.bottom,moved:false};
+  });
+  canvas.addEventListener('mousemove',e=>{
+    const rect=canvas.getBoundingClientRect();
+    if(!annDrag){
+      const cx=e.clientX-rect.left, cy=e.clientY-rect.top;
+      canvas.style.cursor=_annHitTest(cx,cy)?'move':'';
+      return;
+    }
+    const dx=e.clientX-annDrag.sx, dy=e.clientY-annDrag.sy;
+    if(!annDrag.moved&&(Math.abs(dx)>3||Math.abs(dy)>3)) annDrag.moved=true;
+    if(!annDrag.moved)return;
+    const newX=annDrag.boxX+dx, newY=annDrag.boxY+dy;
+    annCustom={
+      fx:(newX-annDrag.pL)/(annDrag.pR-annDrag.pL),
+      fy:(newY-annDrag.pT)/(annDrag.pB-annDrag.pT)
+    };
+    if(chartInst) chartInst.draw();
+  });
+  canvas.addEventListener('mouseup',()=>{ annDrag=null; });
+  canvas.addEventListener('mouseleave',()=>{ annDrag=null; });
+}
+setupAnnotationDrag();
 
 // =====================================================================
 //  SAVE PLOT
