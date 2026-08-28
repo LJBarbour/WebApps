@@ -381,7 +381,7 @@ header .spacer{flex:1 1 auto}
     <div class="sbody">
       <label class="toggle"><input type="checkbox" id="legShow" checked oninput="redraw()"> Show fit summary</label>
       <div class="ctl-top"><label>Position</label>
-        <select class="sel" id="legPos" oninput="redraw()">
+        <select class="sel" id="legPos" oninput="legCustom=null;redraw()">
           <option value="tl">Top left</option>
           <option value="tr">Top right</option>
           <option value="bl">Bottom left</option>
@@ -455,7 +455,7 @@ header .spacer{flex:1 1 auto}
     <p>Switch to the <strong>α(t) Curve</strong> tab. The selected segment is rescaled so that α runs from 0 (at t₀) to 1 (at t∞), and time is shifted to start at zero. The curve shape gives a qualitative indication of the likely kinetic mechanism before any fitting is attempted.</p>
 
     <h3>Step 4 &mdash; Fit a Kinetic Model</h3>
-    <p>Choose a model from one of the four groups in the left panel. The app automatically switches to the <strong>Model Fit</strong> tab, where f(α) is plotted against time. A good model produces a straight line. The regression parameters (k, b, R², n) are shown directly on the plot in the Annotation box — toggle or reposition it from the right-hand panel.</p>
+    <p>Choose a model from one of the four groups in the left panel. The app automatically switches to the <strong>Model Fit</strong> tab, where f(α) is plotted against time. A good model produces a straight line. The regression parameters (k, b, R², n) are shown directly on the plot in the Annotation box — toggle it, choose a corner preset, or simply drag it anywhere on the plot with the mouse.</p>
     <p>The equation of the selected model is displayed in the canvas below the model selector.</p>
 
     <h3>Step 5 &mdash; Zoom &amp; Refine</h3>
@@ -540,6 +540,8 @@ const zsMap={raw:{xMin:null,xMax:null,yMin:null,yMax:null}, alpha:{xMin:null,xMa
 zs=zsMap.raw;
 const dragMap={}, isDragMap={}, rubberMap={};
 let wasPanDrag=false;
+let legCustom=null;   // {fx,fy} fractional top-left position of dragged legend box, relative to plot area; null = use preset
+let legBoxBounds=null; // {x,y,w,h} last-drawn legend box bounds in canvas-pixel coords, for hit-testing drags
 
 // ════════════════════════════════════════════════════════════════
 //  FILE LOADING
@@ -1154,6 +1156,15 @@ function onDown(e,id){
   if(cx<dims.l||cx>dims.r||cy<dims.t||cy>dims.b) return;
   e.preventDefault();
   if(e.button===0){
+    // If the click lands on the fit legend box, drag the legend instead of rubber-band zooming
+    if(id==='fit' && legBoxBounds &&
+       cx>=legBoxBounds.x && cx<=legBoxBounds.x+legBoxBounds.w &&
+       cy>=legBoxBounds.y && cy<=legBoxBounds.y+legBoxBounds.h){
+      dragMap[id]={mode:'legend', sx:e.clientX, sy:e.clientY,
+        boxX:legBoxBounds.x, boxY:legBoxBounds.y, dims};
+      isDragMap[id]=false;
+      return;
+    }
     // left button — start rubber-band zoom
     dragMap[id]={mode:'zoom', csx:cx, csy:cy, sx:e.clientX, sy:e.clientY};
     rubberMap[id]=null; isDragMap[id]=false;
@@ -1173,6 +1184,13 @@ function onMove(e,id){
 
   if(!dragMap[id]){
     if(id==='raw') showTip(e,c,rect,dpr);
+    if(id==='fit'){
+      // Hover feedback: show a move cursor over the legend box
+      const cx=(e.clientX-rect.left)*dpr, cy=(e.clientY-rect.top)*dpr;
+      const over = legBoxBounds && cx>=legBoxBounds.x && cx<=legBoxBounds.x+legBoxBounds.w &&
+                   cy>=legBoxBounds.y && cy<=legBoxBounds.y+legBoxBounds.h;
+      c.style.cursor = over ? 'move' : '';
+    }
     return;
   }
 
@@ -1182,6 +1200,20 @@ function onMove(e,id){
 
   document.getElementById('tooltip').style.display='none';
   const dims=getPlotDims(c, id);
+
+  if(dragMap[id].mode==='legend'){
+    // Move the legend box by the same pixel delta, converted to a fraction of the plot area
+    const snap=dragMap[id];
+    const pdims=snap.dims;
+    const newX = snap.boxX + dx*dpr;
+    const newY = snap.boxY + dy*dpr;
+    legCustom = {
+      fx: (newX - pdims.l) / (pdims.r - pdims.l),
+      fy: (newY - pdims.t) / (pdims.b - pdims.t)
+    };
+    drawFit();
+    return;
+  }
 
   if(dragMap[id].mode==='zoom'){
     // Update rubber-band rectangle (clamped to plot area)
@@ -1208,6 +1240,11 @@ function onMove(e,id){
 }
 
 function onUp(e,id){
+  if(dragMap[id] && dragMap[id].mode==='legend'){
+    rubberMap[id]=null; dragMap[id]=null; isDragMap[id]=false;
+    drawFit();
+    return;
+  }
   if(dragMap[id] && dragMap[id].mode==='pan' && !isDragMap[id]){
     // Right-click with no movement — copy canvas to clipboard
     const c=canvasEl(id); if(!c) { cleanup(); return; }
@@ -1608,7 +1645,16 @@ function drawFit(){
   ctx.fillStyle='#ffffff'; ctx.fillRect(l,t,pw,ph);
   ctx.save(); ctx.beginPath(); ctx.rect(l,t,pw,ph); ctx.clip();
 
-  // Regression line (drawn first, behind points)
+  // Data points — plain filled circles (drawn first, behind the line)
+  const ptC=gv('ptCol')||'#000000', ptS=(parseFloat(gv('ptSz'))||4)*dpr;
+  ctx.fillStyle=ptC;
+  fitPts.forEach(p=>{
+    const{cx,cy}=toC(p.t,p.y,dims,xr,yr);
+    if(cx<l-ptS||cx>r+ptS||cy<t-ptS||cy>b+ptS) return; // clip
+    ctx.beginPath(); ctx.arc(cx,cy,ptS,0,Math.PI*2); ctx.fill();
+  });
+
+  // Regression line (drawn on top of points)
   if(fitReg){
     const xL=xr.min, xR=xr.max;
     const{cx:lx,cy:ly}=toC(xL, fitReg.k*xL+fitReg.b, dims,xr,yr);
@@ -1619,15 +1665,6 @@ function drawFit(){
     ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(rx2,ry2); ctx.stroke();
     ctx.restore();
   }
-
-  // Data points — plain filled circles
-  const ptC=gv('ptCol')||'#000000', ptS=(parseFloat(gv('ptSz'))||4)*dpr;
-  ctx.fillStyle=ptC;
-  fitPts.forEach(p=>{
-    const{cx,cy}=toC(p.t,p.y,dims,xr,yr);
-    if(cx<l-ptS||cx>r+ptS||cy<t-ptS||cy>b+ptS) return; // clip
-    ctx.beginPath(); ctx.arc(cx,cy,ptS,0,Math.PI*2); ctx.fill();
-  });
 
   // Rubber-band zoom rect
   if(rubberMap['fit']){
@@ -1642,15 +1679,16 @@ function drawFit(){
 
   // Axes/grid drawn first, then the annotation box on top of them
   drawAxesFit(ctx,dims,xr,yr,'Time (t − t₀)','f(α)');
-  if(gb('legShow')) drawLegend(ctx, dims, xr, yr);
+  if(gb('legShow')) drawLegend(ctx, dims, xr, yr, {trackBounds:true}); else legBoxBounds=null;
 }
 
 // drawAxesFit: uses right-panel style controls; slider values are px sizes at 1x dpr
 // ════════════════════════════════════════════════════════════════
 //  FIT LEGEND
 // ════════════════════════════════════════════════════════════════
-function drawLegend(ctx, dims, xr, yr){
-  if(!fitReg||!selectedModel||!alphaData.length) return;
+function drawLegend(ctx, dims, xr, yr, opts){
+  const trackBounds = opts && opts.trackBounds;
+  if(!fitReg||!selectedModel||!alphaData.length){ if(trackBounds) legBoxBounds=null; return; }
   ctx.save();
   const{l,r,t,b,dpr}=dims;
   const font  = gv('legFont')||"'Palatino Linotype',Palatino,Georgia,serif";
@@ -1746,12 +1784,23 @@ function drawLegend(ctx, dims, xr, yr){
   const boxH = lines.length * lineH + pad*1.2;
   const margin = sz * 0.8;
 
-  // Position
+  // Position — a custom drag position (fractional, relative to plot area) overrides the preset
   let bx, by;
-  if(pos==='tl'){ bx=l+margin;       by=t+margin; }
+  if(legCustom){
+    bx = l + legCustom.fx*(r-l);
+    by = t + legCustom.fy*(b-t);
+    // keep the box from being dragged fully out of the plot area
+    bx = Math.max(l, Math.min(r-boxW, bx));
+    by = Math.max(t, Math.min(b-boxH, by));
+  } else if(pos==='tl'){ bx=l+margin;       by=t+margin; }
   else if(pos==='tr'){ bx=r-boxW-margin; by=t+margin; }
   else if(pos==='bl'){ bx=l+margin;       by=b-boxH-margin; }
   else              { bx=r-boxW-margin; by=b-boxH-margin; }
+
+  // Record bounds (canvas-pixel coords) so mouse handlers can hit-test for dragging.
+  // Only track for the live, on-screen canvas — not for offscreen export renders,
+  // which use a different pixel space (this would otherwise corrupt drag hit-testing).
+  if(trackBounds) legBoxBounds = {x:bx, y:by, w:boxW, h:boxH};
 
   // Box — white fill, border same as axis colour
   ctx.save();
@@ -1869,16 +1918,7 @@ function renderFitChart(ctx, W, H){
   ctx.fillStyle='#ffffff'; ctx.fillRect(l,t,pw,ph);
   ctx.save(); ctx.beginPath(); ctx.rect(l,t,pw,ph); ctx.clip();
 
-  // Regression line
-  const lnC=gv('lnCol')||'#4A6FA5', lnW2=parseFloat(gv('lnW'))||3;
-  ctx.save();
-  ctx.strokeStyle=lnC; ctx.lineWidth=lnW2;
-  const{cx:lx,cy:ly}=toC(xr.min,fitReg.k*xr.min+fitReg.b,dims,xr,yr);
-  const{cx:rx3,cy:ry3}=toC(xr.max,fitReg.k*xr.max+fitReg.b,dims,xr,yr);
-  ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(rx3,ry3); ctx.stroke();
-  ctx.restore();
-
-  // Data points — plain filled circles
+  // Data points — plain filled circles (drawn first, behind the line)
   const ptC=gv('ptCol')||'#000000', ptS2=parseFloat(gv('ptSz'))||4;
   ctx.fillStyle=ptC;
   fitPts.forEach(p=>{
@@ -1886,6 +1926,15 @@ function renderFitChart(ctx, W, H){
     if(cx<l-ptS2||cx>r+ptS2||cy<t-ptS2||cy>b+ptS2) return;
     ctx.beginPath(); ctx.arc(cx,cy,ptS2,0,Math.PI*2); ctx.fill();
   });
+
+  // Regression line (drawn on top of points)
+  const lnC=gv('lnCol')||'#4A6FA5', lnW2=parseFloat(gv('lnW'))||3;
+  ctx.save();
+  ctx.strokeStyle=lnC; ctx.lineWidth=lnW2;
+  const{cx:lx,cy:ly}=toC(xr.min,fitReg.k*xr.min+fitReg.b,dims,xr,yr);
+  const{cx:rx3,cy:ry3}=toC(xr.max,fitReg.k*xr.max+fitReg.b,dims,xr,yr);
+  ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(rx3,ry3); ctx.stroke();
+  ctx.restore();
 
   ctx.restore(); // end clip
 

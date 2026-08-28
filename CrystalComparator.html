@@ -2961,7 +2961,7 @@ select.sel:focus{border-color:var(--accent)}
 
   var scene, camera, orthoCam, activeCam, renderer;
   var atomsGroup, bondsGroup, surfaceGroup, guestAtomsGroup, guestBondsGroup, hbondsGroup, selectionGroup, unitCellGroup;
-  var comparisonAtomsGroup, comparisonBondsGroup, comparisonUnitCellGroup, anchorMarkerGroup, correspondenceLinkGroup, anisotropicEllipsoidGroup;
+  var comparisonAtomsGroup, comparisonBondsGroup, comparisonUnitCellGroup, anchorMarkerGroup, correspondenceLinkGroup, anisotropicEllipsoidGroup, xpacHighlightGroup;
   var lightRig, keyLight, fillLight, rimLight;
   var sphereGeo = null, highlightCylGeo = null, matCache = {};
   var state = {
@@ -3237,6 +3237,7 @@ select.sel:focus{border-color:var(--accent)}
     anchorMarkerGroup = new THREE.Group(); scene.add(anchorMarkerGroup);
     correspondenceLinkGroup = new THREE.Group(); scene.add(correspondenceLinkGroup);
     anisotropicEllipsoidGroup = new THREE.Group(); scene.add(anisotropicEllipsoidGroup);
+    xpacHighlightGroup = new THREE.Group(); scene.add(xpacHighlightGroup);
     surfaceGroup = new THREE.Group(); scene.add(surfaceGroup);
     window.addEventListener("resize", onResize); onResize(); animate();
   }
@@ -4120,6 +4121,7 @@ select.sel:focus{border-color:var(--accent)}
     renderSelection();
     renderAnisotropicEllipsoid();
     if(typeof renderMolecularCorrespondenceLinks==="function")renderMolecularCorrespondenceLinks();
+    if(typeof renderXPacHighlights==="function")renderXPacHighlights();
   }
   function atomDisplayRadius(style, r, elem, bondRadius, scaleMult) {
     if (style === "spacefill") return r * scaleMult;
@@ -5359,8 +5361,8 @@ select.sel:focus{border-color:var(--accent)}
       structureSlots[si]=captureStructureState();
     }
     activeStructureIndex=originalActive;applyStructureState(structureSlots[originalActive]);
-    anchorPairs=anchorPairs.filter(function(p){return p.a1.el!=="H"&&p.a2.el!=="H";});if(anchorPending&&anchorPending.el==="H")anchorPending=null;moleculeFitResult=null;
-    symmetrySearchResults=[];symmetrySearchSelected=0;symmetryPreviewStarted=false;symmetryBaseCorrespondence=null;invalidateComparisonDefinition();inflationOptimResults=[];inflationCache=[null,null];
+    anchorPairs=anchorPairs.filter(function(p){return p.a1.el!=="H"&&p.a2.el!=="H";});if(anchorPending&&anchorPending.el==="H")anchorPending=null;
+    symmetrySearchResults=[];symmetrySearchSelected=0;symmetryPreviewStarted=false;clearComparisonResultsOnly();inflationOptimResults=[];inflationCache=[null,null];
     rebuildActiveStructurePanel();updateComparatorHeader();renderAnchorMarkers();updateAnchorUI();updateSymmetrySearchUI();
     if(!total){setStatus("No hydrogen atoms were present in either loaded structure.",false);return;}
     setStatus("Deleted "+total+" hydrogen atom"+(total===1?"":"s")+" from the loaded structures (Structure 1: "+counts[0]+"; Structure 2: "+counts[1]+"). CIF growth will not recreate them.",false);
@@ -6772,6 +6774,11 @@ select.sel:focus{border-color:var(--accent)}
   var comparisonColours = [0x4A6FA5, 0xC46A47];
   var COMPARATOR_BUILD = "2026-07-29.24";
   var comparisonDiagnosticEvents = [];
+  var xpacResult = null;
+  var xpacSelectedMatch = null;
+  var xpacShowHighlights = true;
+  var rigidNeighbourhoodFitResult = null;
+  var xpacDefaults = { tolerance: 1.5, fAng: 7, fDhd: 18, fTor: 22 };
   function recordComparisonDiagnosticEvent(name,data){comparisonDiagnosticEvents.push({time:new Date().toISOString(),name:name,data:data||null});if(comparisonDiagnosticEvents.length>500)comparisonDiagnosticEvents.shift();}
   var alignmentMode = "camera";
   var alignmentMovingIndex = 1;
@@ -6820,12 +6827,12 @@ select.sel:focus{border-color:var(--accent)}
   function ensureAlignment(slot) { if (!slot.alignment) slot.alignment = freshAlignment(); return slot.alignment; }
   function clearAllDerivedComparisonState(){
     anchorFitMode=false;alignmentPairedGrowMode=false;anchorPairs=[];anchorPending=null;twoAnchorWholePackingFitComplete=false;moleculeFitResult=null;symmetrySearchResults=[];symmetrySearchSelected=0;symmetryPreviewStarted=false;symmetryBaseCorrespondence=null;
-    comparisonAtomPairs=[];comparisonAtomMask={};comparisonMaskLocked=false;molecularCorrespondenceResult=null;radialAnalysisResult=null;volumetricAnalysisResult=null;radialReportText="";inflationOptimResults=[];inflationCache=[null,null];
+    comparisonAtomPairs=[];comparisonAtomMask={};comparisonMaskLocked=false;molecularCorrespondenceResult=null;radialAnalysisResult=null;volumetricAnalysisResult=null;radialReportText="";inflationOptimResults=[];inflationCache=[null,null];xpacResult=null;xpacSelectedMatch=null;rigidNeighbourhoodFitResult=null;
     function resetSlot(slot){if(!slot)return;slot.alignment=freshAlignment();slot.inflationScale=1;slot.inflationCenter=null;slot.anisotropicEnabled=false;slot.anisotropicMode="molecular";slot.anisotropicStretches=[1,1,1];slot.anisotropicAxes=[[1,0,0],[0,1,0],[0,0,1]];slot.anisotropicCenter=null;slot.anisotropicResult=null;slot.deformUnitCellDisplay=false;slot.showAnisotropicEllipsoid=false;}
     if(structureSlots){resetSlot(structureSlots[0]);resetSlot(structureSlots[1]);}
     state.alignment=freshAlignment();state.inflationScale=1;state.inflationCenter=null;state.anisotropicEnabled=false;state.anisotropicMode="molecular";state.anisotropicStretches=[1,1,1];state.anisotropicAxes=[[1,0,0],[0,1,0],[0,0,1]];state.anisotropicCenter=null;state.anisotropicResult=null;state.deformUnitCellDisplay=false;state.showAnisotropicEllipsoid=false;
-    if(anisotropicEllipsoidGroup)clearGroup(anisotropicEllipsoidGroup);if(correspondenceLinkGroup)clearGroup(correspondenceLinkGroup);if(anchorMarkerGroup)clearGroup(anchorMarkerGroup);
-    if(typeof updateAnchorUI==="function")updateAnchorUI();if(typeof updateCorrespondenceUI==="function")updateCorrespondenceUI();if(typeof updateSymmetrySearchUI==="function")updateSymmetrySearchUI();if(typeof updateAnisotropicUI==="function")updateAnisotropicUI();if(typeof updateVolumetricUI==="function")updateVolumetricUI();if(typeof updateRadialAnalysisUI==="function")updateRadialAnalysisUI();if(typeof updateAlignmentUI==="function")updateAlignmentUI();
+    if(anisotropicEllipsoidGroup)clearGroup(anisotropicEllipsoidGroup);if(correspondenceLinkGroup)clearGroup(correspondenceLinkGroup);if(anchorMarkerGroup)clearGroup(anchorMarkerGroup);if(xpacHighlightGroup)clearGroup(xpacHighlightGroup);
+    if(typeof updateAnchorUI==="function")updateAnchorUI();if(typeof updateCorrespondenceUI==="function")updateCorrespondenceUI();if(typeof updateSymmetrySearchUI==="function")updateSymmetrySearchUI();if(typeof updateAnisotropicUI==="function")updateAnisotropicUI();if(typeof updateVolumetricUI==="function")updateVolumetricUI();if(typeof updateRadialAnalysisUI==="function")updateRadialAnalysisUI();if(typeof updateAlignmentUI==="function")updateAlignmentUI();if(typeof updateXPacUI==="function")updateXPacUI();if(typeof updateRigidNeighbourhoodFitUI==="function")updateRigidNeighbourhoodFitUI();
   }
 
   function captureStructureState() {
@@ -7081,7 +7088,8 @@ select.sel:focus{border-color:var(--accent)}
   function comparisonPairKey(p){return p.a1.uid+"|"+p.a2.uid;}
   function comparisonAtomLabel(atom,index){var slot=structureSlots&&structureSlots[index],au=slot&&slot.cifAsymUnit&&atom.auIndex!==undefined?slot.cifAsymUnit[atom.auIndex]:null;return au&&au.label?au.label:(atom.label||atom.el+(atom.auIndex!==undefined?atom.auIndex+1:""));}
   function activeComparisonAtomPairs(){return comparisonAtomPairs.filter(function(p){return comparisonAtomMask[comparisonPairKey(p)]!==false&&isSelectable(p.a1)&&isSelectable(p.a2);});}
-  function invalidateComparisonDefinition(){comparisonAtomPairs=[];comparisonAtomMask={};comparisonMaskLocked=false;molecularCorrespondenceResult=null;radialAnalysisResult=null;volumetricAnalysisResult=null;if(correspondenceLinkGroup)while(correspondenceLinkGroup.children.length){var c=correspondenceLinkGroup.children.pop();if(c.geometry)c.geometry.dispose();if(c.material)c.material.dispose();}updateCorrespondenceUI();updateVolumetricUI();updateRadialAnalysisUI();}
+  function clearComparisonResultsOnly(){molecularCorrespondenceResult=null;radialAnalysisResult=null;volumetricAnalysisResult=null;xpacResult=null;xpacSelectedMatch=null;rigidNeighbourhoodFitResult=null;if(correspondenceLinkGroup)while(correspondenceLinkGroup.children.length){var c=correspondenceLinkGroup.children.pop();if(c.geometry)c.geometry.dispose();if(c.material)c.material.dispose();}updateCorrespondenceUI();updateVolumetricUI();updateRadialAnalysisUI();if(typeof updateXPacUI==="function")updateXPacUI();if(typeof renderXPacHighlights==="function")renderXPacHighlights();if(typeof updateRigidNeighbourhoodFitUI==="function")updateRigidNeighbourhoodFitUI();}
+  function invalidateComparisonDefinition(){comparisonAtomPairs=[];comparisonAtomMask={};comparisonMaskLocked=false;clearComparisonResultsOnly();}
   function buildComparisonAtomSet(){if(comparisonMaskLocked){setStatus("Unlock the comparison atom set before rebuilding it.",true);return;}var match=symmetryBaseCorrespondence||findMoleculeCorrespondence();if(!match)return;comparisonAtomPairs=match.pairs.slice();comparisonAtomMask={};comparisonAtomPairs.forEach(function(p){comparisonAtomMask[comparisonPairKey(p)]=true;});molecularCorrespondenceResult=null;updateCorrespondenceUI();setStatus("Built a comparison set containing "+comparisonAtomPairs.length+" atom pairs. Review or exclude pairs, then lock the set.",false);}
   function setSelectedComparisonPairsIncluded(include){if(comparisonMaskLocked){setStatus("Unlock the comparison atom set before changing it.",true);return;}if(!comparisonAtomPairs.length){setStatus("Build the comparison atom set first.",true);return;}var changed=0;comparisonAtomPairs.forEach(function(p){if(p.a1.selected||p.a2.selected){comparisonAtomMask[comparisonPairKey(p)]=include;changed++;}});if(!changed){setStatus("Select corresponding atoms in either structure first.",true);return;}molecularCorrespondenceResult=null;radialAnalysisResult=null;updateCorrespondenceUI();updateRadialAnalysisUI();renderMolecularCorrespondenceLinks();setStatus((include?"Included ":"Excluded ")+changed+" selected atom pair"+(changed===1?"":"s")+".",false);}
   function includeAllComparisonPairs(){if(comparisonMaskLocked){setStatus("Unlock the comparison atom set before changing it.",true);return;}comparisonAtomPairs.forEach(function(p){comparisonAtomMask[comparisonPairKey(p)]=true;});molecularCorrespondenceResult=null;radialAnalysisResult=null;updateCorrespondenceUI();updateRadialAnalysisUI();}
@@ -7131,6 +7139,43 @@ select.sel:focus{border-color:var(--accent)}
     r1.forEach(function(a,i){r2.forEach(function(b,j){var cd=a.c.distanceTo(b.c);if(cd>cutoff)return;var ar=baseComponentAtomicRmsd(a.comp,b.comp,atomPairs);if(ar)candidates.push({i:i,j:j,cost:ar.rmsd+.25*cd,centroidDistance:cd,atomicRmsd:ar.rmsd,atomCount:ar.n,directAtomPairs:ar.pairs});});});
     var assignments=minimumCostMolecularAssignment(r1.length,r2.length,candidates),matches=assignments.map(function(p){return {comp1:r1[p.i].comp,comp2:r2[p.j].comp,c1:r1[p.i].c,c2:r2[p.j].c,centroidDistance:p.centroidDistance,atomicRmsd:p.atomicRmsd,atomCount:p.atomCount,atomPairs:p.directAtomPairs};});
     return {pairs:matches,count1:r1.length,count2:r2.length,radius:radius,cutoff:cutoff,origin1:O1,origin2:O2};
+  }
+  function atomPairsFromMolecularPairs(pairs){var out=[];pairs.forEach(function(p){(p.atomPairs||[]).forEach(function(ap){if(ap.a1&&ap.a2)out.push(ap);});});return out;}
+  function centroidRmsdOf(pairs){if(!pairs.length)return NaN;var sum=0;pairs.forEach(function(p){sum+=p.centroidDistance*p.centroidDistance;});return Math.sqrt(sum/pairs.length);}
+  function atomicRmsdOf(atomPairs){if(!atomPairs.length)return NaN;var sum=0;atomPairs.forEach(function(p){sum+=atomAlignedPosition(p.a1,0).distanceToSquared(atomAlignedPosition(p.a2,1));});return Math.sqrt(sum/atomPairs.length);}
+  function refineRigidNeighbourhoodFit(){
+    if(!comparisonMaskLocked){setStatus("Lock the comparison atom set before refining the rigid whole-packing fit.",true);return;}
+    var atomPairsScaffold=activeComparisonAtomPairs();if(atomPairsScaffold.length<3){setStatus("At least three locked atom pairs are required.",true);return;}
+    var radiusInp=document.getElementById("corrRadius"),cutoffInp=document.getElementById("corrCutoff"),radius=radiusInp?parseFloat(radiusInp.value):NaN,cutoff=cutoffInp?parseFloat(cutoffInp.value):NaN;
+    if(!isFinite(radius)||radius<=0||!isFinite(cutoff)||cutoff<=0){setStatus("Enter positive molecular matching radius and tolerance values before refining the rigid fit.",true);return;}
+    saveActiveStructureState();
+    var iterations=0,deltaAngle=0,centroidRmsdBefore=NaN,atomicRmsdBefore=NaN;
+    for(var iter=0;iter<4;iter++){
+      var local=computeLocalNeighbourhoodMatch(radius,cutoff,atomPairsScaffold);
+      if(!local||!local.pairs.length){setStatus(iter?("Rigid refinement stopped after "+iterations+" iteration"+(iterations===1?"":"s")+": no matched molecular neighbourhood remained within the given radius/tolerance."):"No matched molecular neighbourhood is available within the given radius/tolerance to refine against.",true);return;}
+      var atomPairs=atomPairsFromMolecularPairs(local.pairs);
+      if(atomPairs.length<3){setStatus(iter?("Rigid refinement stopped after "+iterations+" iteration"+(iterations===1?"":"s")+": fewer than three corresponding atoms remained across the matched neighbourhood."):"Fewer than three corresponding atoms are available across the matched neighbourhood.",true);return;}
+      if(iter===0){centroidRmsdBefore=centroidRmsdOf(local.pairs);atomicRmsdBefore=atomicRmsdOf(atomPairs);}
+      var source=atomPairs.map(function(p){return atomLocalPosition(p.a2,1);}),target=atomPairs.map(function(p){return atomAlignedPosition(p.a1,0);});
+      var fit=rigidFitQuaternion(source,target);
+      deltaAngle=2*Math.acos(Math.max(-1,Math.min(1,Math.abs(fit.q.clone().normalize().w))))*180/Math.PI;
+      setAlignmentFromQuaternion(1,fit.q,fit.t);
+      iterations++;
+      if(deltaAngle<0.01)break;
+    }
+    applyAlignmentTransforms();
+    var finalLocal=computeLocalNeighbourhoodMatch(radius,cutoff,atomPairsScaffold),matchedMolecules=finalLocal?finalLocal.pairs.length:0,centroidRmsdAfter=finalLocal?centroidRmsdOf(finalLocal.pairs):NaN,atomicRmsdAfter=finalLocal?atomicRmsdOf(atomPairsFromMolecularPairs(finalLocal.pairs)):NaN;
+    molecularCorrespondenceResult=null;radialAnalysisResult=null;volumetricAnalysisResult=null;xpacResult=null;xpacSelectedMatch=null;
+    rigidNeighbourhoodFitResult={iterations:iterations,matchedMolecules:matchedMolecules,centroidRmsdBefore:centroidRmsdBefore,centroidRmsdAfter:centroidRmsdAfter,atomicRmsdBefore:atomicRmsdBefore,atomicRmsdAfter:atomicRmsdAfter,radius:radius,cutoff:cutoff};
+    renderStructure();renderUnitCell();renderAnchorMarkers();renderMolecularCorrespondenceLinks();updateCorrespondenceUI();updateRadialAnalysisUI();updateVolumetricUI();updateAnisotropicUI();updateRigidNeighbourhoodFitUI();if(typeof updateXPacUI==="function")updateXPacUI();if(typeof renderXPacHighlights==="function")renderXPacHighlights();
+    recordComparisonDiagnosticEvent("rigid-neighbourhood-fit",rigidNeighbourhoodFitResult);
+    setStatus("Rigid whole-packing refinement (no strain) converged after "+iterations+" iteration"+(iterations===1?"":"s")+" using "+matchedMolecules+" matched molecules; atomic RMSD "+(isFinite(atomicRmsdAfter)?atomicRmsdAfter.toFixed(4):"—")+" "+U.ang+".",false);
+  }
+  function updateRigidNeighbourhoodFitUI(){
+    var box=document.getElementById("rigidNeighbourhoodFitInfo");if(!box)return;
+    var r=rigidNeighbourhoodFitResult;
+    if(!r){box.innerHTML="<div class='dim'>No rigid whole-packing refinement yet.</div>";return;}
+    box.innerHTML="<div><b>Rigid whole-packing fit (no strain)</b></div><div>Matched molecules: "+r.matchedMolecules+"</div><div>Iterations: "+r.iterations+"</div><div>Centroid RMSD: "+(isFinite(r.centroidRmsdBefore)?r.centroidRmsdBefore.toFixed(4):"—")+" → "+(isFinite(r.centroidRmsdAfter)?r.centroidRmsdAfter.toFixed(4):"—")+" "+U.ang+"</div><div>Atomic RMSD: "+(isFinite(r.atomicRmsdBefore)?r.atomicRmsdBefore.toFixed(4):"—")+" → "+(isFinite(r.atomicRmsdAfter)?r.atomicRmsdAfter.toFixed(4):"—")+" "+U.ang+"</div>";
   }
   function radialAnalysisReadiness(){
     if(!comparisonMaskLocked)return {ready:false,message:"Lock the comparison atom set first."};
@@ -7272,6 +7317,159 @@ select.sel:focus{border-color:var(--accent)}
     var seen={},out=[];
     for(var i=0;i<atoms.length;i++){if(seen[i])continue;var stack=[i],comp=[];seen[i]=1;while(stack.length){var x=stack.pop();comp.push(atoms[x]);for(var j=0;j<adj[x].length;j++){var n=adj[x][j];if(!seen[n]){seen[n]=1;stack.push(n);}}}out.push(comp);}
     return out;
+  }
+  function vectorAngleDeg(u, v) {
+    var lu = u.length(), lv = v.length(); if (lu < 1e-8 || lv < 1e-8) return 0;
+    var d = u.dot(v) / (lu * lv); d = Math.max(-1, Math.min(1, d));
+    return Math.acos(d) * 180 / Math.PI;
+  }
+  function planeNormalXPac(p1, p2, p3) {
+    var v1 = new THREE.Vector3().subVectors(p2, p1), v2 = new THREE.Vector3().subVectors(p3, p1), n = new THREE.Vector3().crossVectors(v1, v2);
+    return n.lengthSq() < 1e-10 ? new THREE.Vector3(0, 0, 1) : n.normalize();
+  }
+  function dihedralAngleXPac(p1, p2, p3, p4) {
+    var b1 = new THREE.Vector3().subVectors(p2, p1), b2 = new THREE.Vector3().subVectors(p3, p2), b3 = new THREE.Vector3().subVectors(p4, p3);
+    if (b1.lengthSq() < 1e-10 || b2.lengthSq() < 1e-10 || b3.lengthSq() < 1e-10) return 0;
+    var n1 = new THREE.Vector3().crossVectors(b1, b2), n2 = new THREE.Vector3().crossVectors(b2, b3);
+    if (n1.lengthSq() < 1e-10 || n2.lengthSq() < 1e-10) return 0;
+    var m1 = new THREE.Vector3().crossVectors(n1, b2.clone().normalize());
+    return Math.atan2(m1.dot(n2), n1.dot(n2)) * 180 / Math.PI;
+  }
+  /* XPac (Gelbrich & Hursthouse) double sub-unit comparison — additive analysis mode.
+     Enumeration of angle/interplanar/torsion lists below is this app's own documented
+     convention (the papers describe only "sufficiently large representative lists"
+     without a formula); see the Guide for the exact definitions and its caveats. */
+  function xpacKernelComponent(index) {
+    var pairs = activeComparisonAtomPairs(); if (!pairs.length || !structureSlots || !structureSlots[index]) return null;
+    var seed = index === 0 ? pairs[0].a1 : pairs[0].a2;
+    return moleculeComponent(structureSlots[index], seed);
+  }
+  function xpacShellNeighbours(index, kernelComponent, tolerance) {
+    if (!kernelComponent || !kernelComponent.length) return [];
+    var all = allMolecularComponents(structureSlots[index]);
+    return all.filter(function (comp) {
+      if (comp.indexOf(kernelComponent[0]) >= 0) return false;
+      for (var i = 0; i < kernelComponent.length; i++) {
+        var a = kernelComponent[i]; if (!isSelectable(a)) continue; var pa = atomAlignedPosition(a, index);
+        for (var j = 0; j < comp.length; j++) {
+          var b = comp[j]; if (!isSelectable(b)) continue;
+          var lim = K.vdw(a.el) + K.vdw(b.el) + tolerance;
+          if (atomAlignedPosition(b, index).distanceTo(pa) < lim) return true;
+        }
+      }
+      return false;
+    });
+  }
+  function deriveOSPForComponent(component, ospAuIndices) {
+    var out = [];
+    for (var i = 0; i < ospAuIndices.length; i++) {
+      var au = ospAuIndices[i], found = null;
+      for (var j = 0; j < component.length; j++) { if (isSelectable(component[j]) && component[j].auIndex === au) { found = component[j]; break; } }
+      if (!found) return null;
+      out.push(found);
+    }
+    return out;
+  }
+  function xpacAngleList(kernelPts, neighbourPts) {
+    var n = kernelPts.length, list = [], i, j, v, vertex, a, b;
+    for (i = 0; i < n; i++) for (j = i + 1; j < n; j++) for (v = 0; v < n; v++) {
+      vertex = neighbourPts[v]; a = kernelPts[i]; b = kernelPts[j];
+      list.push(vectorAngleDeg(new THREE.Vector3().subVectors(a, vertex), new THREE.Vector3().subVectors(b, vertex)));
+    }
+    for (i = 0; i < n; i++) for (j = i + 1; j < n; j++) for (v = 0; v < n; v++) {
+      vertex = kernelPts[v]; a = neighbourPts[i]; b = neighbourPts[j];
+      list.push(vectorAngleDeg(new THREE.Vector3().subVectors(a, vertex), new THREE.Vector3().subVectors(b, vertex)));
+    }
+    return list;
+  }
+  function xpacInterplanarList(kernelPts, neighbourPts) {
+    var n = kernelPts.length, list = [];
+    for (var i = 0; i < n; i++) for (var j = i + 1; j < n; j++) for (var k = j + 1; k < n; k++) {
+      var n1 = planeNormalXPac(kernelPts[i], kernelPts[j], kernelPts[k]), n2 = planeNormalXPac(neighbourPts[i], neighbourPts[j], neighbourPts[k]);
+      var ang = vectorAngleDeg(n1, n2); if (ang > 90) ang = 180 - ang;
+      list.push(ang);
+    }
+    return list;
+  }
+  function xpacTorsionList(kernelPts, neighbourPts, mirror) {
+    var n = kernelPts.length, list = [], sign = mirror ? -1 : 1;
+    for (var i = 0; i < n; i++) for (var j = 0; j < n; j++) { if (j === i) continue; for (var l = 0; l < n; l++) { if (l === i) continue;
+      list.push(sign * dihedralAngleXPac(kernelPts[j], kernelPts[i], neighbourPts[i], neighbourPts[l]));
+    } }
+    return list;
+  }
+  function meanAbsDiff(a, b) {
+    var n = Math.min(a.length, b.length); if (!n) return NaN;
+    var sum = 0; for (var i = 0; i < n; i++) sum += Math.abs(a[i] - b[i]);
+    return sum / n;
+  }
+  function computeXPacDoubleSubunits() {
+    if (!comparisonMaskLocked) { setStatus("Lock the comparison atom set before running the XPac comparison.", true); return; }
+    var pairs = activeComparisonAtomPairs();
+    if (pairs.length < 3) { setStatus("At least three locked atom pairs are required to define the XPac OSP.", true); return; }
+    var tolInp = document.getElementById("xpacTolerance"), fAngInp = document.getElementById("xpacFAng"), fDhdInp = document.getElementById("xpacFDhd"), fTorInp = document.getElementById("xpacFTor");
+    var tolerance = parseFloat(tolInp ? tolInp.value : xpacDefaults.tolerance), fAng = parseFloat(fAngInp ? fAngInp.value : xpacDefaults.fAng), fDhd = parseFloat(fDhdInp ? fDhdInp.value : xpacDefaults.fDhd), fTor = parseFloat(fTorInp ? fTorInp.value : xpacDefaults.fTor);
+    if (!isFinite(tolerance) || tolerance < 0 || !isFinite(fAng) || fAng <= 0 || !isFinite(fDhd) || fDhd <= 0 || !isFinite(fTor) || fTor <= 0) { setStatus("Enter positive XPac tolerance and filter values.", true); return; }
+    saveActiveStructureState();
+    var ospAu1 = pairs.map(function (p) { return p.a1.auIndex; }), ospAu2 = pairs.map(function (p) { return p.a2.auIndex; });
+    var kernel1 = xpacKernelComponent(0), kernel2 = xpacKernelComponent(1);
+    if (!kernel1 || !kernel2) { setStatus("Could not identify the kernel molecule in one or both structures.", true); return; }
+    var kernelOSP1 = deriveOSPForComponent(kernel1, ospAu1), kernelOSP2 = deriveOSPForComponent(kernel2, ospAu2);
+    if (!kernelOSP1 || !kernelOSP2) { setStatus("The locked scaffold could not be located in full within the kernel molecule of one or both structures.", true); return; }
+    var shell1 = xpacShellNeighbours(0, kernel1, tolerance), shell2 = xpacShellNeighbours(1, kernel2, tolerance);
+    var neighbours1 = shell1.map(function (comp) { return { comp: comp, osp: deriveOSPForComponent(comp, ospAu1) }; }).filter(function (r) { return r.osp; });
+    var neighbours2 = shell2.map(function (comp) { return { comp: comp, osp: deriveOSPForComponent(comp, ospAu2) }; }).filter(function (r) { return r.osp; });
+    if (!neighbours1.length || !neighbours2.length) { setStatus("No shell neighbour of the kernel molecule carries the complete locked scaffold in one or both structures. Grow more atoms or relax the tolerance.", true); return; }
+    var kernelPts1 = kernelOSP1.map(function (a) { return atomAlignedPosition(a, 0); }), kernelPts2 = kernelOSP2.map(function (a) { return atomAlignedPosition(a, 1); });
+    function subunitLists(kernelPts, neighbourAtoms, index) {
+      var neighbourPts = neighbourAtoms.map(function (a) { return atomAlignedPosition(a, index); });
+      return { ang: xpacAngleList(kernelPts, neighbourPts), dhd: xpacInterplanarList(kernelPts, neighbourPts), tor: xpacTorsionList(kernelPts, neighbourPts, false), torMirror: xpacTorsionList(kernelPts, neighbourPts, true) };
+    }
+    var sub1 = neighbours1.map(function (r) { return { comp: r.comp, lists: subunitLists(kernelPts1, r.osp, 0) }; });
+    var sub2 = neighbours2.map(function (r) { return { comp: r.comp, lists: subunitLists(kernelPts2, r.osp, 1) }; });
+    var combos = [];
+    sub1.forEach(function (s1) {
+      sub2.forEach(function (s2) {
+        var dAng = meanAbsDiff(s1.lists.ang, s2.lists.ang), dDhd = meanAbsDiff(s1.lists.dhd, s2.lists.dhd);
+        var dTor = meanAbsDiff(s1.lists.tor, s2.lists.tor), dTorMirror = meanAbsDiff(s1.lists.tor, s2.lists.torMirror);
+        var torBest = Math.min(dTor, dTorMirror), mirrored = dTorMirror < dTor;
+        combos.push({ neighbour1: s1.comp, neighbour2: s2.comp, dAng: dAng, dDhd: dDhd, dTor: torBest, mirrored: mirrored, similar: dAng < fAng && dDhd < fDhd && torBest < fTor });
+      });
+    });
+    combos.sort(function (a, b) { return (a.dAng + a.dDhd / 2.5 + a.dTor / 2) - (b.dAng + b.dDhd / 2.5 + b.dTor / 2); });
+    xpacResult = { n: pairs.length, count1: sub1.length, count2: sub2.length, tolerance: tolerance, fAng: fAng, fDhd: fDhd, fTor: fTor, combos: combos, matches: combos.filter(function (c) { return c.similar; }), kernelOSP1: kernelOSP1, kernelOSP2: kernelOSP2 };
+    xpacSelectedMatch = xpacResult.matches.length ? xpacResult.matches[0] : null;
+    updateXPacUI(); renderXPacHighlights();
+    setStatus("XPac: " + sub1.length + " × " + sub2.length + " double sub-unit combinations checked; " + xpacResult.matches.length + " similar pair" + (xpacResult.matches.length === 1 ? "" : "s") + " found.", false);
+  }
+  function updateXPacUI() {
+    var info = document.getElementById("xpacInfo"); if (!info) return;
+    var r = xpacResult, list = document.getElementById("xpacMatchList");
+    if (!r) { info.innerHTML = "<div class='dim'>No XPac comparison yet.</div>"; if (list) list.innerHTML = ""; return; }
+    info.innerHTML = "<div><b>XPac double sub-unit comparison</b></div><div>OSP size: " + r.n + " atoms</div><div>Shell neighbours: " + r.count1 + " / " + r.count2 + "</div><div>Combinations checked: " + r.combos.length + "</div><div>Similar double sub-units (δang&lt;" + r.fAng + "°, δdhd&lt;" + r.fDhd + "°, δtor&lt;" + r.fTor + "°): " + r.matches.length + "</div>";
+    if (list) {
+      list.innerHTML = "";
+      if (!r.matches.length) list.innerHTML = "<div class='dim'>No double sub-unit pair meets the current filters.</div>";
+      else r.matches.forEach(function (m, idx) {
+        var row = document.createElement("div"); row.className = "readout"; row.style.cursor = "pointer"; if (m === xpacSelectedMatch) row.style.outline = "1px solid #8f6b24";
+        row.innerHTML = "<div><b>Match " + (idx + 1) + "</b>" + (m.mirrored ? " (opposite-hand)" : "") + "</div><div>δang " + m.dAng.toFixed(1) + "°  δdhd " + m.dDhd.toFixed(1) + "°  δtor " + m.dTor.toFixed(1) + "°</div>";
+        row.addEventListener("click", function () { xpacSelectedMatch = m; updateXPacUI(); renderXPacHighlights(); });
+        list.appendChild(row);
+      });
+    }
+  }
+  function renderXPacHighlights() {
+    if (!xpacHighlightGroup) return; clearGroup(xpacHighlightGroup);
+    if (!xpacResult || !xpacShowHighlights) return;
+    var kernelMat = new THREE.MeshStandardMaterial({ color: 0xffd23f, emissive: 0x554400, emissiveIntensity: 0.5 }),
+        neighbourMat = new THREE.MeshStandardMaterial({ color: 0x2fd2b0, emissive: 0x004433, emissiveIntensity: 0.5 });
+    function markOSP(ospAtoms, index, mat) { if (!ospAtoms) return; ospAtoms.forEach(function (a) { if (!isSelectable(a)) return; var m = new THREE.Mesh(sphereGeo, mat); m.scale.setScalar(0.4); m.position.copy(atomAlignedPosition(a, index)); m.renderOrder = 29; xpacHighlightGroup.add(m); }); }
+    markOSP(xpacResult.kernelOSP1, 0, kernelMat); markOSP(xpacResult.kernelOSP2, 1, kernelMat);
+    if (xpacSelectedMatch) {
+      var ospAu1 = xpacResult.kernelOSP1.map(function (a) { return a.auIndex; }), ospAu2 = xpacResult.kernelOSP2.map(function (a) { return a.auIndex; });
+      markOSP(deriveOSPForComponent(xpacSelectedMatch.neighbour1, ospAu1), 0, neighbourMat);
+      markOSP(deriveOSPForComponent(xpacSelectedMatch.neighbour2, ospAu2), 1, neighbourMat);
+    }
   }
   function symmetryTransformGroups(slot) {
     var groups={},atoms=hideFilter(slot.atoms||[]);atoms.forEach(function(a){if(a.opIndex===undefined)return;var key=a.opIndex+":"+(a.cellI||0)+":"+(a.cellJ||0)+":"+(a.cellK||0);if(!groups[key])groups[key]=[];groups[key].push(a);});return Object.keys(groups).map(function(k){return groups[k];});
@@ -7638,7 +7836,7 @@ select.sel:focus{border-color:var(--accent)}
       if(node.nodeType===1&&node.dataset&&node.dataset.alignmentStage){current={title:node.dataset.alignmentStage,note:node.dataset.alignmentNote,nodes:[]};groups.push(current);return;}
       if(current)current.nodes.push(node);
     });
-    var workflowOrder=["Reference alignment","Paired sphere growth","Comparison definition and neighbourhood","Principal-strain deformation","Volumetric overlap assessment","Radial similarity assessment","Symmetry-site candidate search","Interactive and manual alignment"];
+    var workflowOrder=["Reference alignment","Paired sphere growth","Comparison definition and neighbourhood","XPac double sub-unit comparison","Principal-strain deformation","Volumetric overlap assessment","Radial similarity assessment","Symmetry-site candidate search","Interactive and manual alignment"];
     groups.sort(function(a,b){var ai=workflowOrder.indexOf(a.title),bi=workflowOrder.indexOf(b.title);return (ai<0?999:ai)-(bi<0?999:bi);});
     body.innerHTML="";
     groups.forEach(function(group,index){
@@ -7664,29 +7862,38 @@ select.sel:focus{border-color:var(--accent)}
     var anchorInfo = el("div", "readout"); anchorInfo.id = "anchorInfo"; body.appendChild(anchorInfo);
     var anchorActions = el("div", "btnrow"); button(anchorActions, "Undo anchor", "ghost", undoAnchor); button(anchorActions, "Clear anchors", "ghost", clearAnchors); body.appendChild(anchorActions);
     var twoAnchorAxisFitBtn=button(body,"Find best whole-packing rotation around 2-anchor axis","prominent ghost",optimiseTwoAnchorAxisFit);twoAnchorAxisFitBtn.id="twoAnchorAxisFitBtn";twoAnchorAxisFitBtn.disabled=true;
-    body.appendChild(el("div", "hint", "Anchor mode alternates between Structure 1 and Structure 2. One pair translates; two pairs align and lock a vector. After two pairs, either scan the complete packed heavy-atom structures for their best rotation around that axis, or select a third pair as before. The three pairs may all belong to one molecule or may span several corresponding molecules in a packed substructure. Anchor Fit turns off so interactive growth can use viewport clicks; re-enable it if you later want to add a third pair."));
     var moleculeFitBtn = button(body, "Fit anchored molecule / packed substructure", "prominent", refineWholeMoleculeFit); moleculeFitBtn.id = "moleculeFitBtn";
     var moleculeFitInfo = el("div", "readout"); moleculeFitInfo.id = "moleculeFitInfo"; body.appendChild(moleculeFitInfo);
     var clearMoleculeRefRow=el("div","btnrow");button(clearMoleculeRefRow,"Clear molecular reference","ghost",clearMolecularReference);body.appendChild(clearMoleculeRefRow);
-    body.appendChild(el("div", "hint", "If all anchors belong to one molecule, the original molecular fit is used. If they span several packed molecules, each anchor-containing molecule is paired one-to-one and their common element-labelled connectivity is fitted as one substructure. Hydrogen atoms and unmatched substituents are ignored."));
     alignmentStageMarker(body,"Paired sphere growth","Grow both fitted structures together around a corresponding atom before defining and matching their molecular neighbourhoods.");
     var pairedGrowBtn=button(body,"","prominent ghost",toggleAlignmentPairedGrow);pairedGrowBtn.id="alignmentPairedGrowBtn";
     var pairedGrowRow=el("div","ctl-inline");pairedGrowRow.appendChild(el("label","plain","Sphere of inclusion"));var pairedGrowRadius=document.createElement("input");pairedGrowRadius.type="number";pairedGrowRadius.className="num";pairedGrowRadius.id="alignmentPairedGrowRadius";pairedGrowRadius.min="0.1";pairedGrowRadius.step="0.5";pairedGrowRadius.value=alignmentPairedGrowRadius.toFixed(1);pairedGrowRadius.addEventListener("input",function(){var v=parseFloat(pairedGrowRadius.value);if(isFinite(v)&&v>0){alignmentPairedGrowRadius=v;state.sphereRadius=v;}});pairedGrowRow.appendChild(pairedGrowRadius);pairedGrowRow.appendChild(el("span","unit",U.ang));body.appendChild(pairedGrowRow);
-    body.appendChild(el("div","hint","Click a matched atom in either fitted reference molecule. Both structures are grown as whole asymmetric units within the same sphere radius, centred on the corresponding atom in each structure."));
     alignmentStageMarker(body,"Comparison definition and neighbourhood","Choose the common atomic scaffold, lock it, and establish one-to-one molecular correspondences around the reference.");
     body.appendChild(el("div","hint","Comparison atom definition"));
     button(body,"Build atom set from molecular correspondence","prominent",buildComparisonAtomSet);
     var corrAtomActions=el("div","btnrow");button(corrAtomActions,"Include all","ghost",includeAllComparisonPairs);button(corrAtomActions,"Exclude selected","ghost",function(){setSelectedComparisonPairsIncluded(false);});button(corrAtomActions,"Include selected","ghost",function(){setSelectedComparisonPairsIncluded(true);});body.appendChild(corrAtomActions);
     var corrPairsList=el("div","readout");corrPairsList.id="correspondencePairsList";corrPairsList.style.maxHeight="180px";corrPairsList.style.overflowY="auto";body.appendChild(corrPairsList);
     var corrLockBtn=button(body,"Lock comparison atom set","prominent ghost",toggleComparisonMaskLock);corrLockBtn.id="corrLockBtn";
-    body.appendChild(el("div","hint","The checked atom pairs define the common scaffold used for every molecular comparison. Select atoms in either structure to include or exclude their pair, then lock the definition."));
     body.appendChild(el("div","hint","One-to-one molecular neighbourhood correspondence"));
     var corrParams=el("div","ctl-inline");corrParams.appendChild(el("label","plain","Radius"));var corrRadius=document.createElement("input");corrRadius.type="number";corrRadius.className="num";corrRadius.id="corrRadius";corrRadius.value="15.0";corrRadius.step="1";corrParams.appendChild(corrRadius);corrParams.appendChild(el("span","unit",U.ang));corrParams.appendChild(el("label","plain","Tolerance"));var corrCutoff=document.createElement("input");corrCutoff.type="number";corrCutoff.className="num";corrCutoff.id="corrCutoff";corrCutoff.value="3.0";corrCutoff.step="0.25";corrParams.appendChild(corrCutoff);corrParams.appendChild(el("span","unit",U.ang));body.appendChild(corrParams);
     button(body,"Match molecular neighbourhood","prominent",matchMolecularNeighbourhood);
     var corrLinks=toggle(body,"show centroid correspondence lines",showCorrespondenceLinks,function(v){showCorrespondenceLinks=v;renderMolecularCorrespondenceLinks();});corrLinks.id="corrShowLinks";
     var molecularCorrInfo=el("div","readout");molecularCorrInfo.id="molecularCorrespondenceInfo";body.appendChild(molecularCorrInfo);
     var trimUnmatchedRow=el("div","btnrow");var trimUnmatchedBtn=button(trimUnmatchedRow,"Trim unmatched","ghost",trimUnmatchedMolecules);trimUnmatchedBtn.id="trimUnmatchedBtn";trimUnmatchedBtn.disabled=true;body.appendChild(trimUnmatchedRow);
-    body.appendChild(el("div","hint","Assignments are one-to-one and use centroid proximity plus RMSD of the locked atom set. Unmatched molecules remain explicitly counted."));
+    body.appendChild(el("div","hint","Rigid whole-packing refinement"));
+    button(body,"Refine orientation and translation across matched neighbourhood (no strain)","prominent ghost",refineRigidNeighbourhoodFit);
+    var rigidFitInfo=el("div","readout");rigidFitInfo.id="rigidNeighbourhoodFitInfo";body.appendChild(rigidFitInfo);
+    alignmentStageMarker(body,"XPac double sub-unit comparison","Compare local kernel+shell packing motifs using the XPac (Gelbrich & Hursthouse) internal-coordinate method. This never overlays S1 and S2, so it complements rather than duplicates the neighbourhood-matching stage above.");
+    var xpacParams1=el("div","ctl-inline");xpacParams1.appendChild(el("label","plain","Shell tolerance t"));var xpacTol=document.createElement("input");xpacTol.type="number";xpacTol.className="num";xpacTol.id="xpacTolerance";xpacTol.value=xpacDefaults.tolerance.toFixed(1);xpacTol.step="0.1";xpacParams1.appendChild(xpacTol);xpacParams1.appendChild(el("span","unit",U.ang));body.appendChild(xpacParams1);
+    var xpacParams2=el("div","ctl-inline");
+    xpacParams2.appendChild(el("label","plain","f_ang"));var xpacFAng=document.createElement("input");xpacFAng.type="number";xpacFAng.className="num";xpacFAng.id="xpacFAng";xpacFAng.value=xpacDefaults.fAng;xpacFAng.step="0.5";xpacParams2.appendChild(xpacFAng);xpacParams2.appendChild(el("span","unit","°"));
+    xpacParams2.appendChild(el("label","plain","f_dhd"));var xpacFDhd=document.createElement("input");xpacFDhd.type="number";xpacFDhd.className="num";xpacFDhd.id="xpacFDhd";xpacFDhd.value=xpacDefaults.fDhd;xpacFDhd.step="0.5";xpacParams2.appendChild(xpacFDhd);xpacParams2.appendChild(el("span","unit","°"));
+    xpacParams2.appendChild(el("label","plain","f_tor"));var xpacFTor=document.createElement("input");xpacFTor.type="number";xpacFTor.className="num";xpacFTor.id="xpacFTor";xpacFTor.value=xpacDefaults.fTor;xpacFTor.step="0.5";xpacParams2.appendChild(xpacFTor);xpacParams2.appendChild(el("span","unit","°"));
+    body.appendChild(xpacParams2);
+    button(body,"Compute XPac double sub-units","prominent",computeXPacDoubleSubunits);
+    var xpacHighlightsToggle=toggle(body,"show XPac highlights in 3D view",xpacShowHighlights,function(v){xpacShowHighlights=v;renderXPacHighlights();});xpacHighlightsToggle.id="xpacShowHighlightsToggle";
+    var xpacInfo=el("div","readout");xpacInfo.id="xpacInfo";body.appendChild(xpacInfo);
+    var xpacMatchList=el("div");xpacMatchList.id="xpacMatchList";xpacMatchList.style.maxHeight="220px";xpacMatchList.style.overflowY="auto";body.appendChild(xpacMatchList);
     alignmentStageMarker(body,"Symmetry-site candidate search","Test symmetry-generated S2 reference molecules and retain the candidate that gives the best packing correspondence.");
     body.appendChild(el("div", "hint", "Symmetry-site packing search"));
     var searchParams=el("div","ctl-inline");searchParams.appendChild(el("label","plain","Radius"));var radiusInp=document.createElement("input");radiusInp.type="number";radiusInp.className="num";radiusInp.id="symSearchRadius";radiusInp.value="12.0";radiusInp.step="1";searchParams.appendChild(radiusInp);searchParams.appendChild(el("span","unit",U.ang));searchParams.appendChild(el("label","plain","Tolerance"));var cutInp=document.createElement("input");cutInp.type="number";cutInp.className="num";cutInp.id="symSearchCutoff";cutInp.value="1.5";cutInp.step="0.1";searchParams.appendChild(cutInp);searchParams.appendChild(el("span","unit",U.ang));body.appendChild(searchParams);
@@ -7694,40 +7901,30 @@ select.sel:focus{border-color:var(--accent)}
     var symInfo=el("div","readout");symInfo.id="symmetrySearchInfo";body.appendChild(symInfo);
     var symNav=el("div","btnrow");var prevBtn=button(symNav,"Previous","ghost",function(){stepSymmetryCandidate(-1);});prevBtn.id="symPrevBtn";var nextBtn=button(symNav,"Next","ghost",function(){stepSymmetryCandidate(1);});nextBtn.id="symNextBtn";body.appendChild(symNav);
     var promoteCandidateBtn=button(body,"Make displayed S2 molecule the S2 asymmetric unit","prominent",promoteCurrentS2CandidateToAsu);promoteCandidateBtn.id="promoteS2CandidateBtn";promoteCandidateBtn.disabled=true;
-    body.appendChild(el("div","hint","Cycles through the selected Structure 2 ASU molecule followed by its symmetry equivalents in CIF operator order. When the desired packing is shown, promote that pink molecule to become Structure 2's new asymmetric-unit reference; deleting all symmetry-generated atoms from Structure 2 will then retain it."));
     alignmentStageMarker(body,"Principal-strain deformation","Determine and inspect the anisotropic principal-strain tensor for rigid molecular translations.");
     body.appendChild(el("div","hint","Automatic anisotropic principal-strain fit"));
     var anisoParams=el("div","ctl-inline");anisoParams.appendChild(el("label","plain","Radius"));var anisoRadius=document.createElement("input");anisoRadius.type="number";anisoRadius.className="num";anisoRadius.id="anisoRadius";anisoRadius.value="15.0";anisoRadius.step="1";anisoParams.appendChild(anisoRadius);anisoParams.appendChild(el("span","unit",U.ang));anisoParams.appendChild(el("label","plain","Match"));var anisoCutoff=document.createElement("input");anisoCutoff.type="number";anisoCutoff.className="num";anisoCutoff.id="anisoCutoff";anisoCutoff.value="4.0";anisoCutoff.step="0.25";anisoParams.appendChild(anisoCutoff);anisoParams.appendChild(el("span","unit",U.ang));body.appendChild(anisoParams);
     var refineOrientationToggle=toggle(body,"refine orientation together with strain",true,function(){});refineOrientationToggle.id="anisoRefineOrientation";
     var refineTranslationToggle=toggle(body,"refine translation together with strain",true,function(){});refineTranslationToggle.id="anisoRefineTranslation";
-    body.appendChild(el("div","hint","Translation refinement applies the least-squares centroid shift of Structure 2 after orientation and strain refinement. It may move the original reference molecules slightly apart in order to improve the neighbourhood-wide fit."));
     var deformCellToggle=toggle(body,"deform Structure 2 unit cell display",!!(structureSlots&&structureSlots[1]&&structureSlots[1].deformUnitCellDisplay),setDeformedUnitCellDisplay);deformCellToggle.id="deformUnitCellDisplay";
-    body.appendChild(el("div","hint","Unchecked shows the original Structure 2 cell. Checked applies the current isotropic and principal-strain deformation to the displayed cell only; crystallographic cell data and atom coordinates are unchanged."));
     button(body,"Determine principal inflation axes","prominent",determineAnisotropicInflation);
     button(body,"Export comparison diagnostic log (JSON)","ghost",exportComparisonDiagnosticLog);
-    body.appendChild(el("div","hint","The diagnostic log stays on this computer and records the build, settings, assignments, centroids, atom-pair coordinates and before/after strain distances."));
     var showAnisoEllipsoid=toggle(body,"show principal-strain ellipsoid",!!(structureSlots&&structureSlots[1]&&structureSlots[1].showAnisotropicEllipsoid),setAnisotropicEllipsoidVisible);showAnisoEllipsoid.id="showAnisoEllipsoid";showAnisoEllipsoid.disabled=!(structureSlots&&structureSlots[1]&&structureSlots[1].anisotropicResult);
     var ellipsoidAppearance=el("div","ctl-inline");ellipsoidAppearance.appendChild(el("label","plain","Surface"));var ellipsoidStyle=document.createElement("select");ellipsoidStyle.className="sel";ellipsoidStyle.id="anisoEllipsoidStyle";[["solid","Solid"],["wireframe","Wireframe"]].forEach(function(item){var option=document.createElement("option");option.value=item[0];option.textContent=item[1];ellipsoidStyle.appendChild(option);});ellipsoidStyle.value=structureSlots&&structureSlots[1]&&structureSlots[1].anisotropicEllipsoidStyle||"solid";ellipsoidStyle.addEventListener("change",function(){setAnisotropicEllipsoidStyle(ellipsoidStyle.value);});ellipsoidAppearance.appendChild(ellipsoidStyle);ellipsoidAppearance.appendChild(el("label","plain","Colour"));var ellipsoidColour=colorSwatch(structureSlots&&structureSlots[1]&&structureSlots[1].anisotropicEllipsoidColor!==undefined?structureSlots[1].anisotropicEllipsoidColor:0x4A6FA5,setAnisotropicEllipsoidColor);ellipsoidColour.id="anisoEllipsoidColor";ellipsoidAppearance.appendChild(ellipsoidColour);body.appendChild(ellipsoidAppearance);
     var ellipsoidOpacityRow=el("div","ctl-inline");ellipsoidOpacityRow.appendChild(el("label","plain","Surface opacity"));var ellipsoidOpacity=document.createElement("input");ellipsoidOpacity.type="range";ellipsoidOpacity.id="anisoEllipsoidOpacity";ellipsoidOpacity.min="0.05";ellipsoidOpacity.max="1";ellipsoidOpacity.step="0.01";ellipsoidOpacity.value=structureSlots&&structureSlots[1]&&structureSlots[1].anisotropicEllipsoidOpacity!==undefined?structureSlots[1].anisotropicEllipsoidOpacity:.28;ellipsoidOpacity.style.flex="1";var ellipsoidOpacityValue=el("span","unit",Math.round(parseFloat(ellipsoidOpacity.value)*100)+"%");ellipsoidOpacityValue.id="anisoEllipsoidOpacityValue";ellipsoidOpacity.addEventListener("input",function(){setAnisotropicEllipsoidOpacity(parseFloat(ellipsoidOpacity.value));ellipsoidOpacityValue.textContent=Math.round(parseFloat(ellipsoidOpacity.value)*100)+"%";});ellipsoidOpacityRow.appendChild(ellipsoidOpacity);ellipsoidOpacityRow.appendChild(ellipsoidOpacityValue);body.appendChild(ellipsoidOpacityRow);
-    body.appendChild(el("div","hint","The ellipsoid is centred on the S2 reference molecule and is approximately molecular-sized. X1, X2 and X3 are shown in red, green and blue."));
     var anisoInfo=el("div","readout");anisoInfo.id="anisoInfo";body.appendChild(anisoInfo);var anisoReset=el("div","btnrow");button(anisoReset,"Reset anisotropic inflation","ghost",resetAnisotropicInflation);body.appendChild(anisoReset);
-    body.appendChild(el("div","hint","Fits a symmetric stretch tensor to corresponding molecular centroids. If each grown structure is one connected periodic net, the app automatically uses the locked corresponding atoms instead and applies an affine net deformation. Discrete molecules remain rigid."));
     alignmentStageMarker(body,"Volumetric overlap assessment","Add the Fábián–Kálmán van der Waals volume-overlap descriptors without replacing the existing atom, centroid or radial analyses.");
     body.appendChild(el("div","hint","Fábián–Kálmán volumetric isostructurality"));
     var volumeParams=el("div","ctl-inline");volumeParams.appendChild(el("label","plain","Maximum radius"));var volumeRadius=document.createElement("input");volumeRadius.type="number";volumeRadius.className="num";volumeRadius.id="volumetricRadius";volumeRadius.value="15.0";volumeRadius.step="1";volumeParams.appendChild(volumeRadius);volumeParams.appendChild(el("span","unit",U.ang));volumeParams.appendChild(el("label","plain","Step"));var volumeStep=document.createElement("input");volumeStep.type="number";volumeStep.className="num";volumeStep.id="volumetricStep";volumeStep.value="1.0";volumeStep.step="0.5";volumeParams.appendChild(volumeStep);volumeParams.appendChild(el("span","unit",U.ang));body.appendChild(volumeParams);
     var volumePrecisionRow=el("div","ctl-inline");volumePrecisionRow.appendChild(el("label","plain","Sampling precision"));var volumePrecision=document.createElement("select");volumePrecision.className="sel";volumePrecision.id="volumetricPrecision";[["quick","Quick (30,000)"],["standard","Standard (120,000)"],["high","High (400,000)"]].forEach(function(item){var opt=document.createElement("option");opt.value=item[0];opt.textContent=item[1];if(item[0]==="standard")opt.selected=true;volumePrecision.appendChild(opt);});volumePrecisionRow.appendChild(volumePrecision);body.appendChild(volumePrecisionRow);
     button(body,"Calculate volumetric overlap","prominent",calculateVolumetricOverlap);var volumeInfo=el("div","readout");volumeInfo.id="volumetricInfo";body.appendChild(volumeInfo);var volumePlots=el("div");volumePlots.id="volumetricPlots";body.appendChild(volumePlots);
-    body.appendChild(el("div","hint","Reports Iᵥ = 2V∩/(V₁+V₂), its theoretical maximum Iᵥmax, and the explicitly derived normalized efficiency Qᵥ = Iᵥ/Iᵥmax. Rigid and deformation-assisted overlaps are both retained. Sampling uses reproducible shifted Halton sequences rather than the original purely random Monte Carlo points."));
-    body.appendChild(el("div","hint","Attribution: L. Fábián and A. Kálmán, ‘Volumetric measure of isostructurality’, Acta Crystallographica B55 (1999) 1099–1108. Hydrogen atoms contribute when present; the result records their counts. Correlated disorder is not modelled."));
     alignmentStageMarker(body,"Radial similarity assessment","Calculate coherence, coverage and residual mismatch as functions of distance from the shared reference origin.");
     body.appendChild(el("div","hint","Radial isostructurality analysis"));
     var radialRow1=el("div","ctl-inline");radialRow1.appendChild(el("label","plain","Maximum radius"));var radialMax=document.createElement("input");radialMax.type="number";radialMax.className="num";radialMax.id="radialMaxRadius";radialMax.value="15.0";radialMax.step="1";radialRow1.appendChild(radialMax);radialRow1.appendChild(el("span","unit",U.ang));radialRow1.appendChild(el("label","plain","Step"));var radialStep=document.createElement("input");radialStep.type="number";radialStep.className="num";radialStep.id="radialStep";radialStep.value="1.0";radialStep.step="0.5";radialRow1.appendChild(radialStep);radialRow1.appendChild(el("span","unit",U.ang));body.appendChild(radialRow1);
     var radialRow2=el("div","ctl-inline");radialRow2.appendChild(el("label","plain","RMSD threshold"));var radialThreshold=document.createElement("input");radialThreshold.type="number";radialThreshold.className="num";radialThreshold.id="radialThreshold";radialThreshold.value="0.50";radialThreshold.step="0.1";radialRow2.appendChild(radialThreshold);radialRow2.appendChild(el("span","unit",U.ang));radialRow2.appendChild(el("label","plain","Coverage"));var radialCoverage=document.createElement("input");radialCoverage.type="number";radialCoverage.className="num";radialCoverage.id="radialCoverage";radialCoverage.value="80";radialCoverage.step="5";radialRow2.appendChild(radialCoverage);radialRow2.appendChild(el("span","unit","%"));body.appendChild(radialRow2);
     [radialMax,radialStep,radialThreshold,radialCoverage].forEach(function(inp){inp.addEventListener("input",updateRadialReadinessUI);});var radialReady=el("div","readout");radialReady.id="radialReadiness";body.appendChild(radialReady);var radialCalculate=button(body,"Calculate radial similarity profiles","prominent",calculateRadialSimilarity);radialCalculate.id="radialCalculateBtn";radialCalculate.disabled=true;var radialInfo=el("div","readout");radialInfo.id="radialAnalysisInfo";body.appendChild(radialInfo);var radialPlots=el("div",null);radialPlots.id="radialPlots";body.appendChild(radialPlots);var radialExportRow=el("div","btnrow");var radialCopy=button(radialExportRow,"Copy concise report","ghost",copyRadialReport);radialCopy.id="radialCopyReportBtn";radialCopy.disabled=true;var radialExport=button(radialExportRow,"Export radial data (CSV)","ghost",exportRadialAnalysisCsv);radialExport.id="radialExportBtn";radialExport.disabled=true;body.appendChild(radialExportRow);
-    body.appendChild(el("div","hint","Uses the same locked atom and molecular assignments for rigid, optimal isotropic and optimal anisotropic models. Rδ,C is the greatest sampled radius satisfying the chosen RMSD and molecular-coverage thresholds."));
     alignmentStageMarker(body,"Interactive and manual alignment","Use direct mouse manipulation or explicit translation and rotation controls for visual adjustment.");
     var interactiveBtn = button(body, "", "prominent ghost", toggleInteractiveAlignment); interactiveBtn.id = "interactiveAlignmentBtn";
-    body.appendChild(el("div", "hint", "Interactive mode preserves the normal camera controls. Hold Ctrl and drag to rotate Structure 2; hold Alt and drag to pan it."));
     body.appendChild(el("hr", "divider"));
     body.appendChild(el("div", "hint", "Or choose an explicit mouse mode in Overlay view."));
     var modes = el("div", "modeseg"); modes.style.alignSelf = "stretch";
@@ -7748,7 +7945,7 @@ select.sel:focus{border-color:var(--accent)}
     var resets = el("div", "btnrow"); button(resets, "Reset move", "ghost", function () { resetAlignment("translation"); }); button(resets, "Reset rotation", "ghost", function () { resetAlignment("rotation"); }); button(resets, "Reset all", "ghost", function () { resetAlignment("all"); }); body.appendChild(resets);
     body.appendChild(el("div", "hint", "Move: drag across the screen; Shift-drag changes depth. Rotate: drag as a trackball; Shift-drag rolls."));
     organiseAlignmentStages(body);
-    updateAlignmentUI(); updateAnchorUI(); updateAlignmentPairedGrowUI(); updateCorrespondenceUI(); updateSymmetrySearchUI(); updateInflationUI(); updateAnisotropicUI(); updateVolumetricUI(); updateRadialAnalysisUI(); updateJointOptimUI();
+    updateAlignmentUI(); updateAnchorUI(); updateAlignmentPairedGrowUI(); updateCorrespondenceUI(); updateSymmetrySearchUI(); updateInflationUI(); updateAnisotropicUI(); updateVolumetricUI(); updateRadialAnalysisUI(); updateJointOptimUI(); updateXPacUI(); updateRigidNeighbourhoodFitUI();
   }
   function updateComparatorHeader() {
     var structureButtons = document.querySelectorAll("#structureViewSeg button[data-structure]");
@@ -7958,7 +8155,7 @@ select.sel:focus{border-color:var(--accent)}
       "<h3>4a. Hiding atoms without deleting them</h3>" +
       "<ul><li><b>Hide selected</b> hides the selected atoms in the currently active structure. It does not delete them, alter their original coordinates or discard their bonding and CIF provenance. Hidden atoms cannot be selected while hidden. Hiding is not placed on the Delete/Undo stack; use <b>Unhide all</b> to restore them.</li><li>Hidden atoms are treated as absent when determining every fit and comparison: anchor propagation, molecular or packed-substructure fitting, molecular centroids, neighbourhood assignments, connected-net or molecular strain, volumetric overlap and radial analysis. They therefore cannot bias a result simply because they remain stored in the file.</li><li>The fitted translation, rotation and anisotropic deformation are stored at structure level rather than baked destructively into individual coordinates. Hidden atoms retain membership of their structure and inherit the same active transformation when restored, so a hidden substituent or framework fragment does not become detached after fitting.</li><li><b>Unhide all</b> searches both loaded structures, regardless of which structure is currently selected, restores every hidden atom and reports separate S1/S2 counts. The existing overlay transformation is retained. Results whose calculation set has changed are cleared; recalculate the relevant fit or analysis if the newly restored atoms should participate.</li><li><b>Trim unmatched</b> operates only on the visible molecular components considered during neighbourhood matching; hidden atoms are retained. Explicit deletion commands, deleting symmetry-generated atoms, replacing a structure or loading another overlay are different operations and can remove or replace stored atoms.</li></ul>" +
       "<h3>5. Recommended alignment workflow</h3>" +
-      "<p>The Alignment panel is divided into collapsible stages. The normal sequence is Reference alignment, Paired sphere growth, Comparison definition and neighbourhood, Principal-strain deformation, Volumetric overlap assessment and Radial similarity assessment. Symmetry-site candidate search and Interactive/manual alignment are optional diagnostic stages near the end.</p>" +
+      "<p>The Alignment panel is divided into collapsible stages. The normal sequence is Reference alignment, Paired sphere growth, Comparison definition and neighbourhood, Principal-strain deformation, Volumetric overlap assessment and Radial similarity assessment. XPac double sub-unit comparison is an optional, independent method that can be run alongside these once the comparison atom set is locked. Symmetry-site candidate search and Interactive/manual alignment are optional diagnostic stages near the end.</p>" +
       "<h3>6. Reference alignment</h3>" +
       "<ul><li>Turn on <b>Anchor fit</b>. The diagonal-cross cursor indicates this mode. Select an atom in S1 and its counterpart in S2, repeating for three non-collinear heavy-atom pairs. The three atoms may belong to one molecule or span several molecules in an already packed substructure.</li><li>One pair translates S2 and two align a vector. After two pairs, either select the third pair exactly as before or click <b>Find best whole-packing rotation around 2-anchor axis</b>. This optional action treats every displayed non-hydrogen atom in each packed structure as part of one point cloud. It incrementally scans rotations of S2 around the fixed two-anchor vector and minimises a symmetric, element-aware nearest-neighbour score without moving that axis. It does not itself create a molecular correspondence. Anchor Fit is then turned off so ordinary interactive Grow can receive viewport clicks; re-enable it if you later want to add a third pair.</li><li>Three pairs perform the least-squares rigid anchor fit and turn anchor mode off automatically.</li><li><b>Fit anchored molecule / packed substructure</b> propagates correspondence through the element-labelled connectivity of every anchor-containing molecule. With one anchored molecule it preserves the original molecular fit. With several, it enforces a one-to-one molecular pairing and fits their combined common heavy-atom scaffold. Hydrogen atoms and unmatched substituents are ignored.</li><li><b>Anchor RMSD</b> is the residual of the manually chosen pairs. The fit RMSD and coverage describe the automatically propagated common scaffold.</li></ul>" +
       "<h3>7. Paired sphere growth</h3>" +
@@ -7966,9 +8163,11 @@ select.sel:focus{border-color:var(--accent)}
       "<h3>8. Comparison atom definition</h3>" +
       "<p><b>Build atom set from molecular correspondence</b> creates paired atoms from the common reference-molecule scaffold. Include or exclude pairs to define the chemistry that should count; for example, omit substituents that differ between analogues. Lock the set before neighbourhood matching. At least three included pairs are required. All later molecular RMSDs use this same declared atom set, making the analysis reproducible and interpretable.</p>" +
       "<h3>9. Molecular neighbourhood matching</h3>" +
-      "<ul><li><b>Radius</b> is the S1 molecular-centroid distance from the shared reference origin. S2 is searched to radius plus tolerance so boundary counterparts are not lost.</li><li><b>Tolerance</b> is the maximum centroid separation used to generate candidate molecular pairs. Assignments are one-to-one and favour small centroid and atomic residuals.</li><li><b>Matched</b> is the number of unique molecular pairs. <b>Available</b> gives the S1/S2 search-pool sizes; <b>Unmatched</b> gives unused molecules.</li><li><b>Centroid RMSD</b> measures molecular-centre disagreement. <b>Atomic RMSD</b> combines residuals of the locked corresponding atoms. <b>Matched atom observations</b> is the number of atom-pair measurements contributing.</li><li>Centroid tie lines can be displayed. <b>Trim unmatched</b> deletes unmatched visible molecules from both structures and is enabled only when they exist. Temporarily hidden atoms are not part of the matching pool and are retained.</li></ul>" +
+      "<ul><li><b>Radius</b> is the S1 molecular-centroid distance from the shared reference origin. S2 is searched to radius plus tolerance so boundary counterparts are not lost.</li><li><b>Tolerance</b> is the maximum centroid separation used to generate candidate molecular pairs. Assignments are one-to-one and favour small centroid and atomic residuals.</li><li><b>Matched</b> is the number of unique molecular pairs. <b>Available</b> gives the S1/S2 search-pool sizes; <b>Unmatched</b> gives unused molecules.</li><li><b>Centroid RMSD</b> measures molecular-centre disagreement. <b>Atomic RMSD</b> combines residuals of the locked corresponding atoms. <b>Matched atom observations</b> is the number of atom-pair measurements contributing.</li><li>Centroid tie lines can be displayed. <b>Trim unmatched</b> deletes unmatched visible molecules from both structures and is enabled only when they exist. Temporarily hidden atoms are not part of the matching pool and are retained.</li>" +
+      "<li><b>Refine orientation and translation across matched neighbourhood (no strain)</b> performs a rigid least-squares (Kabsch) fit of Structure 2's orientation and translation using every corresponding atom in the whole matched neighbourhood above, with no scaling of either structure. <b>Fit anchored molecule / packed substructure</b> (stage 6) only ever fits the small anchored molecule or substructure; nothing before this button uses the wider neighbourhood to refine the rigid overlay. It internally re-matches the neighbourhood as the fit improves (up to 4 iterations), then clears the molecular correspondence, radial and volumetric results so they are not read as still describing the old alignment; re-run them afterwards. Use this before principal-strain deformation to establish the best possible rigid fit first, so any strain reported afterwards reflects genuine deformation rather than an unrefined orientation or position.</li></ul>" +
       "<h3>10. Principal-strain deformation</h3>" +
       "<p>The app fits a symmetric strain tensor to matched molecular centroids. Molecules move as rigid bodies: their internal geometry and orientation are not distorted by scaling. When each grown structure is one connected periodic net, such as a 2D MOF sheet, the app automatically fits the locked corresponding atom positions instead and applies an affine deformation to the net. The unconstrained direction of a 2D net is regularised to a stretch of 1. <b>X1, X2 and X3</b> are orthogonal principal directions; their stretch factors are dimensionless (1 unchanged, above 1 expansion, below 1 contraction). The volume factor is X1 × X2 × X3. Crystallographic [a,b,c] components are unit-normalised.</p>" +
+      "<p><b>Refine orientation/translation together with strain</b>, below, are not a substitute for stage 9's rigid-only refinement: they are computed jointly with the anisotropic strain tensor at each iteration (the rotation is fit to strain-corrected positions, not raw ones), so they are the right tool for polishing a fit that genuinely involves deformation, not for obtaining a pure rigid answer. If no strain is actually present, running stage 9's rigid refinement first should already leave very little for this stage to improve.</p>" +
       "<ul><li><b>Refine orientation together with strain</b> is on by default and permits an additional rigid rotation of S2 to improve the neighbourhood fit.</li><li><b>Refine translation together with strain</b> is also on by default and applies the least-squares global centroid shift of S2. It may be turned off when preserving the original reference position is more important than the neighbourhood-wide fit.</li><li><b>Deform Structure 2 unit cell display</b> switches the drawn cell between its original geometry and the current isotropic/principal-strain deformation. This is visual only: the stored crystallographic cell and atom coordinates are not rewritten.</li><li>The result reports RMSD before/after deformation, additional rotation, translation vector and magnitude, principal stretches and volume factor.</li><li>The principal-strain ellipsoid is centred on the fitted atom-pair observations and may be hidden, solid or wireframe, recoloured and given adjustable opacity. Its red, green and blue axes represent X1, X2 and X3.</li></ul>" +
       "<h3>11. Fábián–Kálmán volumetric overlap</h3>" +
       "<p>This complementary stage measures overlap of the actual van der Waals volumes and therefore does not require atom-to-atom correspondence. It reports <b>Iᵥ = 2V∩/(V₁+V₂)</b>, the size-limited maximum <b>Iᵥmax = 2min(V₁,V₂)/(V₁+V₂)</b>, and <b>Qᵥ = Iᵥ/Iᵥmax</b>, an explicitly derived CrystalComparator normalization. Rigid and deformation-assisted values and radial profiles are kept separately so deformation is never mistaken for inherent agreement.</p>" +
@@ -7976,6 +8175,15 @@ select.sel:focus{border-color:var(--accent)}
       "<h3>12. Radial similarity assessment</h3>" +
       "<p>Radial analysis locally rematches the neighbourhood and evaluates three models: <b>Rigid</b> (no scale), <b>Isotropic</b> (one optimal scale, retained as a benchmark) and <b>Anisotropic</b> (three principal stretches). The maximum analysis radius cannot exceed the matched-neighbourhood radius.</p>" +
       "<ul><li><b>Cumulative atomic RMSD</b> includes all observations from the origin to each radius. <b>Shell RMSD</b> includes only the newest shell and reveals where agreement deteriorates.</li><li><b>Centroid RMSD</b> measures molecular positions. <b>Orientation RMSD</b> measures relative molecular reorientation. <b>Coverage</b> reports represented molecules and comparable atoms.</li><li>The criterion combines an atomic RMSD threshold δ and minimum molecular coverage C. <b>Rδ,C</b> is the greatest continuously sampled radius from the origin satisfying both. Failure at an inner radius prevents a later isolated pass from extending it.</li><li>This is a transparent criterion-based assessment, not a claim that one universal isostructurality index has been established.</li></ul>" +
+      "<h3>12a. XPac double sub-unit comparison</h3>" +
+      "<p>This stage is a second, independent isostructurality method: <b>XPac</b> (Gelbrich &amp; Hursthouse, <i>CrystEngComm</i> 2005, 7, 324 and 2006, 8, 448). Unlike the neighbourhood-matching, deformation and volumetric stages above, XPac never overlays S1 and S2 in a shared frame. Instead it characterises the local packing around the reference (\"kernel\") molecule using only internal coordinates, so it can find a shared local motif even when the two whole packings are not superimposable.</p>" +
+      "<ul><li>The kernel molecule's locked <b>comparison atom set</b> (stage 8) is reused directly as the XPac <b>ordered set of points (OSP)</b> — lock it first. Every shell neighbour molecule's own OSP is then found automatically from the same asymmetric-unit atom identities, so no separate atom picking is needed.</li>" +
+      "<li><b>Shell tolerance t</b> selects which molecules around the kernel count as shell neighbours: any interatomic distance below the van der Waals radii sum plus t. The default, t = 1.5 Å, and the default filters <b>f_ang = 7°, f_dhd = 18°, f_tor = 22°</b>, follow the source paper. A shell neighbour must already be present in the grown structure (via ordinary Grow or Paired sphere growth) to be found.</li>" +
+      "<li>For every combination of one S1 shell neighbour and one S2 shell neighbour (a \"double sub-unit\" pair), the app computes mean absolute differences <b>δang, δdhd, δtor</b> between lists of angles, interplanar angles and torsion angles built from the combined kernel+neighbour OSP points, and reports the pair as similar when all three fall under the chosen filters. A δtor comparison against a sign-mirrored torsion list is also tried, and a match found only that way is flagged \"opposite-hand\" (a possible enantiomeric relationship).</li>" +
+      "<li>The kernel and matched-neighbour OSP atoms are highlighted (yellow/teal spheres) in the 3D view, and stay correctly positioned through any later fit, growth or deformation. <b>Show XPac highlights in 3D view</b> turns them off — do this before exporting a figure that should not include them.</li>" +
+      "<li><b>Important caveat:</b> the source papers describe these angle/interplanar/torsion lists only qualitatively, as \"sufficiently large, representative lists\", without publishing the exact enumeration. This app therefore uses its own explicit, documented convention: δang from angles subtended at each OSP point of one molecule by every pair of points of the other; δdhd from the interplanar angle between the two molecules' planes through each same-indexed OSP triple; δtor from torsions around each kernel-to-neighbour connecting vector. This is a principled, self-consistent construction, not a verified reproduction of XPac's unpublished formula — treat δ values as internally comparable within this app rather than as literal equivalents of numbers published for the same structures elsewhere.</li>" +
+      "<li>This pass implements <b>double sub-unit comparison only</b>. XPac's further steps — combining double into triple sub-units, assembling a \"seed\", determining its dimensionality (0D/1D/2D/3D) and computing the overall dissimilarity index Δ — are not yet implemented.</li>" +
+      "<li>XPac makes <b>no assessment of overlay fit at all</b>, and needs none: every δang/δdhd/δtor value above is computed from each structure's own atoms in its own frame, so a rigid rotation or translation applied to a whole structure changes none of them. The Reference alignment, Paired sphere growth and rigid-refinement stages exist only to support the neighbourhood-matching/deformation stages above and to draw a sensible shared 3D view; they have no effect on this stage's numbers.</li></ul>" +
       "<h3>13. Symmetry-site candidate search</h3>" +
       "<p>If fitting the two asymmetric-unit molecules does not align their packing, search the symmetry-generated S2 molecular sites. Previous/Next applies each complete S2 transformation so the candidate molecule remains overlaid with the S1 reference while the packing changes. When the best candidate is found, it can be promoted to the S2 asymmetric-unit reference; deleting symmetry-generated atoms then retains the desired central molecule.</p>" +
       "<h3>14. Interactive and manual alignment</h3>" +
@@ -7983,7 +8191,7 @@ select.sel:focus{border-color:var(--accent)}
       "<h3>15. Redesignating asymmetric units</h3>" +
       "<p>A single grown molecule can be made the asymmetric unit when the selected atoms are unique and match the asymmetric-unit atom count. The command appears only when the selection is valid. This is useful for centring a preferred symmetry-generated molecule before deleting the remaining generated packing.</p>" +
       "<h3>16. Export and reporting</h3>" +
-      "<ul><li><b>Export image (PNG)</b> renders a high-detail figure at the chosen resolution and can use a transparent background. The current image can also be copied to the clipboard. Hidden atoms are absent because the image records the displayed model.</li><li><b>Export Structure 1/2 overlay PDB</b> writes the currently visible atoms in the final shared Cartesian frame; hidden atoms are intentionally omitted. Unhide them before PDB export if they are required in the coordinate file.</li><li><b>Export complete overlay (JSON)</b> saves a portable two-structure session containing all stored atoms, including their hidden/visible state, together with the overlay transformations, deformation, chosen colours, camera view, markers and completed results. <b>Load overlay session (JSON)</b>, or dropping that JSON onto the model view, restores it on another computer without the original CIF files. Hidden atoms can then be recovered with <b>Unhide all</b>. If work is already loaded, the app warns before replacing it and Cancel leaves it unchanged.</li><li><b>Generate analysis report (PDF)</b> creates a local multi-page report whose headings, paragraphs, table values, labels and captions are proper selectable text; only the molecular view and plotted curves remain graphics.</li><li><b>Generate editable report (RTF)</b> creates a formatted Word-compatible report with the overlay image, plain-language interpretation, result tables, settings and method notes. Its contents can be edited or copied into another Word document.</li><li>When the browser supports secure file-system access, every save picker starts in the folder containing the most recently loaded CIF or overlay JSON, regardless of whether that file was loaded with its button or by drag-and-drop. This applies to PNG, both overlay PDB files, overlay JSON, PDF, RTF, radial and element CSV files, and diagnostic JSON.</li><li><b>Export radial data (CSV)</b> writes the numerical curves for independent plotting or archival analysis. <b>Copy concise report</b> copies the criterion summary as text.</li></ul>" +
+      "<ul><li><b>Export image (PNG)</b> renders a high-detail figure at the chosen resolution and can use a transparent background. The current image can also be copied to the clipboard. Hidden atoms are absent because the image records the displayed model.</li><li><b>Export Structure 1/2 overlay PDB</b> writes the currently visible atoms in the final shared Cartesian frame; hidden atoms are intentionally omitted. Unhide them before PDB export if they are required in the coordinate file.</li><li><b>Export complete overlay (JSON)</b> saves a portable two-structure session containing all stored atoms, including their hidden/visible state, together with the overlay transformations, deformation, chosen colours, camera view, markers and completed results. <b>Load overlay session (JSON)</b>, or dropping that JSON onto the model view, restores it on another computer without the original CIF files. Hidden atoms can then be recovered with <b>Unhide all</b>. If work is already loaded, the app warns before replacing it and Cancel leaves it unchanged.</li><li><b>Generate analysis report (PDF)</b> creates a local multi-page report whose headings, paragraphs, table values, labels and captions are proper selectable text; only the molecular view and plotted curves remain graphics.</li><li><b>Generate editable report (RTF)</b> creates a formatted Word-compatible report with the overlay image, plain-language interpretation, result tables, settings and method notes. Its contents can be edited or copied into another Word document.</li><li>When the browser supports secure file-system access, every save picker starts in the folder containing the most recently loaded CIF or overlay JSON, regardless of whether that file was loaded with its button or by drag-and-drop. This applies to PNG, both overlay PDB files, overlay JSON, PDF, RTF, radial and element CSV files, and diagnostic JSON.</li><li><b>Export radial data (CSV)</b> writes the numerical curves for independent plotting or archival analysis. <b>Copy concise report</b> copies the criterion summary as text.</li><li><b>Export comparison diagnostic log (JSON)</b> (in Principal-strain deformation) stays on this computer and records the build, settings, assignments, centroids, atom-pair coordinates and before/after strain distances for the current comparison, for archival or troubleshooting.</li></ul>" +
       "<h3>17. Scientific interpretation</h3>" +
       "<p>Results depend on the chosen reference molecule, atom mask, growth extent, matching radius and tolerance, deformation options, RMSD threshold and coverage target. Report these choices whenever structures are compared. Similar topology can coexist with large geometric strain, while a low local RMSD does not prove global isostructurality. Inspect the overlay, correspondence lines, shell behaviour, unmatched molecules and symmetry alternatives alongside the numerical results.</p>";
   }
