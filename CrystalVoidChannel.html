@@ -1663,24 +1663,44 @@ select.sel:focus{border-color:var(--accent)}
         i++;
       }
 
+      /* Two CIF tag dialects are supported throughout this function: the
+         traditional star/underscore convention (DDL1, e.g. _cell_length_a,
+         _atom_site_fract_x) every CIF-writing crystallography program has
+         used for decades, and the newer PDBx/mmCIF-style dotted convention
+         (DDL2, e.g. _cell.length_a, _atom_site.fract_x) that Mercury's
+         newest CCDC export can now produce instead -- confirmed directly on
+         a real INIXUC.cif export: identical information, just every tag
+         renamed to '_category.item' form, plus _pdbx_struct_oper_list for
+         symmetry operators instead of the usual symop loop tags, and
+         _atom_site_anisotrop.U[1][1] (bracket-indexed, matched to the atom
+         list by row position via a shared numeric _atom_site.id/
+         _atom_site_anisotrop.id, not by a shared label) instead of
+         _atom_site_aniso_u_11. Every lookup below tries the DDL1 name
+         first, falling back to its DDL2 equivalent only if the DDL1 one
+         isn't present -- so an ordinary DDL1 file (the overwhelming
+         majority, including every bundled test CIF) is completely
+         unaffected; only a file that's ACTUALLY missing the DDL1 tag ever
+         even evaluates the fallback. */
+      function tagVal(ddl1, ddl2) { return tags[ddl1] !== undefined ? tags[ddl1] : tags[ddl2]; }
       var cell = {
-        a: stripEsd(tags["_cell_length_a"] || "0"),
-        b: stripEsd(tags["_cell_length_b"] || "0"),
-        c: stripEsd(tags["_cell_length_c"] || "0"),
-        alpha: stripEsd(tags["_cell_angle_alpha"] || "90"),
-        beta: stripEsd(tags["_cell_angle_beta"] || "90"),
-        gamma: stripEsd(tags["_cell_angle_gamma"] || "90")
+        a: stripEsd(tagVal("_cell_length_a", "_cell.length_a") || "0"),
+        b: stripEsd(tagVal("_cell_length_b", "_cell.length_b") || "0"),
+        c: stripEsd(tagVal("_cell_length_c", "_cell.length_c") || "0"),
+        alpha: stripEsd(tagVal("_cell_angle_alpha", "_cell.angle_alpha") || "90"),
+        beta: stripEsd(tagVal("_cell_angle_beta", "_cell.angle_beta") || "90"),
+        gamma: stripEsd(tagVal("_cell_angle_gamma", "_cell.angle_gamma") || "90")
       };
 
       var symopLoop = null;
       for (var li = 0; li < loops.length; li++) {
         var h = loops[li].headers;
-        if (h.indexOf("_space_group_symop_operation_xyz") >= 0 || h.indexOf("_symmetry_equiv_pos_as_xyz") >= 0) { symopLoop = loops[li]; break; }
+        if (h.indexOf("_space_group_symop_operation_xyz") >= 0 || h.indexOf("_symmetry_equiv_pos_as_xyz") >= 0 || h.indexOf("_pdbx_struct_oper_list.symmetry_operation") >= 0) { symopLoop = loops[li]; break; }
       }
       var symops = [];
       if (symopLoop) {
         var col = symopLoop.headers.indexOf("_space_group_symop_operation_xyz");
         if (col < 0) col = symopLoop.headers.indexOf("_symmetry_equiv_pos_as_xyz");
+        if (col < 0) col = symopLoop.headers.indexOf("_pdbx_struct_oper_list.symmetry_operation");
         for (var r = 0; r < symopLoop.rows.length; r++) {
           var op = parseSymop(symopLoop.rows[r][col]);
           if (op) symops.push(op);
@@ -1691,17 +1711,42 @@ select.sel:focus{border-color:var(--accent)}
       var atomLoop = null;
       for (var lj = 0; lj < loops.length; lj++) {
         var h2 = loops[lj].headers;
-        if (h2.indexOf("_atom_site_fract_x") >= 0) { atomLoop = loops[lj]; break; }
+        if (h2.indexOf("_atom_site_fract_x") >= 0 || h2.indexOf("_atom_site.fract_x") >= 0 || h2.indexOf("_atom_site.Cartn_x") >= 0) { atomLoop = loops[lj]; break; }
       }
       var atoms = [];
       if (atomLoop) {
         var hh = atomLoop.headers;
-        var iLabel = hh.indexOf("_atom_site_label");
-        var iType = hh.indexOf("_atom_site_type_symbol");
-        var iX = hh.indexOf("_atom_site_fract_x");
-        var iY = hh.indexOf("_atom_site_fract_y");
-        var iZ = hh.indexOf("_atom_site_fract_z");
-        var iOcc = hh.indexOf("_atom_site_occupancy");
+        function hcol() {
+          for (var hci = 0; hci < arguments.length; hci++) { var hi = hh.indexOf(arguments[hci]); if (hi >= 0) return hi; }
+          return -1;
+        }
+        /* DDL2 has no single "_atom_site.label" -- label_atom_id (e.g. "N1")
+           is the equivalent; auth_atom_id is the same information under the
+           PDB-style author-assigned name, used only if label_atom_id is
+           itself absent. */
+        var iLabel = hcol("_atom_site_label", "_atom_site.label_atom_id", "_atom_site.auth_atom_id");
+        var iType = hcol("_atom_site_type_symbol", "_atom_site.type_symbol");
+        var iX = hcol("_atom_site_fract_x", "_atom_site.fract_x");
+        var iY = hcol("_atom_site_fract_y", "_atom_site.fract_y");
+        var iZ = hcol("_atom_site_fract_z", "_atom_site.fract_z");
+        /* Some DDL2 exports (confirmed directly on IHUSUC.cif, a Mercury/CCDC
+           export with no _atom_site.fract_x loop at all) give atom positions
+           as Cartesian _atom_site.Cartn_x/y/z instead of fractional -- every
+           other part of this app (symmetry expansion, Grow, void/channel
+           analysis, ...) works in fractional coordinates throughout, so
+           these are converted once, right here, via this CIF's own cell
+           parameters (already parsed above), rather than teaching every
+           downstream consumer to handle two coordinate systems. Esds are not
+           back-propagated through this conversion (dropped, not
+           approximated) -- worth revisiting if a Cartn-only CIF with
+           parenthesised esds actually turns up; none of the ones seen so
+           far have any. */
+        var iCartX = iX < 0 ? hh.indexOf("_atom_site.Cartn_x") : -1;
+        var iCartY = iCartX >= 0 ? hh.indexOf("_atom_site.Cartn_y") : -1;
+        var iCartZ = iCartX >= 0 ? hh.indexOf("_atom_site.Cartn_z") : -1;
+        var cartToFracM = iCartX >= 0 ? fracToCartMatrix(cell) : null;
+        var iOcc = hcol("_atom_site_occupancy", "_atom_site.occupancy");
+        var iId = hh.indexOf("_atom_site.id"); /* DDL2 only -- links to _atom_site_anisotrop.id below, since DDL2's own aniso loop has no shared label to join on */
         /* CIF tags are nominally case-insensitive, and _atom_site_aniso_U_11
            in particular is very commonly written with an uppercase U (it's
            the symbol for the physical quantity) even in files that use
@@ -1726,29 +1771,49 @@ select.sel:focus{border-color:var(--accent)}
             uiso = isFinite(bv) ? bv / (8 * Math.PI * Math.PI) : null; /* B = 8*pi^2*U -- some older CIFs report only B */
           }
           if (!isFinite(uiso)) uiso = null;
-          var atomObj = {
-            label: label, el: el,
-            fx: stripEsd(row[iX]), fy: stripEsd(row[iY]), fz: stripEsd(row[iZ]),
-            sfx: esdOf(row[iX]), sfy: esdOf(row[iY]), sfz: esdOf(row[iZ]),
-            occ: occ, uiso: uiso, uij: null
-          };
+          var atomObj;
+          if (cartToFracM) {
+            var fracPos = cartToFrac(cartToFracM, [stripEsd(row[iCartX]), stripEsd(row[iCartY]), stripEsd(row[iCartZ])]);
+            atomObj = {
+              label: label, el: el, cifId: iId >= 0 ? row[iId] : String(ar + 1),
+              fx: fracPos[0], fy: fracPos[1], fz: fracPos[2],
+              sfx: 0, sfy: 0, sfz: 0,
+              occ: occ, uiso: uiso, uij: null
+            };
+          } else {
+            atomObj = {
+              label: label, el: el, cifId: iId >= 0 ? row[iId] : String(ar + 1),
+              fx: stripEsd(row[iX]), fy: stripEsd(row[iY]), fz: stripEsd(row[iZ]),
+              sfx: esdOf(row[iX]), sfy: esdOf(row[iY]), sfz: esdOf(row[iZ]),
+              occ: occ, uiso: uiso, uij: null
+            };
+          }
           atoms.push(atomObj);
           byLabel[label] = atomObj;
         }
         /* anisotropic displacement parameters, from their own separate loop
-           (_atom_site_aniso_*), matched back to the atom of the same label --
-           a CIF only lists these for atoms actually refined anisotropically,
+           (_atom_site_aniso_* in DDL1, _atom_site_anisotrop.U[i][j] in
+           DDL2), matched back to the atom of the same label in DDL1 -- a
+           CIF only lists these for atoms actually refined anisotropically,
            so most atoms keep uij: null and fall back to the isotropic uiso
-           above (or no ellipsoid at all if neither is present). */
-        var anisoLoop = null, anisoLoopLower = null;
+           above (or no ellipsoid at all if neither is present). DDL2's own
+           _atom_site_anisotrop loop has no shared label at all (only a
+           sequential id + element) -- confirmed directly on INIXUC.cif --
+           so it's matched by that id against atomObj.cifId (the atom
+           loop's own row position/_atom_site.id) instead; byId is built
+           lazily, only if a label-keyed lookup ever actually misses. */
+        var byId = null;
+        var anisoLoop = null, anisoLoopLower = null, anisoIsDdl2 = false;
         for (var lk = 0; lk < loops.length; lk++) {
           var lhLower = loops[lk].headers.map(function (s) { return s.toLowerCase(); });
           if (lhLower.indexOf("_atom_site_aniso_u_11") >= 0 || lhLower.indexOf("_atom_site_aniso_b_11") >= 0) { anisoLoop = loops[lk]; anisoLoopLower = lhLower; break; }
+          if (lhLower.indexOf("_atom_site_anisotrop.u[1][1]") >= 0) { anisoLoop = loops[lk]; anisoLoopLower = lhLower; anisoIsDdl2 = true; break; }
         }
         if (anisoLoop) {
           var ah = anisoLoopLower;
           var aLabel = ah.indexOf("_atom_site_aniso_label");
           if (aLabel < 0) aLabel = ah.indexOf("_atom_site_aniso_id");
+          if (aLabel < 0) aLabel = ah.indexOf("_atom_site_anisotrop.id");
           var isB = false;
           var k11 = ah.indexOf("_atom_site_aniso_u_11"), k22 = ah.indexOf("_atom_site_aniso_u_22"), k33 = ah.indexOf("_atom_site_aniso_u_33");
           var k23 = ah.indexOf("_atom_site_aniso_u_23"), k13 = ah.indexOf("_atom_site_aniso_u_13"), k12 = ah.indexOf("_atom_site_aniso_u_12");
@@ -1757,11 +1822,19 @@ select.sel:focus{border-color:var(--accent)}
             k23 = ah.indexOf("_atom_site_aniso_b_23"); k13 = ah.indexOf("_atom_site_aniso_b_13"); k12 = ah.indexOf("_atom_site_aniso_b_12");
             isB = true;
           }
+          if (k11 < 0) {
+            k11 = ah.indexOf("_atom_site_anisotrop.u[1][1]"); k22 = ah.indexOf("_atom_site_anisotrop.u[2][2]"); k33 = ah.indexOf("_atom_site_anisotrop.u[3][3]");
+            k23 = ah.indexOf("_atom_site_anisotrop.u[2][3]"); k13 = ah.indexOf("_atom_site_anisotrop.u[1][3]"); k12 = ah.indexOf("_atom_site_anisotrop.u[1][2]");
+          }
           if (aLabel >= 0 && k11 >= 0 && k22 >= 0 && k33 >= 0) {
             var conv = isB ? 1 / (8 * Math.PI * Math.PI) : 1;
             for (var arow = 0; arow < anisoLoop.rows.length; arow++) {
               var arv = anisoLoop.rows[arow];
-              var target = byLabel[arv[aLabel]];
+              var target = anisoIsDdl2 ? null : byLabel[arv[aLabel]];
+              if (!target && anisoIsDdl2) {
+                if (!byId) { byId = {}; for (var bi = 0; bi < atoms.length; bi++) byId[atoms[bi].cifId] = atoms[bi]; }
+                target = byId[arv[aLabel]];
+              }
               if (!target) continue;
               var u11 = stripEsd(arv[k11]), u22 = stripEsd(arv[k22]), u33 = stripEsd(arv[k33]);
               var u23 = k23 >= 0 ? stripEsd(arv[k23]) : 0, u13 = k13 >= 0 ? stripEsd(arv[k13]) : 0, u12 = k12 >= 0 ? stripEsd(arv[k12]) : 0;
@@ -2344,6 +2417,7 @@ select.sel:focus{border-color:var(--accent)}
   var U = { ang: "\u00C5", cube: "\u00B3", sq: "\u00B2" };
 
   var scene, camera, trueOrthoCam, pseudoOrthoCam, activeCam, renderer;
+  var clipPlane; /* single global cutaway plane (Display > Clipping Plane) -- its normal always tracks the current view direction, see updateClipPlane() */
   var atomsGroup, bondsGroup, surfaceGroup, guestAtomsGroup, guestBondsGroup, hbondsGroup, selectionGroup, unitCellGroup, bondEditGroup, voidGroup, ringGroup, molSurfaceGroup, labelGroup;
   var voidMeshes = {}; /* compId -> array of THREE.Mesh currently in voidGroup, for the cheap visibility-toggle path */
   var nextMolSurfaceId = 1;
@@ -2519,7 +2593,7 @@ select.sel:focus{border-color:var(--accent)}
     atomRoughness: DISPLAY_DEFAULTS.atomRoughness, atomMetalness: DISPLAY_DEFAULTS.atomMetalness, atomReflectivity: DISPLAY_DEFAULTS.atomReflectivity,
     guestAtoms: null, guestName: "", guestScale: 1.0, guestBatch: 0, showGuest: true,
     guestGroups: [], cutBonds: {}, cutBondSignatures: {}, extraBonds: {}, extraBondSignatures: {}, bondEditMode: false, bondEditPair: [],
-    bondSelectionEnabled: false, atomEditUiMode: null,
+    bondSelectionEnabled: false, atomEditUiMode: null, lastClickedAtomUid: null,
     undoStack: [], selectedBonds: {}, guestColorMode: "component",
     hostBondRadius: 0.12, guestBondRadius: 0.12,
     hostColors: {}, guestColors: {}, defaultColors: {}, page: "model",
@@ -2530,7 +2604,10 @@ select.sel:focus{border-color:var(--accent)}
     autoCompleteMolecules: false, _autoCompleting: false,
     videoAxis: "y", videoSteps: 120, videoScale: 100, videoExporting: false, videoDirection: 1, videoFormat: "avi", dontWarnAviSize: false,
     autoRotateAxis: "y", autoRotateDir: 1, autoRotateSpeed: 30, autoRotating: false,
-    videoFps: 30
+    videoFps: 30,
+    clipPlaneEnabled: false, clipPlaneOffset: 50, clipPlaneInvert: false,
+    clipPlaneMode: "view", clipPlaneH: 1, clipPlaneK: 0, clipPlaneL: 0, clipPlaneHklConvention: "reciprocal",
+    clipPlaneApplyHost: true, clipPlaneApplyGuest: true, clipPlaneApplyVoid: true, clipPlaneApplyMolSurface: true, clipPlaneApplyUnitCell: true
   };
 
   /* ---------------- camera controller ----------------
@@ -2683,6 +2760,124 @@ select.sel:focus{border-color:var(--accent)}
     if (state.fogOn) updateFog();
     updateLabelScales();
     updateScaleDisplay();
+    updateClipPlane();
+  }
+  /* Display > Clipping Plane: a single cutaway plane. Two reference modes
+     (state.clipPlaneMode):
+       "view" -- normal is always the CURRENT view direction (recomputed
+         here, on every camera move -- so rotating the structure keeps "near
+         side gets clipped away" true no matter which way you're looking).
+       "hkl"  -- normal is fixed in CRYSTAL space (state.clipPlaneH/K/L),
+         unaffected by camera rotation, so the cut stays aligned with the
+         chosen crystallographic direction while you rotate freely around it.
+         Two sub-conventions (state.clipPlaneHklConvention), because
+         crystallography genuinely has two different, non-interchangeable
+         meanings for "the direction [h k l]" that only coincide for an
+         orthogonal cell:
+           "reciprocal" -- the rigorous Miller-PLANE normal, h*a* + k*b* +
+             l*c* (round-bracket (hkl) convention; see hklPlaneNormalCartesian).
+           "direct" -- the same real-space direction convention Display >
+             Direction's "View along [h k l]" uses, h*a + k*b + l*c
+             (square-bracket [hkl] convention) -- pick this if you want
+             typing the same h k l into both panels to give a matching
+             view/clip pair (see clipHklNormalCartesian).
+         Falls back to "view" if no CIF is loaded or h=k=l=0.
+     Applied per-material (not as a renderer-global clip), so it can be
+     switched on/off independently for each of the 5 structural component
+     types (state.clipPlaneApplyHost/Guest/Void/MolSurface/UnitCell, each
+     with its own Display > Clipping Plane checkbox) -- three.js has no way
+     to exempt an object from a renderer-global clip plane, so per-material
+     assignment (applyClipPlaneToGroups, below) is the only way to make this
+     selective. Atom labels aren't one of the 5 toggleable types; they simply
+     always follow the plane while clipping is enabled, matching this
+     feature's original (pre-selective) behaviour. Void/channel meshes keep
+     their own, unrelated per-material cell-boundary clip planes (a
+     channel's truncation at the unit cell face) alongside this one --
+     setGroupClipPlanes (below) explicitly concatenates onto each
+     material's own base clip planes rather than replacing them; three.js
+     itself does NOT merge two separate assignments to material.clippingPlanes
+     for you, so this concatenation is load-bearing, not a nicety.
+     state.clipPlaneOffset (0-100) maps onto the scene's own sceneBoundRadius
+     (already tracks atoms, unit cell AND void/channel geometry -- see
+     updateSceneBoundRadius's own history) so the slider's range self-scales
+     to whatever is actually loaded: 0 = plane sits at the near edge of
+     everything (relative to camTarget along the chosen normal), clipping
+     nothing; 100 = plane sits at the far edge, clipping everything.
+     Because materials are frequently torn down and rebuilt from scratch
+     (renderStructure/renderVoidMeshes/renderMolSurfaceMeshes/renderUnitCell/
+     renderLabels all create brand-new THREE.Material instances on every
+     call, which default to no clipping planes of their own), each of those
+     functions calls updateClipPlane() again at its own end so freshly
+     created materials immediately pick up the current clip state instead of
+     silently rendering unclipped until the next camera move. */
+  function hklPlaneNormalCartesian(h, k, l) {
+    var a = cifAxisCartesian("a"), b = cifAxisCartesian("b"), c = cifAxisCartesian("c");
+    if (!a) return null;
+    var bc = new THREE.Vector3().crossVectors(b, c);
+    var vol = a.dot(bc);
+    if (Math.abs(vol) < 1e-10) return null;
+    var aStar = bc.clone().divideScalar(vol);
+    var bStar = new THREE.Vector3().crossVectors(c, a).divideScalar(vol);
+    var cStar = new THREE.Vector3().crossVectors(a, b).divideScalar(vol);
+    var n = new THREE.Vector3().addScaledVector(aStar, h).addScaledVector(bStar, k).addScaledVector(cStar, l);
+    if (n.lengthSq() < 1e-10) return null;
+    return n.normalize();
+  }
+  function directLatticeDirectionCartesian(h, k, l) {
+    var a = cifAxisCartesian("a"), b = cifAxisCartesian("b"), c = cifAxisCartesian("c");
+    if (!a) return null;
+    var v = new THREE.Vector3().addScaledVector(a, h).addScaledVector(b, k).addScaledVector(c, l);
+    if (v.lengthSq() < 1e-10) return null;
+    return v.normalize();
+  }
+  function clipHklNormalCartesian(h, k, l) {
+    return state.clipPlaneHklConvention === "direct" ? directLatticeDirectionCartesian(h, k, l) : hklPlaneNormalCartesian(h, k, l);
+  }
+  function setGroupClipPlanes(group, planes) {
+    if (!group) return;
+    /* Some materials (currently just void/channel meshes -- see
+       makeInstanceMat's own comment) carry their OWN intrinsic clip planes,
+       set once at creation time for a reason unrelated to this feature (a
+       channel's cell-boundary truncation). Concatenating onto that base
+       array, rather than replacing material.clippingPlanes outright, is
+       what keeps those intrinsic planes intact regardless of whether this
+       feature is on, off, or excludes that component via its own "Apply
+       to" checkbox -- an earlier version of this function did a blind
+       overwrite here and silently erased void meshes' own truncation the
+       moment ANY void/channel calculation redrew them, reported back as
+       channels no longer being cut off at the unit cell face. */
+    function apply(m) {
+      var base = (m.userData && m.userData.voidBaseClipPlanes) || [];
+      m.clippingPlanes = base.concat(planes);
+    }
+    group.traverse(function (obj) {
+      if (!obj.material) return;
+      if (Array.isArray(obj.material)) obj.material.forEach(apply);
+      else apply(obj.material);
+    });
+  }
+  function applyClipPlaneToGroups() {
+    function planesFor(active) { return (state.clipPlaneEnabled && active) ? [clipPlane] : []; }
+    var hostOn = state.clipPlaneApplyHost, guestOn = state.clipPlaneApplyGuest;
+    setGroupClipPlanes(atomsGroup, planesFor(hostOn));
+    setGroupClipPlanes(bondsGroup, planesFor(hostOn));
+    setGroupClipPlanes(guestAtomsGroup, planesFor(guestOn));
+    setGroupClipPlanes(guestBondsGroup, planesFor(guestOn));
+    setGroupClipPlanes(hbondsGroup, planesFor(hostOn || guestOn)); /* H-bonds visually connect host and guest -- follow either */
+    setGroupClipPlanes(voidGroup, planesFor(state.clipPlaneApplyVoid));
+    setGroupClipPlanes(molSurfaceGroup, planesFor(state.clipPlaneApplyMolSurface));
+    setGroupClipPlanes(unitCellGroup, planesFor(state.clipPlaneApplyUnitCell));
+    setGroupClipPlanes(labelGroup, planesFor(true)); /* labels aren't one of the 5 toggleable component types -- always follow the plane while enabled */
+  }
+  function updateClipPlane() {
+    if (!renderer) return;
+    var normal = state.clipPlaneMode === "hkl" ? clipHklNormalCartesian(state.clipPlaneH, state.clipPlaneK, state.clipPlaneL) : null;
+    if (!normal) normal = new THREE.Vector3(0, 0, -1).applyQuaternion(camOrient); /* view mode, or hkl mode with no CIF/degenerate index -- falls back to view-relative */
+    if (state.clipPlaneInvert) normal.negate();
+    var t = -sceneBoundRadius + (state.clipPlaneOffset / 100) * 2 * sceneBoundRadius;
+    var planePoint = camTarget.clone().addScaledVector(normal, t);
+    clipPlane.setFromNormalAndCoplanarPoint(normal, planePoint);
+    applyClipPlaneToGroups();
   }
   function updateScaleDisplay() {
     var inp = document.getElementById("dispScaleInput");
@@ -2957,6 +3152,7 @@ select.sel:focus{border-color:var(--accent)}
     activeCam = state.pseudoOrtho ? pseudoOrthoCam : trueOrthoCam;
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     renderer.localClippingEnabled = true; /* required for void/channel Option 1's per-axis cell-boundary clip planes (cellBoundaryPlanes) */
+    clipPlane = new THREE.Plane();
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     if (THREE.sRGBEncoding) renderer.outputEncoding = THREE.sRGBEncoding;
     if (THREE.ACESFilmicToneMapping) renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -3965,7 +4161,7 @@ select.sel:focus{border-color:var(--accent)}
 
   function centroid() { return state.viewOffset; }
   function recomputeViewOffset() {
-    if (state.centeringMode === "selected") return; /* frozen -- only changed by the Model centering Apply button */
+    if (state.centeringMode === "selected" || state.centeringMode === "fractional") return; /* frozen -- only changed by their own Apply buttons */
     if (state.centeringMode === "unitcell") {
       if (state.isCif && state.cifFracToCart) {
         var cc = K.fracToCart(state.cifFracToCart, [0.5, 0.5, 0.5]);
@@ -4013,6 +4209,14 @@ select.sel:focus{border-color:var(--accent)}
     clearSelection();
     renderStructure(); renderSurface(); renderVoidMeshes(); renderUnitCell(); renderMolSurfaceMeshes();
     setStatus("Centred on " + sel.length + " selected atom" + (sel.length === 1 ? "" : "s") + ".", false);
+  }
+  function applyFractionalCentering(fx, fy, fz) {
+    if (!state.isCif || !state.cifFracToCart) { setStatus("Load a CIF file first.", true); return; }
+    if (!isFinite(fx) || !isFinite(fy) || !isFinite(fz)) { setStatus("Enter numeric x, y, z fractional coordinates.", true); return; }
+    var cc = K.fracToCart(state.cifFracToCart, [fx, fy, fz]);
+    state.viewOffset = [-cc[0], -cc[1], -cc[2]];
+    renderStructure(); renderSurface(); renderVoidMeshes(); renderUnitCell(); renderMolSurfaceMeshes();
+    setStatus("Centred on fractional coordinates (" + fx + ", " + fy + ", " + fz + ").", false);
   }
 
   /* ---------------- atoms + bonds ---------------- */
@@ -4071,6 +4275,30 @@ select.sel:focus{border-color:var(--accent)}
         if (cd2 > maxD2) maxD2 = cd2;
       }
     }
+    /* voidGroup's own meshes (renderVoidMeshes) are already drawn in this
+       same post-centroid-shift world space (see that function's own
+       comment), but were never considered here -- a channel Moved/Copied
+       several unit cells out along its own periodicity axis (see the
+       Fragments panel) can then sit well beyond every atom/cell corner
+       checked above. That left pseudoOrthoCam's far plane (sized from
+       sceneBoundRadius alone, see updateOrthoFrustum) too close, hard-
+       clipping a long extended/copied channel viewed down its own axis --
+       confirmed directly, unrelated to zoom, since the far plane sits a
+       fixed distance from the camera regardless of how far the user has
+       zoomed in or out. voidGroup may not exist yet on the very first
+       call (initThree creates it after this function is first wired up),
+       hence the guard. */
+    if (typeof voidGroup !== "undefined" && voidGroup && voidGroup.children.length) {
+      voidGroup.updateMatrixWorld(true);
+      var voidBox = new THREE.Box3().setFromObject(voidGroup);
+      if (!voidBox.isEmpty()) {
+        var vx = Math.max(Math.abs(voidBox.min.x), Math.abs(voidBox.max.x));
+        var vy = Math.max(Math.abs(voidBox.min.y), Math.abs(voidBox.max.y));
+        var vz = Math.max(Math.abs(voidBox.min.z), Math.abs(voidBox.max.z));
+        var vd2 = vx * vx + vy * vy + vz * vz;
+        if (vd2 > maxD2) maxD2 = vd2;
+      }
+    }
     sceneBoundRadius = Math.sqrt(maxD2) + 5;
   }
   function renderStructure() {
@@ -4086,6 +4314,7 @@ select.sel:focus{border-color:var(--accent)}
     renderLabels();
     renderSelection();
     syncNoAtomsOverlay();
+    updateClipPlane(); /* atoms/bonds/labels just got rebuilt with fresh materials -- reapply per-component clip planes to them, see updateClipPlane's own comment */
   }
   function syncNoAtomsOverlay() {
     /* Shown whenever there's genuinely nothing to look at -- the initial
@@ -4603,6 +4832,7 @@ select.sel:focus{border-color:var(--accent)}
        others. That one case already has its own proper settle point at
        drag-release instead (onWindowPointerUp's atomMove branch). */
     if (dragMode !== "atomMove") repositionLabels();
+    updateClipPlane(); /* fresh label sprites just got created -- reapply the current clip plane to them */
   }
   function updateLabelScales() {
     /* sizeAttenuation is off, so the sprite scale has to be converted into
@@ -5081,37 +5311,269 @@ select.sel:focus{border-color:var(--accent)}
       }
       return d;
     }
+    /* Shared by both merge passes below: how well do components a and b's
+       (a < b) own vertex keys line up under a single whole-lattice
+       translation? keysByReduced lets a caller recover exactly WHICH of
+       a's keys participated in the best-agreeing delta, not just the
+       count -- needed by the second pass to accumulate coverage across
+       several partners at once. */
+    function pairwiseKeyMatch(a, b) {
+      var ma = keyMaps[a], mb = keyMaps[b];
+      var gens = (components[a].periodicityGenerators || []).concat(components[b].periodicityGenerators || []);
+      var rawByReduced = {}, keysByReduced = {}, total = 0, bestReduced = null, bestCount = 0;
+      for (var k in ma) {
+        if (!mb.hasOwnProperty(k)) continue;
+        var aa = ma[k], ab = mb[k];
+        var raw = [ab[0] - aa[0], ab[1] - aa[1], ab[2] - aa[2]];
+        var red = gens.length ? reduceDelta(raw, gens) : raw;
+        var rstr = red[0] + "," + red[1] + "," + red[2];
+        total++;
+        if (!keysByReduced[rstr]) keysByReduced[rstr] = [];
+        keysByReduced[rstr].push(k);
+        if (!rawByReduced[rstr]) rawByReduced[rstr] = {};
+        var rawStr = raw[0] + "," + raw[1] + "," + raw[2];
+        rawByReduced[rstr][rawStr] = (rawByReduced[rstr][rawStr] || 0) + 1;
+        if (keysByReduced[rstr].length > bestCount) { bestCount = keysByReduced[rstr].length; bestReduced = rstr; }
+      }
+      return { total: total, bestCount: bestCount, bestReduced: bestReduced, keysByReduced: keysByReduced, rawByReduced: rawByReduced };
+    }
+    function bestDeltaOf(match) {
+      var rawVotes = match.rawByReduced[match.bestReduced];
+      var bestRaw = null, bestRawCount = -1;
+      for (var rk in rawVotes) if (rawVotes[rk] > bestRawCount) { bestRawCount = rawVotes[rk]; bestRaw = rk; }
+      return bestRaw.split(",").map(Number);
+    }
     var edges = new Array(n);
     for (var e0 = 0; e0 < n; e0++) edges[e0] = [];
     for (var i = 0; i < n; i++) {
       for (var j = i + 1; j < n; j++) {
-        var mi = keyMaps[i], mj = keyMaps[j];
-        var gens = (components[i].periodicityGenerators || []).concat(components[j].periodicityGenerators || []);
-        var reducedCounts = {}, rawByReduced = {}, total = 0, bestReduced = null, bestCount = 0;
-        for (var k in mi) {
-          if (!mj.hasOwnProperty(k)) continue;
-          var ai = mi[k], aj = mj[k];
-          var raw = [aj[0] - ai[0], aj[1] - ai[1], aj[2] - ai[2]];
-          var red = gens.length ? reduceDelta(raw, gens) : raw;
-          var rstr = red[0] + "," + red[1] + "," + red[2];
-          total++;
-          var c = (reducedCounts[rstr] || 0) + 1; reducedCounts[rstr] = c;
-          if (!rawByReduced[rstr]) rawByReduced[rstr] = {};
-          var rawStr = raw[0] + "," + raw[1] + "," + raw[2];
-          rawByReduced[rstr][rawStr] = (rawByReduced[rstr][rawStr] || 0) + 1;
-          if (c > bestCount) { bestCount = c; bestReduced = rstr; }
-        }
-        if (total === 0) continue;
+        var match = pairwiseKeyMatch(i, j);
+        if (match.total === 0) continue;
         var minCount = Math.min(keyCounts[i], keyCounts[j]);
-        if (bestCount / total >= VOID_MERGE_TRANSLATION_CONSISTENCY && bestCount / minCount >= VOID_MERGE_OVERLAP_THRESHOLD) {
-          var rawVotes = rawByReduced[bestReduced];
-          var bestRaw = null, bestRawCount = -1;
-          for (var rk in rawVotes) if (rawVotes[rk] > bestRawCount) { bestRawCount = rawVotes[rk]; bestRaw = rk; }
-          var d = bestRaw.split(",").map(Number);
+        if (match.bestCount / match.total >= VOID_MERGE_TRANSLATION_CONSISTENCY && match.bestCount / minCount >= VOID_MERGE_OVERLAP_THRESHOLD) {
+          var d = bestDeltaOf(match);
           union(i, j);
           edges[i].push({ to: j, delta: d });
           edges[j].push({ to: i, delta: [-d[0], -d[1], -d[2]] });
         }
+      }
+    }
+    /* Second pass -- recovers a component whose real content is split
+       across SEVERAL bordering captures, each an otherwise-perfect
+       (>=VOID_MERGE_TRANSLATION_CONSISTENCY) delta match on its own but
+       none individually covering VOID_MERGE_OVERLAP_THRESHOLD of this
+       component's own keys, so the pass above never merges any single one
+       of them. Confirmed directly on YARXUK01.cif: a real duplicate's 47
+       keys split into a 28-key perfectly-consistent match against one
+       neighbour (60% short of the 60% bar by a hair -- 0.596), a 24-key
+       match against a second, and a 19-key match against a third --
+       together covering 39 of its 47 keys (83%) once the overlap between
+       those three partial matches is deduplicated, clearly the same real
+       feature, but each pairwise overlap ratio alone stayed just under the
+       threshold, leaving a spurious near-superimposed extra component in
+       the output. Requiring at least two such high-consistency partners
+       (not just one) keeps this from ever lowering the bar for an
+       ordinary single low-overlap pair -- coincidentally agreeing on the
+       exact same whole-lattice delta across many shared keys, with TWO OR
+       MORE independent partners, is not something unrelated components do
+       by chance. */
+    for (var i4 = 0; i4 < n; i4++) {
+      var matchedKeys = {}, partners = [], partnerDelta = {};
+      for (var j4 = 0; j4 < n; j4++) {
+        if (j4 === i4) continue;
+        var lo = Math.min(i4, j4), hi = Math.max(i4, j4);
+        var match4 = pairwiseKeyMatch(lo, hi);
+        if (match4.total === 0 || match4.bestCount / match4.total < VOID_MERGE_TRANSLATION_CONSISTENCY) continue;
+        match4.keysByReduced[match4.bestReduced].forEach(function (k) { matchedKeys[k] = true; });
+        partners.push(j4);
+        var raw4 = bestDeltaOf(match4);
+        partnerDelta[j4] = (i4 === lo) ? raw4 : [-raw4[0], -raw4[1], -raw4[2]];
+      }
+      if (partners.length >= 2 && Object.keys(matchedKeys).length / keyCounts[i4] >= VOID_MERGE_OVERLAP_THRESHOLD) {
+        partners.forEach(function (j4) {
+          if (find(i4) === find(j4)) return;
+          union(i4, j4);
+          var d4 = partnerDelta[j4];
+          edges[i4].push({ to: j4, delta: d4 });
+          edges[j4].push({ to: i4, delta: [-d4[0], -d4[1], -d4[2]] });
+        });
+      }
+    }
+    /* Third pass -- position-based fallback for a pair that shares NO key
+       at all, so the two passes above (which both require at least one
+       matching key to even propose a candidate delta) never get a chance.
+       This happens at a near-cospherical special position (several atoms
+       essentially equidistant from one point): which specific atom a
+       degenerate Voronoi vertex's key names depends on the deterministic
+       per-atom perturbation that breaks the tie (see perturbComponent),
+       and that perturbation is seeded on each atom's position in the
+       padded array -- not on which real atom it is -- so it isn't itself
+       periodic. Two captures of the exact same real vertex, reached
+       through two different (periodicity-related) padding windows, can
+       therefore each resolve the SAME tie toward a DIFFERENT atom and end
+       up with completely different keys, even though they sit at
+       (fractionally) the same point. Confirmed directly on ARAHIM03.cif:
+       a cavity at a high-symmetry site was captured twice this way, no
+       vertex of one capture ever shared a key with the other, and the
+       cavity was reported twice -- once correctly, once as a smaller,
+       misshapen duplicate. Rather than re-seed that perturbation on each
+       atom's real identity instead (tried first -- it makes the whole
+       padded lattice periodic again, which is the "more correct" fix in
+       principle, but it perturbs literally every atom in every structure
+       differently, and confirmed directly it moves already-verified
+       volumes on unrelated, non-degenerate structures by a fraction of a
+       percent), this only ever compares actual vertex POSITIONS -- so it
+       can only fire on a pair the key-based passes had no chance at
+       all on, never second-guess one they already accepted or rejected. */
+    var POSITION_MERGE_TOL = 0.25; /* Angstrom -- a near-degenerate vertex's
+      position can shift by somewhat more than perturbComponent's own
+      3e-3 A step (it's a computed circumcenter of 4 nearly-equidistant
+      atoms, not a directly-perturbed atom position), but nowhere near as
+      much as the distance between two genuinely different real cavities.
+      Raised from the original 0.15 -- confirmed directly on RAPMII.cif
+      (geometry-fingerprint jitter, see computeAtomFingerprints): a real
+      duplicate pair landed 0.16-0.17 A apart, the SAME class of near-
+      degenerate double-capture this pass exists for (two adjacent
+      tetrahedra decompositions of one near-cospherical local cluster,
+      each naming a different 4-atom vertex key for what is physically the
+      same empty-sphere location), just past the original bound by a hair.
+      0.25 A is still two orders of magnitude below any real distinct-
+      cavity separation, so this only widens the net for genuine near-
+      degenerate duplicates, not a general fuzziness increase. */
+    var EXACT_DUP_TOL = 1e-6; /* Angstrom -- see the final per-group dedup
+      pass below (near the byKey assembly): distinguishes a genuine same-
+      vertex-different-key duplicate (effectively 0 A apart) from two
+      merely-adjacent, genuinely distinct mesh vertices (routinely a few
+      tenths of an Angstrom apart even in one single correct triangulation
+      -- confirmed directly on DIANIN.cif, see that pass's own comment). */
+    function centroidFracOf(comp) {
+      var s = [0, 0, 0];
+      comp.vertices.forEach(function (v) {
+        var f = K.cartToFrac(M, v.pos);
+        s[0] += f[0]; s[1] += f[1]; s[2] += f[2];
+      });
+      var cnt = comp.vertices.length || 1;
+      return [s[0] / cnt, s[1] / cnt, s[2] / cnt];
+    }
+    var centroidsFrac = components.map(centroidFracOf);
+    var mergeOrigin = K.fracToCart(M, [0, 0, 0]);
+    for (var i6 = 0; i6 < n; i6++) {
+      for (var j6 = i6 + 1; j6 < n; j6++) {
+        if (find(i6) === find(j6)) continue;
+        if (pairwiseKeyMatch(i6, j6).total > 0) continue; /* had a fair shot above */
+        var gens6 = (components[i6].periodicityGenerators || []).concat(components[j6].periodicityGenerators || []);
+        var rawDelta6 = [centroidsFrac[j6][0] - centroidsFrac[i6][0], centroidsFrac[j6][1] - centroidsFrac[i6][1], centroidsFrac[j6][2] - centroidsFrac[i6][2]];
+        var redDelta6 = gens6.length ? reduceDelta(rawDelta6, gens6) : rawDelta6;
+        var rounded6 = redDelta6.map(Math.round);
+        if (rounded6[0] === 0 && rounded6[1] === 0 && rounded6[2] === 0) continue;
+        var cart6 = K.fracToCart(M, rounded6);
+        var shiftVec6 = [cart6[0] - mergeOrigin[0], cart6[1] - mergeOrigin[1], cart6[2] - mergeOrigin[2]];
+        /* Search direction must run from the SMALLER component to the
+           larger one, not from i6 to j6 -- i6<j6 is just array order, with
+           no relation to which side actually has fewer vertices. Confirmed
+           directly on RAPMII.cif: a real 2-vertex duplicate island (i6, the
+           lower array index purely by chance) sits next to a 96-vertex
+           capture (j6) of the SAME already-merged main channel; searching
+           "for each of the 96 big vertices, does shifting it land within
+           tolerance of one of the island's 2 points" can succeed for at
+           most 2 of the 96 no matter how real the duplicate is, scoring
+           2/96 against the 0.6 bar -- while the sensible direction ("for
+           each of the island's 2 points, does it land on some big vertex")
+           scored a clean 2/2. Swapping so the search set is always
+           whichever side has fewer vertices fixes this without weakening
+           the check itself: minCount6 (the denominator) is unchanged
+           either way, only which set gets iterated and which gets searched
+           changes, and that was always the intended asymmetry -- a small
+           duplicate capture needs ALL of its own points accounted for
+           somewhere in the larger one, not the reverse. */
+        var iIsSmaller = components[i6].vertices.length <= components[j6].vertices.length;
+        var searchComp = iIsSmaller ? i6 : j6, targetComp = iIsSmaller ? j6 : i6;
+        var searchSign = iIsSmaller ? 1 : -1;
+        var vSearch = components[searchComp].vertices, vTarget = components[targetComp].vertices;
+        var matchedCount6 = 0;
+        vSearch.forEach(function (v) {
+          var sx = v.pos[0] + searchSign * shiftVec6[0], sy = v.pos[1] + searchSign * shiftVec6[1], sz = v.pos[2] + searchSign * shiftVec6[2];
+          var ok = vTarget.some(function (w) {
+            var dx = w.pos[0] - sx, dy = w.pos[1] - sy, dz = w.pos[2] - sz;
+            return (dx * dx + dy * dy + dz * dz) < POSITION_MERGE_TOL * POSITION_MERGE_TOL;
+          });
+          if (ok) matchedCount6++;
+        });
+        var minCount6 = Math.min(vSearch.length, vTarget.length);
+        if (minCount6 > 0 && matchedCount6 / minCount6 >= VOID_MERGE_OVERLAP_THRESHOLD) {
+          union(i6, j6);
+          edges[i6].push({ to: j6, delta: rounded6 });
+          edges[j6].push({ to: i6, delta: [-rounded6[0], -rounded6[1], -rounded6[2]] });
+        }
+      }
+    }
+    /* Fourth pass -- a genuinely near-degenerate local cluster (several
+       atoms essentially equidistant from one point) can carve off a tiny,
+       spurious "component" that shares NO key at all with its true
+       neighbour AND has no whole-lattice-translation relationship to it
+       either -- unlike pass 3's case, this isn't a second capture of the
+       SAME feature at a shifted position, it's a genuinely separate
+       empty-sphere location that the perturbation-based tie-break resolved
+       into its own tiny pocket, immediately adjacent to (not
+       translationally coincident with) a much larger real component.
+       Confirmed directly on ZIF-68.cif: three small (2-4 vertex) "voids"
+       of ~44-47 A^3 sit within ~2.4-2.6 A of the main channel's own
+       vertices -- well under 2x the probe radius, meaning a probe centred
+       at one location and a probe centred at the other genuinely overlap
+       in space, so they're the same accessible region by the exact same
+       physical criterion classify() itself already uses for connectivity.
+       Pass 3 never proposes merging them: there's no single consistent
+       whole-cell delta between a huge, sprawling channel's own centroid
+       and this tiny pocket's, since the pocket isn't a shifted copy of the
+       channel, just a near neighbour of one small part of it.
+
+       Actually folding these vertices into the larger component (tried
+       first) is NOT safe: confirmed directly, doing so through the same
+       union-find/edge/cumDelta path as the other passes tripled the
+       channel's own reported volume (2825 -> 9304 A^3) even though only a
+       handful of vertices were added -- something about this component's
+       volume/region computation reacts badly to vertices arriving without
+       a passes-1-3-style consistent shift history, and diagnosing that
+       properly is its own separate task. Silently DROPPING the small
+       component instead -- it's a confirmed numerical artifact, not real
+       additional accessible space, and its own tiny volume (already
+       counted nowhere else) is negligible -- gets the actually-requested
+       result (no spurious extra void in the list) with zero risk to the
+       real component's own already-correct volume. Same narrow trigger as
+       the folding attempt: a SMALL component (a handful of vertices)
+       every one of whose own vertices lands within 2*probeRadius of a
+       MUCH LARGER one, checked across all 27 nearby whole-cell positions
+       independently per vertex (not one shared shift) -- so this can't
+       drop a genuinely separate small cavity that simply happens to sit
+       near a larger one; it only fires when the whole small capture is
+       consistently adjacent to the one larger feature. */
+    var PROXIMITY_MERGE_MAX_SMALL = 8;
+    var proximityTol = 2 * (state.probeRadius || 1.5);
+    var mergeOrigin7 = K.fracToCart(M, [0, 0, 0]);
+    var dropAsArtifact = {};
+    for (var i7 = 0; i7 < n; i7++) {
+      if (components[i7].vertices.length > PROXIMITY_MERGE_MAX_SMALL) continue;
+      for (var j7 = 0; j7 < n; j7++) {
+        if (i7 === j7) continue;
+        if (components[j7].vertices.length <= components[i7].vertices.length) continue;
+        var vSmall7 = components[i7].vertices, vBig7 = components[j7].vertices;
+        var allWithin7 = vSmall7.length > 0;
+        for (var si7 = 0; si7 < vSmall7.length && allWithin7; si7++) {
+          var vs7 = vSmall7[si7];
+          var foundNear7 = false;
+          for (var sa7 = -1; sa7 <= 1 && !foundNear7; sa7++) for (var sb7 = -1; sb7 <= 1 && !foundNear7; sb7++) for (var sc7 = -1; sc7 <= 1 && !foundNear7; sc7++) {
+            var cart7 = K.fracToCart(M, [sa7, sb7, sc7]);
+            var shift7 = [cart7[0] - mergeOrigin7[0], cart7[1] - mergeOrigin7[1], cart7[2] - mergeOrigin7[2]];
+            var sx7 = vs7.pos[0] + shift7[0], sy7 = vs7.pos[1] + shift7[1], sz7 = vs7.pos[2] + shift7[2];
+            for (var bi7 = 0; bi7 < vBig7.length; bi7++) {
+              var vb7 = vBig7[bi7];
+              var dx7 = vb7.pos[0] - sx7, dy7 = vb7.pos[1] - sy7, dz7 = vb7.pos[2] - sz7;
+              if (dx7 * dx7 + dy7 * dy7 + dz7 * dz7 <= proximityTol * proximityTol) { foundNear7 = true; break; }
+            }
+          }
+          if (!foundNear7) allWithin7 = false;
+        }
+        if (allWithin7) { dropAsArtifact[i7] = true; break; }
       }
     }
     var groups = {};
@@ -5119,7 +5581,19 @@ select.sel:focus{border-color:var(--accent)}
     var merged = [];
     Object.keys(groups).forEach(function (rootKey) {
       var memberIdx = groups[rootKey];
-      if (memberIdx.length === 1) { merged.push(components[memberIdx[0]]); return; }
+      /* If EVERY raw component in this group was independently flagged as a
+         near-degenerate artifact by the fourth pass above, drop the whole
+         group -- even when passes 1-3 already fused two or more flagged
+         raw pieces together into a multi-member group before we get here.
+         Checking only memberIdx.length===1 missed exactly that case: two
+         2-vertex artifacts near the same real channel can get unioned with
+         each other (not with the channel) by pass 1/2/3, producing a
+         surviving multi-member "4-vertex" group that never passes back
+         through the single-member branch. */
+      if (memberIdx.every(function (m) { return dropAsArtifact[m]; })) return;
+      if (memberIdx.length === 1) {
+        merged.push(components[memberIdx[0]]); return;
+      }
       var refIdx = memberIdx.reduce(function (a, b) { return components[b].vertices.length > components[a].vertices.length ? b : a; });
       var memberSet = {}; memberIdx.forEach(function (m) { memberSet[m] = true; });
       var cumDelta = {}; cumDelta[refIdx] = [0, 0, 0];
@@ -5135,12 +5609,38 @@ select.sel:focus{border-color:var(--accent)}
       memberIdx.forEach(function (m) { if (!cumDelta.hasOwnProperty(m)) cumDelta[m] = [0, 0, 0]; });
       var origin = K.fracToCart(M, [0, 0, 0]);
       var byKey = {};
+      /* Lower mag always wins outright (an earlier-anchored capture is
+         always at least as trustworthy). A TIE, though, is the routine
+         case here -- once every member is shifted into the same reference
+         frame, several of them typically land on the exact same key at the
+         exact same (now-zero) mag, since they're all periodic echoes of
+         one real feature -- and among tied candidates, only the vertex
+         that was ACTUALLY built from a real (cell 0,0,0) atom deserves to
+         win: it's the one genuine capture, the others are shifted-in
+         padding copies that merely coincide with it once aligned. Without
+         this, a tie fell to whichever member happened to be processed
+         first (memberIdx's order is just the original components[] index
+         order, unrelated to which member is real) -- confirmed directly:
+         on 0Bar_CO2.CIF, a merge group's real (15-vertex, fully anchor-0
+         mi comes LAST in that order, its already-real vertices arriving
+         only after three all-non-real, same-mag captures had already
+         claimed every key, so its own genuinely-real vertices were
+         silently discarded (a strict "<" comparison never replaces a tie) --
+         the merged component ended up with zero real vertices and was
+         dropped entirely by the real-anchor filter below, though the void
+         it represented was found correctly right up to this point. */
+      function betterCandidate(mag, real, existing) {
+        if (!existing) return true;
+        if (mag < existing.mag) return true;
+        if (mag === existing.mag && real && !existing.v.real) return true;
+        return false;
+      }
       memberIdx.forEach(function (mi) {
         var d = cumDelta[mi];
         if (d[0] === 0 && d[1] === 0 && d[2] === 0) {
           components[mi].vertices.forEach(function (v) {
             var mag = Math.abs(v.anchor[0]) + Math.abs(v.anchor[1]) + Math.abs(v.anchor[2]);
-            if (!byKey[v.key] || mag < byKey[v.key].mag) byKey[v.key] = { v: v, mag: mag };
+            if (betterCandidate(mag, v.real, byKey[v.key])) byKey[v.key] = { v: v, mag: mag, origin: mi };
           });
           return;
         }
@@ -5149,22 +5649,83 @@ select.sel:focus{border-color:var(--accent)}
         components[mi].vertices.forEach(function (v) {
           var shiftedAnchor = [v.anchor[0] + d[0], v.anchor[1] + d[1], v.anchor[2] + d[2]];
           var mag = Math.abs(shiftedAnchor[0]) + Math.abs(shiftedAnchor[1]) + Math.abs(shiftedAnchor[2]);
-          if (byKey[v.key] && mag >= byKey[v.key].mag) return;
+          if (!betterCandidate(mag, v.real, byKey[v.key])) return;
           var shiftedAtoms = v.atoms.map(function (a) {
             return { x: a.x + shift[0], y: a.y + shift[1], z: a.z + shift[2], r: a.r, el: a.el, baseId: a.baseId, ci: a.ci + d[0], cj: a.cj + d[1], ck: a.ck + d[2], real: a.real };
           });
           byKey[v.key] = {
-            mag: mag,
+            mag: mag, origin: mi,
             v: { id: v.id, pos: [v.pos[0] + shift[0], v.pos[1] + shift[1], v.pos[2] + shift[2]], radius: v.radius,
                  atomIdx: v.atomIdx, atoms: shiftedAtoms, real: v.real, key: v.key, anchor: shiftedAnchor }
           };
         });
       });
       var best = memberIdx.map(function (m) { return components[m]; }).reduce(function (a, b) { return b.vertices.length > a.vertices.length ? b : a; });
+      /* byKey (above) only collapses vertices that share the exact same
+         literal .key once shifted into this group's one reference frame --
+         but two vertices representing the SAME physical near-degenerate
+         location can carry DIFFERENT keys if their tie-breaking jitter
+         (seeded on each atom's position in the padded array, not on the
+         physical configuration -- see pass 3's own comment above) resolved
+         differently between two captures. byKey can't catch that -- it only
+         ever compares key STRINGS.
+
+         Two broader attempts were tried and reverted: (1) treating any two
+         final vertices within POSITION_MERGE_TOL (0.25 A) as duplicates,
+         (2) narrowing that to pairs whose ORIGIN raw components share no
+         key at all, and (3) narrowing it again to pairs whose origin
+         components merely DIFFER (regardless of their own key overlap).
+         All three caused a real regression, confirmed directly on
+         DIANIN.cif and CuBox_empty.CIF: ordinary ADJACENT vertices of one
+         single, already-correct triangulation -- or of two DIFFERENT raw
+         components that were legitimately merged and now simply meet at a
+         normal seam -- routinely sit a few tenths of an Angstrom apart,
+         with no bug involved at all, and every attempt above deleted some
+         of them, moving DIANIN's exact 247.03 A^3 x3 match and one of
+         CuBox_empty's two volumes off by a small but real amount.
+
+         What actually, reliably distinguishes a genuine jitter-tie-break
+         duplicate from two merely-adjacent mesh vertices, confirmed
+         directly on ZIF-68.cif: a real duplicate pair lands at
+         ESSENTIALLY THE EXACT SAME position (well under 1e-6 A --
+         effectively the same computed circumcenter via two different
+         tie-break paths), never at an ordinary few-tenths-of-an-Angstrom
+         mesh spacing. ZIF-68's channel had 101 such (< 1e-6 A) exact-
+         duplicate pairs, cleanly separable from its own normal mesh
+         spacing (smallest non-duplicate neighbour distance: 0.06 A).
+
+         A separate, still-visible ZIF-68 symptom -- a cluster of close
+         (0.06-0.15 A) but non-identical vertex pairs concentrated at
+         fractional y in [0.542, 0.860], matching the user's own reported
+         overlap range -- was traced further: EVERY vertex in that cluster
+         has its close partner in the SAME raw origin component, not a
+         different one, so it is not the cross-component duplication it
+         first looked like, and isn't safely distinguishable from ordinary
+         dense mesh by any position-only criterion tried here. Whatever is
+         producing the user-visible doubled surface in that zone is most
+         likely downstream of this function (grid/ownership/isosurface
+         rendering), not a duplicate-vertex problem in the merge itself --
+         flagged to the user rather than guessed at further. */
+      var byKeyVals = Object.keys(byKey).map(function (k) { return byKey[k]; });
+      var keptVerts = [], posDropped = new Array(byKeyVals.length).fill(false);
+      for (var dv = 0; dv < byKeyVals.length; dv++) {
+        if (posDropped[dv]) continue;
+        var pick = byKeyVals[dv];
+        for (var dw = dv + 1; dw < byKeyVals.length; dw++) {
+          if (posDropped[dw]) continue;
+          var pa = pick.v.pos, pb = byKeyVals[dw].v.pos;
+          var ddx = pa[0] - pb[0], ddy = pa[1] - pb[1], ddz = pa[2] - pb[2];
+          if (ddx * ddx + ddy * ddy + ddz * ddz >= EXACT_DUP_TOL * EXACT_DUP_TOL) continue;
+          posDropped[dw] = true;
+          if (betterCandidate(byKeyVals[dw].mag, byKeyVals[dw].v.real, pick)) pick = byKeyVals[dw];
+        }
+        keptVerts.push(pick.v);
+      }
       merged.push({
         id: best.id, type: best.type, dimensionality: best.dimensionality, periodicityAxes: best.periodicityAxes,
+        periodicityGenerators: best.periodicityGenerators,
         criticalRadius: Math.min.apply(null, memberIdx.map(function (m) { return components[m].criticalRadius; })),
-        vertices: Object.keys(byKey).map(function (k) { return byKey[k].v; }),
+        vertices: keptVerts,
         edges: [].concat.apply([], memberIdx.map(function (m) { return components[m].edges; })),
         mergedFromCount: memberIdx.length
       });
@@ -5172,6 +5733,82 @@ select.sel:focus{border-color:var(--accent)}
     var withRealAnchor = merged.filter(function (c) { return c.vertices.some(function (v) { return v.real; }); });
     withRealAnchor.forEach(function (c, i3) { c.id = i3; });
     return withRealAnchor;
+  }
+
+  /* ---------------- void/channel analysis: stability limit ----------------
+   * Replaces the old "critical radius" readout (min clearance anywhere in
+   * the whole component -- a diagnostic about the algorithm's own pruning,
+   * not a practically useful number: it's dragged down by any narrow side
+   * pocket or wall crevice, even when the actual through-channel a probe
+   * would traverse stays wide open well beyond it). What's actually useful
+   * to a user:
+   *   - for a CHANNEL: the largest probe radius for which this is still
+   *     recognized as a (periodically connected) channel, rather than
+   *     breaking into separate voids or vanishing outright.
+   *   - for a VOID: the probe radius below which it would start touching a
+   *     periodic image of itself and become a channel instead.
+   * Both are answered with the SAME cheap test, reusing VoidNet.classify()
+   * (already the deliberately-cheap, rebuild-free per-R step -- see its own
+   * doc comment) at a handful of trial R values via bisection -- no new
+   * triangulation, no new graph. componentIsChannelAt(R) is monotonic in R
+   * (pruning only ever REMOVES vertices/edges as R grows, and periodicity
+   * -- a repeated vertex "key" surviving in one connected piece -- can only
+   * be lost as things are removed, never regained), which is exactly what
+   * makes plain bisection valid here. Matching by vertex id (not by
+   * "same component index") is what makes this robust to the component
+   * fragmenting, gaining, or losing members entirely between trial R
+   * values -- and to multi-axis channels, where losing ONE periodicity
+   * generator shouldn't be mistaken for losing channel status if another
+   * one (a different repeated vertex pair) is still intact. */
+  function componentIsChannelAt(graph, vertexIdSet, R) {
+    var results = VoidNet.classify(graph, R);
+    for (var i = 0; i < results.length; i++) {
+      if (results[i].type !== "channel") continue;
+      var vids = results[i].vertexIds;
+      for (var j = 0; j < vids.length; j++) if (vertexIdSet.has(vids[j])) return true;
+    }
+    return false;
+  }
+  var STABILITY_SEARCH_ITERS = 24; /* ~24 classify() calls per component -- each one is the same cheap prune+connected-components pass the UI already re-runs live on every probe-radius tweak, so this is negligible next to the triangulation cost */
+  var VOID_STABILITY_FLOOR = 0.05; /* Angstrom -- below this, "probe radius" isn't a chemically meaningful quantity; a void that hasn't channelized by here is reported as "stays a void", not searched all the way to 0 */
+  function computeChannelUpperLimit(graph, comp) {
+    var ids = comp.vertices.map(function (v) { return v.id; });
+    var vertexIdSet = new Set(ids);
+    var maxVertexRadius = Math.max.apply(null, comp.vertices.map(function (v) { return v.radius; }));
+    var lo = state.probeRadius, hi = maxVertexRadius + 1e-6; /* hi is a guaranteed-false bound: no member vertex can survive pruning past its own radius, so nothing here can possibly still overlap a channel component beyond it */
+    for (var it = 0; it < STABILITY_SEARCH_ITERS; it++) {
+      var mid = (lo + hi) / 2;
+      if (componentIsChannelAt(graph, vertexIdSet, mid)) lo = mid; else hi = mid;
+    }
+    return (lo + hi) / 2;
+  }
+  function computeVoidChannelizeThreshold(graph, comp) {
+    var ids = comp.vertices.map(function (v) { return v.id; });
+    var vertexIdSet = new Set(ids);
+    if (!componentIsChannelAt(graph, vertexIdSet, VOID_STABILITY_FLOOR)) return null; /* stays a void all the way down to the floor -- no meaningful threshold within a chemically realistic range */
+    var lo = VOID_STABILITY_FLOOR, hi = state.probeRadius;
+    for (var it = 0; it < STABILITY_SEARCH_ITERS; it++) {
+      var mid = (lo + hi) / 2;
+      if (componentIsChannelAt(graph, vertexIdSet, mid)) lo = mid; else hi = mid;
+    }
+    return (lo + hi) / 2;
+  }
+  /* Populates c.stabilityLimit/c.stabilityLimitKind on every component,
+   * in place. `graph` is the R-independent graph the components were
+   * classified from -- null for "grown atoms only" mode (Option 2), where
+   * periodicity is structurally impossible (no padded periodic images
+   * exist in that mode's atom set at all -- see the Option 2 branch of
+   * runVoidCalculate), so every component there is unconditionally
+   * "not-periodic" with no search needed. */
+  function computeStabilityLimits(components, graph) {
+    components.forEach(function (c) {
+      if (!graph) { c.stabilityLimit = null; c.stabilityLimitKind = "not-periodic"; return; }
+      if (c.type === "channel") { c.stabilityLimit = computeChannelUpperLimit(graph, c); c.stabilityLimitKind = "channel-max"; }
+      else {
+        var t = computeVoidChannelizeThreshold(graph, c);
+        c.stabilityLimit = t; c.stabilityLimitKind = t === null ? "void-never" : "void-threshold";
+      }
+    });
   }
 
   /* ---------------- void/channel analysis: grid/EDT volume + isosurface ----------------
@@ -5183,7 +5820,18 @@ select.sel:focus{border-color:var(--accent)}
    * below that references it is already guarded to fall back to the plain,
    * non-periodic behaviour when it's absent (no completion shifts, no
    * fractional-window volume restriction, no clip planes). */
-  function edt1dSquared(f, n) {
+  /* `spacing` (default 1, exactly the original behaviour) is the physical
+     distance one index step covers along this 1D pass. Passing it through
+     lets edt3dPhysical run each of its 3 separable passes at a DIFFERENT
+     spacing (needed for an anisotropic grid, see voidAnisotropicGridSteps)
+     while staying byte-identical to the original algorithm whenever spacing
+     is 1 or omitted -- physical squared distance is just a sum of each
+     axis's own (index delta * that axis's spacing)^2, so scaling each pass
+     by its own spacing before summing is equivalent to (and, for a general
+     anisotropic grid, the ONLY correct way to get) squared Euclidean
+     distance in real units. */
+  function edt1dSquared(f, n, spacing) {
+    var s2 = spacing ? spacing * spacing : 1;
     var d = new Float64Array(n);
     var v = new Int32Array(n);
     var z = new Float64Array(n + 1);
@@ -5192,7 +5840,7 @@ select.sel:focus{border-color:var(--accent)}
     for (var q = 1; q < n; q++) {
       var s;
       for (;;) {
-        s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+        s = ((f[q] + q * q * s2) - (f[v[k]] + v[k] * v[k] * s2)) / (2 * q * s2 - 2 * v[k] * s2);
         if (k > 0 && s <= z[k]) { k--; } else break;
       }
       k++;
@@ -5202,11 +5850,17 @@ select.sel:focus{border-color:var(--accent)}
     for (var q2 = 0; q2 < n; q2++) {
       while (z[k + 1] < q2) k++;
       var dx = q2 - v[k];
-      d[q2] = dx * dx + f[v[k]];
+      d[q2] = dx * dx * s2 + f[v[k]];
     }
     return d;
   }
-  function edt3dPhysical(mask, nx, ny, nz, h) {
+  /* hy/hz default to hx when omitted, so every existing call passing one
+     scalar h (as hx) behaves exactly as before -- each pass already
+     incorporates its own spacing (see edt1dSquared), so the combined
+     result needs only a final sqrt, no separate h^2 multiply. */
+  function edt3dPhysical(mask, nx, ny, nz, hx, hy, hz) {
+    if (hy === undefined) hy = hx;
+    if (hz === undefined) hz = hx;
     var BIG = 1e12, n = nx * ny * nz;
     var g = new Float64Array(n);
     function idx(i, j, k) { return (i * ny + j) * nz + k; }
@@ -5214,23 +5868,22 @@ select.sel:focus{border-color:var(--accent)}
     var tmp = new Float64Array(nz);
     for (var i = 0; i < nx; i++) for (var j = 0; j < ny; j++) {
       for (var k = 0; k < nz; k++) tmp[k] = g[idx(i, j, k)];
-      var dz = edt1dSquared(tmp, nz);
+      var dz = edt1dSquared(tmp, nz, hz);
       for (var k2 = 0; k2 < nz; k2++) g[idx(i, j, k2)] = dz[k2];
     }
     tmp = new Float64Array(ny);
     for (var i3 = 0; i3 < nx; i3++) for (var k3 = 0; k3 < nz; k3++) {
       for (var j2 = 0; j2 < ny; j2++) tmp[j2] = g[idx(i3, j2, k3)];
-      var dy = edt1dSquared(tmp, ny);
+      var dy = edt1dSquared(tmp, ny, hy);
       for (var j3 = 0; j3 < ny; j3++) g[idx(i3, j3, k3)] = dy[j3];
     }
     tmp = new Float64Array(nx);
     for (var j4 = 0; j4 < ny; j4++) for (var k4 = 0; k4 < nz; k4++) {
       for (var i4 = 0; i4 < nx; i4++) tmp[i4] = g[idx(i4, j4, k4)];
-      var dxr = edt1dSquared(tmp, nx);
+      var dxr = edt1dSquared(tmp, nx, hx);
       for (var i5 = 0; i5 < nx; i5++) g[idx(i5, j4, k4)] = dxr[i5];
     }
-    var h2 = h * h;
-    for (var i6 = 0; i6 < n; i6++) g[i6] = Math.sqrt(g[i6] * h2);
+    for (var i6 = 0; i6 < n; i6++) g[i6] = Math.sqrt(g[i6]);
     return g;
   }
   function buildAtomHash(atoms, cellSize) {
@@ -5593,6 +6246,7 @@ select.sel:focus{border-color:var(--accent)}
       front.position.set(off[0], off[1], off[2]);
       molSurfaceGroup.add(back); molSurfaceGroup.add(front);
     });
+    updateClipPlane(); /* fresh surface materials just got created -- reapply the per-component clip plane state to them */
   }
   function buildMolSurfaceTable() {
     var body = document.getElementById("molSurfaceResultsBody");
@@ -5667,7 +6321,162 @@ select.sel:focus{border-color:var(--accent)}
     }
     return out;
   }
-  function voidGatherOwnershipVertices(components, regionMin, regionMax, margin) {
+  /* True only for a channel whose periodicity is NOT aligned with any
+     single a/b/c axis (every stored generator has 2+ nonzero components --
+     e.g. a body-diagonal repeat like (-1,-1,-1)). Such a channel's own
+     content, once merged into one consistent reference frame, provably
+     cannot fit entirely within [0,1) on every axis at once: it spans more
+     than one period's width in EACH axis (confirmed directly on RAPMII.cif),
+     so different real pieces of it need different whole-cell translations
+     to land in the reference cell simultaneously -- no single frame choice
+     can hold all of them. An axis-aligned channel never has this problem
+     (its one period fits exactly within one axis by construction), so this
+     is false for every previously-verified structure. */
+  function voidIsDiagonalChannel(comp) {
+    if (comp.type !== "channel") return false;
+    var gens = comp.periodicityGenerators || [];
+    if (!gens.length) return false;
+    var hasPureAxis = gens.some(function (g) {
+      return (g[0] !== 0 ? 1 : 0) + (g[1] !== 0 ? 1 : 0) + (g[2] !== 0 ? 1 : 0) === 1;
+    });
+    return !hasPureAxis;
+  }
+  /* Reduce a Cartesian position to its own representative inside [0,1) on
+     every fractional axis -- independent of whatever single merge frame it
+     came from. Any two occurrences of the same real vertex differ by an
+     exact whole lattice translation, so this always lands on the one
+     canonical in-cell position, regardless of which capture supplied it. */
+  function voidWrapIntoCell(M, pos) {
+    var f = K.cartToFrac(M, pos);
+    var wf = [f[0] - Math.floor(f[0]), f[1] - Math.floor(f[1]), f[2] - Math.floor(f[2])];
+    return K.fracToCart(M, wf);
+  }
+  /* Like voidWrapIntoCell, but wraps only the named axes into [0,1),
+     leaving the others exactly as they are. A channel component that
+     repeats along axis X necessarily contains, for every real vertex it
+     owns, another vertex at the same position plus one whole X-translation
+     (that is what "periodic along X" means) -- VoidNet's own padding depth
+     routinely captures several such periodic echoes before classify() ever
+     reduces the component to its periodicity axes, so a component's raw
+     vertex list can span multiple periods along an axis it repeats on
+     purely redundantly, with zero unique content beyond one period. Wrapping
+     only THIS component's own periodicity axes (never a completion axis,
+     which is genuinely non-periodic and needs its full natural extent) is
+     always exact -- confirmed directly on DIANIN.cif's probe-1.1 channels:
+     100% of every vertex outside its own period-0 slice lands within
+     0.05 A of an actual period-0 vertex once shifted back by the matching
+     whole number of lattice translations. */
+  function voidWrapPeriodicityAxesOnly(M, pos, axes) {
+    if (!axes || !axes.length) return pos;
+    var idx = { a: 0, b: 1, c: 2 };
+    var f = K.cartToFrac(M, pos);
+    var wf = f.slice();
+    axes.forEach(function (ax) { var i = idx[ax]; wf[i] = f[i] - Math.floor(f[i]); });
+    return K.fracToCart(M, wf);
+  }
+  function voidCellCornersBox(M) {
+    var box = new THREE.Box3();
+    [0, 1].forEach(function (i) { [0, 1].forEach(function (j) { [0, 1].forEach(function (k) {
+      var c = K.fracToCart(M, [i, j, k]);
+      box.expandByPoint(new THREE.Vector3(c[0], c[1], c[2]));
+    }); }); });
+    return box;
+  }
+  /* Region a component's own local grid is built over. Normally this is the
+     component's own vertex bounding box (padded) -- correct whenever the
+     component's own single merge frame already holds all its real content.
+     For a diagonal channel (see voidIsDiagonalChannel) that assumption
+     fails, so use the WHOLE reference cell instead: the grid then samples
+     real atom clearances everywhere in the cell, and voidGatherOwnershipVertices'
+     wrapped-vertex augmentation (below) correctly attributes that space to
+     this component regardless of which frame the merge settled on. */
+  function voidComponentRegion(comp, cellBundle, probeRadius) {
+    /* Void pad was 1.5 -- confirmed directly on ZIF-68.cif that this left
+       one void's own local sampling box just barely (~0.05 A) too tight on
+       one side: IsoSurface.extract can't safely close a face right at the
+       edge of the sampled array, so the true (unobstructed -- nearest real
+       atom's own clearance was ~1 A of slack away) surface there was left
+       open, reading as a hole/missing lobe. A bounded +1.0 A (not a
+       retry-until-closed loop -- that was tried and abandoned, see below)
+       closed it with only a modest, still-safe volume change (+4.7% on that
+       specific void) and reproduced the same DIANIN/CuBox_empty baselines
+       this file already treats as ground truth. A retry-widen-until-no-
+       longer-touching-the-box-edge loop was tried first and reverted: past
+       roughly +3-4 A extra pad the box starts reaching what is very likely a
+       genuinely separate feature (a translated periodic copy of the same
+       void, or a neighbouring one) and nearestOwnerId -- which has no
+       distance cutoff -- happily annexes it as owned space, so the loop
+       never converges and just keeps inflating volume the wider it grows
+       (confirmed directly: +50% at +6 A pad, worse beyond that). A small,
+       FIXED bump has none of that runaway-growth risk. */
+    var pad = probeRadius + (comp.type === "channel" ? 3.0 : 2.5);
+    var box;
+    if (cellBundle && voidIsDiagonalChannel(comp)) {
+      box = voidCellCornersBox(cellBundle.M);
+    } else {
+      box = new THREE.Box3();
+      /* Trim a channel's own periodicity axes the same way
+         voidComponentRegionForAccurate already does (see
+         voidWrapPeriodicityAxesOnly's own comment -- proven exact there:
+         every vertex outside period 0 lands within 0.05 A of an actual
+         period-0 vertex once shifted back). The FAST path never did this,
+         and a channel whose merge happened to fold in several raw
+         captures at different whole-period offsets can end up with a
+         vertex bounding box spanning several periods for zero real reason
+         -- confirmed directly on ZIF-68.cif after this session's dedup/
+         reclassification fixes: each channel's own z-span came out at
+         ~55 A, three full periods of its own 18.5 A c-axis, forcing this
+         region so large that VOID_GRID_AXIS_CAP kicked in and rescaled h
+         from the requested 0.2 A up to ~0.54 A -- a visibly coarser,
+         more "blended" surface than before, with no change to the
+         underlying accessible space at all. Trimming here restores the
+         requested resolution. Matches accurate mode's own tradeoff
+         (a small, real volume shift on any channel that previously had
+         redundant multi-period spread -- confirmed there at +0.8% on
+         SK1_383K.CIF) rather than a rendering-only change, but the user
+         has explicitly said sub-1% shifts are acceptable. */
+      var trimAxes = (cellBundle && comp.type === "channel") ? (comp.periodicityAxes || []) : null;
+      for (var v2 = 0; v2 < comp.vertices.length; v2++) {
+        var p2 = comp.vertices[v2].pos;
+        if (trimAxes && trimAxes.length) p2 = voidWrapPeriodicityAxesOnly(cellBundle.M, p2, trimAxes);
+        box.expandByPoint(new THREE.Vector3(p2[0], p2[1], p2[2]));
+      }
+    }
+    return {
+      regionMin: [box.min.x - pad, box.min.y - pad, box.min.z - pad],
+      regionMax: [box.max.x + pad, box.max.y + pad, box.max.z + pad]
+    };
+  }
+  /* Same as voidComponentRegion, but for a channel, trims the redundant
+     multi-period spread its own vertex list can carry (see
+     voidWrapPeriodicityAxesOnly) before taking the bounding box. Used ONLY
+     by accurate-mode's own grid ladder (computeVoidVolumesAccurate) --
+     NEVER by the fast/default path, rendering, or anything else that
+     already has an established, verified volume for a given structure.
+     Confirmed directly this distinction matters: reusing the trimmed
+     region for the fast path too changed SK1_383K.CIF's long-verified
+     103.0 A^3/cell to 103.8, because a smaller region can dodge the fast
+     path's own axis cap (VOID_GRID_AXIS_CAP) at a resolution where the
+     untrimmed region used to trigger it -- a real, if small, change to a
+     baseline this session must never move. Accurate mode has no such
+     baseline to protect (that's the whole reason it needed fixing here),
+     so it alone gets the smaller, much cheaper-to-grid region. */
+  function voidComponentRegionForAccurate(comp, cellBundle, probeRadius) {
+    if (!(cellBundle && comp.type === "channel" && (comp.periodicityAxes || []).length) || voidIsDiagonalChannel(comp)) {
+      return voidComponentRegion(comp, cellBundle, probeRadius);
+    }
+    var pad = probeRadius + 3.0;
+    var box = new THREE.Box3();
+    for (var v2 = 0; v2 < comp.vertices.length; v2++) {
+      var p2 = voidWrapPeriodicityAxesOnly(cellBundle.M, comp.vertices[v2].pos, comp.periodicityAxes);
+      box.expandByPoint(new THREE.Vector3(p2[0], p2[1], p2[2]));
+    }
+    return {
+      regionMin: [box.min.x - pad, box.min.y - pad, box.min.z - pad],
+      regionMax: [box.max.x + pad, box.max.y + pad, box.max.z + pad]
+    };
+  }
+  function voidGatherOwnershipVertices(components, regionMin, regionMax, margin, cellBundle) {
     var out = [];
     for (var ci = 0; ci < components.length; ci++) {
       var comp = components[ci];
@@ -5677,9 +6486,39 @@ select.sel:focus{border-color:var(--accent)}
             p[1] >= regionMin[1] - margin && p[1] <= regionMax[1] + margin &&
             p[2] >= regionMin[2] - margin && p[2] <= regionMax[2] + margin) out.push({ pos: p, compId: comp.id });
       }
+      /* Purely additive: also offer each vertex's own independently-wrapped
+         position as an ownership candidate for this component, so real
+         accessible space anywhere in the reference cell -- not just where
+         this component's own single merge frame happened to leave content --
+         gets correctly attributed to it. See voidIsDiagonalChannel. */
+      if (cellBundle && voidIsDiagonalChannel(comp)) {
+        for (var v2 = 0; v2 < comp.vertices.length; v2++) {
+          var wp = voidWrapIntoCell(cellBundle.M, comp.vertices[v2].pos);
+          if (wp[0] >= regionMin[0] - margin && wp[0] <= regionMax[0] + margin &&
+              wp[1] >= regionMin[1] - margin && wp[1] <= regionMax[1] + margin &&
+              wp[2] >= regionMin[2] - margin && wp[2] <= regionMax[2] + margin) out.push({ pos: wp, compId: comp.id });
+        }
+      }
     }
     return out;
   }
+  /* Deliberately excludes this component's own periodicity axis/axes --
+     only genuinely non-periodic axes the vertex data overflows [0,1] on
+     count as needing completion. Widening this to also recover content
+     straddling the periodicity boundary (the six small surface slivers
+     right at ZIF-68's large channel's own c=0/c=1 seam were the motivating
+     case) was tried at length and abandoned: paired with a matching fix in
+     assembleVoidComponent, it correctly stopped an extra unclipped period
+     from appearing, but the six slivers were STILL disconnected afterward
+     -- proving they were never actually being clipped away by a missing
+     c-shift window to begin with (each one already sat comfortably inside
+     its existing (a,b)-only fragment's own c ∈ [0,1) window). Whatever
+     genuinely bridges them to the main body isn't reachable through this
+     shift-window mechanism at all -- see voidSnapStraySliversOntoMain
+     (consolidateVoidComponent's own call site) for the actual fix: each
+     sliver, translated by exactly one unit lattice vector, lands within
+     floating-point noise of the main body -- a periodic-image mismatch
+     unrelated to which axes this function treats as completable. */
   function voidActiveCompletionAxes(comp, cellBundle) {
     if (!cellBundle) return [];
     var idx = { a: 0, b: 1, c: 2 };
@@ -5740,6 +6579,139 @@ select.sel:focus{border-color:var(--accent)}
     });
     return out;
   }
+  /* Whether every one of a channel's periodicity axes is Cartesian-pure --
+     i.e. each relevant lattice vector has zero component on the OTHER two
+     Cartesian axes (this app's own "a along x" cell convention already
+     guarantees this for 'a'; 'b' only qualifies when gamma=90 and 'c' only
+     when alpha=beta=90). When true, the existing single-scalar
+     voidSnappedGridStep can make sampling exactly periodic on its own --
+     the anisotropic solver below is unneeded and, for parity with every
+     already-verified structure, must not run. */
+  function voidPeriodicityAxesAllPure(M, periodicityAxes) {
+    var idx = { a: 0, b: 1, c: 2 };
+    var lat = voidLatticeVectors(M);
+    var EPS = 1e-4;
+    return (periodicityAxes || []).every(function (ax) {
+      var v = lat[ax];
+      return [0, 1, 2].every(function (k) { return k === idx[ax] || Math.abs(v[k]) < EPS; });
+    });
+  }
+  /* Per-Cartesian-axis grid step, snapped so that sampling is as close to
+     exactly periodic as possible along EVERY one of this channel's
+     periodicity axes -- generalizes voidSnappedGridStep (which only ever
+     snaps a lattice vector that happens to be entirely Cartesian-pure,
+     i.e. zero on both other axes) to the much more common case where a
+     periodicity-relevant lattice vector has components spread across more
+     than one Cartesian axis (any non-90 degree angle involving that axis).
+     Restricted to just this component's OWN periodicityAxes -- a vector
+     the channel doesn't actually repeat along (e.g. 'a' for a channel
+     periodic only along b/c) must never constrain the grid, or it would
+     needlessly fight the axes that actually matter. When a Cartesian
+     dimension is touched by only one such vector (the common case away
+     from truly triclinic cells -- e.g. a monoclinic cell's b and c never
+     share a Cartesian axis with each other), the search below always finds
+     the exact divisor, identical to what a dedicated single-vector snap
+     would give; when more than one vector shares a dimension (a fully
+     triclinic cell, or several periodicity axes all touching one axis),
+     it finds the least-worst compromise step instead. */
+  function voidAnisotropicGridSteps(M, periodicityAxes, h0) {
+    var lat = voidLatticeVectors(M);
+    var axes = periodicityAxes || [];
+    var EPS = 1e-6;
+    var SEARCH_RADIUS = 30;
+    function bestStepFor(dim) {
+      var vals = axes.map(function (ax) { return lat[ax][dim]; }).filter(function (v) { return Math.abs(v) > EPS; });
+      if (!vals.length) return h0;
+      var primary = vals.reduce(function (a, b) { return Math.abs(b) > Math.abs(a) ? b : a; });
+      var n0 = Math.max(1, Math.round(Math.abs(primary) / h0));
+      /* A single contributing vector (by far the common case -- see the
+         function comment above) makes EVERY candidate n an exact divisor,
+         i.e. badness=0 for all of them equally. A plain "strictly better"
+         update would then just keep whichever n the loop happens to reach
+         first (the smallest, most negative dn), landing on a wildly
+         off-target step instead of the one nearest the requested
+         resolution h0 -- so ties within BADNESS_EPS are broken by
+         preferring the candidate closest to n0 (|dn| smallest). */
+      var BADNESS_EPS = 1e-9;
+      var bestH = h0, bestBadness = Infinity, bestAbsDn = Infinity;
+      for (var dn = -SEARCH_RADIUS; dn <= SEARCH_RADIUS; dn++) {
+        var n = n0 + dn;
+        if (n < 1) continue;
+        var hCandidate = Math.abs(primary) / n;
+        var badness = 0;
+        vals.forEach(function (v) {
+          var ratio = v / hCandidate;
+          var dev = Math.abs(ratio - Math.round(ratio)) * hCandidate;
+          if (dev > badness) badness = dev;
+        });
+        var absDn = Math.abs(dn);
+        if (badness < bestBadness - BADNESS_EPS || (badness < bestBadness + BADNESS_EPS && absDn < bestAbsDn)) {
+          bestBadness = badness; bestH = hCandidate; bestAbsDn = absDn;
+        }
+      }
+      return bestH;
+    }
+    return { hx: bestStepFor(0), hy: bestStepFor(1), hz: bestStepFor(2) };
+  }
+  /* KNOWN LIMITATION, deferred by explicit user request (2026-08-30 session) --
+   * read this before touching voidAnisotropicGridSteps/voidSnappedGridStep/
+   * voidPeriodicityAxesAllPure again.
+   *
+   * Symptom: RAPMII.cif -- a genuinely triclinic cell (all three angles far
+   * from 90 deg: alpha~98, beta~103, gamma~115) whose one channel is
+   * periodic along all three of a/b/c at once (periodicityAxes = ["a","b","c"])
+   * -- shows a real, VISIBLE seam (not just sub-pixel noise) where two
+   * Fragments-panel pieces are joined end-on along the channel's own length.
+   * The user found it by manually Assembling one channel from its 4
+   * fragments, then Copying it to extend along its own axis -- the
+   * automatic Assemble & Consolidate does NOT handle this structure
+   * correctly, forcing the manual workaround in the first place (a second,
+   * related symptom, not yet separately investigated -- may or may not
+   * share this same root cause).
+   *
+   * Root cause, confirmed: 'a' is Cartesian-pure (this app's cell
+   * convention always makes it so), but 'b' (non-pure once gamma != 90)
+   * and 'c' (non-pure once alpha/beta != 90) are not, so
+   * voidPeriodicityAxesAllPure(...) is false and voidBuildSweptGrid takes
+   * the ANISOTROPIC branch (voidAnisotropicGridSteps, this function) for
+   * this channel, not the exact voidSnappedGridStep branch a few functions
+   * up. voidSnappedGridStep makes sampling EXACTLY periodic by construction
+   * (the grid's own two ends are bit-identical translates of each other --
+   * see its own comment and the "Periodicity-axis seam closed" verification
+   * elsewhere in this app's history). voidAnisotropicGridSteps, by its own
+   * documented design, only ever finds "the least-worst compromise step"
+   * when more than one periodicity-axis lattice vector shares a Cartesian
+   * dimension -- exactly RAPMII's case, with all three axes doing so at
+   * once -- so SOME residual mismatch at a lengthwise join is the expected,
+   * designed-in outcome here, not a latent bug in this function's own logic.
+   * Confirmed this is not one of this session's OTHER, already-fixed
+   * near-degenerate/tie-break bugs: this is a distinct, harder problem
+   * (sampling-grid periodicity in a genuinely oblique cell), not a
+   * mis-resolved tie.
+   *
+   * Why no fix was attempted this session: closing this properly means
+   * replacing "pick one scalar-per-axis step that's a good compromise"
+   * with something that can satisfy all three oblique periodicities
+   * SIMULTANEOUSLY (e.g. jointly solving for a step/grid-phase per axis
+   * such that each periodicity's own translation maps grid points onto
+   * grid points exactly, not just approximately) -- a materially harder
+   * numerical problem than anything else fixed this session, not a
+   * parameter tweak. The user explicitly deferred it after a long
+   * debugging session and asked to avoid another one right now; this note
+   * exists so that context isn't lost before it's picked back up.
+   *
+   * Suggested starting point for next time: reproduce with RAPMII.cif,
+   * Calculate, manually Assemble one channel's 4 fragments (Fragments
+   * panel), Copy it by whatever lattice vector extends it along its own
+   * length, and look for the gap where the two pieces meet -- same
+   * technique already used successfully elsewhere in this app's history
+   * to quantify a seam (nearest-neighbour distance across the join,
+   * expect ~Angstrom-scale here vs the ~1e-7 A noise floor achieved for a
+   * Cartesian-pure axis). Worth checking first whether the gap is at the
+   * SAME location/magnitude for all three periodicity axes, or worse for
+   * some than others -- would help tell whether a full joint solve is
+   * needed or whether pairwise handling of just the worst offending axis
+   * pair gets most of the way there for less effort. */
   function voidFracGradient(M, axisIdx) {
     return new THREE.Vector3(
       K.cartToFrac(M, [1, 0, 0])[axisIdx],
@@ -5785,7 +6757,7 @@ select.sel:focus{border-color:var(--accent)}
   }
   var VOID_GRID_AXIS_CAP = 120;
   function voidBuildOwnershipPool(components, cellBundle, regionMin, regionMax, margin) {
-    var pool = voidGatherOwnershipVertices(components, regionMin, regionMax, margin);
+    var pool = voidGatherOwnershipVertices(components, regionMin, regionMax, margin, cellBundle);
     for (var i = 0; i < components.length; i++) pool = pool.concat(voidSelfEchoVertices(components[i], cellBundle, regionMin, regionMax, margin));
     return pool;
   }
@@ -5807,16 +6779,17 @@ select.sel:focus{border-color:var(--accent)}
      itself already trusts (they're real, verified empty-sphere centres,
      not a re-derived guess) removes any such island before the swept
      dilation or the volume count ever sees it. */
-  function voidFloodFillFromVertices(mask, nx, ny, nz, h, regionMin, vertices) {
+  function voidFloodFillFromVertices(mask, nx, ny, nz, hx, hy, hz, regionMin, vertices) {
+    if (hz === undefined) { hz = hx; hy = hx; } /* backward compat: single h passed as hx */
     var n = nx * ny * nz;
     function idx(i, j, k) { return (i * ny + j) * nz + k; }
     var visited = new Uint8Array(n);
     var queue = [];
     for (var v = 0; v < vertices.length; v++) {
       var p = vertices[v].pos;
-      var ii = Math.round((p[0] - regionMin[0]) / h);
-      var jj = Math.round((p[1] - regionMin[1]) / h);
-      var kk = Math.round((p[2] - regionMin[2]) / h);
+      var ii = Math.round((p[0] - regionMin[0]) / hx);
+      var jj = Math.round((p[1] - regionMin[1]) / hy);
+      var kk = Math.round((p[2] - regionMin[2]) / hz);
       /* the exact voxel nearest the vertex might itself have failed the
          ownership/clearance gate by a hair (rounding, or the vertex sitting
          right at a voxel boundary) -- scan its immediate 3x3x3 neighbourhood
@@ -5854,43 +6827,106 @@ select.sel:focus{border-color:var(--accent)}
     var nx = Math.max(2, Math.ceil(sx / h) + 1), ny = Math.max(2, Math.ceil(sy / h) + 1), nz = Math.max(2, Math.ceil(sz / h) + 1);
     var maxDim = Math.max(nx, ny, nz);
     if (maxDim > cap) { var scale = maxDim / cap; h *= scale; nx = Math.max(2, Math.ceil(sx / h) + 1); ny = Math.max(2, Math.ceil(sy / h) + 1); nz = Math.max(2, Math.ceil(sz / h) + 1); }
+    var hx = h, hy = h, hz = h;
     if (cellBundle && comp.type === "channel" && (comp.periodicityAxes || []).length) {
-      h = voidSnappedGridStep(cellBundle.M, comp.periodicityAxes, h);
-      nx = Math.max(2, Math.ceil(sx / h) + 1); ny = Math.max(2, Math.ceil(sy / h) + 1); nz = Math.max(2, Math.ceil(sz / h) + 1);
+      /* voidSnappedGridStep folds every periodicity axis into ONE shared
+         scalar h, snapping it exactly to each axis's own length IN TURN --
+         fine for a single periodicity axis (nothing else to conflict with),
+         but for 2 or 3 SIMULTANEOUSLY periodic axes (a 3D-connected channel
+         network -- common, not a corner case) each later axis's own snap
+         can silently detune the exactness the earlier ones already had,
+         even when every axis is individually Cartesian-pure (an orthogonal
+         cell, not just an oblique one -- this was wrongly assumed to only
+         matter for the oblique case, see voidAnisotropicGridSteps' own
+         comment below). Confirmed directly on IFIPEV.cif (fully orthogonal,
+         periodic along a, b AND c at once): the shared h landed exactly on
+         c (the last axis processed, deviation 0) but only approximately on
+         a (0.042 A off) and b (0.118 A off, the worse of the two) --
+         reproducing, coordinate-for-coordinate, the exact seam pattern and
+         relative severity the user found by eye (clean ab face, seamed ac/
+         bc faces, ac -- the b-direction join -- worse than bc). Routing
+         more-than-one-axis cases to the anisotropic solver instead --
+         which sizes hx/hy/hz independently per Cartesian dimension --
+         closes this: for a genuinely orthogonal cell each dimension has
+         only ONE contributing lattice vector, so bestStepFor's own search
+         finds an EXACT divisor for it (proven exact, not merely "least
+         bad" -- that compromise only bites when more than one periodicity
+         vector shares a single Cartesian dimension, i.e. a genuinely
+         oblique angle, which this session's own RAPMII.cif investigation
+         showed is a separate, harder limitation of the anisotropic solver
+         itself, not fixed by this change). */
+      if (comp.periodicityAxes.length <= 1 && voidPeriodicityAxesAllPure(cellBundle.M, comp.periodicityAxes)) {
+        h = voidSnappedGridStep(cellBundle.M, comp.periodicityAxes, h);
+        hx = h; hy = h; hz = h;
+        nx = Math.max(2, Math.ceil(sx / h) + 1); ny = Math.max(2, Math.ceil(sy / h) + 1); nz = Math.max(2, Math.ceil(sz / h) + 1);
+      } else {
+        /* At least one periodicity axis has a lattice vector spread across
+           more than one Cartesian axis (any cell angle involving it that
+           isn't 90 degrees) -- a single shared grid step can't be snapped
+           to make sampling exactly periodic along every such crossing, only
+           the all-pure case above can do that with one h. Instead, size
+           each Cartesian axis's own step independently so that whichever
+           periodicity-axis lattice vectors have a component along that
+           axis land close to (or, for an axis touched by only one such
+           vector -- the common case, e.g. a monoclinic cell's b and c never
+           share a Cartesian axis -- exactly on) integer multiples of that
+           axis's step. This is what lets the two sides of a seam crossing
+           such an axis sample the same points. */
+        var steps = voidAnisotropicGridSteps(cellBundle.M, comp.periodicityAxes, h);
+        hx = steps.hx; hy = steps.hy; hz = steps.hz;
+        nx = Math.max(2, Math.ceil(sx / hx) + 1); ny = Math.max(2, Math.ceil(sy / hy) + 1); nz = Math.max(2, Math.ceil(sz / hz) + 1);
+        h = Math.cbrt(hx * hy * hz);
+      }
     }
     var n = nx * ny * nz;
     var mask = new Uint8Array(n);
     function idx(i, j, k) { return (i * ny + j) * nz + k; }
     for (var i = 0; i < nx; i++) {
-      var x = regionMin[0] + i * h;
+      var x = regionMin[0] + i * hx;
       for (var j = 0; j < ny; j++) {
-        var y = regionMin[1] + j * h;
+        var y = regionMin[1] + j * hy;
         for (var k = 0; k < nz; k++) {
-          var z = regionMin[2] + k * h;
+          var z = regionMin[2] + k * hz;
           if (clearanceAtHash(atomHash, x, y, z) < probeRadius) continue;
           if (voidNearestOwnerId([x, y, z], ownershipVerts) !== comp.id) continue;
           mask[idx(i, j, k)] = 1;
         }
       }
     }
-    mask = voidFloodFillFromVertices(mask, nx, ny, nz, h, regionMin, comp.vertices);
-    var edt = edt3dPhysical(mask, nx, ny, nz, h);
+    /* A diagonal channel's own vertex positions (comp.vertices, still in
+       whichever single frame the merge settled on) are not enough to seed
+       every real, correctly-owned voxel in the cell -- see
+       voidIsDiagonalChannel: real content can sit anywhere in [0,1) that
+       this component's own frame doesn't reach directly. Seed the flood
+       fill from each vertex's own wrapped-into-cell position too, so a
+       voxel that's genuinely accessible and correctly owned (per the
+       pool's own wrapped-vertex augmentation above) isn't discarded here
+       for being unreachable from the frame's own, possibly-distant seeds. */
+    var floodSeeds = comp.vertices;
+    if (cellBundle && voidIsDiagonalChannel(comp)) {
+      floodSeeds = comp.vertices.concat(comp.vertices.map(function (v) {
+        return { pos: voidWrapIntoCell(cellBundle.M, v.pos) };
+      }));
+    }
+    mask = voidFloodFillFromVertices(mask, nx, ny, nz, hx, hy, hz, regionMin, floodSeeds);
+    var edt = edt3dPhysical(mask, nx, ny, nz, hx, hy, hz);
     var accessibleCount = 0;
     for (var m = 0; m < n; m++) if (mask[m]) accessibleCount++;
-    return { nx: nx, ny: ny, nz: nz, h: h, bboxMin: regionMin, edt: edt, accessibleCount: accessibleCount };
+    return { nx: nx, ny: ny, nz: nz, h: h, hx: hx, hy: hy, hz: hz, bboxMin: regionMin, edt: edt, accessibleCount: accessibleCount };
   }
   function voidVolumeFromGrid(grid, probeRadius, cellBundle, offset) {
     var nx = grid.nx, ny = grid.ny, nz = grid.nz, h = grid.h, bboxMin = grid.bboxMin;
+    var hx = grid.hx || h, hy = grid.hy || h, hz = grid.hz || h;
     var ox = offset ? offset[0] : 0, oy = offset ? offset[1] : 0, oz = offset ? offset[2] : 0;
     var count = 0;
     for (var i = 0; i < nx; i++) {
-      var x = bboxMin[0] + i * h;
+      var x = bboxMin[0] + i * hx;
       for (var j = 0; j < ny; j++) {
-        var y = bboxMin[1] + j * h;
+        var y = bboxMin[1] + j * hy;
         for (var k = 0; k < nz; k++) {
           if (grid.edt[(i * ny + j) * nz + k] > probeRadius) continue;
           if (cellBundle) {
-            var z = bboxMin[2] + k * h;
+            var z = bboxMin[2] + k * hz;
             var f = K.cartToFrac(cellBundle.M, [x + ox, y + oy, z + oz]);
             if (f[0] < 0 || f[0] >= 1 || f[1] < 0 || f[1] >= 1 || f[2] < 0 || f[2] >= 1) continue;
           }
@@ -5898,7 +6934,7 @@ select.sel:focus{border-color:var(--accent)}
         }
       }
     }
-    return count * h * h * h;
+    return count * hx * hy * hz;
   }
   function voidTotalVolumeFromGrid(grid, probeRadius, cellBundle, shifts) {
     if (!cellBundle) return voidVolumeFromGrid(grid, probeRadius, null);
@@ -5929,6 +6965,7 @@ select.sel:focus{border-color:var(--accent)}
      needing to know which mode built the grid it was handed. */
   function voidFieldFnFromGrid(grid) {
     var nx = grid.nx, ny = grid.ny, nz = grid.nz, h = grid.h, bboxMin = grid.bboxMin, edt = grid.edt;
+    var hx = grid.hx || h, hy = grid.hy || h, hz = grid.hz || h;
     function at(i, j, k) {
       i = Math.max(0, Math.min(nx - 1, i));
       j = Math.max(0, Math.min(ny - 1, j));
@@ -5936,7 +6973,7 @@ select.sel:focus{border-color:var(--accent)}
       return edt[(i * ny + j) * nz + k];
     }
     return function (x, y, z) {
-      var fx = (x - bboxMin[0]) / h, fy = (y - bboxMin[1]) / h, fz = (z - bboxMin[2]) / h;
+      var fx = (x - bboxMin[0]) / hx, fy = (y - bboxMin[1]) / hy, fz = (z - bboxMin[2]) / hz;
       var i0 = Math.floor(fx), j0 = Math.floor(fy), k0 = Math.floor(fz);
       var tx = fx - i0, ty = fy - j0, tz = fz - k0;
       var c000 = at(i0, j0, k0), c100 = at(i0 + 1, j0, k0);
@@ -5953,11 +6990,8 @@ select.sel:focus{border-color:var(--accent)}
     state._voidSweptGrids = {};
     for (var ci = 0; ci < components.length; ci++) {
       var comp = components[ci];
-      var box = new THREE.Box3();
-      for (var v2 = 0; v2 < comp.vertices.length; v2++) { var p2 = comp.vertices[v2].pos; box.expandByPoint(new THREE.Vector3(p2[0], p2[1], p2[2])); }
-      var pad = probeRadius + (comp.type === "channel" ? 3.0 : 1.5);
-      var regionMin = [box.min.x - pad, box.min.y - pad, box.min.z - pad];
-      var regionMax = [box.max.x + pad, box.max.y + pad, box.max.z + pad];
+      var region = voidComponentRegion(comp, cellBundle, probeRadius);
+      var regionMin = region.regionMin, regionMax = region.regionMax;
       var atomHash = buildAtomHash(voidNearbyAtoms(paddedAtoms, regionMin, regionMax, 6.0), 3.5);
       var ownershipPool = voidBuildOwnershipPool(components, cellBundle, regionMin, regionMax, probeRadius + 2.0);
       var grid = voidBuildSweptGrid(comp, ownershipPool, atomHash, regionMin, regionMax, state.voidQuality, probeRadius, cellBundle);
@@ -5982,11 +7016,8 @@ select.sel:focus{border-color:var(--accent)}
     for (var ci = 0; ci < components.length; ci++) {
       var comp = components[ci];
       if (state.voidConsolidated[comp.id]) continue;
-      var box = new THREE.Box3();
-      for (var v2 = 0; v2 < comp.vertices.length; v2++) { var p2 = comp.vertices[v2].pos; box.expandByPoint(new THREE.Vector3(p2[0], p2[1], p2[2])); }
-      var pad = probeRadius + (comp.type === "channel" ? 3.0 : 1.5);
-      var regionMin = [box.min.x - pad, box.min.y - pad, box.min.z - pad];
-      var regionMax = [box.max.x + pad, box.max.y + pad, box.max.z + pad];
+      var region = voidComponentRegion(comp, cellBundle, probeRadius);
+      var regionMin = region.regionMin, regionMax = region.regionMax;
       var atomHash = buildAtomHash(voidNearbyAtoms(paddedAtoms, regionMin, regionMax, 6.0), 3.5);
       var ownershipPool = voidBuildOwnershipPool(components, cellBundle, regionMin, regionMax, probeRadius + 2.0);
       var h = comp.gridStepUsed || state.voidQuality;
@@ -6077,17 +7108,39 @@ select.sel:focus{border-color:var(--accent)}
     var totalWork = Math.max(1, components.length * VOID_ACCURATE_H_LEVELS.length * VOID_ACCURATE_JITTER), done = 0;
     for (var ci = 0; ci < components.length; ci++) {
       var comp = components[ci];
-      var box = new THREE.Box3();
-      for (var v2 = 0; v2 < comp.vertices.length; v2++) { var p2 = comp.vertices[v2].pos; box.expandByPoint(new THREE.Vector3(p2[0], p2[1], p2[2])); }
-      var pad = probeRadius + (comp.type === "channel" ? 3.0 : 1.5);
-      var regionMin = [box.min.x - pad, box.min.y - pad, box.min.z - pad];
-      var regionMax = [box.max.x + pad, box.max.y + pad, box.max.z + pad];
+      var region = voidComponentRegionForAccurate(comp, cellBundle, probeRadius);
+      var regionMin = region.regionMin, regionMax = region.regionMax;
       var atomHash = buildAtomHash(voidNearbyAtoms(paddedAtoms, regionMin, regionMax, 6.0), 3.5);
       var ownershipPool = voidBuildOwnershipPool(components, cellBundle, regionMin, regionMax, probeRadius + 2.0);
       var shifts = (cellBundle && comp.type === "channel") ? [[0, 0, 0]].concat(voidCompletionShifts(comp, cellBundle)) : [[0, 0, 0]];
+      var sx = regionMax[0] - regionMin[0], sy = regionMax[1] - regionMin[1], sz = regionMax[2] - regionMin[2];
       var pts = [], grid = null;
       for (var hi = 0; hi < VOID_ACCURATE_H_LEVELS.length; hi++) {
         var h0 = VOID_ACCURATE_H_LEVELS[hi];
+        /* VOID_ACCURATE_AXIS_CAP is sized for a typical component's region;
+           a component whose OWN vertex bounding box happens to be unusually
+           large (confirmed on DIANIN.cif: a channel sitting on the cell's
+           3-fold axis, whose vertex set spans several periods, gives a
+           region ~3x the size of its symmetry-equivalent neighbours) can
+           still exceed it. voidBuildSweptGrid silently RESCALES h upward
+           whenever its cap is exceeded -- and that rescaled h depends only
+           on the region size and the cap, not on the h0 that was actually
+           requested, so every h0 fine enough to overflow the same fixed cap
+           collapses to the SAME actual grid resolution. Four of this
+           component's six "levels" then carried literally identical (h, V)
+           points into voidLinFit, which -- weighting by 1/h^2 -- let that
+           one duplicated point dominate the fit while leaving only two truly
+           distinct spacings to constrain a 2-parameter line: exactly what
+           produced DIANIN's wildly-off, wildly-uncertain accurate volume for
+           that one component (301 +-20 vs its symmetry partners' 278 +-5 and
+           274 +-3, all three of which should be identical by the space
+           group). Sizing the cap per level, just large enough to honor THIS
+           level's own h0 for THIS component's own region, guarantees the
+           ladder always reaches six genuinely distinct spacings -- slower
+           for a large-region component, but accurate mode's whole premise
+           already accepts that trade. */
+        var neededCap = Math.ceil(Math.max(sx, sy, sz) / h0) + 2;
+        var axisCap = Math.max(VOID_ACCURATE_AXIS_CAP, neededCap);
         var sumV = 0, lastGrid = null;
         for (var ji = 0; ji < VOID_ACCURATE_JITTER; ji++) {
           /* Used to be a random sub-voxel origin offset here, meant to be
@@ -6102,7 +7155,7 @@ select.sel:focus{border-color:var(--accent)}
              (regionMin, no offset) means the render grid always aligns
              with the atoms the same well-tested way, rather than a fresh
              gamble each time. */
-          var jGrid = voidBuildSweptGrid(comp, ownershipPool, atomHash, regionMin, regionMax, h0, probeRadius, cellBundle, VOID_ACCURATE_AXIS_CAP);
+          var jGrid = voidBuildSweptGrid(comp, ownershipPool, atomHash, regionMin, regionMax, h0, probeRadius, cellBundle, axisCap);
           sumV += voidTotalVolumeFromGrid(jGrid, probeRadius, comp.type === "channel" ? cellBundle : null, shifts);
           lastGrid = jGrid;
           done++;
@@ -6274,12 +7327,36 @@ select.sel:focus{border-color:var(--accent)}
       } else {
         var grid = state._voidSweptGrids && state._voidSweptGrids[comp.id];
         if (!grid || !grid.accessibleCount) continue;
-        var field = voidFieldFnFromGrid(grid);
-        var boxMin = grid.bboxMin;
-        var boxMax = [boxMin[0] + (grid.nx - 1) * grid.h, boxMin[1] + (grid.ny - 1) * grid.h, boxMin[2] + (grid.nz - 1) * grid.h];
-        try {
-          iso = IsoSurface.extract(field, boxMin, boxMax, grid.h, state.probeRadius);
-        } catch (e) { console.error("isosurface failed for void component " + comp.id, e); continue; }
+        /* renderVoidMeshes() runs on every selection click, Move/Copy drag,
+           visibility toggle and colour change -- none of which change this
+           component's actual surface, only how the already-extracted mesh
+           gets placed/coloured. Re-running IsoSurface.extract() (a full
+           marching-cubes-style pass over the whole grid) on every one of
+           those was fine at the fast path's default resolution, but
+           accurate mode's finest grid can be tens of millions of cells for
+           a large component (confirmed directly on 0Bar_CO2.CIF's ~950
+           A^3 channels) -- re-extracting that on every click is what made
+           selecting a fragment visibly lag. state._voidSweptGrids[comp.id]
+           is only ever reassigned to a brand-new object when the grid
+           itself is actually rebuilt (a fresh Calculate, a probe-radius
+           change, ...), so caching the extracted iso keyed on that exact
+           object reference is a safe, self-invalidating cache: identical
+           reference -> nothing about the surface could have changed;
+           different reference -> re-extract, exactly as before. */
+        var cached = state._voidIsoCache && state._voidIsoCache[comp.id];
+        if (cached && cached.grid === grid) {
+          iso = cached.iso;
+        } else {
+          var field = voidFieldFnFromGrid(grid);
+          var boxMin = grid.bboxMin;
+          var ghx = grid.hx || grid.h, ghy = grid.hy || grid.h, ghz = grid.hz || grid.h;
+          var boxMax = [boxMin[0] + (grid.nx - 1) * ghx, boxMin[1] + (grid.ny - 1) * ghy, boxMin[2] + (grid.nz - 1) * ghz];
+          try {
+            iso = IsoSurface.extract(field, boxMin, boxMax, { hx: ghx, hy: ghy, hz: ghz }, state.probeRadius);
+          } catch (e) { console.error("isosurface failed for void component " + comp.id, e); continue; }
+          if (!state._voidIsoCache) state._voidIsoCache = {};
+          state._voidIsoCache[comp.id] = { grid: grid, iso: iso };
+        }
         if (!iso.positions.length) continue;
         geo = new THREE.BufferGeometry();
         geo.setAttribute("position", new THREE.Float32BufferAttribute(iso.positions, 3));
@@ -6309,9 +7386,17 @@ select.sel:focus{border-color:var(--accent)}
       function makeInstanceMat(side, clipPlanes, color) {
         var m = makeMat(side, color);
         if (clipPlanes) m.clippingPlanes = clipPlanes;
+        /* Display > Clipping Plane's own setGroupClipPlanes() re-touches
+           material.clippingPlanes on every redraw (see its own comment) --
+           tagging the mesh's OWN cell-boundary truncation planes here lets
+           it concatenate rather than clobber them, so a channel stays cut
+           off exactly at the unit cell face regardless of what the user's
+           own clip plane feature is doing. */
+        m.userData.voidBaseClipPlanes = clipPlanes || [];
         return m;
       }
-      function placeInstance(offset, shiftMap, fragVisible, fragKey, copyId) {
+      function placeInstance(offset, shiftMap, fragVisible, fragKey, copyId, geoOverride) {
+        var useGeo = geoOverride || geo;
         var clipPlanes = activeAxes.length ? voidCellBoundaryPlanes(cellBundle.M, activeAxes, shiftMap) : null;
         if (clipPlanes) { var offVec = new THREE.Vector3(voidOff[0], voidOff[1], voidOff[2]); clipPlanes.forEach(function (p) { p.translate(offVec); }); }
         var vis = compVisible && fragVisible;
@@ -6321,8 +7406,8 @@ select.sel:focus{border-color:var(--accent)}
           m.userData = { compId: comp.id, fragKey: fragKey, copyId: copyId || null, selectable: true, activeAxes: activeAxes, shiftMap: shiftMap };
           voidGroup.add(m); parts.push(m);
         }
-        var back = new THREE.Mesh(geo, makeInstanceMat(THREE.BackSide, clipPlanes, colors.outer)); back.renderOrder = 0;
-        var front = new THREE.Mesh(geo, makeInstanceMat(THREE.FrontSide, clipPlanes, colors.inner)); front.renderOrder = 1;
+        var back = new THREE.Mesh(useGeo, makeInstanceMat(THREE.BackSide, clipPlanes, colors.outer)); back.renderOrder = 0;
+        var front = new THREE.Mesh(useGeo, makeInstanceMat(THREE.FrontSide, clipPlanes, colors.inner)); front.renderOrder = 1;
         place(back); place(front);
       }
       var myCopies = state.voidChannelCopies.filter(function (cp) { return cp.compId === comp.id; });
@@ -6337,6 +7422,37 @@ select.sel:focus{border-color:var(--accent)}
         myCopies.forEach(function (cp) {
           var copyOffset = cellBundle ? voidShiftToCartesian(cellBundle.M, [move[0] + cp.shift[0], move[1] + cp.shift[1], move[2] + cp.shift[2]]) : [move[0] + cp.shift[0], move[1] + cp.shift[1], move[2] + cp.shift[2]];
           placeInstance(copyOffset, {}, fragVisible && cp.visible !== false, fragKey, cp.id);
+        });
+      } else if (cellBundle && voidIsDiagonalChannel(comp)) {
+        /* See voidComputeShiftIslands: a diagonal channel's own shift-window
+           content need not be one physical piece. Split it into its actual
+           disjoint islands and give each its own Fragments-panel entry,
+           instead of the single shared-geometry fragment every other
+           (axis-aligned) component still gets below, unchanged. */
+        var baseShiftsD = [[0, 0, 0]].concat(voidCompletionShifts(comp, cellBundle));
+        baseShiftsD.forEach(function (s) {
+          var baseOffset = (s[0] || s[1] || s[2]) ? voidShiftToCartesian(cellBundle.M, s) : [0, 0, 0];
+          var refPlanes = activeAxes.length ? voidCellBoundaryPlanes(cellBundle.M, activeAxes, {}) : [];
+          var islands = voidComputeShiftIslands(iso, baseOffset, refPlanes);
+          islands.forEach(function (triIndices, islandIdx) {
+            var islandGeo = voidBuildIslandGeometry(iso, triIndices);
+            var islandPos = islandGeo.attributes.position.array;
+            var fragKey = comp.id + ":" + s.join(",") + ":" + islandIdx;
+            var move = state.voidFragmentMove[fragKey] || [0, 0, 0];
+            var fragVisible = state.voidFragmentVisible[fragKey] !== false;
+            var totalShift = s.map(function (v, k) { return v + (move[k] || 0); });
+            var offset = voidShiftToCartesian(cellBundle.M, totalShift);
+            var shiftMap = {}; activeAxes.forEach(function (ax) { shiftMap[ax] = move[idxAx[ax]] || 0; });
+            var current = analyzeVoidShift(islandPos, offset, cellBundle.M, activeAxes, shiftMap);
+            state.voidFragments[fragKey] = { key: fragKey, compId: comp.id, shift: s, move: move, geo: islandGeo, activeAxes: activeAxes, centroid: current.centroid };
+            placeInstance(offset, shiftMap, fragVisible, fragKey, null, islandGeo);
+            myCopies.forEach(function (cp) {
+              var copyTotalShift = totalShift.map(function (v, k) { return v + (cp.shift[k] || 0); });
+              var copyOffset = voidShiftToCartesian(cellBundle.M, copyTotalShift);
+              var copyShiftMap = {}; activeAxes.forEach(function (ax) { copyShiftMap[ax] = (move[idxAx[ax]] || 0) + (cp.shift[idxAx[ax]] || 0); });
+              placeInstance(copyOffset, copyShiftMap, fragVisible && cp.visible !== false, fragKey, cp.id, islandGeo);
+            });
+          });
         });
       } else {
         var baseShifts = [[0, 0, 0]].concat(voidCompletionShifts(comp, cellBundle));
@@ -6363,6 +7479,14 @@ select.sel:focus{border-color:var(--accent)}
       }
       voidMeshes[comp.id] = parts;
     }
+    /* Void geometry just changed (Calculate, Move/Copy, visibility, a fresh
+       component) -- refresh sceneBoundRadius (now voidGroup-aware, see its
+       own comment) and re-apply it to the camera frustum immediately,
+       rather than waiting for some unrelated atom-side render to happen to
+       trigger it. Without this, a channel just Moved/Copied out beyond the
+       previous bound stays clipped until something else nudges the camera. */
+    updateSceneBoundRadius();
+    applyController();
   }
 
   /* ---------------- void/channel analysis: results table ---------------- */
@@ -6388,7 +7512,13 @@ select.sel:focus{border-color:var(--accent)}
       var badge = document.createElement("span"); badge.className = "badge " + c.type;
       badge.textContent = c.type === "channel" ? ("channel " + c.dimensionality + "D" + (c.periodicityAxes.length ? " (" + c.periodicityAxes.join(",") + ")" : "")) : "void";
       tdType.appendChild(badge); tr.appendChild(tdType);
-      var tdCrit = document.createElement("td"); tdCrit.textContent = c.criticalRadius.toFixed(3); tr.appendChild(tdCrit);
+      var tdCrit = document.createElement("td");
+      if (c.stabilityLimitKind === "channel-max") { tdCrit.textContent = "≤ " + c.stabilityLimit.toFixed(3); tdCrit.title = "Stays recognized as this channel for probe radii up to " + c.stabilityLimit.toFixed(3) + " " + U.ang + ". Above that, at least one part of it would be pruned away or lose its periodic connection, turning it into void(s) or removing it."; }
+      else if (c.stabilityLimitKind === "void-threshold") { tdCrit.textContent = "≥ " + c.stabilityLimit.toFixed(3); tdCrit.title = "Stays a void for probe radii down to " + c.stabilityLimit.toFixed(3) + " " + U.ang + ". Below that, it would connect to a periodic image of itself and become a channel."; }
+      else if (c.stabilityLimitKind === "void-never") { tdCrit.textContent = "—"; tdCrit.title = "Stays a void for any probe radius down to " + VOID_STABILITY_FLOOR.toFixed(2) + " " + U.ang + " (the practical floor tested) -- doesn't channelize within a chemically realistic range."; }
+      else if (c.stabilityLimitKind === "not-periodic") { tdCrit.textContent = "—"; tdCrit.title = "Not applicable in “Use visible atoms only” mode -- there are no periodic images here, so this can never become a channel regardless of probe radius."; }
+      else { tdCrit.textContent = "—"; tdCrit.title = "Not computed for this saved result -- recalculate to see this."; }
+      tr.appendChild(tdCrit);
       var tdVol = document.createElement("td");
       var volText = c.volume !== undefined ? c.volume.toFixed(1) : "-";
       if (c.volumeSE != null) volText += " ±" + c.volumeSE.toFixed(1);
@@ -6544,15 +7674,347 @@ select.sel:focus{border-color:var(--accent)}
     for (var k = 1; k + 1 < poly.length; k++) tris.push(poly[0], poly[k], poly[k + 1]);
     return tris;
   }
+  /* For a channel whose periodicity touches all of a/b/c (voidIsDiagonalChannel),
+     a single shift's worth of geometry -- correctly confined to the reference
+     cell by voidComponentRegion's own fix -- is not necessarily ONE physical
+     piece: RAPMII.cif's channel, once properly completed, is two channel arcs
+     plus two small closing fragments where they meet the cell edge, all one
+     topological network but four disjoint pieces once clipped to [0,1)^3 (the
+     rest of that network lives in neighbouring cells). The Fragments panel's
+     Move/Copy/Assemble tooling needs each of those as its own independently
+     selectable entry -- exactly the granularity every axis-aligned structure
+     already gets "for free" (its own corner/edge pieces are already genuinely
+     disjoint at the shift-window level). This clips the FULL isosurface
+     against the same boundary planes the renderer will use (reference window,
+     move=0 -- a later user Move is a pure rigid re-placement, see
+     renderVoidMeshes' own shift/move math, so it never needs to change which
+     triangles belong together), then unions ORIGINAL triangle indices whose
+     CLIPPED output shares a vertex position -- clipping first (not a cheap
+     per-vertex "is it in the window" test) is what keeps two islands from
+     re-joining through the padded region beyond the cell face, where the real,
+     continuous mesh the isosurface was built from does still connect them.
+     Gated to diagonal channels only -- every axis-aligned structure's own
+     shift-window content is already exactly one island, confirmed directly,
+     so this is inert there. */
+  function voidComputeShiftIslands(iso, offset, planes) {
+    var pos = iso.positions, idx = iso.indices, norm = iso.normals;
+    var nTri = idx.length / 3;
+    var clippedPerTri = new Array(nTri);
+    for (var t = 0; t < nTri; t++) {
+      var i0 = idx[t * 3], i1 = idx[t * 3 + 1], i2 = idx[t * 3 + 2];
+      function vtx(vi) {
+        return { pos: [pos[vi * 3] + offset[0], pos[vi * 3 + 1] + offset[1], pos[vi * 3 + 2] + offset[2]],
+                 norm: [norm[vi * 3], norm[vi * 3 + 1], norm[vi * 3 + 2]] };
+      }
+      clippedPerTri[t] = planes.length ? clipVoidTriangleAgainstPlanes(vtx(i0), vtx(i1), vtx(i2), planes) : [vtx(i0), vtx(i1), vtx(i2)];
+    }
+    var parent = new Array(nTri).fill(-1);
+    function find(a) { while (parent[a] >= 0) { if (parent[parent[a]] >= 0) parent[a] = parent[parent[a]]; a = parent[a]; } return a; }
+    function union(a, b) { a = find(a); b = find(b); if (a !== b) parent[a] = b; }
+    var posMap = {};
+    var TOL = 1e-3;
+    function keyFor(p) { return Math.round(p[0] / TOL) + "," + Math.round(p[1] / TOL) + "," + Math.round(p[2] / TOL); }
+    for (var t2 = 0; t2 < nTri; t2++) {
+      var cl = clippedPerTri[t2];
+      for (var k2 = 0; k2 < cl.length; k2++) {
+        var key = keyFor(cl[k2].pos);
+        if (posMap.hasOwnProperty(key)) union(t2, posMap[key]); else posMap[key] = t2;
+      }
+    }
+    var groups = {};
+    for (var t3 = 0; t3 < nTri; t3++) {
+      if (!clippedPerTri[t3].length) continue;
+      var r = find(t3);
+      if (!groups[r]) groups[r] = [];
+      groups[r].push(t3);
+    }
+    return Object.keys(groups).map(function (k) { return groups[k]; });
+  }
+  /* Builds a standalone BufferGeometry from a subset of a component's
+     ORIGINAL (unclipped) triangles -- deliberately NOT the clipped output
+     voidComputeShiftIslands used to decide membership. Keeping the original,
+     uncut triangles lets this island's mesh still respond correctly to the
+     existing GPU clippingPlanes mechanism (used for the move/shift window,
+     unchanged) exactly like every other fragment's shared geometry already
+     does -- only which triangles belong to which fragment has changed. */
+  function voidBuildIslandGeometry(iso, triIndices) {
+    var pos = iso.positions, idx = iso.indices, norm = iso.normals;
+    var positions = [], normals = [], indices = [];
+    var remap = {};
+    triIndices.forEach(function (t) {
+      for (var k = 0; k < 3; k++) {
+        var vi = idx[t * 3 + k];
+        if (remap[vi] === undefined) {
+          remap[vi] = positions.length / 3;
+          positions.push(pos[vi * 3], pos[vi * 3 + 1], pos[vi * 3 + 2]);
+          normals.push(norm[vi * 3], norm[vi * 3 + 1], norm[vi * 3 + 2]);
+        }
+        indices.push(remap[vi]);
+      }
+    });
+    var geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+    geo.setIndex(indices);
+    return geo;
+  }
+  /* Some small disconnected pieces of a not-yet-welded consolidated mesh
+     are really PART OF the main body's own surface, just one whole
+     unit-cell translation away -- their own capture (an independent
+     shift-window fragment, or even a stray piece of the SAME fragment's
+     own raw isosurface far from its seed vertices) happened to land in a
+     different periodic image than the reference window the rest of the
+     mesh settled into. Confirmed directly on ZIF-68's large channel: the
+     six small stray slivers near its own c=0/c=1 boundary (previously
+     just dropped -- wrong, since that leaves real holes in the main
+     surface where they belong) each align with the main body -- three
+     need +c, three need -c, matching the component's own 6-bar symmetry
+     -- when translated by exactly one whole lattice vector. "Align" does
+     NOT mean the whole piece coincides with existing geometry: a real
+     hole-closing patch shares its OUTER boundary with the main body
+     (where it attaches) while its interior is genuinely new surface that
+     was never captured anywhere else -- on that same sliver, ~45% of its
+     own vertices land within snapTol of an existing main vertex under
+     the correct translation, and the rest (real, new surface) land
+     0.1-0.6 A away, nowhere near it. So acceptance is by OVERLAP
+     FRACTION (MIN_OVERLAP_FRACTION, comfortably below a genuine shared-
+     boundary's own ~45% and comfortably above the <1% one coincidental
+     vertex would give), not "every vertex must match" -- an earlier
+     version of this function required the WORST vertex to be close and
+     could never pass for a real hole-closer, since a real one's own new
+     surface content is exactly what keeps its worst-case distance large.
+     Detects pieces via the same position-canonicalized connectivity test
+     voidDropSmallIslands uses, tries each of the 6 unit lattice-vector
+     translations per small piece, and permanently shifts ALL of that
+     piece's own vertex entries (not just the canonical/deduplicated ones
+     used to test candidates -- every triangle corner referencing this
+     piece has to move together, or the mesh tears) once a candidate's
+     overlap fraction clears the bar. Leaves position, not owner, changed
+     -- the ALREADY-EXISTING weld pass right after this call then merges
+     the piece's own now-coincident boundary vertices into the main body
+     normally, exactly as if it had been a genuine seam-adjacent fragment
+     all along, no separate merge logic needed here. Whatever finds no
+     matching translation is left untouched for voidDropSmallIslands,
+     further down, as the last-resort fallback for a piece that's
+     genuinely just disconnected. */
+  var VOID_SLIVER_SNAP_TOL = 0.01; /* Angstrom -- comfortably above the ~1e-7 A floating-point-exact match seen at a genuine shared-boundary vertex, comfortably below both realistic mesh vertex spacing and voidWeldConsolidatedSeam's own 0.05 A tolerance (which merges the snapped duplicates afterward) */
+  function voidSnapStraySliversOntoMain(positions, indices, latticeVectors, snapTol) {
+    var TOL = 1e-3;
+    var nVerts = positions.length / 3;
+    function posKey(i) { return Math.round(positions[i * 3] / TOL) + "," + Math.round(positions[i * 3 + 1] / TOL) + "," + Math.round(positions[i * 3 + 2] / TOL); }
+    var posMap = {}, canon = new Int32Array(nVerts);
+    for (var i = 0; i < nVerts; i++) {
+      var k = posKey(i);
+      if (posMap.hasOwnProperty(k)) canon[i] = posMap[k]; else { posMap[k] = i; canon[i] = i; }
+    }
+    var parent = new Int32Array(nVerts);
+    for (var i2 = 0; i2 < nVerts; i2++) parent[i2] = i2;
+    function find(x) { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
+    function union(a, b) { a = find(a); b = find(b); if (a !== b) parent[a] = b; }
+    var nTri = indices.length / 3;
+    for (var t = 0; t < nTri; t++) { union(canon[indices[t * 3]], canon[indices[t * 3 + 1]]); union(canon[indices[t * 3 + 1]], canon[indices[t * 3 + 2]]); }
+    var canonVertsByRoot = {}, allVertsByRoot = {};
+    for (var v = 0; v < nVerts; v++) {
+      var r = find(canon[v]);
+      (allVertsByRoot[r] = allVertsByRoot[r] || []).push(v);
+      if (canon[v] === v) (canonVertsByRoot[r] = canonVertsByRoot[r] || []).push(v);
+    }
+    var roots = Object.keys(canonVertsByRoot);
+    if (roots.length < 2) return 0;
+    var mainRoot = roots.reduce(function (best, r) { return canonVertsByRoot[r].length > canonVertsByRoot[best].length ? r : best; }, roots[0]);
+    var mainVerts = canonVertsByRoot[mainRoot];
+    var cellSize = 1.0;
+    function gkey(x, y, z) { return Math.floor(x / cellSize) + "," + Math.floor(y / cellSize) + "," + Math.floor(z / cellSize); }
+    var grid = {};
+    mainVerts.forEach(function (i3) { var k2 = gkey(positions[i3 * 3], positions[i3 * 3 + 1], positions[i3 * 3 + 2]); (grid[k2] = grid[k2] || []).push(i3); });
+    function nearestDist(px, py, pz) {
+      var minD = Infinity;
+      var cx = Math.floor(px / cellSize), cy = Math.floor(py / cellSize), cz = Math.floor(pz / cellSize);
+      for (var dx = -2; dx <= 2; dx++) for (var dy = -2; dy <= 2; dy++) for (var dz = -2; dz <= 2; dz++) {
+        var bucket = grid[(cx + dx) + "," + (cy + dy) + "," + (cz + dz)]; if (!bucket) continue;
+        for (var bi = 0; bi < bucket.length; bi++) {
+          var i4 = bucket[bi];
+          var ddx = positions[i4 * 3] - px, ddy = positions[i4 * 3 + 1] - py, ddz = positions[i4 * 3 + 2] - pz;
+          var d = Math.sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
+          if (d < minD) minD = d;
+        }
+      }
+      return minD;
+    }
+    var candidates = [];
+    ["a", "b", "c"].forEach(function (ax) { [1, -1].forEach(function (sg) { candidates.push([latticeVectors[ax][0] * sg, latticeVectors[ax][1] * sg, latticeVectors[ax][2] * sg]); }); });
+    var MIN_OVERLAP_FRACTION = 0.15; /* a small stray piece is typically PART duplicate-of-existing-boundary, part genuinely new surface (confirmed directly on ZIF-68: ~45% of one sliver's own vertices land within snapTol of the main body under its correct translation, the rest -- real, new content extending the surface -- land 0.1-0.6 A away, nowhere near snapTol); requiring EVERY vertex to match (the first version of this function) can never pass for a piece that's doing its job of adding new surface, not just duplicating existing content. 15% is comfortably below what a genuine shared-boundary match shows and comfortably above what one coincidental vertex among a hundred-plus would give (under 1%). */
+    var snappedCount = 0;
+    roots.forEach(function (r) {
+      if (r === mainRoot) return;
+      var verts = canonVertsByRoot[r];
+      var best = null, bestFrac = 0;
+      candidates.forEach(function (cand) {
+        var nearCount = 0;
+        for (var vi = 0; vi < verts.length; vi++) {
+          var i5 = verts[vi];
+          var dd = nearestDist(positions[i5 * 3] + cand[0], positions[i5 * 3 + 1] + cand[1], positions[i5 * 3 + 2] + cand[2]);
+          if (dd < snapTol) nearCount++;
+        }
+        var frac = nearCount / verts.length;
+        if (frac > bestFrac) { bestFrac = frac; best = cand; }
+      });
+      if (best && bestFrac >= MIN_OVERLAP_FRACTION) {
+        allVertsByRoot[r].forEach(function (i6) { positions[i6 * 3] += best[0]; positions[i6 * 3 + 1] += best[1]; positions[i6 * 3 + 2] += best[2]; });
+        snappedCount++;
+      }
+    });
+    return snappedCount;
+  }
+  /* Weld near-duplicate vertices that different fragments independently
+     placed at (almost) the same spot along a shift-window seam -- whether
+     that's a diagonal channel's own periodicity boundary (where the
+     anisotropic grid step, voidAnisotropicGridSteps, makes the two sides
+     sample the seam curve at nearly, but not exactly, the same points --
+     residual mismatch ~1e-3 Å, far below the grid's own ~0.1-0.35 Å vertex
+     spacing) or a completion-axis boundary on an otherwise axis-pure
+     channel/void (same kind of sub-grid-spacing residual, different axis).
+     Left unwelded, either shows as a hairline crack; on a completion axis
+     with several shift windows meeting at one corner, small leftover
+     slivers from a neighbouring window can also end up looking like
+     separate stray fragments near, but not quite at, the seam they belong
+     to -- see consolidateVoidComponent's own call site comment. Only
+     ever unions vertices from DIFFERENT fragments (never two corners of the
+     same triangle, since those always share one owner) and only within a
+     tolerance well below normal mesh vertex spacing, so this can't pull
+     together unrelated nearby geometry or collapse a triangle -- unlike the
+     earlier, much coarser weld attempts (tolerance ~0.3 Å, comparable to
+     the mesh's own vertex spacing) that were tried and reverted before the
+     grid fix existed. */
+  function voidWeldConsolidatedSeam(positions, normals, indices, owner) {
+    var TOL = 0.05;
+    var n = positions.length / 3;
+    var parent = new Int32Array(n);
+    for (var i = 0; i < n; i++) parent[i] = i;
+    function find(x) { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
+    function union(a, b) { a = find(a); b = find(b); if (a !== b) parent[a] = b; }
+    var buckets = {};
+    function bkey(bx, by, bz) { return bx + "," + by + "," + bz; }
+    for (var v = 0; v < n; v++) {
+      var bx = Math.round(positions[v * 3] / TOL), by = Math.round(positions[v * 3 + 1] / TOL), bz = Math.round(positions[v * 3 + 2] / TOL);
+      var k = bkey(bx, by, bz);
+      if (!buckets[k]) buckets[k] = [];
+      buckets[k].push(v);
+    }
+    for (var v2 = 0; v2 < n; v2++) {
+      var x = positions[v2 * 3], y = positions[v2 * 3 + 1], z = positions[v2 * 3 + 2];
+      var bx2 = Math.round(x / TOL), by2 = Math.round(y / TOL), bz2 = Math.round(z / TOL);
+      for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) for (var dz = -1; dz <= 1; dz++) {
+        var arr = buckets[bkey(bx2 + dx, by2 + dy, bz2 + dz)];
+        if (!arr) continue;
+        for (var ai = 0; ai < arr.length; ai++) {
+          var j = arr[ai];
+          if (j <= v2 || owner[j] === owner[v2]) continue;
+          var ddx = positions[j * 3] - x, ddy = positions[j * 3 + 1] - y, ddz = positions[j * 3 + 2] - z;
+          if (ddx * ddx + ddy * ddy + ddz * ddz <= TOL * TOL) union(v2, j);
+        }
+      }
+    }
+    var groupOf = new Int32Array(n).fill(-1);
+    var groupSumPos = [], groupSumNorm = [], groupCount = [];
+    var nextGroup = 0;
+    var rootToGroup = {};
+    for (var v3 = 0; v3 < n; v3++) {
+      var r = find(v3);
+      if (!(r in rootToGroup)) { rootToGroup[r] = nextGroup++; groupSumPos.push([0, 0, 0]); groupSumNorm.push([0, 0, 0]); groupCount.push(0); }
+      var g = rootToGroup[r];
+      groupOf[v3] = g;
+      groupSumPos[g][0] += positions[v3 * 3]; groupSumPos[g][1] += positions[v3 * 3 + 1]; groupSumPos[g][2] += positions[v3 * 3 + 2];
+      groupSumNorm[g][0] += normals[v3 * 3]; groupSumNorm[g][1] += normals[v3 * 3 + 1]; groupSumNorm[g][2] += normals[v3 * 3 + 2];
+      groupCount[g]++;
+    }
+    var outPos = [], outNorm = [];
+    for (var g2 = 0; g2 < nextGroup; g2++) {
+      var cnt = groupCount[g2];
+      outPos.push(groupSumPos[g2][0] / cnt, groupSumPos[g2][1] / cnt, groupSumPos[g2][2] / cnt);
+      var gnx = groupSumNorm[g2][0], gny = groupSumNorm[g2][1], gnz = groupSumNorm[g2][2];
+      var gnl = Math.sqrt(gnx * gnx + gny * gny + gnz * gnz) || 1;
+      outNorm.push(gnx / gnl, gny / gnl, gnz / gnl);
+    }
+    var outIdx = new Array(indices.length);
+    for (var ii = 0; ii < indices.length; ii++) outIdx[ii] = groupOf[indices[ii]];
+    return { positions: outPos, normals: outNorm, indices: outIdx };
+  }
+  /* Drops any connected piece of a consolidated mesh smaller than
+     minFraction of the largest piece -- the LAST-RESORT fallback for a
+     small stray surface fragment that survives BOTH
+     voidSnapStraySliversOntoMain (no unit-lattice-vector translation
+     brought it close enough to the main body) and the weld pass right
+     after it. Dropping was tried first as the primary fix for ZIF-68's
+     own six slivers and was wrong: it silently left real holes in the
+     main channel surface where they belonged, no better than leaving
+     them as disconnected islands -- see voidSnapStraySliversOntoMain's
+     own comment for the actual fix. This still matters as a fallback,
+     though, for whatever genuinely doesn't have a matching periodic
+     image nearby (a truly isolated numerical artifact, say) -- silently
+     rendering a floating disconnected fleck is no better than a hole
+     either. Connectivity is by TRIANGLE ADJACENCY through shared (position-
+     canonicalized, since welding only merges vertices across DIFFERENT
+     fragment owners -- two triangles from the SAME fragment never share
+     an index even when they share an edge) vertices, exactly the same
+     technique used to diagnose this in the first place. minFraction is
+     deliberately tiny (0.5%) -- this is a last-resort cleanup for
+     leftover slivers, not a general size filter that could eat a
+     genuinely separate, comparably-sized piece of a legitimate multi-
+     piece consolidation. */
+  var VOID_ISLAND_DROP_FRACTION = 0.005;
+  function voidDropSmallIslands(positions, normals, indices, minFraction) {
+    var TOL = 1e-3;
+    var nVerts = positions.length / 3;
+    function posKey(i) { return Math.round(positions[i * 3] / TOL) + "," + Math.round(positions[i * 3 + 1] / TOL) + "," + Math.round(positions[i * 3 + 2] / TOL); }
+    var posMap = {}, canon = new Int32Array(nVerts);
+    for (var i = 0; i < nVerts; i++) {
+      var k = posKey(i);
+      if (posMap.hasOwnProperty(k)) canon[i] = posMap[k]; else { posMap[k] = i; canon[i] = i; }
+    }
+    var parent = new Int32Array(nVerts);
+    for (var i2 = 0; i2 < nVerts; i2++) parent[i2] = i2;
+    function find(x) { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
+    function union(a, b) { a = find(a); b = find(b); if (a !== b) parent[a] = b; }
+    var nTri = indices.length / 3;
+    for (var t = 0; t < nTri; t++) { union(canon[indices[t * 3]], canon[indices[t * 3 + 1]]); union(canon[indices[t * 3 + 1]], canon[indices[t * 3 + 2]]); }
+    var triRoot = new Int32Array(nTri), sizeByRoot = {};
+    for (var t2 = 0; t2 < nTri; t2++) {
+      var r = find(canon[indices[t2 * 3]]);
+      triRoot[t2] = r;
+      sizeByRoot[r] = (sizeByRoot[r] || 0) + 1;
+    }
+    var maxSize = 0;
+    for (var r2 in sizeByRoot) if (sizeByRoot[r2] > maxSize) maxSize = sizeByRoot[r2];
+    var threshold = Math.max(1, maxSize * minFraction);
+    var keepTriCount = 0;
+    for (var t3 = 0; t3 < nTri; t3++) if (sizeByRoot[triRoot[t3]] >= threshold) keepTriCount++;
+    if (keepTriCount === nTri) return { positions: positions, normals: normals, indices: indices, droppedTriCount: 0 };
+    var remap = {}, outPos = [], outNorm = [], outIdx = [];
+    for (var t4 = 0; t4 < nTri; t4++) {
+      if (sizeByRoot[triRoot[t4]] < threshold) continue;
+      for (var w = 0; w < 3; w++) {
+        var vi = indices[t4 * 3 + w];
+        if (!remap.hasOwnProperty(vi)) {
+          remap[vi] = outPos.length / 3;
+          outPos.push(positions[vi * 3], positions[vi * 3 + 1], positions[vi * 3 + 2]);
+          outNorm.push(normals[vi * 3], normals[vi * 3 + 1], normals[vi * 3 + 2]);
+        }
+        outIdx.push(remap[vi]);
+      }
+    }
+    return { positions: outPos, normals: outNorm, indices: outIdx, droppedTriCount: nTri - keepTriCount };
+  }
   function consolidateVoidComponent(compId) {
     var allKeys = Object.keys(state.voidFragments).filter(function (k) { return state.voidFragments[k].compId === compId; });
     var visibleKeys = allKeys.filter(function (k) { return state.voidFragmentVisible[k] !== false; });
     if (visibleKeys.length < 2) return;
     var cellBundle = voidCellBundle();
+    var comp = (state.voidComponents || []).filter(function (c) { return c.id === compId; })[0];
     var idxAx = { a: 0, b: 1, c: 2 };
-    var allPos = [], allNorm = [], allIdx = [];
+    var allPos = [], allNorm = [], allIdx = [], allOwner = [];
     var sum = [0, 0, 0], count = 0;
-    visibleKeys.forEach(function (key) {
+    visibleKeys.forEach(function (key, fragIdx) {
       var frag = state.voidFragments[key];
       var posArr = frag.geo.attributes.position.array;
       var normArr = frag.geo.attributes.normal.array;
@@ -6575,6 +8037,7 @@ select.sel:focus{border-color:var(--accent)}
             var vtx = clipped[c + w];
             allPos.push(vtx.pos[0], vtx.pos[1], vtx.pos[2]);
             allNorm.push(vtx.norm[0], vtx.norm[1], vtx.norm[2]);
+            allOwner.push(fragIdx);
             if (cellBundle) {
               var f = K.cartToFrac(cellBundle.M, vtx.pos);
               sum[0] += f[0]; sum[1] += f[1]; sum[2] += f[2]; count++;
@@ -6584,6 +8047,36 @@ select.sel:focus{border-color:var(--accent)}
         }
       }
     });
+    if (cellBundle && comp) {
+      /* Every fragment reaching this point is a shift-window slice of this
+         SAME component's own periodicity/completion decomposition (Move
+         only repositions an existing fragment, it never creates an
+         unrelated one) -- so any two of them meeting at a shared boundary
+         are always legitimate seam partners, not coincidentally-nearby
+         unrelated geometry. Originally this only ran for a "diagonal"
+         channel (voidIsDiagonalChannel -- one whose periodicity itself
+         isn't axis-pure), because that was the first case found to need
+         it; but a channel with pure single-axis periodicity plus separate
+         completion axes (e.g. periodic along c, completed along a and b --
+         ZIF-68's own large channel) stitches together just as many
+         independently-clipped shift-window fragments, and needs the exact
+         same seam weld for the exact same reason (a genuine sub-0.05-A
+         seam crack between two adjacent shift windows -- NOT the six
+         small mis-seamed slivers this channel also shows near its own
+         c=0/c=1 boundary; those are a different problem, fixed just
+         above this weld by voidSnapStraySliversOntoMain instead, with
+         voidDropSmallIslands as the last-resort fallback below). */
+      voidSnapStraySliversOntoMain(allPos, allIdx, voidLatticeVectors(cellBundle.M), VOID_SLIVER_SNAP_TOL);
+      var welded = voidWeldConsolidatedSeam(allPos, allNorm, allIdx, allOwner);
+      allPos = welded.positions; allNorm = welded.normals; allIdx = welded.indices;
+    }
+    var cleaned = voidDropSmallIslands(allPos, allNorm, allIdx, VOID_ISLAND_DROP_FRACTION);
+    if (cleaned.droppedTriCount) {
+      var dropMsg = voidCompLabel(compId) + ": dropped " + cleaned.droppedTriCount + " small disconnected surface triangle(s) that never joined the main piece (probe radius " + state.probeRadius.toFixed(2) + " " + U.ang + " may be right at the edge of closing a narrow neck there).";
+      state._voidLastWarnings = (state._voidLastWarnings || []).concat([dropMsg]);
+      setStatus(dropMsg, false);
+    }
+    allPos = cleaned.positions; allNorm = cleaned.normals; allIdx = cleaned.indices;
     state.voidMergedGeometry[compId] = { positions: allPos, normals: allNorm, indices: allIdx, centroid: count ? [sum[0] / count, sum[1] / count, sum[2] / count] : null };
     state.voidConsolidated[compId] = true;
     allKeys.forEach(function (k) { delete state.voidFragmentMove[k]; delete state.voidFragmentVisible[k]; delete state.voidSelectedFragments[k]; });
@@ -6599,11 +8092,42 @@ select.sel:focus{border-color:var(--accent)}
      move = T - s for every fragment collapses all of them onto the SAME
      totalShift = T, which is exactly what re-tiles their complementary
      clipped views back into one seamless whole (see this file's own
-     Consolidate, which relies on the identical mechanism). T is chosen only
-     on the component's own completion axes (never its periodicity axis --
-     sliding along an infinite channel has no notion of "closer to the
-     origin") by rounding the component's own native-frame centroid to the
-     nearest integer per axis; a tie at exactly n+0.5 breaks toward the
+     Consolidate, which relies on the identical mechanism).
+     KNOWN LIMITATION, investigated and deliberately left as-is: this
+     formula does NOT correctly complete a component that needs three or
+     more shift windows along the SAME completion axis (as opposed to just
+     one besides the shift=0 reference) -- confirmed directly on ZIF-68 at
+     probe radius 1.0 A, where its large channel turns 2D-periodic (b AND c
+     at once) and needs shift -1, 0 AND +1 along its remaining completion
+     axis a. There, this formula leaves the -1 and +1 windows sitting at
+     their own raw, untranslated positions instead of folding them onto the
+     reference window -- one spills far past a=0, the other stops short of
+     a=1. The mathematically-obvious-looking fix (move = T alone, so offset
+     = shift + T folds every window onto the same [T, T+1) range regardless
+     of how many there are) was tried and reverted: it broke the ordinary,
+     heavily-tested two-window case instead (confirmed on ZIF-68 at probe
+     1.2/1.5 A -- its large channel needs exactly one extra window on each
+     of a and b, four total): folding each of those four fragments
+     independently into the same window turned one connected surface into
+     four disconnected copies. That case's four fragments apparently rely
+     on being left at their OWN native relative positions (this formula's
+     actual effect: offset always collapses to the same T for every
+     fragment, i.e. no per-fragment translation at all, only a shared
+     recentring) to correctly abut each other where their raw, undiscovered
+     content already meets -- they are not simple repeats of one shape
+     needing a fold, unlike the probe-1.0 case. Since "translate" and
+     "don't translate" are each independently correct for one real,
+     verified case and wrong for the other, and this two-or-more-windows
+     scenario is otherwise rare (needs an unusually small probe radius, by
+     the user's own account not one they'd normally choose), the safer
+     choice is to leave the formula that's actually been validated across
+     every other tested structure in place, and accept the probe-1.0-class
+     case as a known, narrow limitation rather than trade a common-case
+     regression for an uncommon-case fix. T is chosen only on the
+     component's own completion axes (never its periodicity axis -- sliding
+     along an infinite channel has no notion of "closer to the origin") by
+     rounding the component's own native-frame centroid to the nearest
+     integer per axis; a tie at exactly n+0.5 breaks toward the
      higher-numbered cell (JS Math.round's own convention, applied here on
      purpose as a single, explainable default) rather than needing a special
      case. */
@@ -6614,9 +8138,31 @@ select.sel:focus{border-color:var(--accent)}
     if (!cellBundle) return;
     var frags = Object.keys(state.voidFragments).filter(function (k) { return state.voidFragments[k].compId === compId; }).map(function (k) { return state.voidFragments[k]; });
     if (frags.length < 2) return;
+    var idxAx = { a: 0, b: 1, c: 2 };
+    if (voidIsDiagonalChannel(comp)) {
+      /* Diagonal-channel fragments are disjoint mesh ISLANDS (see
+         voidComputeShiftIslands), not distinct shift-windows of one shared
+         mesh, so the shift-window trick below (T - frag.shift) can't apply
+         -- every island already carries frag.shift = [0,0,0]. Correctly
+         reassembling them needs, for each pair of islands that were cut
+         apart at a shared cell face, the exact lattice vector that brings
+         those two cut edges back into contact -- NOT a per-fragment
+         independently-rounded centroid (breaks the islands' existing
+         relative alignment) and NOT a single common translation applied to
+         all of them (confirmed directly: the 4 islands are already mutually
+         disconnected even before any move, so recentering the whole group
+         rigidly can never join them). Both were tried and rejected this
+         session. Correctly computing the per-pair alignment is a real,
+         not-yet-solved problem -- until it is, leave this a no-op here
+         (matching this function's own original behaviour) rather than
+         apply a translation that LOOKS like it did something but doesn't
+         actually reconnect anything; the user's own manual Move, applied to
+         each independently-selectable fragment, is the reliable path for
+         now. */
+      return;
+    }
     var axes = voidActiveCompletionAxes(comp, cellBundle);
     if (!axes.length) return;
-    var idxAx = { a: 0, b: 1, c: 2 };
     var sum = [0, 0, 0], n = comp.vertices.length;
     comp.vertices.forEach(function (v) { sum[0] += v.pos[0]; sum[1] += v.pos[1]; sum[2] += v.pos[2]; });
     var f0 = K.cartToFrac(cellBundle.M, [sum[0] / n, sum[1] / n, sum[2] / n]);
@@ -6990,6 +8536,7 @@ select.sel:focus{border-color:var(--accent)}
           var network = VoidNet.analyze(rawAtoms, voidCellBundle(), {});
           var preMerge = VoidNet.classify(network.graph, state.probeRadius);
           components = mergeDuplicateComponents(preMerge, state.cifFracToCart);
+          computeStabilityLimits(components, network.graph);
           state._voidPaddedAtoms = network.paddedAtoms;
           state._voidLastWarnings = network.warnings;
         } else {
@@ -6998,6 +8545,7 @@ select.sel:focus{border-color:var(--accent)}
           var preMerge2 = VoidNet.classify(graph, state.probeRadius);
           components = filterEnclosedComponents(preMerge2, rawAtoms, state.probeRadius);
           components.forEach(function (c, i) { c.id = i; });
+          computeStabilityLimits(components, null); /* Option 2 (grown atoms only) has no periodic images -- see computeStabilityLimits' own comment */
           state._voidPaddedAtoms = rawAtoms;
           state._voidLastWarnings = [];
         }
@@ -7420,6 +8968,7 @@ select.sel:focus{border-color:var(--accent)}
     if (state.atomEditUiMode === "create") { createAtomAtClick(clientX, clientY); return; }
     var hit = resolveClickTarget(clientX, clientY);
     if (!hit) return;
+    if (hit.atom) { state.lastClickedAtomUid = hit.atom.uid; updateSelectionInfo(); }
     if (state.bondEditMode) {
       if (hit.atom) handleBondEditClick(hit.atom);
       return;
@@ -7791,6 +9340,28 @@ select.sel:focus{border-color:var(--accent)}
     if (reassignElBtn) reassignElBtn.disabled = (c.host + c.guest === 0);
     var copyAtomSettingsBtn2 = document.getElementById("copyAtomSettingsBtn");
     if (copyAtomSettingsBtn2) copyAtomSettingsBtn2.disabled = (c.host + c.guest !== 1);
+    var lastClickedEl = document.getElementById("lastClickedInfo");
+    if (lastClickedEl) {
+      /* Independent of the selection summary below: tracks whichever atom
+         was most recently CLICKED (any click, any modifier, toggled on or
+         off), not "whichever atom happens to be selected" -- the two only
+         coincide for a plain single-atom click. Looked up by uid rather than
+         holding the atom object directly, since a deleted/reloaded atom's
+         object may still exist in memory but no longer represent anything
+         real; a uid that no longer resolves just means nothing is shown. */
+      var lc = null;
+      if (state.lastClickedAtomUid !== null) {
+        var pool = (state.atoms || []).concat(state.guestAtoms || []);
+        for (var li = 0; li < pool.length; li++) { if (pool[li].uid === state.lastClickedAtomUid) { lc = pool[li]; break; } }
+      }
+      if (!lc) { lastClickedEl.innerHTML = ""; }
+      else {
+        var lcHtml = "<div class='rrow'><span>Last clicked: " + lc.el + "</span></div>";
+        if (state.isCif && lc.fx !== undefined) lcHtml += "<div class='rrow dim'><span>fractional</span><b>" + fmt(lc.fx, 4) + " " + fmt(lc.fy, 4) + " " + fmt(lc.fz, 4) + "</b></div>";
+        lcHtml += "<div class='rrow dim'><span>Cartesian / " + U.ang + "</span><b>" + fmt(lc.x, 3) + " " + fmt(lc.y, 3) + " " + fmt(lc.z, 3) + "</b></div>";
+        lastClickedEl.innerHTML = lcHtml;
+      }
+    }
     var el2 = document.getElementById("selInfo"); if (!el2) return;
     var s = getSelectedAtomObjects();
     if (!s.length) { el2.innerHTML = "<div class='dim'>No atoms selected.</div>"; return; }
@@ -8892,6 +10463,7 @@ select.sel:focus{border-color:var(--accent)}
       sprite.position.set(corner[0], corner[1], corner[2]);
       return sprite;
     }
+    updateClipPlane(); /* fresh unit cell edges/labels just got created -- reapply the current clip plane to them */
   }
   function populateSymOpMatrixDom(op) {
     var spinEls = document.querySelectorAll("#symOpMatrixGrid .matspin");
@@ -9264,8 +10836,10 @@ select.sel:focus{border-color:var(--accent)}
     var loadCenteringSel = document.getElementById("centeringModeSelect");
     if (loadCenteringSel) {
       loadCenteringSel.value = "all";
-      var loadCenteringApplyBtn = loadCenteringSel.parentElement ? loadCenteringSel.parentElement.querySelector("button") : null;
+      var loadCenteringApplyBtn = document.getElementById("centeringApplyBtn");
       if (loadCenteringApplyBtn) loadCenteringApplyBtn.style.display = "none";
+      var loadCenteringFracApplyBtn = document.getElementById("centeringFracApplyBtn");
+      if (loadCenteringFracApplyBtn) loadCenteringFracApplyBtn.disabled = true;
     }
     /* loading a host CIF always starts fresh on a new structure to build out
        by symmetry, so any previous guest is cleared along with the old host
@@ -9851,7 +11425,17 @@ select.sel:focus{border-color:var(--accent)}
         rimEnabled: state.rimEnabled, rimIntensity: state.rimIntensity,
         atomRoughness: state.atomRoughness, atomMetalness: state.atomMetalness, atomReflectivity: state.atomReflectivity,
         labelSize: state.labelSize, labelColor: state.labelColor, labelHalo: state.labelHalo, labelFont: state.labelFont,
-        dontWarnAviSize: state.dontWarnAviSize
+        dontWarnAviSize: state.dontWarnAviSize,
+        clipPlaneOffset: state.clipPlaneOffset, clipPlaneInvert: state.clipPlaneInvert,
+        clipPlaneMode: state.clipPlaneMode, clipPlaneH: state.clipPlaneH, clipPlaneK: state.clipPlaneK, clipPlaneL: state.clipPlaneL,
+        clipPlaneApplyHost: state.clipPlaneApplyHost, clipPlaneApplyGuest: state.clipPlaneApplyGuest,
+        clipPlaneApplyVoid: state.clipPlaneApplyVoid, clipPlaneApplyMolSurface: state.clipPlaneApplyMolSurface,
+        clipPlaneApplyUnitCell: state.clipPlaneApplyUnitCell, clipPlaneHklConvention: state.clipPlaneHklConvention
+        /* clipPlaneEnabled deliberately NOT persisted -- starting a fresh
+           session with part of the structure invisible for no visible
+           reason (until the user finds the toggle) is worse than just
+           always starting off; the slider position/invert choice are
+           still remembered for whenever it's turned back on. */
       };
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(payload));
     } catch (e) { /* localStorage unavailable or full -- settings just won't persist this session */ }
@@ -9886,6 +11470,18 @@ select.sel:focus{border-color:var(--accent)}
       if (typeof data.labelHalo === "boolean") state.labelHalo = data.labelHalo;
       if (typeof data.labelFont === "string") state.labelFont = data.labelFont;
       if (typeof data.dontWarnAviSize === "boolean") state.dontWarnAviSize = data.dontWarnAviSize;
+      if (data.hasOwnProperty("clipPlaneOffset")) state.clipPlaneOffset = clamp(data.clipPlaneOffset, 0, 100, state.clipPlaneOffset);
+      if (typeof data.clipPlaneInvert === "boolean") state.clipPlaneInvert = data.clipPlaneInvert;
+      if (data.clipPlaneMode === "view" || data.clipPlaneMode === "hkl") state.clipPlaneMode = data.clipPlaneMode;
+      if (data.hasOwnProperty("clipPlaneH") && isFinite(data.clipPlaneH)) state.clipPlaneH = data.clipPlaneH;
+      if (data.hasOwnProperty("clipPlaneK") && isFinite(data.clipPlaneK)) state.clipPlaneK = data.clipPlaneK;
+      if (data.hasOwnProperty("clipPlaneL") && isFinite(data.clipPlaneL)) state.clipPlaneL = data.clipPlaneL;
+      if (typeof data.clipPlaneApplyHost === "boolean") state.clipPlaneApplyHost = data.clipPlaneApplyHost;
+      if (typeof data.clipPlaneApplyGuest === "boolean") state.clipPlaneApplyGuest = data.clipPlaneApplyGuest;
+      if (typeof data.clipPlaneApplyVoid === "boolean") state.clipPlaneApplyVoid = data.clipPlaneApplyVoid;
+      if (typeof data.clipPlaneApplyMolSurface === "boolean") state.clipPlaneApplyMolSurface = data.clipPlaneApplyMolSurface;
+      if (typeof data.clipPlaneApplyUnitCell === "boolean") state.clipPlaneApplyUnitCell = data.clipPlaneApplyUnitCell;
+      if (data.clipPlaneHklConvention === "reciprocal" || data.clipPlaneHklConvention === "direct") state.clipPlaneHklConvention = data.clipPlaneHklConvention;
       /* every light effectively off would leave only the fixed 0.6-intensity
          hemisphere light -- not literally invisible, but dim enough on some
          monitors to look like nothing loaded. Force at least one real light
@@ -10463,9 +12059,10 @@ select.sel:focus{border-color:var(--accent)}
       if (!grid || !grid.accessibleCount) return;
       var field = voidFieldFnFromGrid(grid);
       var boxMin = grid.bboxMin;
-      var boxMax = [boxMin[0] + (grid.nx - 1) * grid.h, boxMin[1] + (grid.ny - 1) * grid.h, boxMin[2] + (grid.nz - 1) * grid.h];
+      var ghx = grid.hx || grid.h, ghy = grid.hy || grid.h, ghz = grid.hz || grid.h;
+      var boxMax = [boxMin[0] + (grid.nx - 1) * ghx, boxMin[1] + (grid.ny - 1) * ghy, boxMin[2] + (grid.nz - 1) * ghz];
       var iso;
-      try { iso = IsoSurface.extract(field, boxMin, boxMax, grid.h, state.probeRadius); } catch (e) { return; }
+      try { iso = IsoSurface.extract(field, boxMin, boxMax, { hx: ghx, hy: ghy, hz: ghz }, state.probeRadius); } catch (e) { return; }
       if (!iso.positions.length) return;
       out[comp.id] = { positions: plainArrayFrom(iso.positions), normals: plainArrayFrom(iso.normals), indices: plainArrayFrom(iso.indices) };
     });
@@ -10606,7 +12203,7 @@ select.sel:focus{border-color:var(--accent)}
        atoms" rather than keeping whatever mode a previous structure had --
        otherwise a leftover "Selected atoms" freezes recomputeViewOffset()
        into silently doing nothing for the new structure. */
-    state.centeringMode = (data.centeringMode === "all" || data.centeringMode === "visible" || data.centeringMode === "selected" || data.centeringMode === "unitcell") ? data.centeringMode : "all";
+    state.centeringMode = (data.centeringMode === "all" || data.centeringMode === "visible" || data.centeringMode === "selected" || data.centeringMode === "unitcell" || data.centeringMode === "fractional") ? data.centeringMode : "all";
 
     /* deliberately NOT restored from the file: state.radii/defaultColors are
        a global, browser-persisted preference (set on the Elements page, kept
@@ -10640,8 +12237,10 @@ select.sel:focus{border-color:var(--accent)}
     var centeringModeSel = document.getElementById("centeringModeSelect");
     if (centeringModeSel) {
       centeringModeSel.value = state.centeringMode;
-      var centeringApplyBtnEl = centeringModeSel.parentElement ? centeringModeSel.parentElement.querySelector("button") : null;
+      var centeringApplyBtnEl = document.getElementById("centeringApplyBtn");
       if (centeringApplyBtnEl) centeringApplyBtnEl.style.display = (state.centeringMode === "selected") ? "" : "none";
+      var centeringFracApplyBtnEl = document.getElementById("centeringFracApplyBtn");
+      if (centeringFracApplyBtnEl) centeringFracApplyBtnEl.disabled = state.centeringMode !== "fractional";
     }
 
     if (typeof data.showHost === "boolean") state.showHost = data.showHost;
@@ -11427,42 +13026,6 @@ select.sel:focus{border-color:var(--accent)}
     scaleBgRow.appendChild(bgSw);
     cifDispC.appendChild(scaleBgRow);
 
-    var centeringRow = el("div", "ctl-inline");
-    centeringRow.appendChild(el("label", "plain", "Centering"));
-    var centeringSel = document.createElement("select"); centeringSel.className = "sel"; centeringSel.id = "centeringModeSelect";
-    var centeringOpts = [["all", "All atoms"], ["visible", "Visible atoms"], ["selected", "Selected atoms"], ["unitcell", "Unit cell centre"]];
-    for (var coi = 0; coi < centeringOpts.length; coi++) {
-      var centeringOpt = document.createElement("option");
-      centeringOpt.value = centeringOpts[coi][0]; centeringOpt.textContent = centeringOpts[coi][1];
-      if (centeringOpts[coi][0] === state.centeringMode) centeringOpt.selected = true;
-      centeringSel.appendChild(centeringOpt);
-    }
-    centeringRow.appendChild(centeringSel);
-    var centeringApplyBtn = document.createElement("button"); centeringApplyBtn.type = "button"; centeringApplyBtn.className = "btn ghost"; centeringApplyBtn.textContent = "Apply";
-    centeringApplyBtn.style.display = (state.centeringMode === "selected") ? "" : "none";
-    centeringApplyBtn.addEventListener("click", applySelectedAtomsCentering);
-    centeringRow.appendChild(centeringApplyBtn);
-    centeringSel.addEventListener("change", function () {
-      if (centeringSel.value === "unitcell" && (!state.isCif || !state.cifFracToCart)) {
-        setStatus("Load a CIF file first.", true);
-        centeringSel.value = state.centeringMode;
-        return;
-      }
-      state.centeringMode = centeringSel.value;
-      if (state.centeringMode === "selected") {
-        /* frozen at whatever the current rotation centre already is, until
-           Apply is pressed -- switching to this mode does not itself
-           recentre anything */
-        centeringApplyBtn.style.display = "";
-      } else {
-        centeringApplyBtn.style.display = "none";
-        recomputeViewOffset();
-        renderStructure();
-      }
-      setStatus("Centering set to " + centeringSel.options[centeringSel.selectedIndex].textContent + ".", false);
-    });
-    cifDispC.appendChild(centeringRow);
-
     var dispSelRow = el("div", "btnrow");
     button(dispSelRow, "Select all", "ghost", selectAllVisible);
     button(dispSelRow, "Clear selection", "ghost", clearSelection);
@@ -11536,6 +13099,131 @@ select.sel:focus{border-color:var(--accent)}
     button(labelUnfixBtnRow, "Unfix all labels", "ghost", function () { unfixAllLabels(); });
     button(labelUnfixBtnRow, "Unfix selected", "ghost", function () { unfixSelectedLabels(); });
     labelsBody.appendChild(labelUnfixBtnRow);
+
+    var centeringBody = subsection(cifDispC, "Centering", false);
+    var centeringRow = el("div", "ctl-inline");
+    centeringRow.appendChild(el("label", "plain", "Centering"));
+    var centeringSel = document.createElement("select"); centeringSel.className = "sel"; centeringSel.id = "centeringModeSelect";
+    var centeringOpts = [["all", "All atoms"], ["visible", "Visible atoms"], ["selected", "Selected atoms"], ["unitcell", "Unit cell centre"], ["fractional", "Fractional coordinates"]];
+    for (var coi = 0; coi < centeringOpts.length; coi++) {
+      var centeringOpt = document.createElement("option");
+      centeringOpt.value = centeringOpts[coi][0]; centeringOpt.textContent = centeringOpts[coi][1];
+      if (centeringOpts[coi][0] === state.centeringMode) centeringOpt.selected = true;
+      centeringSel.appendChild(centeringOpt);
+    }
+    centeringRow.appendChild(centeringSel);
+    var centeringApplyBtn = document.createElement("button"); centeringApplyBtn.type = "button"; centeringApplyBtn.className = "btn ghost"; centeringApplyBtn.textContent = "Apply";
+    centeringApplyBtn.id = "centeringApplyBtn";
+    centeringApplyBtn.style.display = (state.centeringMode === "selected") ? "" : "none";
+    centeringApplyBtn.addEventListener("click", applySelectedAtomsCentering);
+    centeringRow.appendChild(centeringApplyBtn);
+    centeringBody.appendChild(centeringRow);
+
+    var centeringFracWrap = el("div", "ctl");
+    centeringFracWrap.appendChild(el("label", null, "Fractional coordinates (x y z)"));
+    var centeringFracRow = el("div", "hklrow");
+    var centeringFracXInp = document.createElement("input"); centeringFracXInp.type = "number"; centeringFracXInp.step = "0.001"; centeringFracXInp.value = "0"; centeringFracXInp.className = "num"; centeringFracXInp.id = "centeringFracX";
+    var centeringFracYInp = document.createElement("input"); centeringFracYInp.type = "number"; centeringFracYInp.step = "0.001"; centeringFracYInp.value = "0"; centeringFracYInp.className = "num"; centeringFracYInp.id = "centeringFracY";
+    var centeringFracZInp = document.createElement("input"); centeringFracZInp.type = "number"; centeringFracZInp.step = "0.001"; centeringFracZInp.value = "0"; centeringFracZInp.className = "num"; centeringFracZInp.id = "centeringFracZ";
+    [centeringFracXInp, centeringFracYInp, centeringFracZInp].forEach(function (inp) { inp.style.width = "70px"; }); /* wide enough for a signed 3-decimal value, narrow enough (with the mini Apply button below) to fit one line in the sidebar */
+    centeringFracRow.appendChild(centeringFracXInp); centeringFracRow.appendChild(centeringFracYInp); centeringFracRow.appendChild(centeringFracZInp);
+    var centeringFracApplyBtn = document.createElement("button"); centeringFracApplyBtn.type = "button"; centeringFracApplyBtn.className = "btn mini"; centeringFracApplyBtn.textContent = "Apply";
+    centeringFracApplyBtn.id = "centeringFracApplyBtn";
+    centeringFracApplyBtn.disabled = state.centeringMode !== "fractional";
+    centeringFracApplyBtn.addEventListener("click", function () {
+      applyFractionalCentering(parseFloat(centeringFracXInp.value), parseFloat(centeringFracYInp.value), parseFloat(centeringFracZInp.value));
+    });
+    centeringFracRow.appendChild(centeringFracApplyBtn);
+    centeringFracWrap.appendChild(centeringFracRow);
+    centeringBody.appendChild(centeringFracWrap);
+
+    centeringSel.addEventListener("change", function () {
+      if (centeringSel.value === "unitcell" && (!state.isCif || !state.cifFracToCart)) {
+        setStatus("Load a CIF file first.", true);
+        centeringSel.value = state.centeringMode;
+        return;
+      }
+      state.centeringMode = centeringSel.value;
+      centeringFracApplyBtn.disabled = state.centeringMode !== "fractional";
+      if (state.centeringMode === "selected") {
+        /* frozen at whatever the current rotation centre already is, until
+           Apply is pressed -- switching to this mode does not itself
+           recentre anything */
+        centeringApplyBtn.style.display = "";
+      } else {
+        centeringApplyBtn.style.display = "none";
+        if (state.centeringMode !== "fractional") { recomputeViewOffset(); renderStructure(); }
+      }
+      setStatus("Centering set to " + centeringSel.options[centeringSel.selectedIndex].textContent + ".", false);
+    });
+
+    var clipBody = subsection(cifDispC, "Clipping Plane", false);
+    var clipCtl = checkboxSlider(clipBody, "Enabled", state.clipPlaneEnabled, function (v) {
+      state.clipPlaneEnabled = v; updateClipPlane(); persistPreferences();
+    }, 0, 100, 1, state.clipPlaneOffset, function (v) {
+      state.clipPlaneOffset = v; updateClipPlane(); persistPreferences();
+    }, "cut");
+    clipCtl.checkbox.id = "clipPlaneEnabledTg"; clipCtl.range.id = "clipPlaneOffsetRange";
+    var clipInvertTg = toggle(clipBody, "Invert (clip the far side instead)", state.clipPlaneInvert, function (v) {
+      state.clipPlaneInvert = v; updateClipPlane(); persistPreferences();
+    });
+    clipInvertTg.id = "clipPlaneInvertTg";
+    clipBody.appendChild(el("hr", "divider"));
+    var clipApplyLbl = el("div", "hint"); clipApplyLbl.textContent = "Apply to:";
+    clipBody.appendChild(clipApplyLbl);
+    var clipApplyRow1 = el("div", "toggle-row2");
+    var clipApplyHostTg = toggle(clipApplyRow1, "Host", state.clipPlaneApplyHost, function (v) {
+      state.clipPlaneApplyHost = v; updateClipPlane(); persistPreferences();
+    });
+    clipApplyHostTg.id = "clipPlaneApplyHostTg";
+    var clipApplyGuestTg = toggle(clipApplyRow1, "Guest", state.clipPlaneApplyGuest, function (v) {
+      state.clipPlaneApplyGuest = v; updateClipPlane(); persistPreferences();
+    });
+    clipApplyGuestTg.id = "clipPlaneApplyGuestTg";
+    clipBody.appendChild(clipApplyRow1);
+    var clipApplyRow2 = el("div", "toggle-row2");
+    var clipApplyVoidTg = toggle(clipApplyRow2, "Voids / channels", state.clipPlaneApplyVoid, function (v) {
+      state.clipPlaneApplyVoid = v; updateClipPlane(); persistPreferences();
+    });
+    clipApplyVoidTg.id = "clipPlaneApplyVoidTg";
+    var clipApplyMolSurfTg = toggle(clipApplyRow2, "Molecular surface", state.clipPlaneApplyMolSurface, function (v) {
+      state.clipPlaneApplyMolSurface = v; updateClipPlane(); persistPreferences();
+    });
+    clipApplyMolSurfTg.id = "clipPlaneApplyMolSurfTg";
+    clipBody.appendChild(clipApplyRow2);
+    var clipApplyRow3 = el("div", "toggle-row2");
+    var clipApplyUnitCellTg = toggle(clipApplyRow3, "Unit cell", state.clipPlaneApplyUnitCell, function (v) {
+      state.clipPlaneApplyUnitCell = v; updateClipPlane(); persistPreferences();
+    });
+    clipApplyUnitCellTg.id = "clipPlaneApplyUnitCellTg";
+    clipBody.appendChild(clipApplyRow3);
+    clipBody.appendChild(el("hr", "divider"));
+    var clipModeRow = radioRow(clipBody, "clipPlaneMode", [["view", "Perpendicular to view"], ["hkl", "Perpendicular to (hkl)"]], state.clipPlaneMode, function (v) {
+      state.clipPlaneMode = v; updateClipPlaneHklVisibility(); updateClipPlane(); persistPreferences();
+    }, true);
+    var clipHklWrap = el("div", "ctl");
+    clipHklWrap.appendChild(el("label", null, "(h k l)"));
+    var clipHklRow = el("div", "hklrow");
+    var clipHInp = document.createElement("input"); clipHInp.type = "number"; clipHInp.step = "1"; clipHInp.value = String(state.clipPlaneH); clipHInp.className = "num";
+    var clipKInp = document.createElement("input"); clipKInp.type = "number"; clipKInp.step = "1"; clipKInp.value = String(state.clipPlaneK); clipKInp.className = "num";
+    var clipLInp = document.createElement("input"); clipLInp.type = "number"; clipLInp.step = "1"; clipLInp.value = String(state.clipPlaneL); clipLInp.className = "num";
+    [[clipHInp, "clipPlaneH"], [clipKInp, "clipPlaneK"], [clipLInp, "clipPlaneL"]].forEach(function (pair) {
+      pair[0].addEventListener("input", function () {
+        var v = parseFloat(pair[0].value);
+        if (!isFinite(v)) return;
+        state[pair[1]] = v; updateClipPlane(); persistPreferences();
+      });
+    });
+    clipHklRow.appendChild(clipHInp); clipHklRow.appendChild(clipKInp); clipHklRow.appendChild(clipLInp);
+    clipHklWrap.appendChild(clipHklRow);
+    radioRow(clipHklWrap, "clipPlaneHklConvention",
+      [["reciprocal", "Plane normal (hkl)"], ["direct", "Direction [hkl] (as View along)"]],
+      state.clipPlaneHklConvention, function (v) {
+        state.clipPlaneHklConvention = v; updateClipPlane(); persistPreferences();
+      }, true);
+    clipBody.appendChild(clipHklWrap);
+    function updateClipPlaneHklVisibility() { clipHklWrap.style.display = state.clipPlaneMode === "hkl" ? "" : "none"; }
+    updateClipPlaneHklVisibility();
 
     var autorotateBody = subsection(cifDispC, "Autorotate", false, function (isOpen) { if (!isOpen) stopAutoRotate(); });
     var autoRotateAxisRow = radioRow(autorotateBody, "autoRotateAxisDir",
@@ -11867,7 +13555,7 @@ select.sel:focus{border-color:var(--accent)}
     voidOpacitySlider.id = "voidOpacitySlider";
     var voidColorLinkRow = el("div"); voidColorLinkRow.id = "voidColorLinkRow"; voidChannelsC.appendChild(voidColorLinkRow);
     var voidTable = document.createElement("table"); voidTable.id = "voidResultsTable";
-    voidTable.innerHTML = "<thead><tr><th></th><th>ID</th><th>Type</th><th>Crit. R (" + U.ang + ")</th><th>Vol. (" + U.ang + U.cube + ")</th><th>Colour</th><th></th></tr></thead><tbody id=\"voidResultsBody\"></tbody>";
+    voidTable.innerHTML = "<thead><tr><th></th><th>ID</th><th>Type</th><th title=\"For a channel: the largest probe radius it would still be recognized as a channel at. For a void: the probe radius below which it would connect to a periodic image of itself and become a channel.\">Limit (" + U.ang + ")</th><th>Vol. (" + U.ang + U.cube + ")</th><th>Colour</th><th></th></tr></thead><tbody id=\"voidResultsBody\"></tbody>";
     voidChannelsC.appendChild(voidTable);
     var voidMoveCopyC = subsection(vcC, "Move/Copy", false);
     voidMoveCopyC.parentElement.id = "voidMoveCopySubsec";
@@ -11897,6 +13585,7 @@ select.sel:focus{border-color:var(--accent)}
     buildMolSurfaceTable();
 
     var sgC = section(left, "Selection & geometry", false);
+    var lastClickedInfo = el("div", "readout"); lastClickedInfo.id = "lastClickedInfo"; sgC.appendChild(lastClickedInfo);
     var selInfo = el("div", "readout"); selInfo.id = "selInfo"; selInfo.innerHTML = "<div class='dim'>No atoms selected.</div>"; sgC.appendChild(selInfo);
     var sgSelRow = el("div", "btnrow");
     button(sgSelRow, "Select all", "ghost", selectAllVisible);
@@ -12366,9 +14055,10 @@ select.sel:focus{border-color:var(--accent)}
       "<p>The <b>Metadata</b> tab, at the top of Structure, is a read-only summary of a loaded CIF's own crystallographic data: file name, chemical formula, space group symbol (typeset with italic letters and proper subscripts), unit cell parameters and volume, density, temperature (\"unknown\" if the CIF doesn't record one), and the number of atoms in the asymmetric unit -- followed by how many of those are anisotropic and how many of those are NPD (non-positive-definite -- a refinement warning, not a display error), each row shown only when its count is above zero. A cell angle exactly fixed at 90 or 120 degrees by the structure's own symmetry (not just numerically close) is shown as a plain \"90\"/\"120\", with no decimal places, rather than the two decimal places used for a genuinely free angle. Nothing here can be edited; it just reads back what the CIF itself contains.</p>" +
       "<h3>Void / channel analysis</h3>" +
       "<p>This section finds the empty space -- voids (finite pockets) and channels (space that repeats endlessly along one cell axis) -- inside a loaded structure, using van der Waals radii and a probe radius exactly the way <b>Structure &gt; Edit atoms</b>' own molecular volume calculation does, but reporting the space itself rather than the atoms' own volume. Guest atoms are always excluded from the calculation in both modes, so a guest sitting in a cavity doesn't hide it. <b>Fill unit cell</b> silently completes the whole unit cell from the CIF's own symmetry and searches that, regardless of how much is actually grown on screen. <b>Use grown atoms only</b> searches only whatever host atoms are currently displayed (<b>Structure &gt; Grow</b>) -- no unit cell boundary, no periodicity -- so growing more or less of the structure changes what it finds; a probe that can escape the grown structure entirely is never reported as an enclosed void.</p>" +
-      "<p><b>Calculate</b> populates the results table (one row per void/channel, with its critical radius, swept volume, and node count) and draws the corresponding surfaces in the 3D view; <b>Clear</b> removes them. Loading a new structure, or a saved project, always clears any previous void/channel results automatically, since they'd no longer match the new atoms. <b>Crit. R</b> is the critical radius: the largest probe radius that still finds this exact void/channel as one connected piece of space -- the radius of the tightest bottleneck (the narrowest point of clearance between atoms) that a probe has to pass through to reach every corner of it. Raise the probe radius above a component's own Crit. R and it either shrinks, splits into smaller pieces, or disappears from the results entirely, since the bottleneck that once let a probe of that size through no longer does.</p>" +
+      "<p><b>Calculate</b> populates the results table (one row per void/channel, with its stability limit, swept volume, and node count) and draws the corresponding surfaces in the 3D view; <b>Clear</b> removes them. Loading a new structure, or a saved project, always clears any previous void/channel results automatically, since they'd no longer match the new atoms. <b>Limit</b> reports, for each component, how sensitive its classification (void vs. channel) is to the probe radius actually used, in whichever direction is meaningful for that type: for a <b>channel</b>, shown as \"&le; R\" -- the largest probe radius it would still be recognized as this same connected channel at; raise the probe radius above it and part of the channel gets pruned away, turning it into separate void(s) or removing it entirely. For a <b>void</b>, shown as \"&ge; R\" -- the probe radius below which it would connect to a periodic image of itself and become a channel instead; a dash means it stays a void all the way down to 0.05 &Aring;, the practical floor tested. In <b>Use grown atoms only</b> mode this is always a dash (not applicable), since that mode has no periodic images for anything to connect to. This replaced an earlier \"critical radius\" reading (the single narrowest clearance found anywhere in the whole connected shape) that, while a faithful measure of the algorithm's own pruning sensitivity, routinely got dragged down by a minor side pocket or wall crevice with no bearing on whether a probe can actually traverse the main channel -- Limit answers the more practically useful question of when the reported classification itself would change.</p>" +
       "<p>The reported volume always has some grid-discretization error baked in -- a swept volume is measured by counting grid cells, so a coarser <b>grid resolution</b> systematically undercounts, more so for a small cavity than a large one. <b>Accurate volumes (extrapolated, slower)</b> corrects for this: instead of measuring once at the chosen grid resolution, it measures each component at six progressively finer spacings and extrapolates to what the volume would be at an (unreachable) zero spacing -- the same value a rolling-probe program like MSRoll reports directly, without needing a grid at all. The Vol. column then shows that extrapolated value with its own uncertainty (e.g. \"110.7 &plusmn;1.6\"), and the calculation takes noticeably longer -- six grid builds per component instead of one. Leave it unchecked for a quick look; turn it on when the number itself is what matters.</p>" +
       "<p><b>Assemble &amp; Consolidate</b> (checked by default) does automatically, for every component Calculate finds, what the Fragments panel's own Assemble and Consolidate buttons do by hand: bring a void/channel's scattered edge/corner fragments back together nearest the origin, then bake that arrangement into one permanent piece. Uncheck it to leave every component as its individual, still-movable fragments instead.</p>" +
+      "<p><b>Two known limitations</b>, not yet resolved: a very small void (just a handful of nodes) can show a noticeably different reported volume between otherwise symmetry-equivalent copies of itself -- this is grid-discretization noise, not a real difference, and disproportionately affects tiny voids; switch on <b>Accurate volumes</b> to get numbers that agree with each other as they should. Separately, a channel periodic along more than one non-Cartesian-pure axis at once (i.e. a genuinely oblique/triclinic cell where more than one cell angle is far from 90&deg;) can show a real, visible seam where two Fragments-panel pieces are joined end-on along the channel's own length, and may also need the Fragments panel used manually rather than relying on Assemble &amp; Consolidate -- a harder grid-periodicity limitation, not something adjusting settings will fix.</p>" +
       "<p>A void or channel sitting at a cell edge or corner is shown as several separate <b>fragments</b> -- each one a clipped view of the same underlying shape, positioned so the pieces are exactly complementary. The <b>Fragments</b> panel lists them grouped by which void/channel they belong to, with a colour swatch pair (outside/inside) per group and a \"Same colours for all\" option. <b>Move mode</b> and <b>Copy mode</b> (highlighted red while active) let you click fragments or channel copies directly in the 3D view to select them, then reposition (Move) or duplicate by a further lattice translation (Copy) using the vector boxes or the <b>+a/-a/+b/-b/+c/-c</b> nudge buttons; while either mode is active, spacebar and Delete act on that fragment/channel selection instead of the atom selection, and both modes turn off automatically if the Void/Channel Analysis section is collapsed. <b>Assemble</b> does this automatically for a whole void/channel: it moves every one of that component's fragments back onto each other, reconstructing one complete piece at whichever whole-unit-cell position sits closest to the origin (ties broken toward the higher-numbered cell). <b>Consolidate</b> then bakes the currently-visible fragments into one permanent piece, free of the others' movement.</p>";
     document.getElementById("guideBtn").addEventListener("click", function () { document.getElementById("guideModal").classList.add("open"); });
     document.getElementById("guideClose").addEventListener("click", function () { document.getElementById("guideModal").classList.remove("open"); });
@@ -12386,6 +14076,7 @@ select.sel:focus{border-color:var(--accent)}
        unaffected by this. */
     state.videoFormat = (await isMp4EncoderCached()) ? "mp4" : "avi";
     initThree(document.getElementById("viewport")); buildUI(); buildElementsPage(); buildGuide(); wireIO(); buildGuestGroupsUI(); refreshBondCleanupElements();
+    window.__dbg = { state: state, voidCellBundle: voidCellBundle, voidLatticeVectors: voidLatticeVectors, K: K, VoidNet: VoidNet, buildCellModeAtoms: buildCellModeAtoms, mergeDuplicateComponents: mergeDuplicateComponents, runVoidCalculate: runVoidCalculate };
     syncNoAtomsOverlay(); /* nothing loaded yet -- show "No atoms to display" until a structure loads (renderStructure() keeps this in sync from here on) */
     setPseudoOrtho(state.pseudoOrtho); updateFog();
     if (restored) setStatus("Restored your saved element, display, lighting, and material settings. Load a host structure to begin.", false);
@@ -12525,6 +14216,86 @@ select.sel:focus{border-color:var(--accent)}
     };
   }
 
+  /* Deterministic, purely-geometric identity for perturbComponent's tie-break
+     seed -- replaces seeding on padded-array position (arbitrary, breaks
+     periodicity: see the old perturbComponent callsite) or on baseId
+     (periodic-consistent, but still arbitrary across atoms related by a
+     ROTATION rather than a lattice translation -- confirmed on UiO-66.cif,
+     a cubic MOF fed in as a P1 listing with no usable symmetry operators:
+     its 8 crystallographically-identical octant cavities each depend on a
+     near-cospherical tie between the same local ring geometry, and an
+     arbitrary per-atom seed broke that tie a different way at one of the
+     eight, silently closing a real >=1.5 A channel that Mercury confirms is
+     open). A CIF's declared symmetry operators can't be the fix: a user is
+     entitled to hand in the exact same physical structure as a full P1
+     listing with no operators at all, and the space that's actually there
+     doesn't change because of how the atoms were written down. So instead
+     of asking "which declared symop generated this atom", this asks "what
+     does this atom's own local neighbourhood look like" -- a sorted list of
+     (element, distance) to every other atom (through periodic images) within
+     a fixed cutoff, which is invariant under translation AND rotation by
+     construction: two atoms in truly congruent environments -- whether
+     related by a real symmetry operator, an accidental coincidence, or a
+     symop the file never bothered to record -- always produce the same
+     string, hence the same seed, hence the same tie-break, everywhere they
+     occur. Computed once per real (cell 0,0,0) atom; every periodic image
+     inherits its generating atom's seed unchanged (translation invariance
+     falls out for free, same as baseId already gave). */
+  var ATOM_FINGERPRINT_CUTOFF = 6.0; /* Angstrom -- wide enough to capture the
+    immediate coordination sphere plus its own neighbours (enough to tell
+    apart genuinely different local environments) without pulling in atoms
+    far enough away that unrelated, non-symmetric parts of a large structure
+    start coincidentally reporting similar-looking neighbour shells. */
+  function hashString(s) {
+    var h = 0;
+    for (var i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) | 0; }
+    return h;
+  }
+  function computeAtomFingerprints(atoms, cell, cutoff) {
+    var v = latticeVectors(cell);
+    var d = interplanarSpacings(cell);
+    var Sa = Math.max(1, Math.ceil(cutoff / d.da));
+    var Sb = Math.max(1, Math.ceil(cutoff / d.db));
+    var Sc = Math.max(1, Math.ceil(cutoff / d.dc));
+    var cutoff2 = cutoff * cutoff;
+    for (var i = 0; i < atoms.length; i++) {
+      var self = atoms[i];
+      var neighbors = [];
+      for (var n = 0; n < atoms.length; n++) {
+        var a = atoms[n];
+        for (var ci = -Sa; ci <= Sa; ci++) {
+          for (var cj = -Sb; cj <= Sb; cj++) {
+            for (var ck = -Sc; ck <= Sc; ck++) {
+              if (n === i && ci === 0 && cj === 0 && ck === 0) continue;
+              var x = a.x + ci * v.a[0] + cj * v.b[0] + ck * v.c[0];
+              var y = a.y + ci * v.a[1] + cj * v.b[1] + ck * v.c[1];
+              var z = a.z + ci * v.a[2] + cj * v.b[2] + ck * v.c[2];
+              var dx = x - self.x, dy = y - self.y, dz = z - self.z;
+              var dist2 = dx * dx + dy * dy + dz * dz;
+              /* Rounded to 0.01 A (was 0.001 A): confirmed directly on
+                 ZIF-68.cif that two atoms genuinely related by a symmetry
+                 operator -- H4's own copies at baseId 244 and 261 -- can
+                 still disagree on a neighbour's distance by ~0.002 A
+                 (ordinary floating-point accumulation through the symop
+                 matrices, not a real geometric difference), and 3-decimal
+                 rounding was fine enough for that noise to land on
+                 different sides of a rounding boundary (3.719 vs 3.717),
+                 giving two truly-equivalent atoms DIFFERENT fingerprints --
+                 defeating the whole point of this function (see its own
+                 comment above: two atoms in truly congruent environments
+                 must produce the same string). 0.01 A is comfortably above
+                 that noise floor while still far finer than any real
+                 difference between chemically distinct neighbour shells. */
+              if (dist2 <= cutoff2) neighbors.push(a.el + ":" + (Math.round(Math.sqrt(dist2) * 1e2) / 1e2));
+            }
+          }
+        }
+      }
+      neighbors.sort();
+      self.symSeed = hashString(self.el + "|" + neighbors.join("|"));
+    }
+  }
+
   /* atoms: [{x,y,z,fx,fy,fz,r,el,baseId}] -- the full expanded unit cell
      (cell (0,0,0)), already deduped on special positions. cutoff: Angstrom. */
   function buildPaddedAtoms(atoms, cell, cutoff) {
@@ -12550,7 +14321,7 @@ select.sel:focus{border-color:var(--accent)}
             var x = a.x + i * v.a[0] + j * v.b[0] + k * v.c[0];
             var y = a.y + i * v.a[1] + j * v.b[1] + k * v.c[1];
             var z = a.z + i * v.a[2] + j * v.b[2] + k * v.c[2];
-            padded.push({ x: x, y: y, z: z, r: a.r, el: a.el, baseId: a.baseId, ci: i, cj: j, ck: k, real: real });
+            padded.push({ x: x, y: y, z: z, r: a.r, el: a.el, baseId: a.baseId, symSeed: a.symSeed, ci: i, cj: j, ck: k, real: real });
           }
         }
       }
@@ -12569,9 +14340,17 @@ select.sel:focus{border-color:var(--accent)}
      conditioned) when a structure sits far from the coordinate origin or a
      generous padding cutoff stretches coordinates out. */
   function liftPoint(atom, idx, center) {
-    var x = atom.x - center[0] + perturbComponent(idx, 0);
-    var y = atom.y - center[1] + perturbComponent(idx, 1);
-    var z = atom.z - center[2] + perturbComponent(idx, 2);
+    /* symSeed (a hash of the atom's own local, translation/rotation-
+       invariant neighbourhood -- see computeAtomFingerprints) wins whenever
+       it's been computed; idx (this atom's position in the padded array,
+       carrying no geometric meaning at all) is only a fallback for callers
+       that never ran the fingerprint pass, e.g. buildGrownModeAtoms's
+       finite, non-periodic atom lists, where there is no periodic identity
+       for a seed to preserve in the first place. */
+    var seed = (atom.symSeed !== undefined) ? atom.symSeed : idx;
+    var x = atom.x - center[0] + perturbComponent(seed, 0);
+    var y = atom.y - center[1] + perturbComponent(seed, 1);
+    var z = atom.z - center[2] + perturbComponent(seed, 2);
     return [x, y, z, x * x + y * y + z * z - atom.r * atom.r];
   }
 
@@ -13453,6 +15232,7 @@ select.sel:focus{border-color:var(--accent)}
     var cutoff = opts.cutoff || Math.max(8, 4 * maxR);
     var warnings = [];
     var graph = null, shells = null, paddedCount = 0, paddedAtoms = null;
+    if (!opts.noFingerprint) computeAtomFingerprints(atoms, cell, ATOM_FINGERPRINT_CUTOFF);
 
     for (var attempt = 0; attempt < 3; attempt++) {
       var padResult = buildPaddedAtoms(atoms, cell, cutoff);
@@ -13540,23 +15320,31 @@ select.sel:focus{border-color:var(--accent)}
   function extract(fieldFn, bboxMin, bboxMax, gridStep, isoValue) {
     isoValue = isoValue || 0;
     var sx = bboxMax[0] - bboxMin[0], sy = bboxMax[1] - bboxMin[1], sz = bboxMax[2] - bboxMin[2];
-    var h = gridStep;
-    var nx = Math.max(2, Math.ceil(sx / h) + 1), ny = Math.max(2, Math.ceil(sy / h) + 1), nz = Math.max(2, Math.ceil(sz / h) + 1);
+    /* gridStep is normally a single number (isotropic sampling); a diagonal
+       channel's swept grid instead passes {hx,hy,hz} (see
+       voidAnisotropicGridSteps) so each Cartesian axis can be sampled with
+       its own step -- everything below just uses hx/hy/hz, which collapse
+       to the old single-h behavior whenever they're all equal. */
+    var hx, hy, hz;
+    if (gridStep && typeof gridStep === "object") { hx = gridStep.hx; hy = gridStep.hy; hz = gridStep.hz; }
+    else { hx = gridStep; hy = gridStep; hz = gridStep; }
+    var h = hx;
+    var nx = Math.max(2, Math.ceil(sx / hx) + 1), ny = Math.max(2, Math.ceil(sy / hy) + 1), nz = Math.max(2, Math.ceil(sz / hz) + 1);
     var maxDim = Math.max(nx, ny, nz);
     if (maxDim > MAX_AXIS_CELLS) {
       var scale = maxDim / MAX_AXIS_CELLS;
-      h *= scale;
-      nx = Math.max(2, Math.ceil(sx / h) + 1); ny = Math.max(2, Math.ceil(sy / h) + 1); nz = Math.max(2, Math.ceil(sz / h) + 1);
+      hx *= scale; hy *= scale; hz *= scale; h *= scale;
+      nx = Math.max(2, Math.ceil(sx / hx) + 1); ny = Math.max(2, Math.ceil(sy / hy) + 1); nz = Math.max(2, Math.ceil(sz / hz) + 1);
     }
 
     var val = new Float64Array(nx * ny * nz);
     function idx(i, j, k) { return (i * ny + j) * nz + k; }
     for (var i = 0; i < nx; i++) {
-      var x = bboxMin[0] + i * h;
+      var x = bboxMin[0] + i * hx;
       for (var j = 0; j < ny; j++) {
-        var y = bboxMin[1] + j * h;
+        var y = bboxMin[1] + j * hy;
         for (var k = 0; k < nz; k++) {
-          var z = bboxMin[2] + k * h;
+          var z = bboxMin[2] + k * hz;
           val[idx(i, j, k)] = fieldFn(x, y, z) - isoValue;
         }
       }
@@ -13573,9 +15361,9 @@ select.sel:focus{border-color:var(--accent)}
       var x0 = Math.max(0, i - 1), x1 = Math.min(nx - 1, i + 1);
       var y0 = Math.max(0, j - 1), y1 = Math.min(ny - 1, j + 1);
       var z0 = Math.max(0, k - 1), z1 = Math.min(nz - 1, k + 1);
-      var gx = (val[idx(x1, j, k)] - val[idx(x0, j, k)]) / (((x1 - x0) || 1) * h);
-      var gy = (val[idx(i, y1, k)] - val[idx(i, y0, k)]) / (((y1 - y0) || 1) * h);
-      var gz = (val[idx(i, j, z1)] - val[idx(i, j, z0)]) / (((z1 - z0) || 1) * h);
+      var gx = (val[idx(x1, j, k)] - val[idx(x0, j, k)]) / (((x1 - x0) || 1) * hx);
+      var gy = (val[idx(i, y1, k)] - val[idx(i, y0, k)]) / (((y1 - y0) || 1) * hy);
+      var gz = (val[idx(i, j, z1)] - val[idx(i, j, z0)]) / (((z1 - z0) || 1) * hz);
       return [-gx, -gy, -gz];
     }
 
@@ -13621,9 +15409,9 @@ select.sel:focus{border-color:var(--accent)}
         n++;
       }
       if (n === 0) { vertOf[key] = -1; return -1; }
-      var vx = bboxMin[0] + (i + sx2 / n) * h;
-      var vy = bboxMin[1] + (j + sy2 / n) * h;
-      var vz = bboxMin[2] + (k + sz2 / n) * h;
+      var vx = bboxMin[0] + (i + sx2 / n) * hx;
+      var vy = bboxMin[1] + (j + sy2 / n) * hy;
+      var vz = bboxMin[2] + (k + sz2 / n) * hz;
       var nl = Math.sqrt(nx2 * nx2 + ny2 * ny2 + nz2 * nz2) || 1;
       var vidx = positions.length / 3;
       positions.push(vx, vy, vz);
