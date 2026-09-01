@@ -137,6 +137,11 @@ select:focus{border-color:var(--accent)}
 .g-table td{padding:4px 10px;border-bottom:1px solid var(--pale)}
 .g-table td:first-child{font-family:var(--mono);font-size:11px;white-space:nowrap}
 .unit-warn{background:#fff3cd;border:1.5px solid var(--accent);padding:8px 12px;margin-bottom:8px;font-size:11px;line-height:1.7;font-family:var(--sans);color:#5a2000}
+.meta-missing{background:#FBDCE6 !important;border-color:#D6567F !important}
+/* A field that could ALSO supply a missing value (e.g. host formula for host MW,
+   sorptive identity for gas MW, or sorptive+temperature for Psat) — an outline
+   only, no fill, so it reads as a secondary route rather than the missing value itself. */
+.meta-alt-missing{border-color:#D6567F !important;box-shadow:0 0 0 1px #D6567F}
 #metaNotes{border-radius:0}
 #metaNotes>div:first-child{border-radius:0}
 
@@ -156,7 +161,6 @@ select:focus{border-color:var(--accent)}
 <body>
 <header>
   <h1>Sorption Unit Converter</h1>
-  <span class="sub">Uptake Capacity &mdash; Interunit Conversion</span>
   <span class="spacer"></span>
   <button class="hbtn" id="guideBtn">Guide</button>
 </header>
@@ -196,6 +200,68 @@ select:focus{border-color:var(--accent)}
     </div>
   </div>
 
+  <div class="section" id="sec-metadata">
+    <div class="sechead" onclick="tog(this)">Metadata<span class="tri">&#8250;</span></div>
+    <div class="sbody">
+
+      <div class="subhead">Sorptive</div>
+      <div class="ctl-block">
+        <label>Identity</label>
+        <select class="sel" id="mdSorptive" onchange="onMdSorptiveChange()">
+          <option value="">— not set —</option>
+          <option>Ar</option><option>C2H2</option><option>C2H4</option><option>C2H6</option>
+          <option>C3H6</option><option>C3H8</option><option>C4H10</option><option>C6H6</option>
+          <option>CH4</option><option>CO</option><option>CO2</option><option>COS</option>
+          <option>CS2</option><option>H2</option><option>H2O</option><option>H2S</option>
+          <option>He</option><option>Kr</option><option>N2</option><option>N2O</option>
+          <option>NH3</option><option>NO</option><option>NO2</option><option>O2</option>
+          <option>SO2</option><option>Xe</option><option>CH3OH</option><option>CH3CH2OH</option>
+          <option>CH3CN</option><option>i-C4H10</option><option>n-C4H10</option>
+          <option>n-C5H12</option><option>n-C6H14</option><option value="Custom">Custom</option>
+        </select>
+      </div>
+      <div class="ctl-block" id="mdCustomSorpWrap" style="display:none">
+        <label>Custom name</label>
+        <input type="text" id="mdCustomSorp" placeholder="Custom name" oninput="onMdCustomSorpInput()">
+      </div>
+      <div class="ctl-block">
+        <label>Molecular weight (g mol⁻¹)</label>
+        <input type="number" id="mdMwGas" placeholder="auto" min="0" step="0.01" oninput="onMdMwGasInput()">
+        <div class="hint" id="mdMwGasNote"></div>
+      </div>
+      <div class="ctl-block">
+        <label>P<sub>sat</sub> (bar)</label>
+        <input type="number" id="mdPSat" placeholder="auto or enter" min="0" step="any" oninput="onMdPSatInput()">
+        <div class="hint" id="mdPSatNote"></div>
+      </div>
+      <div class="ctl-block">
+        <label>Temperature (K)</label>
+        <input type="number" id="mdTempK" placeholder="e.g. 298.15" min="0" step="0.01" oninput="onMdTempChange()">
+        <div class="hint" id="mdTempNote"></div>
+      </div>
+
+      <hr class="divider">
+
+      <div class="subhead">Host</div>
+      <div class="ctl-block">
+        <label>Formula</label>
+        <input type="text" id="mdHostFormula" placeholder="e.g. C24H16N2O8Zn2" oninput="onMdFormulaInput()">
+        <div class="hint" id="mdMwFromFormula"></div>
+      </div>
+      <div class="ctl-block">
+        <label>Molecular weight (g mol⁻¹)</label>
+        <input type="number" id="mdHostMW" placeholder="e.g. 259.44" min="0" step="0.01" oninput="onMdHostMWInput()">
+        <div class="hint" id="mdHostMWNote"></div>
+      </div>
+      <div class="ctl-block">
+        <label>Mass (mg)</label>
+        <input type="number" id="mdHostMass" placeholder="e.g. 24.7" min="0" step="0.001" oninput="onMdHostMassInput()">
+        <div class="hint" id="mdHostMassNote"></div>
+      </div>
+
+    </div>
+  </div>
+
 </aside>
 
 <!-- CENTRE -->
@@ -220,8 +286,11 @@ select:focus{border-color:var(--accent)}
         <!-- 2. Conversion summary -->
         <div id="resContent" style="margin-bottom:10px;font-size:11px;line-height:1.7;color:#333;font-family:var(--sans)"><div class="ph">Load a CSV file to begin — conversion happens automatically.</div></div>
 
-        <!-- 3. Metadata (editable, full width) -->
-        <div>
+        <!-- 3. Metadata editing controls have moved to the METADATA panel in the left
+             sidebar. These elements stay in the DOM (hidden) because the conversion
+             engine, validation, and the sidebar mirror all read/write them by id —
+             see mirrorMetaToSidebar() and the onMd*/onMeta* handlers. -->
+        <div id="metaEditablePanel" style="display:none">
             <div class="lbl" style="margin-bottom:8px">Metadata <span style="font-family:var(--sans);font-size:9px;color:#aaa;text-transform:none;letter-spacing:0">(overrideable — written to exported CSV)</span></div>
 
             <!-- Row 1: Sorptive + Sorptive MW + PSat — CSS grid for pixel-perfect alignment -->
@@ -282,12 +351,13 @@ select:focus{border-color:var(--accent)}
 
 
             </div>
-
-            <div id="metaPassthroughWrap" style="display:none;margin-top:10px">
-              <div class="fi-label">Unrecognised rows passed through from file</div>
-              <div id="metaPassthrough" style="font-family:var(--mono);font-size:9px;color:#888;background:var(--cream);border:1.5px solid var(--pale);padding:5px 7px;line-height:1.8;max-height:80px;overflow-y:auto;white-space:pre-wrap;word-break:break-all"></div>
-            </div>
           </div>
+
+        <!-- Kept visible: informational, not an editable control -->
+        <div id="metaPassthroughWrap" style="display:none;margin-top:10px">
+          <div class="fi-label">Unrecognised rows passed through from file</div>
+          <div id="metaPassthrough" style="font-family:var(--mono);font-size:9px;color:#888;background:var(--cream);border:1.5px solid var(--pale);padding:5px 7px;line-height:1.8;max-height:80px;overflow-y:auto;white-space:pre-wrap;word-break:break-all"></div>
+        </div>
       </div>
 
       <div class="modal-veil" id="guideVeil">
@@ -297,7 +367,7 @@ select:focus{border-color:var(--accent)}
         <p class="modal-sub">User Guide</p>
 
         <div class="g-sec">Overview</div>
-        <p>This app loads gas-sorption isotherm data from a CSV file and interconverts the uptake capacity between different unit systems. Both adsorption and desorption branches are supported. The converted data can be exported as a new CSV.</p>
+        <p>This app loads gas-sorption isotherm data from a CSV file and interconverts the uptake capacity between different unit systems. Both adsorption and desorption branches are supported. The converted data can be exported as a new CSV. On load, the app always opens on the <b>Converted</b> tab, so you see the result — or, if metadata is still missing, an empty plot with the left-hand panel showing why — immediately.</p>
 
         <div class="g-sec">Loading data</div>
         <p>Drop a CSV (or delimited text) file anywhere on the app. Column&nbsp;1 should be pressure, column&nbsp;2 uptake, separated by commas, tabs, or semicolons.</p>
@@ -318,8 +388,12 @@ select:focus{border-color:var(--accent)}
         </table>
         <p>If both <span class="g-code">Host_Formula</span> and <span class="g-code">Host_MW</span> are given and disagree by more than 1%, a warning is shown in red.</p>
 
+        <div class="g-sec">Metadata panel</div>
+        <p>Loading a file always clears any previously-entered metadata first, then fills in whatever the new file specifies — nothing carries over from a file you loaded earlier. Anything not read from the file (sorptive identity, molecular weight, P<sub>sat</sub>, temperature, host formula, host MW, host mass) can be entered directly in the <b>METADATA</b> section of the left sidebar, below Input/Output Units.</p>
+        <p>A field with a <span style="background:#FBDCE6;padding:0 4px;border:1px solid #D6567F">pink background</span> is a value the current output units genuinely need and that is still missing. A field with only a <span style="border:1px solid #D6567F;padding:0 4px">red outline</span> could supply that same value a different way — e.g. the host formula can derive the host MW, and the sorptive identity + temperature can derive P<sub>sat</sub> via the Antoine equation. Enter either route and both the pink field and its red-outlined alternative clear together.</p>
+
         <div class="g-sec">Choosing units</div>
-        <p>Set the <b>input units</b> (left sidebar) to match your data file. Set the <b>output units</b> to your target system — conversion happens automatically as soon as all required parameters are available. If something's missing, the Summary tab shows what's needed.</p>
+        <p>Set the <b>input units</b> (left sidebar) to match your data file. Set the <b>output units</b> to your target system — conversion happens automatically as soon as all required parameters are available. If something's missing, the required field turns pink in the METADATA panel (see above), and the Converted plot stays empty until it's filled in.</p>
         <p>On file load, the app always converts to mmol&nbsp;g&#x207b;&#x00b9; vs bar as a baseline. You can then select any output units you like.</p>
 
         <div class="g-sec">Supported pressure units</div>
@@ -339,7 +413,7 @@ select:focus{border-color:var(--accent)}
         <div class="g-sec">Supported uptake units</div>
         <p>Relative units are per gram of host material; absolute units are per sample. mmol/g and mol/kg are numerically identical.</p>
         <table class="g-table">
-          <tr><th>Unit</th><th>Keywords / synonyms</th><th>Requires</th></tr>
+          <tr><th>Unit</th><th>Keywords / synonyms</th><th>Requires (converting to/from mmol/g)</th></tr>
           <tr><th colspan="3" style="background:var(--pale);color:#666;font-size:9px;text-transform:uppercase;letter-spacing:.06em">Relative (per gram of host)</th></tr>
           <tr><td>mmol/g</td><td>mmol/g, mmol g⁻¹</td><td>&mdash; (default)</td></tr>
           <tr><td>mol/kg</td><td>mol/kg, mol kg⁻¹</td><td>&mdash; (= mmol/g numerically)</td></tr>
@@ -356,6 +430,7 @@ select:focus{border-color:var(--accent)}
           <tr><td>g</td><td>g_abs, gram</td><td>Gas MW + host mass (mg)</td></tr>
           <tr><td>cm³(STP)</td><td>cc(STP), cm3_abs, cm3(STP)</td><td>Gas identity + host mass (mg)</td></tr>
         </table>
+        <p style="font-size:11px;color:#666">The app only ever asks for what your specific input→output pair actually needs, which is often less than this table's per-unit list would suggest — it's written against the mmol/g baseline. For example, converting between two absolute mass units (µg ⇄ mg ⇄ g) needs neither gas MW nor host mass, since both cancel out; converting between two relative mass units (e.g. g/g ⇄ wt%) needs neither either. Gas MW is only asked for when the amount kind actually changes (mass ⇄ moles), and host mass only when relative and absolute amounts are actually being converted between each other.</p>
 
         <div class="g-sec">cm³(STP) and real-gas correction</div>
         <p>The ideal-gas molar volume at STP (0&nbsp;&#x00b0;C, 1&nbsp;atm) is 22.414&nbsp;mL&nbsp;mmol&#x207b;&#x00b9;. When a gas preset is selected, the van der Waals equation is solved iteratively at STP to give a more accurate molar volume — for example CO&#x2082; gives &#x2248;&nbsp;22.26&nbsp;mL&nbsp;mmol&#x207b;&#x00b9;. The value used is shown in the conversion summary.</p>
@@ -743,9 +818,7 @@ function updatePSat(){
   const ps = parseFloat(pSatEl.value);
   document.getElementById('pSat').value = isFinite(ps) ? ps : '';
 
-  // Also sync sidebar if it still exists
-  const sb = document.getElementById('sidebarPSat');
-  if(sb) sb.value = pSatEl.value;
+  mirrorMetaToSidebar();
 }
 
 // Called when user manually edits PSat field
@@ -813,6 +886,8 @@ function syncHiddenInputs(){
   document.getElementById('pSat').value = isFinite(ps) ? ps : '';
   const hmnote = document.getElementById('metaHostMassNote');
   hmnote.textContent = isNaN(hm)?'Required for absolute mass conversions':'';
+
+  mirrorMetaToSidebar();
 }
 
 function onMetaSorptiveChange(){
@@ -864,6 +939,78 @@ function onMetaFormulaInput(){
     const hmwnote = document.getElementById('metaHostMWNote');
     hmwnote.textContent = 'Calculated from formula'; hmwnote.style.color='var(--accent)';
   }
+  syncHiddenInputs();
+  onParamChange();
+}
+
+// ── Metadata sidebar panel (left) — mirrors the Summary tab fields ──
+// The Summary tab fields (metaSorptive, metaMwGas, ...) remain the source of
+// truth read by the conversion logic; these md* fields are a second, synced
+// editing surface. Each md* handler writes into its meta* counterpart and
+// then re-runs the same logic the meta* field's own handler would run.
+function mirrorMetaToSidebar(){
+  const valuePairs=[
+    ['metaSorptive','mdSorptive'],['metaCustomSorp','mdCustomSorp'],
+    ['metaMwGas','mdMwGas'],['metaPSat','mdPSat'],['metaTempK','mdTempK'],
+    ['metaHostFormula','mdHostFormula'],['metaHostMW','mdHostMW'],['metaHostMass','mdHostMass']
+  ];
+  for(const[srcId,dstId] of valuePairs){
+    const src=document.getElementById(srcId), dst=document.getElementById(dstId);
+    if(!src||!dst||document.activeElement===dst) continue;
+    dst.value=src.value;
+  }
+  const notePairs=[
+    ['metaMwGasNote','mdMwGasNote'],['metaPSatNote','mdPSatNote'],['metaTempNote','mdTempNote'],
+    ['metaMwFromFormula','mdMwFromFormula'],['metaHostMWNote','mdHostMWNote'],['metaHostMassNote','mdHostMassNote']
+  ];
+  for(const[srcId,dstId] of notePairs){
+    const src=document.getElementById(srcId), dst=document.getElementById(dstId);
+    if(!src||!dst) continue;
+    dst.textContent=src.textContent;
+    dst.style.color=src.style.color;
+  }
+  document.getElementById('mdCustomSorpWrap').style.display =
+    document.getElementById('metaSorptive').value==='Custom' ? '' : 'none';
+}
+
+function onMdSorptiveChange(){
+  document.getElementById('metaSorptive').value=document.getElementById('mdSorptive').value;
+  onMetaSorptiveChange();
+}
+function onMdCustomSorpInput(){
+  document.getElementById('metaCustomSorp').value=document.getElementById('mdCustomSorp').value;
+  onMetaCustomSorpInput();
+}
+function onMdMwGasInput(){
+  const metaEl=document.getElementById('metaMwGas');
+  metaEl.value=document.getElementById('mdMwGas').value;
+  metaEl.dataset.autoSet='false';   // direct edit — stop treating it as database-derived
+  syncHiddenInputs();
+  onParamChange();
+}
+function onMdPSatInput(){
+  document.getElementById('metaPSat').value=document.getElementById('mdPSat').value;
+  onMetaPSatManual();
+}
+function onMdTempChange(){
+  document.getElementById('metaTempK').value=document.getElementById('mdTempK').value;
+  syncHiddenInputs();
+  document.getElementById('metaPSat').dataset.manual='false';
+  updatePSat();
+  if(rawData.length){ tryConvert(true); renderChart(); }
+  onParamChange();
+}
+function onMdFormulaInput(){
+  document.getElementById('metaHostFormula').value=document.getElementById('mdHostFormula').value;
+  onMetaFormulaInput();
+}
+function onMdHostMWInput(){
+  document.getElementById('metaHostMW').value=document.getElementById('mdHostMW').value;
+  syncHiddenInputs();
+  onParamChange();
+}
+function onMdHostMassInput(){
+  document.getElementById('metaHostMass').value=document.getElementById('mdHostMass').value;
   syncHiddenInputs();
   onParamChange();
 }
@@ -974,6 +1121,79 @@ function needsHost(u)   { return u==='mol/mol'; }
 function needsMass(u)   { return ['mg_abs','ug_abs','g_abs','mmol','cm3_abs'].includes(u); }
 function needsRho(u)    { return u==='cm3/g'; }
 function needsTemp(u)   { return false; } // placeholder for future real-gas cc(STP) at expt conditions
+
+// ── Direct, family-aware conversion ──────────────────────────────────────
+// qToMmolG/qFromMmolG above always pivot through mmol/g (relative molar
+// amount). That forces e.g. µg(absolute) → mg(absolute) through a
+// mass→moles→mass AND absolute→relative→absolute round trip, demanding gas
+// MW and host mass even though both cancel out algebraically for that pair.
+// UNIT_INFO classifies each unit by "kind" (mass/moles/volume) and "norm"
+// (relative to host mass, or absolute total); convertQty below only invokes
+// MW when the KIND changes and host mass only when the NORM changes —
+// exactly when they are genuinely needed, nothing more.
+const UNIT_INFO = {
+  'mmol/g':     {kind:'moles', norm:'rel', factor:1},
+  'mol/kg':     {kind:'moles', norm:'rel', factor:1},
+  'cc(STP)/g':  {kind:'vol',   norm:'rel', factor:1},
+  'g/g':        {kind:'mass',  norm:'rel', factor:1000},
+  'wt%':        {kind:'mass',  norm:'rel', factor:10},
+  'mg/g':       {kind:'mass',  norm:'rel', factor:1},
+  'ug/g':       {kind:'mass',  norm:'rel', factor:0.001},
+  'mmol':       {kind:'moles', norm:'abs', factor:1},
+  'mg_abs':     {kind:'mass',  norm:'abs', factor:1},
+  'ug_abs':     {kind:'mass',  norm:'abs', factor:0.001},
+  'g_abs':      {kind:'mass',  norm:'abs', factor:1000},
+  'cm3_abs':    {kind:'vol',   norm:'abs', factor:1},
+};
+
+// Which metadata a specific qIn→qOut pair genuinely requires. 'mol/mol' and
+// legacy units outside UNIT_INFO (cm3/g, mg/mg_host, ug/mg_host — not
+// reachable from the unit dropdowns) fall back to the conservative,
+// per-unit needsX() checks used by the old pivot-only implementation.
+function metaRequirements(qIn,qOut){
+  if(qIn===qOut) return {gas:false,mass:false,host:false};
+  const A=UNIT_INFO[qIn], B=UNIT_INFO[qOut];
+  if(!A||!B) return {
+    gas:  needsGas(qIn)||needsGas(qOut),
+    mass: needsMass(qIn)||needsMass(qOut),
+    host: needsHost(qIn)||needsHost(qOut)
+  };
+  return {
+    gas:  (A.kind==='mass')!==(B.kind==='mass'),  // mass⇄moles or mass⇄volume needs gas MW
+    mass: A.norm!==B.norm,                        // relative⇄absolute needs host mass
+    host: false                                     // mol/mol (host MW) is outside UNIT_INFO
+  };
+}
+
+// Direct conversion for any pair covered by UNIT_INFO — touches gas MW only
+// when the amount KIND changes, host mass only when the NORMALISATION
+// changes. Falls back to the qToMmolG/qFromMmolG pivot for mol/mol and the
+// legacy units above.
+function convertQty(v,qIn,qOut,prm){
+  if(qIn===qOut) return v;
+  const A=UNIT_INFO[qIn], B=UNIT_INFO[qOut];
+  if(!A||!B){
+    const qM=qToMmolG(v,qIn,prm); if(qM===null) return null;
+    return qFromMmolG(qM,qOut,prm);
+  }
+  const{mwGas:G, massHost:M, gasKey}=prm;
+  let val=v*A.factor, kind=A.kind;
+  if(kind!==B.kind){
+    const vm=vmSTP(gasKey);
+    if(kind==='mass'&&B.kind==='moles'){       if(!G) return null; val=val/G; }
+    else if(kind==='moles'&&B.kind==='mass'){  if(!G) return null; val=val*G; }
+    else if(kind==='moles'&&B.kind==='vol'){   val=val*vm; }
+    else if(kind==='vol'&&B.kind==='moles'){   val=val/vm; }
+    else if(kind==='mass'&&B.kind==='vol'){    if(!G) return null; val=(val/G)*vm; }
+    else if(kind==='vol'&&B.kind==='mass'){    if(!G) return null; val=(val/vm)*G; }
+    kind=B.kind;
+  }
+  if(A.norm!==B.norm){
+    if(!M) return null;
+    val = A.norm==='rel' ? val*(M/1000) : val/(M/1000);
+  }
+  return val/B.factor;
+}
 
 let rawData=[],convData=[],chart=null,currentTab='raw',parsedMeta={};
 let sourceFileHandle=null; // FileSystemFileHandle of the loaded data file, so Save dialogs default to its folder
@@ -1279,6 +1499,48 @@ function applyMetadata(meta){
   return notes;
 }
 
+// Reset all metadata (Summary tab fields, sidebar mirrors, and the hidden inputs the
+// conversion engine reads) to a blank slate before applying a newly-loaded file's
+// parsed metadata. applyMetadata()/populateMetadataPanel() are purely additive — they
+// only SET what the file specifies — so without this, anything a previous file (or a
+// manual edit) left behind would silently carry over into a file that doesn't mention
+// it at all (e.g. a leftover sorptive/MW from an earlier load).
+function resetMetadataFields(){
+  const sel=document.getElementById('metaSorptive');
+  sel.value='';
+  document.getElementById('metaCustomSorp').value='';
+  document.getElementById('metaCustomSorpWrap').style.display='none';
+  document.getElementById('metaSorpSrc').textContent='';
+  document.getElementById('metaSorpSrc').title='';
+
+  const mwEl=document.getElementById('metaMwGas');
+  mwEl.value=''; mwEl.dataset.autoSet='false';
+  document.getElementById('metaMwGasNote').textContent='';
+
+  const psEl=document.getElementById('metaPSat');
+  psEl.value=''; psEl.dataset.manual='false'; psEl.dataset.autoSet='false';
+  document.getElementById('metaPSatNote').textContent='';
+
+  document.getElementById('metaTempK').value='';
+  document.getElementById('metaTempNote').textContent='';
+
+  document.getElementById('metaHostFormula').value='';
+  document.getElementById('metaMwFromFormula').textContent='';
+  document.getElementById('metaHostMW').value='';
+  document.getElementById('metaHostMWNote').textContent='';
+  document.getElementById('metaHostMass').value='';
+  document.getElementById('metaHostMassNote').textContent='';
+
+  document.getElementById('metaPassthroughWrap').style.display='none';
+  document.getElementById('metaPassthrough').textContent='';
+
+  // Hidden inputs read directly by the conversion engine
+  ['gasPreset','mwGas','tempK','hostFormula','mwHost','rhoHost','pSat','massHost'].forEach(id=>{
+    document.getElementById(id).value='';
+  });
+  document.getElementById('mwFromFormula').textContent='';
+}
+
 // Populate the Summary metadata fields from parsed meta, with source indicators
 function populateMetadataPanel(meta){
   function src(detected, assumed){
@@ -1560,13 +1822,20 @@ function parseCSV(text,name){
 
   // Store for export passthrough
   parsedMeta=meta;
+  // Blank slate first — a new file's metadata must not inherit anything left over
+  // from a previous file or from manual edits (see resetMetadataFields for why).
+  resetMetadataFields();
   // Apply metadata to controls and collect notes
   const notes=applyMetadata(meta);
   populateMetadataPanel(meta);
   showMetaNotes(notes);
 
-  const inSec=document.getElementById('sec-inunits');
-  if(inSec) inSec.classList.add('open');
+  // Expand all three left-sidebar menus so the user sees units + metadata at a glance —
+  // they can still collapse whichever ones they don't need.
+  ['sec-inunits','sec-outunits','sec-metadata'].forEach(id=>{
+    const s=document.getElementById(id);
+    if(s) s.classList.add('open');
+  });
   const nAds=rawData.filter(r=>r.branch==='ads').length;
   const nDes=rawData.filter(r=>r.branch==='des').length;
   const ptInfo=gapSeen?' ('+nAds+' ads + '+nDes+' des)':'';
@@ -1580,14 +1849,15 @@ function parseCSV(text,name){
   document.getElementById('qUnitsOut').value = 'mmol/g';
   autoLabels();  // update labels for output units too
 
-  // Try silent conversion immediately; if it works, show the converted tab
+  // Always land on Converted — that's the app's whole purpose. If required
+  // metadata are missing there's simply no plot, and the left panel shows the
+  // user why; they can switch to Raw Input or Summary themselves if they want.
   const ok = tryConvert(true);
+  switchTab('conv');
   if(ok){
-    switchTab('conv');
     st('Loaded and converted to mmol g⁻¹ vs bar. Check Summary tab for details.','ok');
   } else {
-    switchTab('meta');
-    st('Loaded '+rawData.length+' points. Review Summary tab and set any missing parameters.','ok');
+    st('Loaded '+rawData.length+' points. Set the missing metadata (left panel) to see the converted plot.','ok');
   }
 }
 
@@ -1599,8 +1869,8 @@ function autoLabels(){
 function onParamChange(){
   validateUnits();
   if(rawData.length){
-    const ok = tryConvert(true);
-    if(ok) renderChart();
+    tryConvert(true);
+    renderChart();   // always redraw — if conversion just became invalid, this clears the stale plot
   }
 }
 function onUnitsChange(){
@@ -1618,20 +1888,38 @@ function onUnitsChange(){
 }
 
 // Show prominent warning in results panel if required parameters are missing
+// Toggle the pink "missing metadata" highlight on a field and its sidebar mirror
+function setMissing(ids,isMissing){
+  for(const id of ids){
+    const el=document.getElementById(id);
+    if(el) el.classList.toggle('meta-missing',isMissing);
+  }
+}
+// Toggle the outline-only "could also supply this" highlight (e.g. host formula
+// as an alternate route to host MW) on a field and its sidebar mirror
+function setAltMissing(ids,isMissing){
+  for(const id of ids){
+    const el=document.getElementById(id);
+    if(el) el.classList.toggle('meta-alt-missing',isMissing);
+  }
+}
+
 function validateUnits(){
   const qIn=gv('qUnitsIn'), qOut=gv('qUnitsOut'), pIn=gv('pUnitsIn'), pOut=gv('pUnitsOut');
   const mwGas=gn('mwGas'), mwHost=gn('mwHost'), rhoHost=gn('rhoHost');
   const massHost=gn('massHost'), gasKey=gv('gasPreset')||'';
   const msgs=[];
-  // When uptake units are identical, values pass through unchanged — no uptake parameters needed
-  const qSame = qIn===qOut;
-  if(!qSame&&(needsGas(qIn)||needsGas(qOut))&&!mwGas)
-    msgs.push('Gas molecular weight (M<sub>gas</sub>, g/mol) is required for <b>'+[qIn,qOut].filter(u=>needsGas(u)).join(', ')+'</b> — enter it in Gas Properties.');
-  if(!qSame&&(needsHost(qIn)||needsHost(qOut))&&!mwHost)
-    msgs.push('<b>mol/mol</b> requires the host formula-unit molecular weight: uptake [mmol/g] × M<sub>host</sub> [g/mol] ÷ 1000 = mol guest / mol host. Enter the host formula or MW in Host Material.');
-  if(!qSame&&(needsMass(qIn)||needsMass(qOut))&&!massHost)
-    msgs.push('<b>Absolute mass units (mg/µg)</b> require the mass of the host sample in mg — enter it in Host Material.');
-  if(!qSame&&(needsRho(qIn)||needsRho(qOut))&&!rhoHost)
+  // Only the metadata this specific unit PAIR genuinely needs — see metaRequirements().
+  // (e.g. µg(absolute)→mg(absolute) needs neither gas MW nor host mass: both would
+  // cancel out algebraically, so it would be wrong to demand them.)
+  const req = metaRequirements(qIn,qOut);
+  if(req.gas&&!mwGas)
+    msgs.push('Gas molecular weight (M<sub>gas</sub>, g/mol) is required to convert <b>'+qIn+'</b> → <b>'+qOut+'</b> — enter it in Metadata.');
+  if(req.host&&!mwHost)
+    msgs.push('<b>mol/mol</b> requires the host formula-unit molecular weight: uptake [mmol/g] × M<sub>host</sub> [g/mol] ÷ 1000 = mol guest / mol host. Enter the host formula or MW in Metadata.');
+  if(req.mass&&!massHost)
+    msgs.push('Converting <b>'+qIn+'</b> → <b>'+qOut+'</b> requires the mass of the host sample in mg (relative ⇄ absolute amounts) — enter it in Metadata.');
+  if((needsRho(qIn)||needsRho(qOut))&&!rhoHost)
     msgs.push('Host density is required for <b>cm³/g (liquid)</b> — enter it in Host Material.');
   // p/p0 validation (input or output)
   const pSatVal=gn('pSat');
@@ -1639,6 +1927,19 @@ function validateUnits(){
     const direction = (pIn==='p/p0'&&pOut==='p/p0')?'input and output':(pIn==='p/p0'?'input':'output');
     msgs.push('<b>p/p₀ '+direction+'</b> requires P<sub>sat</sub> (bar). '+(pSatVal===null?'Enter the sorptive and temperature to auto-calculate, or enter P<sub>sat</sub> manually in the Metadata panel.':''));
   }
+  // Pink-highlight whichever metadata fields are blocking the current output-unit choice
+  // (mirrored in both the Summary tab and the Metadata sidebar panel)
+  setMissing(['metaMwGas','mdMwGas'],       req.gas&&!mwGas);
+  setMissing(['metaHostMW','mdHostMW'],     req.host&&!mwHost);
+  setMissing(['metaHostMass','mdHostMass'], req.mass&&!massHost);
+  setMissing(['metaPSat','mdPSat'],         (pIn==='p/p0'||pOut==='p/p0')&&!pSatVal);
+  // Outline-only "could also supply this" highlight on fields that can derive
+  // the actual missing value another way — clears the moment the underlying
+  // value (mwHost / mwGas / pSat) is in place, however it got there.
+  const psatMissing = (pIn==='p/p0'||pOut==='p/p0')&&!pSatVal;
+  setAltMissing(['metaHostFormula','mdHostFormula'], req.host&&!mwHost);       // → derives Host MW
+  setAltMissing(['metaSorptive','mdSorptive'],       (req.gas&&!mwGas)||psatMissing); // → derives gas MW, or Psat (with temp)
+  setAltMissing(['metaTempK','mdTempK'],             psatMissing);             // → derives Psat (with sorptive)
   // cm³(STP)/g note — informational only, not a blocking error
   const notes=[];
   const stpUnits=[qIn,qOut].filter(u=>u==='cc(STP)/g');
@@ -1678,12 +1979,12 @@ function tryConvert(silent){
   const pSat=gn('pSat');
   const prm={mwGas,mwHost,rhoHost,massHost,gasKey,tempK,pSat};
   const missing=[];
-  // When uptake units are identical, values pass through unchanged — no uptake parameters needed
-  const qSame = qIn===qOut;
-  if(!qSame&&(needsGas(qIn)||needsGas(qOut))&&!mwGas)     missing.push('gas MW (set in Gas Properties)');
-  if(!qSame&&(needsHost(qIn)||needsHost(qOut))&&!mwHost)   missing.push('host MW (set in Host Material)');
-  if(!qSame&&(needsMass(qIn)||needsMass(qOut))&&!massHost)  missing.push('mass of host sample in mg (set in Host Material)');
-  if(!qSame&&(needsRho(qIn)||needsRho(qOut))&&!rhoHost)    missing.push('host density (set in Host Material)');
+  // Only the metadata this specific unit pair actually needs (see metaRequirements)
+  const req = metaRequirements(qIn,qOut);
+  if(req.gas&&!mwGas)     missing.push('gas MW (set in Metadata)');
+  if(req.host&&!mwHost)   missing.push('host MW (set in Metadata)');
+  if(req.mass&&!massHost)  missing.push('mass of host sample in mg (set in Metadata)');
+  if((needsRho(qIn)||needsRho(qOut))&&!rhoHost) missing.push('host density (set in Host Material)');
   if(pIn==='p/p0'&&!gn('pSat')) missing.push('saturation pressure Pₛₐₜ in bar (set in Metadata panel)');
   if(missing.length){
     if(!silent){
@@ -1697,14 +1998,8 @@ function tryConvert(silent){
   convData=[];let bad=0;
   for(const pt of rawData){
     const pB=pToBar(pt.p,pIn,prm.pSat),pC=pFromBar(pB,pOut,prm.pSat);
-    // If uptake units are identical, pass the value through without touching it
-    let qC;
-    if(qIn===qOut){
-      qC=pt.q;
-    } else {
-      const qM=qToMmolG(pt.q,qIn,prm);if(qM===null){bad++;continue;}
-      qC=qFromMmolG(qM,qOut,prm);if(qC===null){bad++;continue;}
-    }
+    const qC=convertQty(pt.q,qIn,qOut,prm);
+    if(qC===null){bad++;continue;}
     convData.push({p:pC,q:qC,branch:pt.branch});
   }
   if(!silent){
@@ -2305,6 +2600,7 @@ window.addEventListener('keydown',e=>{if(e.key==='Escape')document.getElementByI
 updateCpanelForTab(currentTab);
 syncRangeInputs(currentTab);
 syncPointStyleInputs(currentTab);
+syncHiddenInputs();
 window.addEventListener('resize',()=>{renderChart();});
 
 </script>

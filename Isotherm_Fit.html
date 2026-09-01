@@ -57,6 +57,12 @@ select:focus{border-color:var(--accent)}
 .pg label span{display:block;font-size:11px;color:#888}
 .pg input{background:var(--cream);border:1.5px solid var(--rule);padding:4px 6px;font-family:var(--mono);font-size:11px;color:var(--ink);width:100%;outline:none}
 .pg input:focus{border-color:var(--accent)}
+.pg-row{display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--rule)}
+.pg-row:last-child{border-bottom:none}
+.pg-row label{font-size:13px;color:#444;line-height:1.4}
+.pg-row label span{display:block;font-size:11px;color:#888}
+.pg-row .val{font-family:var(--mono);font-size:12px;color:var(--ink);white-space:nowrap;text-align:right}
+.pg-row.hi{background:var(--cream)}
 
 .btn{display:block;width:100%;padding:8px 12px;font-family:var(--sans);font-size:12px;font-weight:500;border-radius:4px;cursor:pointer;border:none;background:var(--accent);color:#fff;transition:opacity .15s}
 .btn:hover:not(:disabled){opacity:.88}
@@ -172,25 +178,27 @@ select:focus{border-color:var(--accent)}
 <body>
 <header>
   <h1>Isotherm Fitter</h1>
-  <span class="sub">Sorption Isotherm Analysis &mdash; Nonlinear Least Squares</span>
   <span class="spacer"></span>
   <button class="hbtn" id="guideBtn">Guide</button>
 </header>
 <div class="app">
 <aside class="sidebar side-panel">
-  <div class="section" id="sec-model">
-    <div class="sechead" onclick="tog(this)">Model<span class="tri">&#8250;</span></div>
-    <div class="sbody">
-      <select id="modelSel" onchange="onModelChange()" style="width:100%"></select>
-      <canvas id="eqCanvas" height="96"></canvas>
-      <div class="eq-sub" id="eqDesc"></div>
-      <div class="subhead" style="margin-top:6px">Initial Guesses</div>
-      <div class="pg" id="guessGrid"></div>
-      <button class="btn2" id="btnFit" disabled style="margin-top:8px">Fit Isotherm</button>
-    </div>
+  <!-- Internal state the fitting engine reads/writes — no longer a user-facing control.
+       Auto-select is the only way to choose a model now; these just hold that choice. -->
+  <select id="modelSel" style="display:none"></select>
+  <div id="guessGrid" style="display:none"></div>
+  <button id="btnFit" style="display:none"></button>
+
+  <div class="side-panel-loose" id="autoWrap" style="display:none">
+    <button class="btn2 ghost" id="btnAuto">&#9733; Auto-Select Best Model</button>
   </div>
-  <div class="side-panel-loose">
-    <button class="btn2 ghost" id="btnAuto" disabled>&#9733; Auto-Select Best Model</button>
+
+  <div class="side-panel-loose" id="modelPanel" style="display:none">
+    <div id="modelNameHeading" style="font-family:var(--serif);font-weight:600;font-size:15px"></div>
+    <canvas id="eqCanvas" height="96"></canvas>
+    <div class="eq-sub" id="eqDesc"></div>
+    <div class="subhead" style="margin-top:10px">Fitted Parameters</div>
+    <div id="paramSummary"></div>
   </div>
 </aside>
 <div class="centre">
@@ -209,7 +217,7 @@ select:focus{border-color:var(--accent)}
   <!-- Summary tab -->
   <div id="summaryContent" style="display:none;flex:1;overflow-y:auto;padding:18px 24px">
     <!-- Fitted parameters in App-3 style -->
-    <div id="fitSummary"><div class="ph">Load a CSV file and click Fit Isotherm.</div></div>
+    <div id="fitSummary"><div class="ph">Load a CSV file, then click Auto-Select Best Model.</div></div>
     <!-- Metadata panel -->
     <div style="margin-top:16px">
       <div class="lbl">Metadata <span style="font-family:var(--sans);font-size:9px;color:#aaa;text-transform:none;letter-spacing:0">(editable — written to exported CSV)</span></div>
@@ -286,14 +294,14 @@ select:focus{border-color:var(--accent)}
     <button class="close-x" id="guideClose">&times;</button>
     <h2>Isotherm Fitter</h2>
     <p class="modal-sub">User Guide</p>
-    <p>This app fits sorption isotherm data to any of 26 standard isotherm models using nonlinear least-squares (Levenberg–Marquardt). Load a two-column CSV (pressure, uptake), select a model, optionally adjust initial guesses, and click <b>Fit Isotherm</b>. Use <b>Auto-Select Best Model</b> to rank all models by AICc.</p>
+    <p>This app fits sorption isotherm data to any of 26 standard isotherm models using nonlinear least-squares (Levenberg–Marquardt). Load a two-column CSV (pressure, uptake) and click <b>Auto-Select Best Model</b> — it fits all 26 models, ranks them, and picks the best one for you.</p>
 
     <div class="g-sec">Loading data</div>
     <p>Drop a CSV file anywhere on the app. Column 1 must be pressure, column 2 uptake. Delimiters: comma, tab, or semicolon. Lines that cannot be parsed as two numbers are treated as metadata or headers and skipped for fitting (but retained for export).</p>
 
     <div class="g-sec">Fitting</div>
-    <p>Select a model from the left panel. The equation is shown graphically below the selector. Initial guesses are pre-filled with sensible defaults but can be adjusted. Click <b>Fit Isotherm</b> to run the optimisation. Fitted parameters, standard errors, R² and SSR appear in the <b>Summary</b> tab. The fit is drawn over the data in the <b>Plot</b> tab.</p>
-    <p><b>Auto-Select Best Model</b> fits all 26 models and ranks them by AICc (Akaike Information Criterion, corrected). Lower AICc is better; a difference &lt;2 is statistically indistinguishable. Click any row in the results table to select that model.</p>
+    <p><b>Auto-Select Best Model</b> fits all 26 models and ranks them by AICc (Akaike Information Criterion, corrected). Lower AICc is better; a difference &lt;2 is statistically indistinguishable. Click any row in the results table to select that model, or click <b>Use Best Model</b> to accept the top-ranked one.</p>
+    <p>Once a model is selected, the left panel shows its name, its equation, and a read-only summary of the fitted parameters (name, symbol, and value ± standard error). The same fitted values, plus R² and SSR, appear in the <b>Summary</b> tab and as an annotation on the plot itself. The fit is drawn over the data in the <b>Plot</b> tab.</p>
 
     <div class="g-sec">Exporting results</div>
     <p>Click <b>Export Results CSV</b> in the right-hand panel (Output section) to save the fitted parameters, goodness-of-fit statistics, fitted vs. raw data, and correlation matrix. All metadata from the input file (and any entered in the Summary panel) are written to the header, so the file is ready for use with the IAST and Sorption Enthalpy Calculators.</p>
@@ -427,7 +435,7 @@ select:focus{border-color:var(--accent)}
           <option value="'Century Schoolbook',serif">Century Schoolbook</option>
         </select>
       </div>
-      <div class="ctl-top"><label>Size</label><input type="range" id="annSz" min="8" max="40" value="24" oninput="V(this);redraw()"><span class="rv2">24</span></div>
+      <div class="ctl-top"><label>Size</label><input type="range" id="annSz" min="15" max="55" value="24" oninput="V(this);redraw()"><span class="rv2">24</span></div>
     </div>
   </div>
 
@@ -1505,12 +1513,10 @@ function parseCSV(txt,name){
   });
   if(pts.length<3){st('Error: need at least 3 numeric data points.','err');return;}
   rawData=pts;parsedMeta=meta;
-  const fitSec=document.getElementById('sec-model');
-  if(fitSec) fitSec.classList.add('open');
-  document.getElementById('btnFit').disabled=false;
-  document.getElementById('btnAuto').disabled=false;
+  document.getElementById('autoWrap').style.display='';
+  document.getElementById('modelPanel').style.display='none';
   fitResult=null;document.getElementById('btnExp').style.display='none';
-  document.getElementById('fitSummary').innerHTML='<div class="ph">Data loaded \u2014 click Fit Isotherm.</div>';
+  document.getElementById('fitSummary').innerHTML='<div class="ph">Data loaded \u2014 click Auto-Select Best Model.</div>';
   populateMetaPanel(meta);
   drawChart();
   switchTab('plot');
@@ -1730,13 +1736,15 @@ function computeSE(par,fn,jac,ssv){
 // =====================================================================
 //  FIT
 // =====================================================================
-document.getElementById('btnFit').addEventListener('click',()=>{
+// Runs the fit for whatever model is currently set in the (hidden) modelSel/guessGrid
+// state \u2014 set by useBest() right before calling this. There's no manual Fit button
+// any more; auto-select is the only entry point.
+function performFit(){
   if(!rawData.length)return;
   const mod=MOD[sel.value];
   const lb=mod.bounds||mod.params.map(()=>1e-12);
   const par0=mod.params.map((pr,i)=>{const v=parseFloat(document.getElementById('ig_'+pr.id).value);const x=isNaN(v)?pr.def:v;return Math.max(x,lb[i]);});
   st('<span class="sp"></span>Fitting\u2026','');
-  document.getElementById('btnFit').disabled=true;
   setTimeout(()=>{
     try{
       const res=levmar(par0,mod.fn,mod.jac,lb);
@@ -1749,13 +1757,50 @@ document.getElementById('btnFit').addEventListener('click',()=>{
       const rsq=sst>0?1-ss2/sst:0;
       const extra=mod.post?mod.post(res.par,se):[];
       fitResult={par:res.par,se,rsq,ss:res.ss,extra,conv:res.conv,it:res.it,mod:sel.value,corr:corrMatrix};
-      showResults(fitResult,mod);drawChart();
+      showResults(fitResult,mod);
+      renderModelPanel(fitResult,mod);
+      drawChart();
       document.getElementById('btnExp').style.display='';
       st((res.conv?'Converged in '+res.it+' iter':'Stopped at '+res.it+' iter (try different initial guesses)')+' -- R\u00b2 = '+rsq.toFixed(6),'ok');
     }catch(e){st('Fitting error: '+e.message,'err');console.error(e)}
-    document.getElementById('btnFit').disabled=false;
   },20);
-});
+}
+
+// Shared by showResults() (Summary tab) and renderModelPanel() (left sidebar) so the
+// two stay in sync \u2014 one list of {lbl (name), sym (symbol), val, se, hi (derived?)}.
+function buildParamList(r,mod){
+  return [
+    ...mod.params.map((pr,i)=>({
+      lbl: pr.title||(pr.lbl.toUpperCase()),
+      sym: pr.html||('<i>'+pr.lbl+'</i>'),
+      val: r.par[i], se: r.se[i], hi: false
+    })),
+    ...(r.extra||[]).map(e=>({
+      lbl: e.title||(e.lbl.toUpperCase()),
+      sym: e.html||('<i>'+(e.lbl||e.id)+'</i>'),
+      val: e.val, se: e.se, hi: true
+    }))
+  ];
+}
+
+// Populate the left-sidebar model panel: name, formula, and a read-only summary of
+// the fitted parameters (actual names + values \u2014 no initial-guess edit boxes).
+function renderModelPanel(r,mod){
+  document.getElementById('modelPanel').style.display='';
+  document.getElementById('modelNameHeading').innerHTML='<i>'+mod.name+'</i>';
+  document.getElementById('eqDesc').textContent=mod.desc;
+  drawEq(sel.value);
+  const g=document.getElementById('paramSummary');
+  g.innerHTML='';
+  buildParamList(r,mod).forEach(p=>{
+    const seStr=fmtSE(p.val,p.se);
+    const seDisp=(seStr&&seStr!=='(n/a)')?(' \u00b1 '+seStr):'';
+    const row=document.createElement('div');
+    row.className='pg-row'+(p.hi?' hi':'');
+    row.innerHTML='<label>'+p.lbl+'<span>'+p.sym+'</span></label><span class="val">'+fmt(p.val)+seDisp+'</span>';
+    g.appendChild(row);
+  });
+}
 
 function showResults(r,mod){
   // Build in the same DOM style as App 3's "Detected from file" / conversion summary panels
@@ -1783,19 +1828,7 @@ function showResults(r,mod){
   noteRow('\u2713 Optimiser: '+convTxt, false);
 
   // Parameters
-  const allParams=[
-    ...mod.params.map((pr,i)=>({
-      lbl: pr.title||(pr.lbl.toUpperCase()),
-      sym: pr.html||('<i>'+pr.lbl+'</i>'),
-      val: r.par[i], se: r.se[i], hi: false
-    })),
-    ...(r.extra||[]).map(e=>({
-      lbl: e.title||(e.lbl.toUpperCase()),
-      sym: e.html||('<i>'+(e.lbl||e.id)+'</i>'),
-      val: e.val, se: e.se, hi: true
-    }))
-  ];
-  allParams.forEach(p=>{
+  buildParamList(r,mod).forEach(p=>{
     const seStr=fmtSE(p.val,p.se);
     const seDisp=(seStr&&seStr!=='(n/a)')?(' \u00b1 <b>'+seStr+'</b>'):'';
     noteRow('\u2713 '+p.lbl+': '+p.sym+' = <b>'+fmt(p.val)+'</b>'+seDisp, p.hi);
@@ -2116,8 +2149,14 @@ function buildConfig(){
       axis.ticks=ticks;
     };
   }
-  const xAfterBuildTicks=makeStrictTicks(xStepManual);
-  const yAfterBuildTicks=makeStrictTicks(yStepManual);
+  // Apply the same strict, no-orphan-tick generation whenever the axis range is
+  // manually constrained (min and/or max set) — not just when the tick interval
+  // itself is typed in. Otherwise Chart.js's own tick engine forces an extra tick
+  // exactly at the manual max/min even when it doesn't land on the step grid
+  // (e.g. ticks 1..6 by 1, Ymax set to 6.5 -> Chart.js adds a stray "6.5" tick).
+  const xManual = xMinV!==undefined || xMaxV!==undefined;
+  const xAfterBuildTicks=makeStrictTicks((xStepManual!==undefined||xManual)?xStep:undefined);
+  const yAfterBuildTicks=makeStrictTicks((yStepManual!==undefined||yManual)?yStep:undefined);
   const scX={...sc,ticks:{...sc.ticks,...(xStep?{stepSize:xStep}:{})},...(xAfterBuildTicks?{afterBuildTicks:xAfterBuildTicks}:{})};
   const scY={...sc,ticks:{...sc.ticks,...(yStep?{stepSize:yStep}:{})},...(yAfterBuildTicks?{afterBuildTicks:yAfterBuildTicks}:{})};
   return{
@@ -2405,6 +2444,7 @@ function useBest(){
   const r2=_pendingResult;
   if(!r2||!r2.par)return;
   closeOverlay();
+  document.getElementById('modelPanel').style.display='';   // show before onModelChange() sizes eqCanvas
   const selEl=document.getElementById('modelSel');
   selEl.value=r2.k;
   onModelChange();
@@ -2413,7 +2453,7 @@ function useBest(){
     const el=document.getElementById('ig_'+pr.id);
     if(el)el.value=parseFloat(r2.par[i].toPrecision(6));
   });
-  document.getElementById('btnFit').click();
+  performFit();
 }
 let _overlayEl=null;
 function showOverlay(title,bodyHtml,buttons){
