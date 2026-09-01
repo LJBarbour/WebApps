@@ -4134,10 +4134,10 @@ select.sel:focus{border-color:var(--accent)}
   }
   function buildElementSelectOptions(sel, present) {
     /* shared by refreshReassignElementOptions() below for both the "Reassign
-       element to" (Edit atoms) and "Create atom" (Create/Move Atoms)
-       dropdowns -- structure's own elements first, a divider, then the full
-       periodic table -- so the two stay identical and in sync automatically
-       from this one place. */
+       element to" (Edit atoms) and "Click to add atom"/coordinate-Add
+       (Create/Move Atoms) dropdowns -- structure's own elements first, a
+       divider, then the full periodic table -- so the two stay identical
+       and in sync automatically from this one place. */
     if (!sel) return;
     var prev = sel.value;
     sel.innerHTML = "";
@@ -9295,6 +9295,42 @@ select.sel:focus{border-color:var(--accent)}
     renderStructure(); updateHostInfo(); buildRadiiEditor(); buildHostColorEditor(); refreshReassignElementOptions(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
     setStatus("Created a new " + newEl + " atom.", false);
   }
+  /* The coordinate-box "Add" button's own path -- places an atom at an
+     explicitly typed fractional (unit-cell) position instead of wherever a
+     click happens to unproject to. Otherwise mirrors createAtomAtClick()
+     exactly, including the same CIF-registration branch (so a hand-added
+     atom is grow-able by symmetry). Needs an actual unit cell to place a
+     fractional coordinate in, so -- unlike click-to-add, which works on any
+     structure -- this one requires a loaded CIF. */
+  function addAtomAtFractionalCoords(fx, fy, fz) {
+    var sel = document.getElementById("createAtomEl");
+    var newEl = sel ? sel.value : null;
+    if (!newEl) { setStatus("Choose an element to create first.", true); return; }
+    if (!state.isCif || !state.cifFracToCart) { setStatus("This needs a loaded CIF -- there's no unit cell to place a fractional coordinate in otherwise.", true); return; }
+    /* NOT offset by centroid() -- unlike createAtomAtClick's world position
+       (unprojected from screen space, which IS in that render-time-offset
+       frame and has to have it removed), fracToCart's output is already in
+       the same plain crystal-Cartesian frame every other atom's stored x/y/z
+       is in (see loadCIFText/loadResText's own identical, offset-free
+       K.fracToCart(M, [a.fx, a.fy, a.fz]) call). Subtracting the offset here
+       shifted every atom placed this way away from its typed coordinate by
+       the whole structure's own centroid -- exactly the bug this comment is
+       now here to stop from coming back. */
+    var c = K.fracToCart(state.cifFracToCart, [fx, fy, fz]);
+    var x = c[0], y = c[1], z = c[2];
+    pushUndo();
+    var newAtom = { el: newEl, x: x, y: y, z: z, r: K.vdw(newEl), cr: K.cov(newEl), color: K.cpk(newEl), isCentroid: false, selected: false, hidden: false };
+    if (!state.symmetryForgotten) {
+      var auIndex = state.cifAsymUnit.length;
+      state.cifAsymUnit.push({ label: newEl + (auIndex + 1), el: newEl, fx: fx, fy: fy, fz: fz, occ: 1.0 });
+      newAtom.auIndex = auIndex; newAtom.opIndex = 0; newAtom.cellI = 0; newAtom.cellJ = 0; newAtom.cellK = 0;
+      newAtom.fx = fx; newAtom.fy = fy; newAtom.fz = fz;
+    }
+    assignUids([newAtom]);
+    state.atoms = (state.atoms || []).concat([newAtom]);
+    renderStructure(); updateHostInfo(); buildRadiiEditor(); buildHostColorEditor(); refreshReassignElementOptions(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
+    setStatus("Created a new " + newEl + " atom at (" + fx.toFixed(3) + ", " + fy.toFixed(3) + ", " + fz.toFixed(3) + ").", false);
+  }
   function moveAtomTo(atom, x, y, z) {
     /* For a CIF/RES-tracked atom, a drag moves the whole asymmetric-unit
        position, not just this one displayed copy -- every symmetry-related
@@ -9549,13 +9585,12 @@ select.sel:focus{border-color:var(--accent)}
     renderSelection(); updateBondSelectionInfo();
   }
   /* ---------------- macro recording ----------------
-   * X-Seed-compatible: the goal is a macro recorded here to also be usable
-   * in the user's own X-Seed installation (and vice versa) "to the extent
-   * that the two apps can support this" -- so command names, argument
-   * order, and the double-space between an atom's name and its symmetry
-   * operator (matching the two examples given: "SELECT_FRAG H7A  1+X,1+Y,Z",
-   * "SELECT_ATOM O9D  2/3-X+Y,1/3-X,Z-2/3") are all deliberately kept
-   * exactly as specified, not "cleaned up" to this app's own usual style.
+   * Command names, argument order, and the double-space between an atom's
+   * name and its symmetry operator (e.g. "SELECT_FRAG H7A  1+X,1+Y,Z",
+   * "SELECT_ATOM O9D  2/3-X+Y,1/3-X,Z-2/3") are kept exactly as specified,
+   * not "cleaned up" to this app's own usual style -- this format predates
+   * some command-set changes made since, so it's no longer X-Seed-macro-
+   * compatible, but the format itself is unchanged.
    * The memo textarea (#macroMemo, built in buildUI's Macro section) is the
    * ONLY store for recorded commands -- no parallel state array -- so a
    * user hand-editing the memo before Save just works, with no separate
@@ -13424,12 +13459,33 @@ select.sel:focus{border-color:var(--accent)}
        layer, matching this app's own convention that guest membership is
        something atoms are explicitly moved into afterwards (see "Move
        selection to" above), not a place new atoms start out. */
-    var createRow = el("div", "ctl-inline");
-    var createBtn = document.createElement("button"); createBtn.type = "button"; createBtn.className = "btn ghost"; createBtn.textContent = "Create atom"; createBtn.id = "createAtomBtn";
-    createBtn.addEventListener("click", function () { setAtomEditUiMode("create"); });
+    var createElRow = el("div", "ctl-inline");
+    createElRow.appendChild(el("label", "plain", "Element"));
     var createSel = document.createElement("select"); createSel.className = "sel sel-narrow"; createSel.id = "createAtomEl";
-    createRow.appendChild(createBtn); createRow.appendChild(createSel);
-    atomEditTab.appendChild(createRow);
+    createElRow.appendChild(createSel);
+    atomEditTab.appendChild(createElRow);
+    var createBtnRow = el("div", "btnrow");
+    var createBtn = document.createElement("button"); createBtn.type = "button"; createBtn.className = "btn ghost"; createBtn.textContent = "Click to add atom"; createBtn.id = "createAtomBtn";
+    createBtn.addEventListener("click", function () { setAtomEditUiMode("create"); });
+    createBtnRow.appendChild(createBtn);
+    atomEditTab.appendChild(createBtnRow);
+    var createCoordWrap = el("div", "ctl");
+    createCoordWrap.appendChild(el("label", null, "Fractional coordinates (x y z)"));
+    var createCoordRow = el("div", "hklrow");
+    var createXInp = document.createElement("input"); createXInp.type = "number"; createXInp.step = "0.001"; createXInp.value = "0"; createXInp.className = "num"; createXInp.id = "createAtomX";
+    var createYInp = document.createElement("input"); createYInp.type = "number"; createYInp.step = "0.001"; createYInp.value = "0"; createYInp.className = "num"; createYInp.id = "createAtomY";
+    var createZInp = document.createElement("input"); createZInp.type = "number"; createZInp.step = "0.001"; createZInp.value = "0"; createZInp.className = "num"; createZInp.id = "createAtomZ";
+    [createXInp, createYInp, createZInp].forEach(function (inp) { inp.style.width = "70px"; });
+    createCoordRow.appendChild(createXInp); createCoordRow.appendChild(createYInp); createCoordRow.appendChild(createZInp);
+    var createCoordAddBtn = document.createElement("button"); createCoordAddBtn.type = "button"; createCoordAddBtn.className = "btn mini"; createCoordAddBtn.textContent = "Add";
+    createCoordAddBtn.addEventListener("click", function () {
+      var fx = parseFloat(createXInp.value), fy = parseFloat(createYInp.value), fz = parseFloat(createZInp.value);
+      if (!isFinite(fx) || !isFinite(fy) || !isFinite(fz)) { setStatus("Enter numeric x, y, z fractional coordinates.", true); return; }
+      addAtomAtFractionalCoords(fx, fy, fz);
+    });
+    createCoordRow.appendChild(createCoordAddBtn);
+    createCoordWrap.appendChild(createCoordRow);
+    atomEditTab.appendChild(createCoordWrap);
     var moveRow = el("div", "btnrow"); moveRow.style.marginTop = "6px";
     var moveBtn = document.createElement("button"); moveBtn.type = "button"; moveBtn.className = "btn ghost"; moveBtn.textContent = "Move atom"; moveBtn.id = "moveAtomBtn";
     moveBtn.addEventListener("click", function () { setAtomEditUiMode("move"); });
@@ -14915,7 +14971,65 @@ select.sel:focus{border-color:var(--accent)}
       "<p>The reported volume always has some grid-discretization error baked in -- a swept volume is measured by counting grid cells, so a coarser <b>grid resolution</b> systematically undercounts, more so for a small cavity than a large one. <b>Accurate volumes (extrapolated, slower)</b> corrects for this: instead of measuring once at the chosen grid resolution, it measures each component at six progressively finer spacings and extrapolates to what the volume would be at an (unreachable) zero spacing -- the same value a rolling-probe program like MSRoll reports directly, without needing a grid at all. The Vol. column then shows that extrapolated value with its own uncertainty (e.g. \"110.7 &plusmn;1.6\"), and the calculation takes noticeably longer -- six grid builds per component instead of one. Leave it unchecked for a quick look; turn it on when the number itself is what matters.</p>" +
       "<p><b>Assemble &amp; Consolidate</b> (checked by default) does automatically, for every component Calculate finds, what the Fragments panel's own Assemble and Consolidate buttons do by hand: bring a void/channel's scattered edge/corner fragments back together nearest the origin, then bake that arrangement into one permanent piece. Uncheck it to leave every component as its individual, still-movable fragments instead.</p>" +
       "<p><b>Two known limitations</b>, not yet resolved: a very small void (just a handful of nodes) can show a noticeably different reported volume between otherwise symmetry-equivalent copies of itself -- this is grid-discretization noise, not a real difference, and disproportionately affects tiny voids; switch on <b>Accurate volumes</b> to get numbers that agree with each other as they should. Separately, a channel periodic along more than one non-Cartesian-pure axis at once (i.e. a genuinely oblique/triclinic cell where more than one cell angle is far from 90&deg;) can show a real, visible seam where two Fragments-panel pieces are joined end-on along the channel's own length, and may also need the Fragments panel used manually rather than relying on Assemble &amp; Consolidate -- a harder grid-periodicity limitation, not something adjusting settings will fix.</p>" +
-      "<p>A void or channel sitting at a cell edge or corner is shown as several separate <b>fragments</b> -- each one a clipped view of the same underlying shape, positioned so the pieces are exactly complementary. The <b>Fragments</b> panel lists them grouped by which void/channel they belong to, with a colour swatch pair (outside/inside) per group and a \"Same colours for all\" option. <b>Move mode</b> and <b>Copy mode</b> (highlighted red while active) let you click fragments or channel copies directly in the 3D view to select them, then reposition (Move) or duplicate by a further lattice translation (Copy) using the vector boxes or the <b>+a/-a/+b/-b/+c/-c</b> nudge buttons; while either mode is active, spacebar and Delete act on that fragment/channel selection instead of the atom selection, and both modes turn off automatically if the Void/Channel Analysis section is collapsed. <b>Assemble</b> does this automatically for a whole void/channel: it moves every one of that component's fragments back onto each other, reconstructing one complete piece at whichever whole-unit-cell position sits closest to the origin (ties broken toward the higher-numbered cell). <b>Consolidate</b> then bakes the currently-visible fragments into one permanent piece, free of the others' movement.</p>";
+      "<p>A void or channel sitting at a cell edge or corner is shown as several separate <b>fragments</b> -- each one a clipped view of the same underlying shape, positioned so the pieces are exactly complementary. The <b>Fragments</b> panel lists them grouped by which void/channel they belong to, with a colour swatch pair (outside/inside) per group and a \"Same colours for all\" option. <b>Move mode</b> and <b>Copy mode</b> (highlighted red while active) let you click fragments or channel copies directly in the 3D view to select them, then reposition (Move) or duplicate by a further lattice translation (Copy) using the vector boxes or the <b>+a/-a/+b/-b/+c/-c</b> nudge buttons; while either mode is active, spacebar and Delete act on that fragment/channel selection instead of the atom selection, and both modes turn off automatically if the Void/Channel Analysis section is collapsed. <b>Assemble</b> does this automatically for a whole void/channel: it moves every one of that component's fragments back onto each other, reconstructing one complete piece at whichever whole-unit-cell position sits closest to the origin (ties broken toward the higher-numbered cell). <b>Consolidate</b> then bakes the currently-visible fragments into one permanent piece, free of the others' movement.</p>" +
+      "<h3>Macro</h3>" +
+      "<p>A macro is a plain-text sequence of commands, one per line, that can be replayed later to reproduce a sequence of actions -- recorded live from your own clicks and button presses, typed or pasted in by hand, or a mix of both (the memo box is an ordinary text area throughout, editable at any time). It's designed to work not just on the structure it was recorded against but on a whole series of similar ones (e.g. a variable-temperature data set for the same crystal) -- provided each structure's asymmetric unit is labelled the same way and sits in the same place, which is the user's own responsibility to ensure; nothing here can verify that automatically.</p>" +
+      "<p><b>Record</b> and <b>Pause</b> are mutually exclusive (pressing one always pops the other back up). While Record is down, every action below that has a defined macro command gets appended to the memo the instant it happens -- not batched or reordered, in the exact sequence performed. Not every possible action has one: a not-yet-implemented combination is simply never recorded, silently, the same as pressing a key with no shortcut bound to it. <b>Clear</b> empties the memo (confirming first if there's anything in it to lose). <b>Save</b> and <b>Load</b> read and write a plain-text <b>.MAC</b> file -- Save suggests the current structure's own name with a .MAC extension and, in Chrome or Edge, starts its folder picker in whichever folder the structure itself was last dropped from; Load offers the same picker (also starting there), falling back to a plain file-browse button in other browsers, and confirms before replacing a non-empty memo. A .MAC file can also be dropped directly onto the 3D view to load it the same way, without going through the Load button at all. <b>Play</b>, <b>Save</b>, and <b>Load</b> are all disabled while Record is down -- pause first.</p>" +
+      "<p><b>Play</b> runs every line in the memo, in order, against whichever structure is currently loaded (or, in folder-batch mode, against each structure in turn -- see below), and reports how many ran versus how many it couldn't, by line number -- an unrecognized command word, or one whose atom reference doesn't match any atom in the structure currently loaded (the usual sign of replaying against a differently-labelled structure), is skipped rather than stopping the whole run. A command's own argument(s) follow the command word after a single space; where an argument is itself an atom reference it has the form <span class='mono'>name  matrix</span> (the atom's own CIF/SHELX label, two spaces, then the space-group operator that generated that specific copy in Jones-Faithful notation, e.g. <span class='mono'>H7A  1+X,1+Y,Z</span>) -- exactly the text already shown for that atom everywhere else in the app (labels, Save CIF, the Selection & geometry readout).</p>" +
+      "<p>Two buttons below the memo insert a command directly, regardless of whether Record is down -- there's no single live action either one corresponds to, so unlike everything above they're never recorded automatically. <b>Add current POV</b> appends a <span class='mono'>VIEW</span> command capturing the exact current camera orientation (as the same four-number quaternion a saved project file itself already uses for this), so a macro can return the view to precisely this orientation later, on this structure or another. <b>Add EXPORT_PNG</b> appends an <span class='mono'>EXPORT_PNG</span> command, optionally with whatever suffix is typed in the box beside the button (sanitized against characters a filename can't contain) -- see below.</p>" +
+      "<p><span class='mono'>EXPORT_PNG</span>, when played, saves the current view as a PNG using whatever <b>Export &gt; Image</b> is currently set to (resolution, transparent background), the same as pressing <b>Export image (PNG)</b> by hand. Its filename is always the current structure's own name with its extension stripped, plus an underscore and the given suffix if one was given (e.g. structure <span class='mono'>ZIF-68.cif</span> with suffix <span class='mono'>top</span> saves <span class='mono'>ZIF-68_top.png</span>). Because writing straight to disk needs the user's permission, the very first time <b>Play</b> is pressed on a memo containing an <span class='mono'>EXPORT_PNG</span> line, a folder picker appears asking where to save -- granted once, that folder is then reused silently for every <span class='mono'>EXPORT_PNG</span> in every macro played for the rest of this browser session, with no further prompts, until a write to it actually fails (at which point the next Play asks again). Declining the picker, or using a browser without this capability at all, falls back to an ordinary individual download per image instead of failing outright.</p>" +
+      "<p><b>Apply macro to all files in folder</b>, at the bottom of the panel, turns Play into a batch operation: tick the box, use <b>Select folder</b> to grant access to a folder (the box above it shows the folder's own name once chosen -- browsers never expose a full filesystem path, only that), then press Play as normal. Instead of running once against the currently-loaded structure, every <span class='mono'>.cif</span>/<span class='mono'>.res</span>/<span class='mono'>.ins</span>/<span class='mono'>.txt</span> file in that folder is loaded in turn (alphabetical order) and the whole memo is run against each one before moving to the next, reporting how many files it got through and how many commands failed along the way. If the memo also contains an <span class='mono'>EXPORT_PNG</span> line, the same batch folder doubles as the export destination -- no second permission prompt -- so this is the tool for producing one rendered image per structure across a whole folder of similar files in one action. It's entirely up to the user to make sure every file in the folder is actually compatible with the macro being played (matching ASU labelling, as above); a file that fails to load at all (wrong format, unparseable) is skipped and counted, not fatal to the rest of the batch.</p>" +
+      "<p>The command reference below groups every command by what it does. Most mirror a specific action one-to-one and are recorded automatically while Record is down; a handful are noted where that isn't the case.</p>" +
+      "<p><b>Selection</b> (recorded on the matching click or spacebar press):</p>" +
+      "<ul>" +
+      "<li><span class='mono'>SELECT_ALL</span> / <span class='mono'>DESELECT_ALL</span> &mdash; spacebar with nothing selected / with anything selected.</li>" +
+      "<li><span class='mono'>TOGGLE_ALL</span> &mdash; Shift+spacebar (inverts the whole selection).</li>" +
+      "<li><span class='mono'>SELECT_ATOM name matrix</span> / <span class='mono'>UNSELECT_ATOM name matrix</span> &mdash; plain click on an unselected / already-selected atom.</li>" +
+      "<li><span class='mono'>SELECT_FRAG name matrix</span> / <span class='mono'>DESELECT_FRAG name matrix</span> &mdash; Ctrl-click (the clicked atom's whole bonded fragment).</li>" +
+      "<li><span class='mono'>SELECT_ELEMENT #</span> / <span class='mono'>DESELECT_ELEMENT #</span> &mdash; Shift-click (<span class='mono'>#</span> is the clicked atom's atomic number, e.g. 6 for carbon; every atom of that element, host and guest together).</li>" +
+      "<li><span class='mono'>SELECT_PART #</span> / <span class='mono'>DESELECT_PART #</span> &mdash; Shift+Ctrl+Alt-click (<span class='mono'>#</span> is the clicked atom's SHELX PART number). Only meaningful for a .res/.ins-derived structure -- fails cleanly on a plain CIF, which has no PART numbers.</li>" +
+      "</ul>" +
+      "<p><b>View and display</b>:</p>" +
+      "<ul>" +
+      "<li><span class='mono'>VIEW_VECTOR h k l</span> &mdash; the a/b/c buttons, or the [hkl] field's own Go button (Display &gt; Direction).</li>" +
+      "<li><span class='mono'>VIEW_PLANE h k l</span> &mdash; the bc/ac/ab buttons, or \"Perpendicular to (hkl)\"'s own Go button.</li>" +
+      "<li><span class='mono'>VIEW x y z w</span> &mdash; never recorded automatically; only ever inserted by <b>Add current POV</b> (see above).</li>" +
+      "<li><span class='mono'>UNIT_CELL_ON</span> / <span class='mono'>UNIT_CELL_OFF</span> &mdash; the Show unit cell checkbox, or the <b>c</b> key.</li>" +
+      "<li><span class='mono'>ASU_ONLY_ON</span> / <span class='mono'>ASU_ONLY_OFF</span> &mdash; the Show ASU only checkbox, or the <b>a</b> key.</li>" +
+      "<li><span class='mono'>HIDE_SELECTION</span> / <span class='mono'>UNHIDE_ATOMS</span> &mdash; Hide selection / Unhide all (or Ctrl-Z / Ctrl-U).</li>" +
+      "<li><span class='mono'>CENTER_ALL</span> / <span class='mono'>CENTER_VISIBLE</span> / <span class='mono'>CENTER_UNITCELL</span> &mdash; the Centering dropdown, for the three options that recentre the instant they're picked.</li>" +
+      "<li><span class='mono'>CENTER_SELECTED</span> &mdash; the Centering dropdown set to Selected atoms, plus its own Apply button.</li>" +
+      "<li><span class='mono'>CENTER x,y,z</span> &mdash; the Centering dropdown set to Fractional coordinates, plus its own Apply button (note: comma-separated, unlike every hkl-style command above).</li>" +
+      "</ul>" +
+      "<p><b>Editing the structure</b>:</p>" +
+      "<ul>" +
+      "<li><span class='mono'>SELECTED_TO_ASU</span> &mdash; \"Move to ASU\".</li>" +
+      "<li><span class='mono'>DELETE_SELECTED_ATOMS</span> &mdash; \"Delete selection\".</li>" +
+      "<li><span class='mono'>CREATE_CENTROID</span> &mdash; \"Generate centroid\" (or Ctrl-C).</li>" +
+      "<li><span class='mono'>DELETE_SYM_ATOMS</span> &mdash; \"Delete all symmetry-generated atoms\".</li>" +
+      "<li><span class='mono'>REASSIGN_ELEMENT #</span> &mdash; \"Reassign element to\" (<span class='mono'>#</span> is the new element's atomic number).</li>" +
+      "<li><span class='mono'>MOVE_SELECTION_TO Host</span> / <span class='mono'>MOVE_SELECTION_TO NewGuestGroup</span> / <span class='mono'>MOVE_SELECTION_TO Guest1</span> (etc.) &mdash; \"Move selection to\", for its three kinds of destination; an existing guest group is referred to by its current position in the Guest tab's own list (1st, 2nd, ...), which stays valid even if the app's own internal group numbering isn't consecutive.</li>" +
+      "</ul>" +
+      "<p><b>Growing by symmetry</b> (all require a CIF-based structure that still has its symmetry information):</p>" +
+      "<ul>" +
+      "<li><span class='mono'>GROW_ATOM name matrix</span> / <span class='mono'>GROW_FRAG name matrix</span> / <span class='mono'>GROW_ASU name matrix</span> &mdash; a plain click in grow mode (Grow &gt; Mouse), for whichever of Atoms/Fragment/ASU is currently selected there.</li>" +
+      "<li><span class='mono'>GROW_SPHERE_ATOM # name matrix</span> / <span class='mono'>GROW_SPHERE_FRAG # name matrix</span> / <span class='mono'>GROW_SPHERE_ASU # name matrix</span> &mdash; a click in grow mode with Sphere of inclusion selected (<span class='mono'>#</span> is the radius in " + U.ang + ").</li>" +
+      "<li><span class='mono'>PACK_FRAGATOMS amin amax bmin bmax cmin cmax</span> / <span class='mono'>PACK_FRAGCENTROID amin amax bmin bmax cmin cmax</span> &mdash; the Pack tab's own Pack button, for its \"fragment atom in limits\" / \"fragment centroid in limits\" condition.</li>" +
+      "<li><span class='mono'>GROW_SYM matrix</span> &mdash; the Symmetry tab's Apply button, or one of its own -a/+a/-b/+b/-c/+c shift buttons; always the matrix as set at the time (before any \"Use M<sup>-1</sup>\" inversion), and always honours whatever the Use M<sup>-1</sup>/Select new/Keep source format checkboxes are set to at the moment it's replayed, not whatever they happened to be at record time.</li>" +
+      "<li><span class='mono'>EXTEND_FRAGS</span> / <span class='mono'>COMPLETE_MOLS</span> &mdash; \"Extend fragment(s)\" / \"Complete molecule(s)\", both global rather than selection-scoped.</li>" +
+      "</ul>" +
+      "<p><b>Atom display style</b> -- these eight are always recorded together, as one batch reflecting the complete current state of Style &gt; Atoms' own checkboxes, only when its <b>Apply</b> button is actually pressed (not one line per checkbox click along the way):</p>" +
+      "<ul>" +
+      "<li><span class='mono'>ATOM_STYLE_CPK_COLOR</span> / <span class='mono'>ATOM_STYLE_CUSTOM_COLOR #rrggbb</span> &mdash; whichever of Colour: CPK/Custom is ticked, if either.</li>" +
+      "<li><span class='mono'>ATOM_STYLE_ELLIPSOID</span> / <span class='mono'>ATOM_STYLE_SPHERE</span> &mdash; always one of the two, reflecting the Ellipsoid checkbox.</li>" +
+      "<li><span class='mono'>ATOM_STYLE_RADIUS_FIXED #</span> / <span class='mono'>ATOM_STYLE_RADIUS_VDW # #</span> (Non-H, H) &mdash; whichever radius option is ticked, if either.</li>" +
+      "<li><span class='mono'>ATOM_STYLE_CLEAR_SELECTION</span> &mdash; only when the Clear selection checkbox is ticked.</li>" +
+      "<li><span class='mono'>ATOM_STYLE_APPLY</span> &mdash; always last; actually applies whatever the lines above it set up.</li>" +
+      "</ul>" +
+      "<p><b>Export</b>:</p>" +
+      "<ul>" +
+      "<li><span class='mono'>EXPORT_PNG suffix</span> &mdash; never recorded automatically; only ever inserted by <b>Add EXPORT_PNG</b> (suffix is optional -- see above for exactly what it does when played).</li>" +
+      "</ul>";
     document.getElementById("guideBtn").addEventListener("click", function () { document.getElementById("guideModal").classList.add("open"); });
     document.getElementById("guideClose").addEventListener("click", function () { document.getElementById("guideModal").classList.remove("open"); });
     document.getElementById("guideModal").addEventListener("click", function (e) { if (e.target.id === "guideModal") e.currentTarget.classList.remove("open"); });
