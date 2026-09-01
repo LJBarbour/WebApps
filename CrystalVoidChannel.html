@@ -180,6 +180,10 @@ select.sel{font-family:var(--sans);font-size:11.5px;border:1px solid var(--borde
   padding:4px 5px;background:var(--bg);color:var(--ink);outline:none;min-width:120px}
 select.sel.sel-narrow{min-width:50px}
 .divider{border:none;border-top:1px solid var(--border);margin:2px 0}
+.macro-memo{width:100%;height:160px;font-family:var(--mono);font-size:10.5px;line-height:1.4;resize:vertical;
+  box-sizing:border-box;padding:6px 7px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--ink);
+  white-space:pre;overflow:auto}
+.macro-memo:focus{border-color:var(--accent);outline:none}
 select.sel:focus{border-color:var(--accent)}
 .toggle{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--ink-mid);cursor:pointer}
 .toggle-row2{display:grid;grid-template-columns:1fr 1fr;align-items:center}
@@ -271,6 +275,7 @@ select.sel:focus{border-color:var(--accent)}
 <input type="file" id="cifInput" accept=".cif,.txt,.res,.ins" style="display:none">
 <input type="file" id="elementCsvInput" accept=".csv,.txt" style="display:none">
 <input type="file" id="modelJsonInput" accept=".json" style="display:none">
+<input type="file" id="macroInput" accept=".mac,.MAC,.txt" style="display:none">
 <script>
 /**
  * @license
@@ -2607,7 +2612,9 @@ select.sel:focus{border-color:var(--accent)}
     videoFps: 30,
     clipPlaneEnabled: false, clipPlaneOffset: 50, clipPlaneInvert: false,
     clipPlaneMode: "view", clipPlaneH: 1, clipPlaneK: 0, clipPlaneL: 0, clipPlaneHklConvention: "reciprocal",
-    clipPlaneApplyHost: true, clipPlaneApplyGuest: true, clipPlaneApplyVoid: true, clipPlaneApplyMolSurface: true, clipPlaneApplyUnitCell: true
+    clipPlaneApplyHost: true, clipPlaneApplyGuest: true, clipPlaneApplyVoid: true, clipPlaneApplyMolSurface: true, clipPlaneApplyUnitCell: true,
+    macroRecording: false, macroPlaying: false, macroExportDirHandle: null,
+    macroBatchFolder: false, macroBatchDirHandle: null
   };
 
   /* ---------------- camera controller ----------------
@@ -2890,9 +2897,14 @@ select.sel:focus{border-color:var(--accent)}
     var tip = K.fracToCart(state.cifFracToCart, frac);
     return new THREE.Vector3(tip[0] - origin[0], tip[1] - origin[1], tip[2] - origin[2]);
   }
+  var GROW_UNIT_SUFFIX = { atom: "ATOM", frag: "FRAG", asu: "ASU" };
+  var AXIS_BUTTON_HKL = { a: [1, 0, 0], b: [0, 1, 0], c: [0, 0, 1] };
+  var CELL_PLANE_BUTTON_HKL = { bc: [1, 0, 0], ac: [0, 1, 0], ab: [0, 0, 1] };
   function viewDownAxis(which) {
     var v = cifAxisCartesian(which); if (!v) return;
     setViewDirection(v.normalize());
+    var hkl = AXIS_BUTTON_HKL[which];
+    recordMacroCommand("VIEW_VECTOR " + hkl[0] + " " + hkl[1] + " " + hkl[2]);
     setStatus("Viewing down the " + which + " axis.", false);
   }
   function viewPerpendicularToCellPlane(pair) {
@@ -2901,6 +2913,8 @@ select.sel:focus{border-color:var(--accent)}
     var v1 = pair === "bc" ? b : a, v2 = pair === "ab" ? b : c;
     var normal = new THREE.Vector3().crossVectors(v1, v2).normalize();
     setViewDirection(normal);
+    var hkl = CELL_PLANE_BUTTON_HKL[pair];
+    recordMacroCommand("VIEW_PLANE " + hkl[0] + " " + hkl[1] + " " + hkl[2]);
     setStatus("Viewing perpendicular to the " + pair + " plane.", false);
   }
   function viewAlongHKL(h, k, l) {
@@ -2909,7 +2923,24 @@ select.sel:focus{border-color:var(--accent)}
     var v = new THREE.Vector3().addScaledVector(a, h).addScaledVector(b, k).addScaledVector(c, l);
     if (v.lengthSq() < 1e-10) { setStatus("[" + h + " " + k + " " + l + "] is a zero vector -- not a valid direction.", true); return; }
     setViewDirection(v.normalize());
+    recordMacroCommand("VIEW_VECTOR " + h + " " + k + " " + l);
     setStatus("Viewing along [" + h + " " + k + " " + l + "].", false);
+  }
+  function viewPerpendicularToHKL(h, k, l) {
+    /* Round-bracket (hkl) Miller-PLANE convention (h*a* + k*b* + l*c*, via
+       hklPlaneNormalCartesian) -- not the square-bracket [hkl] direction
+       viewAlongHKL uses -- since "perpendicular to the plane (hkl)" is
+       exactly the rigorous definition of a Miller plane's own normal, and
+       only coincides with h*a+k*b+l*c for an orthogonal cell. Same
+       convention the clip-plane hkl feature's "reciprocal" option uses
+       (see clipHklNormalCartesian's own comment). */
+    var a = cifAxisCartesian("a");
+    if (!a) return;
+    var n = hklPlaneNormalCartesian(h, k, l);
+    if (!n) { setStatus("(" + h + " " + k + " " + l + ") is not a valid plane -- h, k, l can't all be zero.", true); return; }
+    setViewDirection(n);
+    recordMacroCommand("VIEW_PLANE " + h + " " + k + " " + l);
+    setStatus("Viewing perpendicular to (" + h + " " + k + " " + l + ").", false);
   }
   function integerGcd(x, y) { x = Math.abs(x); y = Math.abs(y); while (y) { var t = y; y = x % y; x = t; } return x; }
   /* Finds the lowest-index [h k l] (in lattice-vector, not reciprocal, terms
@@ -3314,6 +3345,21 @@ select.sel:focus{border-color:var(--accent)}
     var opts = { suggestedName: suggestedName, types: [filePickerType || { description: "PNG image", accept: { "image/png": [".png"] } }] };
     if (state.lastSourceHandle) opts.startIn = state.lastSourceHandle;
     return window.showSaveFilePicker(opts).catch(function (e) {
+      return (e && e.name === "AbortError") ? "CANCELLED" : null;
+    });
+  }
+  function requestOpenHandle(filePickerType) {
+    /* Mirrors requestSaveHandle() above, for loading instead of saving --
+       same startIn convention (starts in the folder the current structure
+       was loaded from, when known, via state.lastSourceHandle), same "null
+       means fall back to the plain <input type=file>" contract for browsers
+       without the File System Access API (Firefox, Safari). Returns a
+       promise of a FileSystemFileHandle, the string "CANCELLED" if the user
+       dismissed the picker, or null to fall back. */
+    if (!window.showOpenFilePicker) return Promise.resolve(null);
+    var opts = { types: [filePickerType], multiple: false };
+    if (state.lastSourceHandle) opts.startIn = state.lastSourceHandle;
+    return window.showOpenFilePicker(opts).then(function (handles) { return handles[0]; }).catch(function (e) {
       return (e && e.name === "AbortError") ? "CANCELLED" : null;
     });
   }
@@ -3900,6 +3946,51 @@ select.sel:focus{border-color:var(--accent)}
       handlePromise.then(function (h) { writeToSaveHandle(h, blob, "CrystalVoid_figure.png", w, h); });
     });
   }
+  /* EXPORT_PNG's own macro handler -- unlike exportImage() above (a picker
+     every time, via requestSaveHandle), this writes straight into
+     state.macroExportDirHandle, a folder the user authorized once (see
+     playMacro()'s own comment on why that has to happen up front, before
+     any line actually runs) -- no per-file dialog, so a macro with several
+     EXPORT_PNG lines (e.g. one per structure in a variable-temperature
+     series) can save all of them without the user touching anything.
+     Same PNG (same renderExportBlob(), same current Export > Image
+     resolution/transparent-background settings) as a live "Export image
+     (PNG)" click would produce. Falls back to a plain Downloads-folder
+     download (legacyDownload) when no folder was ever granted -- either
+     this browser has no showDirectoryPicker at all, or the user declined
+     it -- so the command still does *something* useful either way. */
+  function exportPngViaMacro(suffix) {
+    var cleanSuffix = suffix ? suffix.replace(/[<>:"/\\|?*]/g, "_") : "";
+    var base = state.name ? state.name.replace(/\.[^./\\]+$/, "") : "CrystalVoid";
+    var filename = base + (cleanSuffix ? "_" + cleanSuffix : "") + ".png";
+    return new Promise(function (resolve) {
+      renderExportBlob(function (blob, w, h) {
+        if (!blob) { setStatus("Export failed.", true); resolve(false); return; }
+        var dims = " (" + w + "×" + h + " px)";
+        if (state.macroExportDirHandle) {
+          state.macroExportDirHandle.getFileHandle(filename, { create: true }).then(function (fh) {
+            return fh.createWritable();
+          }).then(function (w2) {
+            return w2.write(blob).then(function () { return w2.close(); });
+          }).then(function () {
+            setStatus("Saved " + filename + dims + ".", false);
+            resolve(true);
+          }).catch(function () {
+            /* permission may have been revoked (folder moved/deleted, user
+               revoked it in browser settings, ...) -- clear the cached
+               handle so the NEXT Play press re-prompts instead of failing
+               the same way forever */
+            state.macroExportDirHandle = null;
+            legacyDownload(blob, filename, dims, "writing to the granted folder failed");
+            resolve(true);
+          });
+        } else {
+          legacyDownload(blob, filename, dims, "no folder access has been granted for this session");
+          resolve(true);
+        }
+      });
+    });
+  }
   function copyImageToClipboard() {
     if (!window.ClipboardItem || !navigator.clipboard || !navigator.clipboard.write) {
       setStatus("This browser does not support copying images to the clipboard from a local file -- try Export image (PNG) instead.", true);
@@ -4208,6 +4299,7 @@ select.sel:focus{border-color:var(--accent)}
     state.viewOffset = [-x / sel.length, -y / sel.length, -z / sel.length];
     clearSelection();
     renderStructure(); renderSurface(); renderVoidMeshes(); renderUnitCell(); renderMolSurfaceMeshes();
+    recordMacroCommand("CENTER_SELECTED");
     setStatus("Centred on " + sel.length + " selected atom" + (sel.length === 1 ? "" : "s") + ".", false);
   }
   function applyFractionalCentering(fx, fy, fz) {
@@ -4216,6 +4308,7 @@ select.sel:focus{border-color:var(--accent)}
     var cc = K.fracToCart(state.cifFracToCart, [fx, fy, fz]);
     state.viewOffset = [-cc[0], -cc[1], -cc[2]];
     renderStructure(); renderSurface(); renderVoidMeshes(); renderUnitCell(); renderMolSurfaceMeshes();
+    recordMacroCommand("CENTER " + fx + "," + fy + "," + fz);
     setStatus("Centred on fractional coordinates (" + fx + ", " + fy + ", " + fz + ").", false);
   }
 
@@ -8804,6 +8897,11 @@ select.sel:focus{border-color:var(--accent)}
   var atomDispColorMode = null, atomDispColorHex = 0xffffff;
   var atomDispRadiusMode = null, atomDispFixedVal = 0, atomDispNonHMult = 0.20, atomDispHMult = 0.15;
   var atomDispEllipsoid = false;
+  /* set once, inside buildUI(), to the Style > Atoms Apply button's own
+     handler -- module-level so ATOM_STYLE_APPLY's macro playback (defined
+     far below, outside buildUI()'s closure) can call the exact same
+     function a live Apply click does, rather than duplicating its logic. */
+  var applyAtomDisplaySettings = null;
   function contrastColorFor(bgHex) {
     var r = (bgHex >> 16) & 255, g = (bgHex >> 8) & 255, b = bgHex & 255;
     var luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
@@ -9004,12 +9102,19 @@ select.sel:focus{border-color:var(--accent)}
       return;
     }
     if (state.isCif && state.growMode && !state.symmetryForgotten) {
+      /* GROW_UNIT_SUFFIX maps state.growUnit's 3 values to the matching
+         macro command's own suffix (ATOM/FRAG/ASU) -- shared between the
+         plain-seed and sphere-of-inclusion recordings just below, since
+         both respect growUnit identically (see growFromSeed/
+         growSphereOfInclusion's own near-identical 3-way branches). */
       if (state.growBySphere) {
         var r = state.sphereRadius;
         if (!isFinite(r) || r <= 0) { setStatus("Enter a valid sphere radius first.", true); return; }
         growSphereOfInclusion([hit.atom.x, hit.atom.y, hit.atom.z], r);
+        recordMacroCommand("GROW_SPHERE_" + GROW_UNIT_SUFFIX[state.growUnit] + " " + r + " " + macroAtomRef(hit.atom));
       } else {
         growFromSeed(hit.atom);
+        recordMacroCommand("GROW_" + GROW_UNIT_SUFFIX[state.growUnit] + " " + macroAtomRef(hit.atom));
       }
       return;
     }
@@ -9031,6 +9136,19 @@ select.sel:focus{border-color:var(--accent)}
     }
     scope = scope.filter(isSelectable);
     var target = !atom.selected;
+    /* Only the three single-modifier cases below have a defined macro
+       command yet (SELECT_FRAG/SELECT_ELEMENT/SELECT_ATOM and their
+       deselect counterparts) -- ctrl/alt/shift COMBINATIONS reaching this
+       point (e.g. ctrl+shift: fragment scope, then element-filtered by the
+       loop below) aren't recorded at all for now, silently, same as any
+       other not-yet-implemented command. */
+    if (mods.ctrl && !mods.alt && !mods.shift) {
+      recordMacroCommand((target ? "SELECT_FRAG " : "DESELECT_FRAG ") + macroAtomRef(atom));
+    } else if (mods.shift && !mods.ctrl && !mods.alt) {
+      recordMacroCommand((target ? "SELECT_ELEMENT " : "DESELECT_ELEMENT ") + K.ELEMENTS.indexOf(atom.el));
+    } else if (!mods.ctrl && !mods.alt && !mods.shift) {
+      recordMacroCommand((target ? "SELECT_ATOM " : "UNSELECT_ATOM ") + macroAtomRef(atom));
+    }
     for (i = 0; i < scope.length; i++) {
       if (mods.shift && scope[i].el !== atom.el) continue;
       scope[i].selected = target;
@@ -9067,20 +9185,30 @@ select.sel:focus{border-color:var(--accent)}
     renderSelection(); updateSelectionInfo();
     setStatus(makeSelected ? ("Selected " + count + " atom" + (count === 1 ? "" : "s") + " generated by the same symmetry operator.") : "Deselected atoms generated by the same symmetry operator.", false);
   }
+  /* Shared by selectSamePart() (click-driven, toggle) and runMacroLine's
+     SELECT_PART/DESELECT_PART (explicit, not a toggle -- the command word
+     itself says which direction) -- both just need "make every atom in this
+     PART number selected/deselected", so the actual loop lives here once. */
+  function applyPartSelection(targetPart, makeSelected) {
+    var allAtoms = (state.atoms || []).concat(state.guestAtoms || []);
+    var count = 0;
+    for (var i = 0; i < allAtoms.length; i++) {
+      if ((allAtoms[i].part || 0) === targetPart && (!makeSelected || isSelectable(allAtoms[i]))) { allAtoms[i].selected = makeSelected; if (makeSelected) count++; }
+    }
+    renderSelection(); updateSelectionInfo();
+    setStatus(makeSelected ? ("Selected " + count + " atom" + (count === 1 ? "" : "s") + " in PART " + targetPart + ".") : ("Deselected PART " + targetPart + " atoms."), false);
+    return count;
+  }
   function selectSamePart(clickedAtom) {
     /* mirrors selectSymmetryRelated() above -- toggle-select/deselect every
        atom (host and guest together) sharing the clicked atom's PART number.
        Only meaningful for a SHELX .res/.ins-derived structure (see the
        "part !== undefined" gate at the call site); a CIF-sourced atom never
        reaches here at all. */
-    var allAtoms = (state.atoms || []).concat(state.guestAtoms || []);
     var targetPart = clickedAtom.part || 0;
-    var makeSelected = !clickedAtom.selected, count = 0;
-    for (var i = 0; i < allAtoms.length; i++) {
-      if ((allAtoms[i].part || 0) === targetPart && (!makeSelected || isSelectable(allAtoms[i]))) { allAtoms[i].selected = makeSelected; if (makeSelected) count++; }
-    }
-    renderSelection(); updateSelectionInfo();
-    setStatus(makeSelected ? ("Selected " + count + " atom" + (count === 1 ? "" : "s") + " in PART " + targetPart + ".") : ("Deselected PART " + targetPart + " atoms."), false);
+    var makeSelected = !clickedAtom.selected;
+    applyPartSelection(targetPart, makeSelected);
+    recordMacroCommand((makeSelected ? "SELECT_PART " : "DESELECT_PART ") + targetPart);
   }
   function generateCentroid() {
     var sel = getSelectedAtomObjects();
@@ -9109,6 +9237,7 @@ select.sel:focus{border-color:var(--accent)}
     for (i = 0; i < sel.length; i++) sel[i].selected = false;
     renderSelection();
     renderStructure(); updateHostInfo(); buildRadiiEditor(); buildHostColorEditor(); refreshReassignElementOptions(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
+    recordMacroCommand("CREATE_CENTROID");
     setStatus("Generated a centroid from " + sel.length + " selected atoms.", false);
   }
   /* ---------------- Create/Move Atoms ----------------
@@ -9226,6 +9355,7 @@ select.sel:focus{border-color:var(--accent)}
     applyRadii(guestSel); applyColors(guestSel, state.guestColors); refreshGuestAtomColors();
     renderSelection();
     renderStructure(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); refreshReassignElementOptions(); refreshBondCleanupElements(); updateSelectionInfo();
+    recordMacroCommand("REASSIGN_ELEMENT " + K.ELEMENTS.indexOf(newEl));
     var n = hostSel.length + guestSel.length;
     setStatus("Reassigned " + n + " atom" + (n === 1 ? "" : "s") + " to " + newEl +
       (cascadeCount ? " (" + cascadeCount + " symmetry-related atom" + (cascadeCount === 1 ? "" : "s") + " updated automatically)" : "") + ".", false);
@@ -9418,11 +9548,572 @@ select.sel:focus{border-color:var(--accent)}
     state.selectedBonds = {};
     renderSelection(); updateBondSelectionInfo();
   }
+  /* ---------------- macro recording ----------------
+   * X-Seed-compatible: the goal is a macro recorded here to also be usable
+   * in the user's own X-Seed installation (and vice versa) "to the extent
+   * that the two apps can support this" -- so command names, argument
+   * order, and the double-space between an atom's name and its symmetry
+   * operator (matching the two examples given: "SELECT_FRAG H7A  1+X,1+Y,Z",
+   * "SELECT_ATOM O9D  2/3-X+Y,1/3-X,Z-2/3") are all deliberately kept
+   * exactly as specified, not "cleaned up" to this app's own usual style.
+   * The memo textarea (#macroMemo, built in buildUI's Macro section) is the
+   * ONLY store for recorded commands -- no parallel state array -- so a
+   * user hand-editing the memo before Save just works, with no separate
+   * data to fall out of sync. */
+  /* The raw "append one line to the memo" primitive, shared by
+     recordMacroCommand() below (gated on state.macroRecording -- an action
+     the user actually performed while Record is down) and the Macro panel's
+     own "Add current POV"/"Add EXPORT_PNG" buttons (which insert a command
+     unconditionally, Record or not -- they're direct authoring tools, not
+     a recording of a live action, exactly like EXPORT_PNG itself is always
+     hand-added rather than auto-recorded). */
+  function appendToMacroMemo(line) {
+    var ta = document.getElementById("macroMemo");
+    if (!ta) return;
+    ta.value += (ta.value ? "\n" : "") + line;
+    ta.scrollTop = ta.scrollHeight;
+  }
+  function recordMacroCommand(line) {
+    if (state.macroPlaying) return; /* Play macro drives the same functions that normally record -- suppress re-recording into the memo while it's replaying, regardless of whether Record also happens to be down */
+    if (!state.macroRecording) return;
+    appendToMacroMemo(line);
+  }
+  /* "Add current POV" button's handler -- appends a VIEW command that
+     exactly reproduces the current camera orientation. camOrient (a
+     THREE.Quaternion) is this app's own existing internal representation
+     of "which way the camera is pointing" -- the same [x,y,z,w] shape
+     buildProjectSnapshot() already uses to save/restore camera orientation
+     in a project file (see its own "camera:" field), reused here rather
+     than inventing a fresh convention. Deliberately NOT gated on
+     state.macroRecording -- see appendToMacroMemo's own comment. */
+  function addCurrentPovCommand() {
+    if (!state.isCif && !state.atoms) { setStatus("Load a structure first.", true); return; }
+    appendToMacroMemo("VIEW " + camOrient.x.toFixed(6) + " " + camOrient.y.toFixed(6) + " " + camOrient.z.toFixed(6) + " " + camOrient.w.toFixed(6));
+  }
+  /* "Add EXPORT_PNG" button's handler -- suffix comes from its own text box
+     next to the button, sanitized the same way exportPngViaMacro() itself
+     sanitizes at playback time, so what's written into the memo already
+     matches the filename component that will actually be used. */
+  function addExportPngCommand() {
+    var inp = document.getElementById("macroExportSuffixInp");
+    var suffix = inp ? inp.value.trim().replace(/[<>:"/\\|?*]/g, "_") : "";
+    appendToMacroMemo("EXPORT_PNG" + (suffix ? " " + suffix : ""));
+  }
+  /* "name<space><space>symop" for a specific atom instance, e.g.
+     "H7A  1+X,1+Y,Z" -- name is the CIF's own _atom_site_label for this
+     atom's asymmetric-unit position (atomLabelText, same text Save CIF and
+     every on-screen label already use), and symop is the space-group
+     operator that generated THIS copy with its own whole-cell translation
+     folded in (cellI/J/K added onto the operator's own trans -- the same
+     recipe moveAtomToAsu/findComposedOpAndCell already use elsewhere in
+     this file), formatted via K.symopToString. Falls back to just the name
+     if this atom has no symmetry information at all (not a CIF structure,
+     or symmetry already forgotten) -- a macro recorded that way can still
+     only ever mean "this specific atom on this specific structure", never
+     mind replaying it elsewhere, but that's the user's own call to make. */
+  function macroAtomRef(atom) {
+    var label = atomLabelText(atom);
+    if (!state.cifSymops || atom.opIndex === undefined || !state.cifSymops[atom.opIndex]) return label;
+    var op = state.cifSymops[atom.opIndex];
+    var opWithCell = { rot: op.rot, trans: [op.trans[0] + (atom.cellI || 0), op.trans[1] + (atom.cellJ || 0), op.trans[2] + (atom.cellK || 0)] };
+    return label + "  " + K.symopToString(opWithCell);
+  }
+  function syncMacroButtons() {
+    var recordBtn = document.getElementById("macroRecordBtn"), pauseBtn = document.getElementById("macroPauseBtn");
+    if (recordBtn) recordBtn.className = "btn" + (state.macroRecording ? " grow-active" : " ghost");
+    if (pauseBtn) pauseBtn.className = "btn" + (!state.macroRecording ? " grow-active" : " ghost");
+    /* Play/Save/Load are all disabled while actively recording -- playing
+       or loading a macro mid-recording would interleave someone else's
+       (or an old) script's lines with whatever's being freshly recorded
+       right now, and saving mid-recording invites saving a macro the user
+       still meant to keep adding to. Pause first, then use any of the
+       three -- Record can always be pressed again afterward to resume. */
+    var playBtn = document.getElementById("macroPlayBtn"), saveBtn = document.getElementById("macroSaveBtn"), loadBtn = document.getElementById("macroLoadBtn");
+    if (playBtn) playBtn.disabled = state.macroRecording;
+    if (saveBtn) saveBtn.disabled = state.macroRecording;
+    if (loadBtn) loadBtn.disabled = state.macroRecording;
+    var batchCb = document.getElementById("macroBatchFolderCb"), batchSelectBtn = document.getElementById("macroBatchSelectBtn");
+    if (batchCb) batchCb.disabled = state.macroRecording;
+    if (batchSelectBtn) batchSelectBtn.disabled = state.macroRecording;
+  }
+  function saveMacroFile() {
+    var ta = document.getElementById("macroMemo");
+    var text = ta ? ta.value : "";
+    if (!text.trim()) { setStatus("Nothing to save -- the macro memo is empty.", true); return; }
+    var base = state.name ? state.name.replace(/\.[^./\\]+$/, "") : "macro";
+    var suggestedName = base + ".MAC";
+    /* requestSaveHandle() must run first, before any other work -- see
+       saveCifFile's own identical comment on why (showSaveFilePicker
+       consumes the click's transient user-activation). It already starts
+       the picker in state.lastSourceHandle's own folder when known (the
+       structure the macro is being recorded against), the same mechanism
+       Save CIF relies on -- see requestSaveHandle's own definition. */
+    var handlePromise = requestSaveHandle(suggestedName, { description: "Macro file", accept: { "text/plain": [".MAC"] } });
+    handlePromise.then(function (h) {
+      if (h === "CANCELLED") { setStatus("Save cancelled.", false); return; }
+      if (h) {
+        h.createWritable().then(function (w) { return w.write(text).then(function () { return w.close(); }); })
+          .then(function () { setStatus("Saved " + suggestedName + ".", false); })
+          .catch(function () { legacyDownloadText(text, suggestedName, "text/plain"); });
+      } else {
+        legacyDownloadText(text, suggestedName, "text/plain");
+      }
+    });
+  }
+  /* Loads a previously-saved .MAC file's text into the memo. Starts in the
+     currently-loaded structure's own folder (state.lastSourceHandle, same
+     convention Save/requestOpenHandle above use) -- even though a macro can
+     be replayed against a DIFFERENT structure than the one it was recorded
+     on (the variable-temperature use case), a .MAC file is still most often
+     saved right alongside the structure it was made for, so that folder is
+     still the best starting guess; the user can always navigate elsewhere
+     in the picker. Falls back to the hidden #macroInput <input type=file>
+     (same pattern as #modelJsonInput's "Load model...") on a browser
+     without the File System Access API, where there's no such thing as a
+     starting folder to suggest anyway. */
+  function loadMacroFile() {
+    var handlePromise = requestOpenHandle({ description: "Macro file", accept: { "text/plain": [".mac", ".MAC"] } });
+    handlePromise.then(function (h) {
+      if (h === "CANCELLED") { setStatus("Load cancelled.", false); return; }
+      if (h) {
+        h.getFile().then(handleMacroFileSelected);
+      } else {
+        var input = document.getElementById("macroInput");
+        if (input) input.click();
+      }
+    });
+  }
+  function clearMacroMemo() {
+    var ta = document.getElementById("macroMemo");
+    if (!ta || !ta.value.trim()) return;
+    var n = ta.value.split("\n").length;
+    if (!window.confirm("Clear the macro memo (" + n + " line" + (n === 1 ? "" : "s") + ")? This can't be undone.")) return;
+    ta.value = "";
+    setStatus("Macro memo cleared.", false);
+  }
+  /* Keeps the batch folder's own readonly name box in sync with
+     state.macroBatchDirHandle -- same "update by id" convention
+     syncCenteringUI()/syncAtomStyleUI() already use. There's no way to
+     show a real filesystem path here (the File System Access API never
+     exposes one, deliberately, for privacy) -- only the folder's own leaf
+     name, which is why this box is readonly rather than a real path the
+     user could type: there'd be nothing meaningful to parse a typed path
+     into without the picker itself. */
+  function syncMacroBatchFolderUI() {
+    var inp = document.getElementById("macroBatchFolderName");
+    if (inp) inp.value = state.macroBatchDirHandle ? state.macroBatchDirHandle.name : "";
+  }
+  function selectMacroBatchFolder() {
+    if (!window.showDirectoryPicker) { setStatus("This browser can't offer a folder picker.", true); return; }
+    var opts = { mode: "readwrite" };
+    if (state.lastSourceHandle) opts.startIn = state.lastSourceHandle;
+    window.showDirectoryPicker(opts).then(function (h) {
+      state.macroBatchDirHandle = h;
+      syncMacroBatchFolderUI();
+      setStatus("Selected folder \"" + h.name + "\".", false);
+    }).catch(function () { /* cancelled/dismissed -- leave whatever was already selected untouched */ });
+  }
+  function handleMacroFileSelected(file) {
+    if (!file) return;
+    var ta = document.getElementById("macroMemo");
+    if (ta && ta.value.trim() && !window.confirm("This replaces the current macro memo's contents (" + ta.value.split("\n").length + " line" + (ta.value.split("\n").length === 1 ? "" : "s") + "). Continue?")) {
+      setStatus("Load cancelled.", false);
+      return;
+    }
+    var rd = new FileReader();
+    rd.onload = function () {
+      if (ta) { ta.value = String(rd.result).replace(/\r\n/g, "\n"); ta.scrollTop = 0; }
+      setStatus("Loaded " + file.name + ".", false);
+    };
+    rd.onerror = function () { setStatus("Couldn't read " + file.name + ".", true); };
+    rd.readAsText(file);
+  }
+  /* Finds the atom (host or guest) whose macroAtomRef() matches ref exactly
+     -- the inverse of macroAtomRef's own "name  matrix" formatting, done by
+     re-running the same forward function over every currently-present atom
+     rather than reverse-parsing the symop string, so a lookup can never
+     drift out of sync with how refs are actually written. Works the same
+     whether ref is being replayed against the structure it was recorded on
+     or a different (e.g. variable-temperature) one with matching labels --
+     see the Macro panel's own hint about that being the user's
+     responsibility, not something this can verify. */
+  function findAtomByMacroRef(ref) {
+    var host = state.atoms || [], guest = state.guestAtoms || [], i;
+    for (i = 0; i < host.length; i++) if (macroAtomRef(host[i]) === ref) return { atom: host[i], atoms: host };
+    for (i = 0; i < guest.length; i++) if (macroAtomRef(guest[i]) === ref) return { atom: guest[i], atoms: guest };
+    return null;
+  }
+  /* Keeps the Centering subsection's own controls (built once in buildUI,
+     read back here by id) in sync after playMacro() changes
+     state.centeringMode/viewOffset programmatically -- mirrors exactly what
+     the select's own "change" handler already does for Apply-button
+     visibility, so the panel looks right if/when the user opens it,
+     without needing playMacro() to duplicate that layout logic inline. */
+  function syncCenteringUI() {
+    var sel = document.getElementById("centeringModeSelect");
+    if (sel) sel.value = state.centeringMode;
+    var applyBtn = document.getElementById("centeringApplyBtn");
+    if (applyBtn) applyBtn.style.display = (state.centeringMode === "selected") ? "" : "none";
+    var fracApplyBtn = document.getElementById("centeringFracApplyBtn");
+    if (fracApplyBtn) fracApplyBtn.disabled = state.centeringMode !== "fractional";
+  }
+  /* Same idea as syncCenteringUI(), for Style > Atoms -- pushes the
+     atomDisp* brush-state module vars (mutated directly by the ATOM_STYLE_*
+     macro cases below, bypassing the checkboxes entirely) back into the
+     panel's own controls, so it looks right if/when the user opens it. */
+  function syncAtomStyleUI() {
+    var el;
+    el = document.getElementById("atomStyleCpkCb"); if (el) el.checked = atomDispColorMode === "cpk";
+    el = document.getElementById("atomStyleCustomCb"); if (el) el.checked = atomDispColorMode === "custom";
+    el = document.getElementById("atomStyleColorSwatch"); if (el) el.value = hexToCss(atomDispColorHex);
+    el = document.getElementById("atomStyleRadiiCb"); if (el) el.checked = atomDispRadiusMode === "vdwx";
+    el = document.getElementById("atomStyleFixedCb"); if (el) el.checked = atomDispRadiusMode === "fixed";
+    el = document.getElementById("atomStyleNonHInp"); if (el) el.value = atomDispNonHMult.toFixed(2);
+    el = document.getElementById("atomStyleHInp"); if (el) el.value = atomDispHMult.toFixed(2);
+    el = document.getElementById("atomStyleFixedInp"); if (el) el.value = atomDispFixedVal.toFixed(2);
+    el = document.getElementById("atomStyleEllipsoidCb"); if (el) el.checked = atomDispEllipsoid;
+  }
+  /* Runs one already-trimmed, non-empty macro line, dispatching to exactly
+     the same functions the corresponding live UI action (button/checkbox/
+     Go) would call -- so playback and manual use can never silently drift
+     apart in behaviour. Returns true if the line was a recognized command
+     that could be dispatched (even if the underlying action itself then
+     turned out to be a harmless no-op, e.g. HIDE_SELECTION with nothing
+     currently selected -- that mirrors clicking the real button in the same
+     situation, not a playback failure), false if the command word wasn't
+     recognized or its argument(s)/atom reference couldn't be resolved. */
+  function runMacroLine(line) {
+    var sp = line.indexOf(" ");
+    var cmd = sp < 0 ? line : line.slice(0, sp);
+    var rest = sp < 0 ? "" : line.slice(sp + 1).trim();
+    var hit, idx, scope, target, n, el, all, i, parts, xyz, gm, gi, mv;
+    var hasParts, growUnit, savedGrowUnit, sp2, radius, ref, op;
+    switch (cmd) {
+      case "SELECT_ALL": selectAllVisible(); return true;
+      case "DESELECT_ALL": clearSelection(); return true;
+      case "TOGGLE_ALL": invertSelection(); return true;
+      case "SELECT_FRAG": case "DESELECT_FRAG":
+        hit = findAtomByMacroRef(rest);
+        if (!hit) return false;
+        idx = hit.atoms.indexOf(hit.atom); if (idx < 0) return false;
+        scope = fragmentIndices(hit.atoms, idx).map(function (k) { return hit.atoms[k]; }).filter(isSelectable);
+        target = cmd === "SELECT_FRAG";
+        for (i = 0; i < scope.length; i++) scope[i].selected = target;
+        renderSelection(); updateSelectionInfo();
+        return true;
+      case "SELECT_ELEMENT": case "DESELECT_ELEMENT":
+        n = parseInt(rest, 10);
+        if (!isFinite(n) || !K.ELEMENTS[n]) return false;
+        el = K.ELEMENTS[n];
+        all = (state.atoms || []).concat(state.guestAtoms || []).filter(isSelectable);
+        target = cmd === "SELECT_ELEMENT";
+        for (i = 0; i < all.length; i++) if (all[i].el === el) all[i].selected = target;
+        renderSelection(); updateSelectionInfo();
+        return true;
+      case "SELECT_ATOM": case "UNSELECT_ATOM":
+        hit = findAtomByMacroRef(rest);
+        if (!hit || !isSelectable(hit.atom)) return false;
+        hit.atom.selected = cmd === "SELECT_ATOM";
+        renderSelection(); updateSelectionInfo();
+        return true;
+      case "UNIT_CELL_ON": case "UNIT_CELL_OFF":
+        state.showUnitCell = cmd === "UNIT_CELL_ON";
+        renderUnitCell();
+        el = document.getElementById("showUnitCellTg"); if (el) el.checked = state.showUnitCell;
+        return true;
+      case "ASU_ONLY_ON": case "ASU_ONLY_OFF":
+        state.showOnlyAsu = cmd === "ASU_ONLY_ON";
+        recomputeViewOffset(); clearUnselectableSelections(); renderStructure(); updateSelectionInfo();
+        el = document.getElementById("showOnlyAsuTg"); if (el) el.checked = state.showOnlyAsu;
+        return true;
+      case "VIEW_VECTOR": case "VIEW_PLANE":
+        parts = rest.split(/\s+/).map(Number);
+        if (parts.length !== 3 || !parts.every(isFinite)) return false;
+        if (cmd === "VIEW_VECTOR") viewAlongHKL(parts[0], parts[1], parts[2]); else viewPerpendicularToHKL(parts[0], parts[1], parts[2]);
+        return true;
+      case "HIDE_SELECTION": hideSelectedAtoms(); return true;
+      case "UNHIDE_ATOMS": unhideAllAtoms(); return true;
+      case "CENTER_ALL": case "CENTER_VISIBLE": case "CENTER_UNITCELL":
+        state.centeringMode = cmd === "CENTER_ALL" ? "all" : cmd === "CENTER_VISIBLE" ? "visible" : "unitcell";
+        recomputeViewOffset(); renderStructure();
+        syncCenteringUI();
+        return true;
+      case "CENTER_SELECTED":
+        state.centeringMode = "selected";
+        syncCenteringUI();
+        applySelectedAtomsCentering();
+        return true;
+      case "CENTER":
+        xyz = rest.split(",").map(Number);
+        if (xyz.length !== 3 || !xyz.every(isFinite)) return false;
+        state.centeringMode = "fractional";
+        syncCenteringUI();
+        applyFractionalCentering(xyz[0], xyz[1], xyz[2]);
+        el = document.getElementById("centeringFracX"); if (el) el.value = String(xyz[0]);
+        el = document.getElementById("centeringFracY"); if (el) el.value = String(xyz[1]);
+        el = document.getElementById("centeringFracZ"); if (el) el.value = String(xyz[2]);
+        return true;
+      case "SELECTED_TO_ASU": moveSelectedAtomsToAsu(); return true;
+      case "DELETE_SELECTED_ATOMS": deleteSelectedAtoms(); return true;
+      case "CREATE_CENTROID": generateCentroid(); return true;
+      case "DELETE_SYM_ATOMS": deleteSymmetryGeneratedAtoms(); return true;
+      case "REASSIGN_ELEMENT":
+        n = parseInt(rest, 10);
+        if (!isFinite(n) || !K.ELEMENTS[n]) return false;
+        reassignSelectedElement(K.ELEMENTS[n]);
+        return true;
+      case "MOVE_SELECTION_TO":
+        if (rest === "Host") mv = "host";
+        else if (rest === "NewGuestGroup") mv = "__new__";
+        else {
+          gm = /^Guest(\d+)$/.exec(rest);
+          if (!gm) return false;
+          gi = parseInt(gm[1], 10) - 1;
+          if (gi < 0 || gi >= state.guestGroups.length) return false;
+          mv = state.guestGroups[gi].id;
+        }
+        moveSelectionTo(mv);
+        return true;
+      /* The eight ATOM_STYLE_* commands are always recorded together, as one
+         batch per Apply press (see the Apply button's own handler) -- each
+         one here just sets the same atomDisp* brush-state vars that
+         checkbox would, mirroring its live change handler including mutual
+         exclusion (ellipsoid <-> fixed radius), then ATOM_STYLE_APPLY calls
+         the real Apply function. */
+      case "ATOM_STYLE_CPK_COLOR":
+        atomDispColorMode = "cpk"; syncAtomStyleUI(); return true;
+      case "ATOM_STYLE_CUSTOM_COLOR":
+        if (!rest) return false;
+        atomDispColorMode = "custom"; atomDispColorHex = cssToHex(rest);
+        syncAtomStyleUI(); return true;
+      case "ATOM_STYLE_ELLIPSOID":
+        atomDispEllipsoid = true;
+        if (atomDispRadiusMode === "fixed") atomDispRadiusMode = null;
+        syncAtomStyleUI(); return true;
+      case "ATOM_STYLE_SPHERE":
+        atomDispEllipsoid = false; syncAtomStyleUI(); return true;
+      case "ATOM_STYLE_RADIUS_FIXED":
+        n = parseFloat(rest);
+        if (!isFinite(n)) return false;
+        atomDispRadiusMode = "fixed"; atomDispFixedVal = n; atomDispEllipsoid = false;
+        syncAtomStyleUI(); return true;
+      case "ATOM_STYLE_RADIUS_VDW":
+        parts = rest.split(/\s+/).map(Number);
+        if (parts.length !== 2 || !parts.every(isFinite)) return false;
+        atomDispRadiusMode = "vdwx"; atomDispNonHMult = parts[0]; atomDispHMult = parts[1];
+        syncAtomStyleUI(); return true;
+      case "ATOM_STYLE_CLEAR_SELECTION":
+        el = document.getElementById("atomStyleClearSelCb"); if (el) el.checked = true;
+        return true;
+      case "ATOM_STYLE_APPLY":
+        if (!applyAtomDisplaySettings) return false;
+        applyAtomDisplaySettings();
+        return true;
+      case "SELECT_PART": case "DESELECT_PART":
+        /* only meaningful for a SHELX .res/.ins-derived structure -- same
+           "does any atom actually carry a .part" test the live ctrl+shift+
+           alt-click gate uses (see selectSamePart's own call site), so
+           replaying this against a plain CIF structure fails cleanly rather
+           than silently matching every atom (.part defaults to 0 when
+           absent, so without this guard SELECT_PART 0 would select
+           everything on an ordinary CIF). */
+        n = parseInt(rest, 10);
+        if (!isFinite(n)) return false;
+        hasParts = (state.atoms || []).concat(state.guestAtoms || []).some(function (a) { return a.part !== undefined; });
+        if (!hasParts) return false;
+        applyPartSelection(n, cmd === "SELECT_PART");
+        return true;
+      case "EXTEND_FRAGS":
+        /* both async (a setTimeout defers the real work so the "Extending
+           fragments..." overlay can paint first) -- returning a Promise here
+           lets playMacro() await completion before moving to the next line,
+           instead of racing ahead against a structure that hasn't actually
+           grown yet. */
+        return new Promise(function (resolve) { extendAllFragments(function () { resolve(true); }); });
+      case "COMPLETE_MOLS":
+        return new Promise(function (resolve) { completeMoleculeFragments(function () { resolve(true); }); });
+      case "GROW_ATOM": case "GROW_FRAG": case "GROW_ASU":
+        if (!state.isCif || state.symmetryForgotten) return false;
+        hit = findAtomByMacroRef(rest);
+        if (!hit) return false;
+        growUnit = cmd === "GROW_ATOM" ? "atom" : cmd === "GROW_FRAG" ? "frag" : "asu";
+        savedGrowUnit = state.growUnit;
+        state.growUnit = growUnit;
+        try { growFromSeed(hit.atom); } finally { state.growUnit = savedGrowUnit; }
+        return true;
+      case "GROW_SPHERE_ATOM": case "GROW_SPHERE_FRAG": case "GROW_SPHERE_ASU":
+        if (!state.isCif || state.symmetryForgotten) return false;
+        sp2 = rest.indexOf(" ");
+        if (sp2 < 0) return false;
+        radius = parseFloat(rest.slice(0, sp2));
+        ref = rest.slice(sp2 + 1).trim();
+        if (!isFinite(radius) || radius <= 0) return false;
+        hit = findAtomByMacroRef(ref);
+        if (!hit) return false;
+        growUnit = cmd === "GROW_SPHERE_ATOM" ? "atom" : cmd === "GROW_SPHERE_FRAG" ? "frag" : "asu";
+        savedGrowUnit = state.growUnit;
+        state.growUnit = growUnit;
+        try { growSphereOfInclusion([hit.atom.x, hit.atom.y, hit.atom.z], radius); } finally { state.growUnit = savedGrowUnit; }
+        return true;
+      case "PACK_FRAGATOMS": case "PACK_FRAGCENTROID":
+        parts = rest.split(/\s+/).map(Number);
+        if (parts.length !== 6 || !parts.every(isFinite)) return false;
+        if (parts[0] > parts[1] || parts[2] > parts[3] || parts[4] > parts[5]) return false;
+        growByPackRange({ aMin: parts[0], aMax: parts[1], bMin: parts[2], bMax: parts[3], cMin: parts[4], cMax: parts[5] }, cmd === "PACK_FRAGCENTROID" ? "centroid" : "any");
+        return true;
+      case "GROW_SYM":
+        op = K.parseSymop(rest);
+        if (!op) return false;
+        applySymOpTransform(op);
+        return true;
+      case "EXPORT_PNG":
+        /* rest is the optional suffix, already trimmed by the split above --
+           "" when the command was given with no suffix at all. Never
+           recorded automatically (there's no live UI action that means
+           "export a PNG" the way every other macro command mirrors a
+           button/checkbox) -- this one only ever appears because the user
+           typed it into the memo by hand, per its own spec. */
+        return exportPngViaMacro(rest);
+      case "VIEW":
+        /* x y z w -- camOrient's own [x,y,z,w] quaternion components,
+           exactly as "Add current POV" wrote them and as
+           buildProjectSnapshot()'s own "camera:" field already serializes
+           camOrient for a saved project -- reusing that convention rather
+           than inventing a matrix form. Sets orientation only (not
+           camTarget/camDist), matching VIEW_VECTOR/VIEW_PLANE's own scope. */
+        parts = rest.split(/\s+/).map(Number);
+        if (parts.length !== 4 || !parts.every(isFinite)) return false;
+        camOrient.set(parts[0], parts[1], parts[2], parts[3]);
+        camOrient.normalize();
+        applyController();
+        updateViewDirectionReadout();
+        repositionLabels();
+        return true;
+      default:
+        return false;
+    }
+  }
+  /* Runs every line once against whatever structure is currently loaded --
+     the shared inner loop for both a plain single-structure Play and one
+     iteration of the folder-batch mode below. Always leaves
+     state.macroPlaying false again on the way out (even if a line throws),
+     same guarantee playMacro() itself used to provide directly. */
+  async function runMacroLinesOnce(lines) {
+    state.macroPlaying = true;
+    var done = 0, failed = [];
+    try {
+      for (var i = 0; i < lines.length; i++) {
+        var result = runMacroLine(lines[i]);
+        if (result && typeof result.then === "function") result = await result;
+        if (result) done++; else failed.push(String(i + 1));
+      }
+    } finally {
+      state.macroPlaying = false;
+    }
+    return { done: done, failed: failed };
+  }
+  /* "Apply macro to all files in folder" mode -- loads each .cif/.res/.ins/
+     .txt file in state.macroBatchDirHandle (same extension set #cifInput's
+     own picker filter accepts, sniffed the same content-agnostic way
+     handleStructureFileText() already treats any of them) in name order,
+     and runs the full macro against each one in turn. Built for "render
+     the same figure/export for every structure in a folder" -- e.g. one
+     EXPORT_PNG per file in a variable-temperature series, each landing in
+     the same folder under that structure's own name (exportPngViaMacro()
+     already bases the filename on state.name, which loadAtoms() sets fresh
+     on every load here). It's the caller's own responsibility that every
+     file in the folder is actually compatible with this macro (matching
+     ASU labelling etc.) -- same caveat as replaying any macro on a
+     different structure, just now automated across many at once. */
+  async function playMacroBatch(lines) {
+    var dirHandle = state.macroBatchDirHandle;
+    var entries = [];
+    for await (var h of dirHandle.values()) {
+      if (h.kind === "file" && /\.(cif|res|ins|txt)$/i.test(h.name)) entries.push(h);
+    }
+    entries.sort(function (a, b) { return a.name.localeCompare(b.name, undefined, { numeric: true }); });
+    if (!entries.length) { setStatus("No .cif/.res/.ins files found in \"" + dirHandle.name + "\".", true); return; }
+    var filesOk = 0, filesFailed = 0, totalDone = 0, totalFailedLines = 0;
+    for (var fi = 0; fi < entries.length; fi++) {
+      var h = entries[fi];
+      var content;
+      try {
+        var fileObj = await h.getFile();
+        content = await fileObj.text();
+      } catch (e) { filesFailed++; continue; }
+      handleStructureFileText(content, h.name);
+      /* handleStructureFileText() never throws and never returns a value
+         either way (see its own call chain) -- state.name (or, for a
+         multi-block CIF, state.cifMultiSourceName) actually landing on
+         this file's own name is the only after-the-fact signal that it
+         really loaded rather than silently failing a parse/cell check and
+         leaving the PREVIOUS file's structure sitting there untouched. */
+      if (state.name !== h.name && state.cifMultiSourceName !== h.name) { filesFailed++; continue; }
+      filesOk++;
+      var result = await runMacroLinesOnce(lines);
+      totalDone += result.done; totalFailedLines += result.failed.length;
+    }
+    var msg = "Applied the macro to " + filesOk + " of " + entries.length + " file" + (entries.length === 1 ? "" : "s") + " in \"" + dirHandle.name + "\"";
+    if (filesFailed) msg += " (" + filesFailed + " couldn't be loaded)";
+    if (totalFailedLines) msg += "; " + totalFailedLines + " command" + (totalFailedLines === 1 ? "" : "s") + " failed along the way";
+    setStatus(msg + ".", filesFailed > 0 || totalFailedLines > 0);
+  }
+  async function playMacro() {
+    /* async because a couple of lines (EXTEND_FRAGS/COMPLETE_MOLS) dispatch
+       to functions that defer their real work to a setTimeout -- runMacroLine
+       returns a Promise for those instead of a plain boolean, and awaiting
+       it here (rather than firing every line in one synchronous burst) is
+       what keeps state.macroPlaying genuinely true for their whole duration
+       and stops a later line from running against a not-yet-grown structure. */
+    var ta = document.getElementById("macroMemo");
+    var text = ta ? ta.value : "";
+    var lines = text.split("\n").map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 0; });
+    if (!lines.length) { setStatus("Nothing to play -- the macro memo is empty.", true); return; }
+    var needsExportDir = lines.some(function (l) { return l === "EXPORT_PNG" || l.indexOf("EXPORT_PNG ") === 0; });
+    if (state.macroBatchFolder) {
+      if (!state.macroBatchDirHandle) { setStatus("Select a folder first, or untick \"Apply macro to all files in folder\".", true); return; }
+      /* The batch folder was already granted read+write access of its own
+         (see selectMacroBatchFolder()'s own {mode:"readwrite"} picker
+         call) -- reusing that same handle for EXPORT_PNG's output means
+         "process this folder" never needs a second permission prompt. */
+      if (needsExportDir && !state.macroExportDirHandle) state.macroExportDirHandle = state.macroBatchDirHandle;
+      await playMacroBatch(lines);
+      return;
+    }
+    /* If this script has any EXPORT_PNG line, ask for folder access RIGHT
+       HERE -- before anything else, including state.macroPlaying flipping
+       on -- because this call has to be the very first thing awaited in
+       this whole function. showDirectoryPicker() consumes the Play click's
+       transient user-activation exactly like requestSaveHandle()'s own
+       picker does (see its comment); by the time the line loop below has
+       already awaited even one earlier line, that activation is gone and
+       the picker would be rejected outright. Only asked once per session
+       -- state.macroExportDirHandle is reused by every later Play press
+       (even across different macros) until a write against it actually
+       fails, at which point exportPngViaMacro() clears it so the next
+       Play retries the picker instead of silently breaking forever. */
+    if (!state.macroExportDirHandle && window.showDirectoryPicker && needsExportDir) {
+      try {
+        var dirOpts = { mode: "readwrite" };
+        if (state.lastSourceHandle) dirOpts.startIn = state.lastSourceHandle;
+        state.macroExportDirHandle = await window.showDirectoryPicker(dirOpts);
+      } catch (e) {
+        state.macroExportDirHandle = null; /* declined or dismissed -- EXPORT_PNG lines below fall back to individual downloads instead of failing outright */
+      }
+    }
+    var result = await runMacroLinesOnce(lines);
+    if (result.failed.length) {
+      setStatus("Played " + result.done + " of " + lines.length + " command" + (lines.length === 1 ? "" : "s") + " -- couldn't run line" + (result.failed.length === 1 ? "" : "s") + " " + result.failed.join(", ") + " (unrecognized command or atom not found).", true);
+    } else {
+      setStatus("Played " + result.done + " macro command" + (result.done === 1 ? "" : "s") + ".", false);
+    }
+  }
   function toggleSelectAll() {
     var c = countSelected(), target = (c.host + c.guest) === 0;
     if (state.atoms) for (var i = 0; i < state.atoms.length; i++) state.atoms[i].selected = target && isSelectable(state.atoms[i]);
     if (state.guestAtoms) for (var j = 0; j < state.guestAtoms.length; j++) state.guestAtoms[j].selected = target && isSelectable(state.guestAtoms[j]);
     renderSelection(); updateSelectionInfo();
+    recordMacroCommand(target ? "SELECT_ALL" : "DESELECT_ALL");
   }
   function selectAllVisible() {
     /* unlike toggleSelectAll() (Space's clear-if-any/select-if-none toggle),
@@ -9435,6 +10126,7 @@ select.sel:focus{border-color:var(--accent)}
     if (state.atoms) for (var i = 0; i < state.atoms.length; i++) if (isSelectable(state.atoms[i])) state.atoms[i].selected = !state.atoms[i].selected;
     if (state.guestAtoms) for (var j = 0; j < state.guestAtoms.length; j++) if (isSelectable(state.guestAtoms[j])) state.guestAtoms[j].selected = !state.guestAtoms[j].selected;
     renderSelection(); updateSelectionInfo();
+    recordMacroCommand("TOGGLE_ALL");
   }
   function invertBondSelection() {
     /* bonds are computed per-array (host, guest never cross-bonded), same
@@ -9682,6 +10374,7 @@ select.sel:focus{border-color:var(--accent)}
     }
     renderStructure();
     clearSelection();
+    recordMacroCommand("SELECTED_TO_ASU");
     var speciesCount = Object.keys(speciesDone).length;
     var msg = "Moved " + speciesCount + " species to a new asymmetric-unit reference (" + atomsTouched + " atom" + (atomsTouched === 1 ? "" : "s") + " re-parented).";
     if (skipped) msg += " " + skipped + " selected atom" + (skipped === 1 ? "" : "s") + " skipped (not host atoms with symmetry tracking).";
@@ -9767,7 +10460,99 @@ select.sel:focus{border-color:var(--accent)}
     }
     if (!toAdd.length) { setStatus("No new fragments found within those limits (they may already be displayed, or none qualify).", false); return; }
     var n2 = commitGrownAtoms(toAdd);
+    recordMacroCommand((condition === "centroid" ? "PACK_FRAGCENTROID " : "PACK_FRAGATOMS ") +
+      limits.aMin + " " + limits.aMax + " " + limits.bMin + " " + limits.bMax + " " + limits.cMin + " " + limits.cMax);
     setStatus("Pack growth added " + n2 + " atom" + (n2 === 1 ? "" : "s") + ".", false);
+  }
+  /* Reads the Grow > Symmetry sub-panel's own 3x3 rotation spinner grid +
+     3 translation text boxes back into a {rot, trans} operator -- module-
+     level (not nested in buildUI, where it used to live) purely so
+     applySymOpTransform() below can be called by runMacroLine's GROW_SYM
+     case too, not just the panel's own Apply/shift buttons. Pure DOM query
+     by id, no closure dependency, so hoisting it changed nothing about how
+     it works. */
+  function readMatrixFromUI() {
+    var spinEls = document.querySelectorAll("#symOpMatrixGrid .matspin");
+    var tEls = document.querySelectorAll("#symOpMatrixGrid .symop-t");
+    var rot = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], trans = [0, 0, 0];
+    for (var r = 0; r < 3; r++) {
+      for (var c = 0; c < 3; c++) rot[r][c] = parseInt(spinEls[r * 3 + c].dataset.value, 10) || 0;
+      var tv = parseFloat(tEls[r].value);
+      trans[r] = isFinite(tv) ? tv : 0;
+    }
+    return { rot: rot, trans: trans };
+  }
+  function findAtomNearPosition(x, y, z, extraBatch) {
+    var tol2 = 0.0001;
+    function scan(arr) {
+      if (!arr) return null;
+      for (var i = 0; i < arr.length; i++) {
+        var dx = arr[i].x - x, dy = arr[i].y - y, dz = arr[i].z - z;
+        if (dx * dx + dy * dy + dz * dz < tol2) return arr[i];
+      }
+      return null;
+    }
+    return scan(state.atoms) || scan(state.guestAtoms) || scan(extraBatch);
+  }
+  function applySymOpTransform(opOverride) {
+    /* opOverride: only ever passed by GROW_SYM's macro playback
+       (runMacroLine) -- substitutes for reading the Symmetry sub-panel's
+       own matrix grid, so replaying a macro doesn't require (or touch) any
+       particular grid state. The Use-M^-1/Select-new/Keep-source-format
+       checkboxes are read live by id either way (this function used to be
+       nested inside buildUI() for closure access to those three -- hoisted
+       out here, by id instead, so runMacroLine can call it directly): a
+       macro's GROW_SYM line has no flags of its own for any of the three,
+       deliberately, so it always behaves according to whatever the panel is
+       currently set to, exactly like a live Apply click would. */
+    if (!state.isCif || state.symmetryForgotten) { setStatus("This only applies to a CIF-based structure that still has its symmetry information.", true); return; }
+    var sel = getSelectedAtomObjects();
+    if (!sel.length) { setStatus("Select one or more atoms first, then press Apply.", true); return; }
+    var op = opOverride || readMatrixFromUI();
+    var rawOp = op; /* recorded as typed/passed in, before any inverse below -- so replaying reproduces the same effective transform as long as "Use M^-1" is in the same state it was at record time */
+    if (opOverride) populateSymOpMatrixDom(op);
+    var invCb = document.getElementById("symOpInverse");
+    var selectNewCb = document.getElementById("symOpSelectNew");
+    var keepFormatCb = document.getElementById("symOpKeepFormat");
+    if (invCb && invCb.checked) {
+      var inv = K.invertSymop(op);
+      if (!inv) { setStatus("This matrix has no inverse (its determinant is zero) -- cannot apply it in reverse.", true); return; }
+      op = inv;
+    }
+    var toAdd = [], resultAtoms = [], skippedNotTracked = 0, skippedNoMatch = 0, alreadyExistingCount = 0;
+    for (var i = 0; i < sel.length; i++) {
+      var atom = sel[i];
+      if (atom.isCentroid || atom.auIndex === undefined) { skippedNotTracked++; continue; }
+      var match = findComposedOpAndCell(op, atom.opIndex, [atom.cellI, atom.cellJ, atom.cellK]);
+      if (!match) { skippedNoMatch++; continue; }
+      var newAtom = generateSymmetryAtom(atom.auIndex, match.opIndex, match.cellI, match.cellJ, match.cellK);
+      if (keepFormatCb && keepFormatCb.checked) {
+        /* copies the specific selected source atom's own actual settings,
+           atom-by-atom -- distinct from "Settings for new atoms" (Grow >
+           Mouse's default/current dropdowns), which paint a generic brush;
+           this is scoped only to Symmetry's own Apply/shift buttons */
+        newAtom.dispColorMode = atom.dispColorMode; newAtom.dispColor = atom.dispColor;
+        newAtom.dispRadiusMode = atom.dispRadiusMode; newAtom.dispRadiusValue = atom.dispRadiusValue;
+      }
+      var existingAtom = findAtomNearPosition(newAtom.x, newAtom.y, newAtom.z, toAdd);
+      if (existingAtom) { alreadyExistingCount++; resultAtoms.push(existingAtom); continue; }
+      toAdd.push(newAtom);
+      resultAtoms.push(newAtom);
+    }
+    if (!toAdd.length && !resultAtoms.length) {
+      var reason = skippedNoMatch ? "this matrix doesn't correspond to any symmetry operation of this space group" : "none of the selection is a CIF-tracked atom";
+      setStatus("No atoms were added — " + reason + ".", false);
+      return;
+    }
+    var n = commitGrownAtoms(toAdd, keepFormatCb && keepFormatCb.checked);
+    if (selectNewCb && selectNewCb.checked) {
+      for (var s = 0; s < sel.length; s++) sel[s].selected = false;
+      for (var r = 0; r < resultAtoms.length; r++) resultAtoms[r].selected = true;
+      renderSelection(); updateSelectionInfo();
+    }
+    recordMacroCommand("GROW_SYM " + K.symopToString(rawOp));
+    var note = alreadyExistingCount ? (" (" + alreadyExistingCount + " already present, skipped)") : "";
+    setStatus("Applied the symmetry operation: added " + n + " atom" + (n === 1 ? "" : "s") + note + ".", false);
   }
   function enforcedGrowthBondMatches(auA, auB, dist) {
     /* mirrors addExtraBondSignatureCandidates()'s own test, but for a
@@ -9903,12 +10688,20 @@ select.sel:focus{border-color:var(--accent)}
     }
     return out;
   }
-  function extendAllFragments() {
-    if (!state.isCif || state.symmetryForgotten) { setStatus("This only applies to a CIF-based structure that still has its symmetry information.", true); return; }
+  function extendAllFragments(onDone) {
+    /* onDone is an optional zero-arg completion callback -- ONLY macro
+       playback passes one (see runMacroLine's EXTEND_FRAGS case), never the
+       live "Extend fragment(s)" button (bound via a zero-arg wrapper closure
+       precisely so a click's MouseEvent can never land in this slot). The
+       real work runs on a setTimeout (below), well after this function has
+       already returned, so playMacro() -- which otherwise runs macro lines
+       one synchronous call at a time -- needs a way to know when it's
+       actually safe to move on to the next line. */
+    if (!state.isCif || state.symmetryForgotten) { setStatus("This only applies to a CIF-based structure that still has its symmetry information.", true); if (onDone) onDone(); return; }
     var seeds = [];
     if (state.atoms) for (var i = 0; i < state.atoms.length; i++) { var a = state.atoms[i]; if (!a.isCentroid && a.auIndex !== undefined) seeds.push(a); }
     if (state.guestAtoms) for (var j = 0; j < state.guestAtoms.length; j++) { var g = state.guestAtoms[j]; if (!g.isCentroid && g.auIndex !== undefined) seeds.push(g); }
-    if (!seeds.length) { setStatus("No atoms to extend from.", true); return; }
+    if (!seeds.length) { setStatus("No atoms to extend from.", true); if (onDone) onDone(); return; }
     showOverlay(true, "Extending fragments...");
     setTimeout(function () {
       var allNew = [], seenKeys = {};
@@ -9927,9 +10720,11 @@ select.sel:focus{border-color:var(--accent)}
         }
       }
       showOverlay(false);
-      if (!allNew.length) { setStatus("No new fragments found to extend.", false); return; }
+      if (!allNew.length) { setStatus("No new fragments found to extend.", false); if (onDone) onDone(); return; }
       var n = commitGrownAtoms(allNew);
+      recordMacroCommand("EXTEND_FRAGS");
       setStatus("Extended fragments: added " + n + " atom" + (n === 1 ? "" : "s") + ".", false);
+      if (onDone) onDone();
     }, 30);
   }
   /* Standard metal/non-metal staircase: every element except this list is
@@ -10151,9 +10946,12 @@ select.sel:focus{border-color:var(--accent)}
     });
     return { atomsAdded: atomsAdded, ligandsCompleted: ligandsCompleted };
   }
-  function completeMoleculeFragments() {
-    if (!state.isCif || state.symmetryForgotten) { setStatus("This only applies to a CIF-based structure that still has its symmetry information.", true); return; }
-    if (!state.atoms && !state.guestAtoms) { setStatus("No atoms to complete.", true); return; }
+  function completeMoleculeFragments(onDone) {
+    /* onDone: see extendAllFragments()'s own comment -- same reason, same
+       contract (optional, macro-playback-only, never wired to the live
+       button directly). */
+    if (!state.isCif || state.symmetryForgotten) { setStatus("This only applies to a CIF-based structure that still has its symmetry information.", true); if (onDone) onDone(); return; }
+    if (!state.atoms && !state.guestAtoms) { setStatus("No atoms to complete.", true); if (onDone) onDone(); return; }
     showOverlay(true, "Completing molecules...");
     setTimeout(function () {
       var baseImages = buildBaseSymmetryImages();
@@ -10186,7 +10984,7 @@ select.sel:focus{border-color:var(--accent)}
         state._autoCompleting = false;
       }
       showOverlay(false);
-      if (!fullCount && !partialCount && !blockedOnlyCount && !ligandsCompleted) { setStatus("Every fragment is already a complete molecule -- nothing to add.", false); return; }
+      if (!fullCount && !partialCount && !blockedOnlyCount && !ligandsCompleted) { setStatus("Every fragment is already a complete molecule -- nothing to add.", false); if (onDone) onDone(); return; }
       var msg;
       if (fullCount || partialCount || ligandsCompleted) {
         var bits = [];
@@ -10194,11 +10992,16 @@ select.sel:focus{border-color:var(--accent)}
         if (partialCount) bits.push(partialCount + " fragment" + (partialCount === 1 ? "" : "s") + " partially completed (the rest extends as a polymer/framework)");
         if (ligandsCompleted) bits.push(ligandsCompleted + " ligand" + (ligandsCompleted === 1 ? "" : "s") + " completed at its metal boundary");
         msg = bits.join("; ") + " (+" + atomsAdded + " atom" + (atomsAdded === 1 ? "" : "s") + ")";
+        /* only recorded when something was actually added -- a run that
+           found nothing but fully-polymeric (blockedOnlyCount-only)
+           fragments falls through to the "else" below instead, unrecorded */
+        recordMacroCommand("COMPLETE_MOLS");
       } else {
         msg = "No fragment could be completed as a discrete molecule";
       }
       if (blockedOnlyCount) msg += (fullCount || partialCount ? "; " : ". ") + blockedOnlyCount + " fragment" + (blockedOnlyCount === 1 ? "" : "s") + " look" + (blockedOnlyCount === 1 ? "s" : "") + " fully polymeric/extended and " + (blockedOnlyCount === 1 ? "was" : "were") + " left alone -- use \"Extend fragment(s)\" for " + (blockedOnlyCount === 1 ? "it" : "those") + " instead";
       setStatus(msg + ".", !fullCount && !partialCount && blockedOnlyCount > 0);
+      if (onDone) onDone();
     }, 30);
   }
   function applyGrowStyleToAtoms(atoms, growStyle) {
@@ -10339,6 +11142,7 @@ select.sel:focus{border-color:var(--accent)}
     recomputeViewOffset();
     renderStructure(); renderUnitCell(); updateHostInfo(); updateGuestInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); refreshReassignElementOptions(); buildGuestGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
     var after = (state.atoms ? state.atoms.length : 0) + (state.guestAtoms ? state.guestAtoms.length : 0);
+    recordMacroCommand("DELETE_SYM_ATOMS");
     setStatus("Removed " + (before - after) + " symmetry-generated atom" + ((before - after) === 1 ? "" : "s") + ", back to the original asymmetric unit.", false);
   }
   function forgetSymmetry() {
@@ -10574,6 +11378,7 @@ select.sel:focus{border-color:var(--accent)}
     pruneEmptyGuestGroups();
     if (state.isCif) { recomputeViewOffset(); renderUnitCell(); }
     renderStructure(); updateHostInfo(); updateGuestInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); refreshReassignElementOptions(); buildGuestGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
+    recordMacroCommand("DELETE_SELECTED_ATOMS");
     var total = Object.keys(toDeleteUids).length;
     setStatus("Deleted " + total + " atom" + (total === 1 ? "" : "s") +
       (cascadeCount ? " (" + cascadeCount + " removed automatically, since a full asymmetric unit atom was deleted)" : ""), false);
@@ -10585,6 +11390,7 @@ select.sel:focus{border-color:var(--accent)}
     for (var i = 0; i < selected.length; i++) { selected[i].hidden = true; selected[i].selected = false; }
     recomputeViewOffset();
     renderStructure(); updateSelectionInfo();
+    recordMacroCommand("HIDE_SELECTION");
     setStatus("Hid " + selected.length + " atom" + (selected.length === 1 ? "" : "s") + ".", false);
   }
   function unhideAllAtoms() {
@@ -10594,6 +11400,7 @@ select.sel:focus{border-color:var(--accent)}
     if (n === 0) { setStatus("No atoms are currently hidden.", false); return; }
     recomputeViewOffset();
     renderStructure();
+    recordMacroCommand("UNHIDE_ATOMS");
     setStatus("Unhid " + n + " atom" + (n === 1 ? "" : "s") + ".", false);
   }
   /* used both in Edit atoms and Guest (directly below "Remove all guests")
@@ -10652,6 +11459,20 @@ select.sel:focus{border-color:var(--accent)}
     pruneEmptyGuestGroups();
     if (state.isCif) { recomputeViewOffset(); renderUnitCell(); }
     renderStructure(); updateHostInfo(); updateGuestInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); refreshReassignElementOptions(); buildGuestGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
+    /* Recorded from `dest` itself (the destination the user actually picked
+       -- Host / an existing group / "new group"), not the group id
+       moveSelectionTo() resolved it to -- so a macro replayed on a
+       different structure with no pre-existing guest groups still means
+       "make a new one" rather than baking in this run's specific ordinal.
+       An existing-group destination is written by its display ordinal
+       ("Guest1", "Guest2", ...) since group ids aren't stable but that
+       ordinal always is (see pruneEmptyGuestGroups's own comment). */
+    if (dest === "host") recordMacroCommand("MOVE_SELECTION_TO Host");
+    else if (dest === "__new__") recordMacroCommand("MOVE_SELECTION_TO NewGuestGroup");
+    else {
+      var destOrdinal = state.guestGroups.findIndex(function (g) { return g.id === dest; }) + 1;
+      if (destOrdinal > 0) recordMacroCommand("MOVE_SELECTION_TO Guest" + destOrdinal);
+    }
     setStatus("Moved " + moved.length + " atom" + (moved.length === 1 ? "" : "s") +
       (cascadeCount ? " (" + cascadeCount + " symmetry-related atom" + (cascadeCount === 1 ? "" : "s") + " moved automatically)" : ""), false);
   }
@@ -12689,13 +13510,14 @@ select.sel:focus{border-color:var(--accent)}
        kept because user control over radii feeds real calculations here. */
     var colorRowEl = el("div", "ctl-inline"); colorRowEl.style.gap = "14px";
     colorRowEl.appendChild(el("label", "plain", "Colour:"));
-    var cpkLbl = el("label", "toggle"); var cpkCb = document.createElement("input"); cpkCb.type = "checkbox";
+    var cpkLbl = el("label", "toggle"); var cpkCb = document.createElement("input"); cpkCb.type = "checkbox"; cpkCb.id = "atomStyleCpkCb";
     cpkLbl.appendChild(cpkCb); cpkLbl.appendChild(el("span", null, "CPK"));
     var customLbl = el("label", "toggle"); customLbl.style.marginLeft = "25px";
-    var customCb = document.createElement("input"); customCb.type = "checkbox";
+    var customCb = document.createElement("input"); customCb.type = "checkbox"; customCb.id = "atomStyleCustomCb";
     customLbl.appendChild(customCb); customLbl.appendChild(el("span", null, "Custom"));
     colorRowEl.appendChild(cpkLbl); colorRowEl.appendChild(customLbl);
     var atomDispColorSwatch = colorSwatch(atomDispColorHex, function (hex) { atomDispColorHex = hex; });
+    atomDispColorSwatch.id = "atomStyleColorSwatch";
     colorRowEl.appendChild(atomDispColorSwatch);
     styleAtomsTab.appendChild(colorRowEl);
     exclusiveCheckPair(cpkCb, "cpk", customCb, "custom", function (v) { atomDispColorMode = v; });
@@ -12705,7 +13527,7 @@ select.sel:focus{border-color:var(--accent)}
        radius is its only mode -- CV needs one since Fixed-A is mutually
        exclusive with it). */
     var radiiToggleRow = el("div", "ctl-inline");
-    var radiiLbl = el("label", "toggle"); var radiiCb = document.createElement("input"); radiiCb.type = "checkbox";
+    var radiiLbl = el("label", "toggle"); var radiiCb = document.createElement("input"); radiiCb.type = "checkbox"; radiiCb.id = "atomStyleRadiiCb";
     radiiLbl.appendChild(radiiCb); radiiLbl.appendChild(el("span", null, "Radii (× vdW):"));
     radiiToggleRow.appendChild(radiiLbl);
     function radiiField(label, val, onChange, shiftPx) {
@@ -12720,14 +13542,16 @@ select.sel:focus{border-color:var(--accent)}
       return inp;
     }
     var nonHInp = radiiField("Non-H", atomDispNonHMult, function (v) { atomDispNonHMult = v; }, 8);
+    nonHInp.id = "atomStyleNonHInp";
     var hInp = radiiField("H", atomDispHMult, function (v) { atomDispHMult = v; }, 8);
+    hInp.id = "atomStyleHInp";
     styleAtomsTab.appendChild(radiiToggleRow);
 
     var fixedRow = el("div", "ctl-inline");
-    var fixedLbl = el("label", "toggle"); var fixedCb = document.createElement("input"); fixedCb.type = "checkbox";
+    var fixedLbl = el("label", "toggle"); var fixedCb = document.createElement("input"); fixedCb.type = "checkbox"; fixedCb.id = "atomStyleFixedCb";
     fixedLbl.appendChild(fixedCb); fixedLbl.appendChild(el("span", null, "Fixed radius (" + U.ang + ")"));
     fixedRow.appendChild(fixedLbl);
-    var atomDispFixedInp = document.createElement("input"); atomDispFixedInp.type = "number"; atomDispFixedInp.className = "num";
+    var atomDispFixedInp = document.createElement("input"); atomDispFixedInp.type = "number"; atomDispFixedInp.className = "num"; atomDispFixedInp.id = "atomStyleFixedInp";
     atomDispFixedInp.step = "0.05"; atomDispFixedInp.min = "0"; atomDispFixedInp.value = atomDispFixedVal.toFixed(2);
     atomDispFixedInp.addEventListener("input", function () { var v = parseFloat(atomDispFixedInp.value); if (isFinite(v) && v >= 0) atomDispFixedVal = v; });
     fixedRow.appendChild(atomDispFixedInp);
@@ -12750,7 +13574,7 @@ select.sel:focus{border-color:var(--accent)}
        every ellipsoid already on screen, not a property being painted on. */
     var ellipsoidRow = el("div", "ctl-inline");
     var ellipsoidLbl = el("label", "toggle");
-    var ellipsoidCb = document.createElement("input"); ellipsoidCb.type = "checkbox"; ellipsoidCb.checked = atomDispEllipsoid;
+    var ellipsoidCb = document.createElement("input"); ellipsoidCb.type = "checkbox"; ellipsoidCb.checked = atomDispEllipsoid; ellipsoidCb.id = "atomStyleEllipsoidCb";
     ellipsoidCb.addEventListener("change", function () {
       atomDispEllipsoid = ellipsoidCb.checked;
       if (ellipsoidCb.checked && atomDispRadiusMode === "fixed") { atomDispRadiusMode = null; fixedCb.checked = false; }
@@ -12875,11 +13699,27 @@ select.sel:focus{border-color:var(--accent)}
     styleAtomsTab.appendChild(quickRow);
 
     var applyRow = el("div", "ctl-inline");
-    button(applyRow, "Apply", "ghost", function () {
+    button(applyRow, "Apply", "ghost", applyAtomDisplaySettings = function () {
       var sel = getSelectedAtomObjects();
       if (!sel.length) { setStatus("Select one or more atoms first.", true); return; }
       if (!atomDispColorMode && !atomDispRadiusMode && !atomDispEllipsoid) { setStatus("Tick Colour, Radius, and/or Ellipsoid first -- none of them is currently set to apply.", true); return; }
       pushUndo();
+      /* Recorded as a fresh batch of ATOM_STYLE_* lines reflecting the
+         complete current brush state at the moment Apply is pressed (not
+         one line per checkbox change, which would record every intermediate
+         click on the way to a final look nobody asked to replay) -- see
+         runMacroLine's ATOM_STYLE_* cases for the inverse (each just sets
+         these same module vars + syncAtomStyleUI(), and ATOM_STYLE_APPLY
+         calls this exact function). Suppressed automatically during replay
+         itself via recordMacroCommand's own state.macroPlaying guard, so
+         playing this batch back doesn't re-record it. */
+      if (atomDispColorMode === "cpk") recordMacroCommand("ATOM_STYLE_CPK_COLOR");
+      else if (atomDispColorMode === "custom") recordMacroCommand("ATOM_STYLE_CUSTOM_COLOR " + hexToCss(atomDispColorHex));
+      recordMacroCommand(atomDispEllipsoid ? "ATOM_STYLE_ELLIPSOID" : "ATOM_STYLE_SPHERE");
+      if (atomDispRadiusMode === "fixed") recordMacroCommand("ATOM_STYLE_RADIUS_FIXED " + atomDispFixedVal);
+      else if (atomDispRadiusMode === "vdwx") recordMacroCommand("ATOM_STYLE_RADIUS_VDW " + atomDispNonHMult + " " + atomDispHMult);
+      if (clearAfterApplyCb.checked) recordMacroCommand("ATOM_STYLE_CLEAR_SELECTION");
+      recordMacroCommand("ATOM_STYLE_APPLY");
       for (var i = 0; i < sel.length; i++) {
         var a = sel[i];
         if (atomDispColorMode === "cpk") { a.dispColorMode = "cpk"; delete a.dispColor; }
@@ -12900,7 +13740,7 @@ select.sel:focus{border-color:var(--accent)}
       if (clearAfterApplyCb.checked) clearSelection();
     });
     var clearSelLbl = el("label", "toggle");
-    var clearAfterApplyCb = document.createElement("input"); clearAfterApplyCb.type = "checkbox";
+    var clearAfterApplyCb = document.createElement("input"); clearAfterApplyCb.type = "checkbox"; clearAfterApplyCb.id = "atomStyleClearSelCb";
     clearSelLbl.appendChild(clearAfterApplyCb); clearSelLbl.appendChild(el("span", null, "Clear selection"));
     applyRow.appendChild(clearSelLbl);
     styleAtomsTab.appendChild(applyRow);
@@ -12990,7 +13830,7 @@ select.sel:focus{border-color:var(--accent)}
     var showRow1 = el("div", "toggle-row2");
     var showHTg = toggle(showRow1, "Show hydrogen atoms", state.showHydrogens !== false, function () { toggleHydrogenDisplay(); });
     showHTg.id = "showHTg";
-    var asuTg = toggle(showRow1, "Show ASU only", state.showOnlyAsu, function (b) { state.showOnlyAsu = b; clearUnselectableSelections(); renderStructure(); updateSelectionInfo(); });
+    var asuTg = toggle(showRow1, "Show ASU only", state.showOnlyAsu, function (b) { state.showOnlyAsu = b; clearUnselectableSelections(); renderStructure(); updateSelectionInfo(); recordMacroCommand(b ? "ASU_ONLY_ON" : "ASU_ONLY_OFF"); });
     asuTg.id = "showOnlyAsuTg";
     cifDispC.appendChild(showRow1);
     /* same .toggle-row2 grid as showRow1 above (not .ctl-inline, which sizes
@@ -12998,7 +13838,7 @@ select.sel:focus{border-color:var(--accent)}
        here -- lines up under "Show ASU only", also second column, instead of
        drifting depending on how long "Show unit cell" happens to be. */
     var ucShowRow = el("div", "toggle-row2");
-    var ucShowTg = toggle(ucShowRow, "Show unit cell", state.showUnitCell, function (b) { state.showUnitCell = b; renderUnitCell(); });
+    var ucShowTg = toggle(ucShowRow, "Show unit cell", state.showUnitCell, function (b) { state.showUnitCell = b; renderUnitCell(); recordMacroCommand(b ? "UNIT_CELL_ON" : "UNIT_CELL_OFF"); });
     ucShowTg.id = "showUnitCellTg";
     toggle(ucShowRow, "Show H bonds", state.showHBonds, function (b) { state.showHBonds = b; renderStructure(); });
     cifDispC.appendChild(ucShowRow);
@@ -13063,6 +13903,22 @@ select.sel:focus{border-color:var(--accent)}
     hklRow.appendChild(hklGoBtn);
     hklWrap.appendChild(hklRow);
     directionBody.appendChild(hklWrap);
+    var perpHklWrap = el("div", "ctl");
+    perpHklWrap.appendChild(el("label", null, "Perpendicular to (h k l)"));
+    var perpHklRow = el("div", "hklrow");
+    var perpHInp = document.createElement("input"); perpHInp.type = "number"; perpHInp.step = "1"; perpHInp.value = "1"; perpHInp.className = "num";
+    var perpKInp = document.createElement("input"); perpKInp.type = "number"; perpKInp.step = "1"; perpKInp.value = "0"; perpKInp.className = "num";
+    var perpLInp = document.createElement("input"); perpLInp.type = "number"; perpLInp.step = "1"; perpLInp.value = "0"; perpLInp.className = "num";
+    perpHklRow.appendChild(perpHInp); perpHklRow.appendChild(perpKInp); perpHklRow.appendChild(perpLInp);
+    var perpHklGoBtn = el("button", "btn mini", "Go");
+    perpHklGoBtn.addEventListener("click", function () {
+      var h = parseFloat(perpHInp.value), k = parseFloat(perpKInp.value), l = parseFloat(perpLInp.value);
+      if (!isFinite(h) || !isFinite(k) || !isFinite(l)) { setStatus("Enter numeric h, k, l values.", true); return; }
+      viewPerpendicularToHKL(h, k, l);
+    });
+    perpHklRow.appendChild(perpHklGoBtn);
+    perpHklWrap.appendChild(perpHklRow);
+    directionBody.appendChild(perpHklWrap);
     var viewVecBtn = button(directionBody, "View along vector", "ghost", viewAlongTwoAtoms); viewVecBtn.id = "viewVecBtn"; viewVecBtn.disabled = true;
     var viewPlaneBtn = button(directionBody, "View perpendicular to plane", "ghost", viewPerpendicularToPlane); viewPlaneBtn.id = "viewPlaneBtn"; viewPlaneBtn.disabled = true;
 
@@ -13152,7 +14008,10 @@ select.sel:focus{border-color:var(--accent)}
         centeringApplyBtn.style.display = "";
       } else {
         centeringApplyBtn.style.display = "none";
-        if (state.centeringMode !== "fractional") { recomputeViewOffset(); renderStructure(); }
+        if (state.centeringMode !== "fractional") {
+          recomputeViewOffset(); renderStructure();
+          recordMacroCommand(state.centeringMode === "all" ? "CENTER_ALL" : state.centeringMode === "visible" ? "CENTER_VISIBLE" : "CENTER_UNITCELL");
+        }
       }
       setStatus("Centering set to " + centeringSel.options[centeringSel.selectedIndex].textContent + ".", false);
     });
@@ -13275,10 +14134,10 @@ select.sel:focus{border-color:var(--accent)}
     autoCompleteCb.id = "autoCompleteMoleculesCheckbox";
     autoCompleteCb.parentElement.title = "Whenever Mouse, Pack, Extend fragment(s), or Sphere of inclusion would leave a partial molecule, automatically complete it by symmetry (same test as \"Complete molecule(s)\"). Polymeric/framework fragments are left as-is, exactly like that button.";
     var extendRow = el("div", "btnrow");
-    button(extendRow, "Extend fragment(s)", "ghost", extendAllFragments);
+    button(extendRow, "Extend fragment(s)", "ghost", function () { extendAllFragments(); });
     symC.appendChild(extendRow);
     var completeRow = el("div", "btnrow");
-    button(completeRow, "Complete molecule(s)", "ghost", completeMoleculeFragments);
+    button(completeRow, "Complete molecule(s)", "ghost", function () { completeMoleculeFragments(); });
     symC.appendChild(completeRow);
     var resetGrowRow = el("div", "btnrow");
     var delSymBtn = button(resetGrowRow, "Delete all symmetry-generated atoms", "ghost", deleteSymmetryGeneratedAtoms);
@@ -13445,17 +14304,6 @@ select.sel:focus{border-color:var(--accent)}
     symApplyBtn.style.gridRow = "1 / span 3"; symApplyBtn.style.gridColumn = "5";
     symOpTab.appendChild(matrixGrid);
 
-    function readMatrixFromUI() {
-      var spinEls = document.querySelectorAll("#symOpMatrixGrid .matspin");
-      var tEls = document.querySelectorAll("#symOpMatrixGrid .symop-t");
-      var rot = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], trans = [0, 0, 0];
-      for (var r = 0; r < 3; r++) {
-        for (var c = 0; c < 3; c++) rot[r][c] = parseInt(spinEls[r * 3 + c].dataset.value, 10) || 0;
-        var tv = parseFloat(tEls[r].value);
-        trans[r] = isFinite(tv) ? tv : 0;
-      }
-      return { rot: rot, trans: trans };
-    }
     symOpSelect.addEventListener("change", function () {
       var idx = parseInt(symOpSelect.value, 10);
       if (state.cifSymops && state.cifSymops[idx]) populateSymOpMatrixDom(state.cifSymops[idx]);
@@ -13471,63 +14319,6 @@ select.sel:focus{border-color:var(--accent)}
     var keepFormatCb = document.createElement("input"); keepFormatCb.type = "checkbox"; keepFormatCb.id = "symOpKeepFormat";
     checkRow.appendChild(keepFormatCb); checkRow.appendChild(el("label", "plain", "Keep source format"));
     symOpTab.appendChild(checkRow);
-
-    function findAtomNearPosition(x, y, z, extraBatch) {
-      var tol2 = 0.0001;
-      function scan(arr) {
-        if (!arr) return null;
-        for (var i = 0; i < arr.length; i++) {
-          var dx = arr[i].x - x, dy = arr[i].y - y, dz = arr[i].z - z;
-          if (dx * dx + dy * dy + dz * dz < tol2) return arr[i];
-        }
-        return null;
-      }
-      return scan(state.atoms) || scan(state.guestAtoms) || scan(extraBatch);
-    }
-    function applySymOpTransform() {
-      if (!state.isCif || state.symmetryForgotten) { setStatus("This only applies to a CIF-based structure that still has its symmetry information.", true); return; }
-      var sel = getSelectedAtomObjects();
-      if (!sel.length) { setStatus("Select one or more atoms first, then press Apply.", true); return; }
-      var op = readMatrixFromUI();
-      if (invCb.checked) {
-        var inv = K.invertSymop(op);
-        if (!inv) { setStatus("This matrix has no inverse (its determinant is zero) -- cannot apply it in reverse.", true); return; }
-        op = inv;
-      }
-      var toAdd = [], resultAtoms = [], skippedNotTracked = 0, skippedNoMatch = 0, alreadyExistingCount = 0;
-      for (var i = 0; i < sel.length; i++) {
-        var atom = sel[i];
-        if (atom.isCentroid || atom.auIndex === undefined) { skippedNotTracked++; continue; }
-        var match = findComposedOpAndCell(op, atom.opIndex, [atom.cellI, atom.cellJ, atom.cellK]);
-        if (!match) { skippedNoMatch++; continue; }
-        var newAtom = generateSymmetryAtom(atom.auIndex, match.opIndex, match.cellI, match.cellJ, match.cellK);
-        if (keepFormatCb.checked) {
-          /* copies the specific selected source atom's own actual settings,
-             atom-by-atom -- distinct from "Settings for new atoms" (Grow >
-             Mouse's default/current dropdowns), which paint a generic brush;
-             this is scoped only to Symmetry's own Apply/shift buttons */
-          newAtom.dispColorMode = atom.dispColorMode; newAtom.dispColor = atom.dispColor;
-          newAtom.dispRadiusMode = atom.dispRadiusMode; newAtom.dispRadiusValue = atom.dispRadiusValue;
-        }
-        var existingAtom = findAtomNearPosition(newAtom.x, newAtom.y, newAtom.z, toAdd);
-        if (existingAtom) { alreadyExistingCount++; resultAtoms.push(existingAtom); continue; }
-        toAdd.push(newAtom);
-        resultAtoms.push(newAtom);
-      }
-      if (!toAdd.length && !resultAtoms.length) {
-        var reason = skippedNoMatch ? "this matrix doesn't correspond to any symmetry operation of this space group" : "none of the selection is a CIF-tracked atom";
-        setStatus("No atoms were added \u2014 " + reason + ".", false);
-        return;
-      }
-      var n = commitGrownAtoms(toAdd, keepFormatCb.checked);
-      if (selectNewCb.checked) {
-        for (var s = 0; s < sel.length; s++) sel[s].selected = false;
-        for (var r = 0; r < resultAtoms.length; r++) resultAtoms[r].selected = true;
-        renderSelection(); updateSelectionInfo();
-      }
-      var note = alreadyExistingCount ? (" (" + alreadyExistingCount + " already present, skipped)") : "";
-      setStatus("Applied the symmetry operation: added " + n + " atom" + (n === 1 ? "" : "s") + note + ".", false);
-    }
     refreshSymOpDropdown();
 
     var vcC = section(left, "Void / Channel Analysis", false, function (isOpen) { if (!isOpen && state.voidUiMode) setVoidUiMode(null); });
@@ -13594,6 +14385,63 @@ select.sel:focus{border-color:var(--accent)}
     var molVolRow = el("div", "btnrow");
     var molVolBtn = button(molVolRow, "Calculate molecular volume", "ghost", calculateMolecularVolume); molVolBtn.id = "molVolBtn"; molVolBtn.disabled = true;
     sgC.appendChild(molVolRow);
+
+    var macroC = section(left, "Macro", false);
+    var macroBtnRow = el("div", "btnrow");
+    var macroRecordBtn = el("button", "btn" + (state.macroRecording ? " grow-active" : " ghost"), "Record");
+    macroRecordBtn.id = "macroRecordBtn";
+    macroRecordBtn.addEventListener("click", function () { state.macroRecording = true; syncMacroButtons(); });
+    var macroPauseBtn = el("button", "btn" + (!state.macroRecording ? " grow-active" : " ghost"), "Pause");
+    macroPauseBtn.id = "macroPauseBtn";
+    macroPauseBtn.addEventListener("click", function () { state.macroRecording = false; syncMacroButtons(); });
+    macroBtnRow.appendChild(macroRecordBtn); macroBtnRow.appendChild(macroPauseBtn);
+    var macroPlayBtn = button(macroBtnRow, "Play", "ghost", playMacro); macroPlayBtn.id = "macroPlayBtn"; macroPlayBtn.disabled = state.macroRecording;
+    macroC.appendChild(macroBtnRow);
+    var macroFileRow = el("div", "btnrow");
+    button(macroFileRow, "Clear", "ghost", clearMacroMemo);
+    var macroSaveBtn = button(macroFileRow, "Save", "ghost", saveMacroFile); macroSaveBtn.id = "macroSaveBtn"; macroSaveBtn.disabled = state.macroRecording;
+    var macroLoadBtn = button(macroFileRow, "Load", "ghost", loadMacroFile); macroLoadBtn.id = "macroLoadBtn"; macroLoadBtn.disabled = state.macroRecording;
+    macroC.appendChild(macroFileRow);
+    var macroMemo = document.createElement("textarea");
+    macroMemo.id = "macroMemo"; macroMemo.className = "macro-memo"; macroMemo.spellcheck = false;
+    macroMemo.placeholder = "Recorded commands appear here as you work -- press Record, then select/deselect atoms.";
+    macroC.appendChild(macroMemo);
+
+    var macroPovRow = el("div", "btnrow");
+    button(macroPovRow, "Add current POV", "ghost", addCurrentPovCommand);
+    macroC.appendChild(macroPovRow);
+
+    var macroExportRow = el("div", "btnrow");
+    macroExportRow.style.flexWrap = "nowrap";
+    var macroExportBtn = button(macroExportRow, "Add EXPORT_PNG", "ghost", addExportPngCommand);
+    macroExportBtn.style.flex = "0 0 auto"; macroExportBtn.style.whiteSpace = "nowrap";
+    var macroExportSuffixInp = document.createElement("input");
+    macroExportSuffixInp.type = "text"; macroExportSuffixInp.className = "num";
+    macroExportSuffixInp.id = "macroExportSuffixInp";
+    macroExportSuffixInp.placeholder = "suffix";
+    macroExportSuffixInp.style.flex = "1 1 auto"; macroExportSuffixInp.style.width = "0"; macroExportSuffixInp.style.minWidth = "0"; macroExportSuffixInp.style.textAlign = "left";
+    macroExportRow.appendChild(macroExportSuffixInp);
+    macroC.appendChild(macroExportRow);
+
+    macroC.appendChild(el("hr", "divider"));
+
+    var macroBatchCb = toggle(macroC, "Apply macro to all files in folder", state.macroBatchFolder, function (b) {
+      state.macroBatchFolder = b;
+    });
+    macroBatchCb.id = "macroBatchFolderCb";
+    var macroBatchFolderInp = document.createElement("input");
+    macroBatchFolderInp.type = "text"; macroBatchFolderInp.readOnly = true; macroBatchFolderInp.className = "num";
+    macroBatchFolderInp.id = "macroBatchFolderName";
+    macroBatchFolderInp.placeholder = "No folder selected";
+    macroBatchFolderInp.value = state.macroBatchDirHandle ? state.macroBatchDirHandle.name : "";
+    macroBatchFolderInp.style.width = "100%"; macroBatchFolderInp.style.boxSizing = "border-box";
+    macroBatchFolderInp.style.textAlign = "left"; macroBatchFolderInp.style.marginTop = "4px";
+    macroC.appendChild(macroBatchFolderInp);
+    var macroBatchBtnRow = el("div", "btnrow");
+    macroBatchBtnRow.style.marginTop = "4px";
+    var macroBatchSelectBtn = button(macroBatchBtnRow, "Select folder", "ghost", selectMacroBatchFolder);
+    macroBatchSelectBtn.id = "macroBatchSelectBtn";
+    macroC.appendChild(macroBatchBtnRow);
 
     var dispC = section(left, "Visual Effects", false);
     var resetAllRow = el("div", "btnrow");
@@ -13726,6 +14574,7 @@ select.sel:focus{border-color:var(--accent)}
     renderStructure();
     updateSelectionInfo();
     var cb = document.getElementById("showOnlyAsuTg"); if (cb) cb.checked = state.showOnlyAsu;
+    recordMacroCommand(state.showOnlyAsu ? "ASU_ONLY_ON" : "ASU_ONLY_OFF");
     setStatus(state.showOnlyAsu ? "Showing only the asymmetric unit." : "Showing all atoms.", false);
   }
   function toggleUnitCellDisplay() {
@@ -13733,6 +14582,7 @@ select.sel:focus{border-color:var(--accent)}
     state.showUnitCell = !state.showUnitCell;
     renderUnitCell();
     var cb = document.getElementById("showUnitCellTg"); if (cb) cb.checked = state.showUnitCell;
+    recordMacroCommand(state.showUnitCell ? "UNIT_CELL_ON" : "UNIT_CELL_OFF");
     setStatus(state.showUnitCell ? "Showing unit cell." : "Hiding unit cell.", false);
   }
   function toggleHydrogenDisplay() {
@@ -13899,12 +14749,16 @@ select.sel:focus{border-color:var(--accent)}
     vp.addEventListener("drop", function (e) {
       /* the main view always means "host" -- clears and loads fresh, no guessing --
          except for a dropped .json project file, which goes through the same
-         confirm-before-overwrite path as the "Load model..." button. A guest is
-         created afterwards by selecting atoms and using "Move selection to" >
-         New guest group, not by dropping a separate file. */
+         confirm-before-overwrite path as the "Load model..." button, and a
+         dropped .MAC file, which goes into the Macro memo (same confirm-
+         before-overwrite path loadMacroFile()'s own picker uses) instead of
+         replacing the structure. A guest is created afterwards by selecting
+         atoms and using "Move selection to" > New guest group, not by
+         dropping a separate file. */
+      var f = e.dataTransfer.files[0]; if (!f) return;
+      if (/\.mac$/i.test(f.name)) { handleMacroFileSelected(f); return; }
       var item = e.dataTransfer.items && e.dataTransfer.items[0];
       if (item && item.getAsFileSystemHandle) item.getAsFileSystemHandle().then(function (h) { state.lastSourceHandle = h; }).catch(function () {});
-      var f = e.dataTransfer.files[0]; if (!f) return;
       var isJson = /\.json$/i.test(f.name) || f.type === "application/json";
       var rd = new FileReader();
       rd.onload = function () { if (isJson) confirmAndLoadModelFromFile(rd.result); else handleStructureFileText(rd.result, f.name); };
@@ -13914,6 +14768,8 @@ select.sel:focus{border-color:var(--accent)}
     radiiInput.addEventListener("change", function (e) { var f = e.target.files[0]; if (!f) return; var rd = new FileReader(); rd.onload = function () { loadElementSettingsCsv(rd.result); }; rd.readAsText(f); });
     var modelInput = document.getElementById("modelJsonInput");
     modelInput.addEventListener("change", function (e) { var f = e.target.files[0]; if (!f) return; var rd = new FileReader(); rd.onload = function () { confirmAndLoadModelFromFile(rd.result); }; rd.readAsText(f); });
+    var macroInput = document.getElementById("macroInput");
+    macroInput.addEventListener("change", function (e) { var f = e.target.files[0]; handleMacroFileSelected(f); macroInput.value = ""; });
     var segBtns = document.querySelectorAll("#modeSeg button");
     for (var i = 0; i < segBtns.length; i++) segBtns[i].addEventListener("click", function (e) { setPage(e.currentTarget.getAttribute("data-page")); });
 
