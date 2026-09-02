@@ -31,9 +31,9 @@ header .spacer{flex:1 1 auto}
   color:var(--accent);background:transparent;border:1px solid var(--border);border-radius:4px;
   padding:3px 10px;cursor:pointer;transition:background .15s,border-color .15s;align-self:center}
 .hbtn:hover{background:var(--accent-soft);border-color:var(--accent)}
-.modeseg{display:flex;align-self:center;border:1px solid var(--border);border-radius:5px;overflow:hidden}
+.modeseg{display:flex;align-self:center;border:1px solid var(--border);border-radius:5px;overflow:hidden;flex-shrink:0}
 .modeseg button{font-family:var(--mono);font-size:10px;letter-spacing:.6px;text-transform:uppercase;
-  color:var(--ink-mid);background:transparent;border:none;padding:4px 13px;cursor:pointer;
+  color:var(--ink-mid);background:transparent;border:none;padding:4px 13px;cursor:pointer;white-space:nowrap;
   border-right:1px solid var(--border);transition:background .15s,color .15s}
 .modeseg button:last-child{border-right:none}
 .modeseg button.on{background:var(--accent);color:#fff}
@@ -232,7 +232,6 @@ select.sel:focus{border-color:var(--accent)}
 <body>
 <header>
   <h1>CrystalComparator</h1>
-  <span class="sub" id="buildStamp">Build 2026-08-02.25</span>
   <span class="spacer"></span>
   <button class="hbtn" id="guideBtn">Guide</button>
 </header>
@@ -5569,6 +5568,7 @@ select.sel:focus{border-color:var(--accent)}
     refreshHostAtomColors(atoms);
     renderStructure(); renderSurface(); renderUnitCell(); if (firstEver) frameCamera(); updateHostInfo(); updateGuestInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); refreshReassignElementOptions(); buildGuestGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo();
     refreshSymmetryUI();
+    updateComparatorHeader();
     if (!cifMeta) setStatus("Loaded " + state.name + ": " + atoms.length + " atoms. Set the probe radius and click Calculate.", false);
   }
   function loadHostFile(text, name) {
@@ -5782,7 +5782,13 @@ select.sel:focus{border-color:var(--accent)}
   function updateHostInfo() {
     var e = document.getElementById("hostInfo"); if (!e) return;
     if (!state.atoms) { e.innerHTML = "&mdash;"; return; }
-    e.innerHTML = "<div class='formula'>" + formula(state.atoms) + "</div><div>" + state.atoms.length + " atoms</div>";
+    var fileLine = "";
+    if (state.name) {
+      var displayName = String(state.name).replace(/\.cif$/i, "");
+      var safeName = displayName.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      fileLine = "<div style='color:#000;font-weight:700;font-size:13px;margin-bottom:3px;word-break:break-all'>" + safeName + "</div>";
+    }
+    e.innerHTML = fileLine + "<div class='formula'>" + formula(state.atoms) + "</div><div>" + state.atoms.length + " atoms</div>";
   }
   function updateGuestInfo() {
     var e = document.getElementById("guestInfo"); if (!e) return;
@@ -7949,7 +7955,14 @@ select.sel:focus{border-color:var(--accent)}
   }
   function updateComparatorHeader() {
     var structureButtons = document.querySelectorAll("#structureViewSeg button[data-structure]");
-    for (var i = 0; i < structureButtons.length; i++) structureButtons[i].classList.toggle("on", parseInt(structureButtons[i].dataset.structure, 10) === activeStructureIndex);
+    for (var i = 0; i < structureButtons.length; i++) {
+      var idx = parseInt(structureButtons[i].dataset.structure, 10);
+      structureButtons[i].classList.toggle("on", idx === activeStructureIndex);
+      /* The active slot's live name lives on `state`; the inactive slot's name
+         is only up to date on its saved `structureSlots` entry. */
+      var rawName = idx === activeStructureIndex ? state.name : (structureSlots && structureSlots[idx] && structureSlots[idx].name);
+      structureButtons[i].textContent = rawName ? String(rawName).replace(/\.cif$/i, "") : "Structure " + (idx + 1);
+    }
     var overlayButton = document.querySelector("#structureViewSeg button[data-overlay]");
     if (overlayButton) overlayButton.classList.toggle("on", comparisonViewMode === "overlay");
   }
