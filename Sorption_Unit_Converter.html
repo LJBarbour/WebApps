@@ -1689,8 +1689,96 @@ function showMetaNotes(notes){
   if(wrap) wrap.innerHTML='', wrap.appendChild(div);
 }
 
+// ── Hiden XEMIS (HIsorp software) export format ──────────────────────────────
+// Distinctive: repeated "Instrument / Sample / Experiment / Application" metadata
+// blocks (one per Scan), each followed by a 3-row data-column header (names /
+// continuation / units) then numeric rows of Pressure, Gas Density, Fugacity,
+// Total Weight, Sample T, Residual Mass. We only need column 1 (Pressure, mbar)
+// and column 6 (Residual Mass, µg — absolute uptake); "Course" says whether the
+// following block is sorption or desorption; "Sample Dry Weight" gives the host
+// mass; "Gas Source Inlet 1" gives the sorptive; "Reference State" (averaged
+// over however many Scans are present) gives the experiment temperature.
+function isHidenXemisFormat(text){
+  return /Pressure,Gas,Fugacity,Total,Sample,"Residual/i.test(text) ||
+         /Applications Software,"HIsorp/i.test(text);
+}
+function parseHidenXemis(text){
+  const lines=text.split(/\r?\n/);
+  // Some XEMIS exports embed a stray CR right before the closing quote
+  // (e.g. "CO2 at supply pressure 45 barg\r"). A regex like /^"(.*)"$/ silently
+  // fails to match then, since "." doesn't match \r — so strip the quotes
+  // positionally instead of relying on an end-anchored regex.
+  const unquote=s=>{
+    s=s.trim();
+    if(s.startsWith('"')){
+      s=s.slice(1);
+      const qi=s.lastIndexOf('"');
+      if(qi>=0) s=s.slice(0,qi);
+    }
+    return s.trim();
+  };
+  rawData=[];
+  const meta={};
+  const hostMassVals=[], tempCVals=[];
+  let sorptiveRaw=null;
+  let branch='ads', headerCountdown=0, inDataBlock=false;
+
+  for(const line of lines){
+    const trimmed=line.trim();
+    if(!trimmed){ inDataBlock=false; headerCountdown=0; continue; }
+    const cols=trimmed.split(',').map(c=>unquote(c.trim()));
+    const c0=cols[0]||'', c1=cols[1]||'';
+
+    // Skip the two data-header continuation rows ("-1,Density,..." and the
+    // "(mbar),(g/cc),..." units row) that follow the "Pressure,Gas,..." trigger.
+    if(headerCountdown>0){
+      headerCountdown--;
+      if(headerCountdown===0) inDataBlock=true;
+      continue;
+    }
+    if(inDataBlock){
+      if(cols.length>=6){
+        const p=parseFloat(cols[0]), q=parseFloat(cols[5]);
+        if(!isNaN(p)&&!isNaN(q)){ rawData.push({p,q,branch}); continue; }
+      }
+      inDataBlock=false;   // this line isn't a data row after all — fall through below
+    }
+    if(c0==='Pressure'&&c1==='Gas'){ headerCountdown=2; continue; }
+
+    const key=c0.toLowerCase().replace(/[\s_]/g,'');
+    if(key==='sampledryweight'){
+      const m=c1.match(/[-\d.]+/); if(m) hostMassVals.push(parseFloat(m[0]));
+      continue;
+    }
+    if(key==='gassourceinlet1'){
+      const g=c1.split(/\s+at\s+/i)[0].trim(); if(g) sorptiveRaw=g;
+      continue;
+    }
+    if(key==='course'){
+      branch=/desorp/i.test(c1)?'des':'ads';
+      continue;
+    }
+    if(key==='referencestate'){
+      const m=c1.match(/[-\d.]+/); if(m) tempCVals.push(parseFloat(m[0]));
+      continue;
+    }
+  }
+
+  if(hostMassVals.length) meta.hostMass=hostMassVals.reduce((a,b)=>a+b,0)/hostMassVals.length;
+  if(sorptiveRaw) meta.sorptive=sorptiveRaw;
+  if(tempCVals.length) meta.tempC=tempCVals.reduce((a,b)=>a+b,0)/tempCVals.length;
+  meta.pUnit='mbar';
+  meta.qUnit='ug_abs';
+  return meta;
+}
+
 // ── Main CSV parser ──────────────────────────────────────────────────────────
 function parseCSV(text,name){
+  if(isHidenXemisFormat(text)){
+    const meta=parseHidenXemis(text);
+    finishLoad(meta,name);
+    return;
+  }
   const allLines=text.split(/\r?\n/);
   rawData=[];
   let skipped=0,branch='ads',inGap=false,gapSeen=false;
@@ -1814,6 +1902,12 @@ function parseCSV(text,name){
     rawData.push({p,q,branch});
   }
 
+  finishLoad(meta,name);
+}
+
+// Shared by both the generic parser and parseHidenXemis() — everything that
+// happens once rawData[]/meta{} have been populated, regardless of source format.
+function finishLoad(meta,name){
   if(!rawData.length){st('No numeric data found in file.','err');return;}
 
   // If no units detected from header, apply defaults and note it
@@ -1836,11 +1930,9 @@ function parseCSV(text,name){
     const s=document.getElementById(id);
     if(s) s.classList.add('open');
   });
-  const nAds=rawData.filter(r=>r.branch==='ads').length;
   const nDes=rawData.filter(r=>r.branch==='des').length;
-  const ptInfo=gapSeen?' ('+nAds+' ads + '+nDes+' des)':'';
   convData=[];
-  st('Loaded '+rawData.length+' points from "'+name+'"'+(gapSeen?' \u2014 ads + des detected.':'.'), 'ok');
+  st('Loaded '+rawData.length+' points from "'+name+'"'+(nDes?' \u2014 ads + des detected.':'.'), 'ok');
   validateUnits();
   autoLabels();
 
