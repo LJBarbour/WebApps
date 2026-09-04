@@ -1,0 +1,1936 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Isotherm Plotter</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:wght@300;600&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --ink:#2C2416;--paper:#FAF6EE;--cream:#F3EDE0;--pale:#EDE6D4;
+  --rule:#CEC3AA;--accent:#4A6FA5;
+  --mono:'DM Mono',monospace;--serif:'Fraunces',Georgia,serif;--sans:'DM Sans',sans-serif;
+}
+html,body{height:100%;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:13px}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:var(--pale)}
+::-webkit-scrollbar-thumb{background:var(--rule);border-radius:2px}
+body{display:grid;grid-template-rows:auto 1fr;overflow:hidden;height:100%}
+header{border-bottom:1.5px solid var(--rule);padding:10px 18px 9px;display:flex;align-items:baseline;gap:12px;flex-shrink:0}
+header h1{font-family:var(--serif);font-size:19px;font-weight:600}
+header .sub{font-family:var(--mono);font-size:10px;color:var(--accent);letter-spacing:.5px}
+header .spacer{flex:1 1 auto}
+.hbtn{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--accent);background:transparent;border:1.5px solid var(--rule);border-radius:4px;
+  padding:5px 12px;cursor:pointer;align-self:center;transition:background .15s,border-color .15s}
+.hbtn:hover{background:var(--cream);border-color:var(--accent)}
+.app{display:grid;grid-template-columns:268px 1fr 268px;overflow:hidden;height:100%;position:relative}
+.app.drag-active::after{content:'Drop CSV files anywhere to add datasets';position:absolute;inset:0;
+  background:rgba(74,111,165,.08);outline:3px dashed var(--accent);outline-offset:-3px;
+  display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:13px;
+  color:var(--accent);letter-spacing:.03em;pointer-events:none;z-index:50}
+.sidebar{border-right:1.5px solid var(--rule);overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column}
+
+/* ── SIDE PANELS (left sidebar + right controls) — shared CrystalVoid-style menu ── */
+.side-panel{
+  --cv-bg:#FAF6EE; --cv-paper:#F3EDE0; --cv-paper2:#EDE6D4; --cv-ink:#2C2416; --cv-ink-mid:#6B5C3E;
+  --cv-ink-faint:#B8A98A; --cv-accent:#4A6FA5; --cv-accent-soft:#EEF3FA; --cv-line:#DDD5C0; --cv-border:#CEC3AA;
+  --cv-mono:'DM Mono',monospace; --cv-sans:'DM Sans',sans-serif;
+  overflow-y:auto;flex-shrink:0;
+  background:var(--cv-bg);color:var(--cv-ink);font-family:var(--cv-sans);font-size:13px;
+}
+.cpanel{border-left:1.5px solid var(--cv-line,var(--rule))}
+.side-panel .section{border-bottom:1px solid var(--cv-line)}
+.side-panel .sechead{padding:9px 14px;display:flex;align-items:center;justify-content:space-between;
+  cursor:pointer;user-select:none;background:var(--cv-accent);
+  font-family:var(--cv-mono);font-size:10.5px;letter-spacing:.9px;text-transform:uppercase;color:#fff}
+.side-panel .sechead:hover{filter:brightness(1.08)}
+.side-panel .tri{font-size:11px;transition:transform .2s;color:rgba(255,255,255,.8)}
+.side-panel .section.open .tri{transform:rotate(90deg)}
+.side-panel .sbody{padding:10px 14px 14px;display:none;flex-direction:column;gap:10px}
+.side-panel .section.open .sbody{display:flex}
+.side-panel .subhead{font-family:var(--cv-mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--cv-ink-faint);margin:2px 0 -2px}
+.side-panel .divider{border:none;border-top:1px solid var(--cv-line);margin:1px 0}
+.side-panel .subsec{border:1px solid var(--cv-line);border-radius:4px;overflow:hidden}
+.side-panel .subhead2{padding:7px 9px;display:flex;align-items:center;justify-content:space-between;
+  cursor:pointer;user-select:none;background:var(--cv-paper2);
+  font-family:var(--cv-mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--cv-ink)}
+.side-panel .subhead2:hover{background:var(--cv-accent-soft);color:var(--cv-accent)}
+.side-panel .tri2{font-size:10px;transition:transform .2s;color:var(--cv-ink-faint)}
+.side-panel .subsec.open .tri2{transform:rotate(90deg);color:var(--cv-accent)}
+.side-panel .subsec.open .subhead2{border-bottom:1px solid var(--cv-line)}
+.side-panel .subbody{padding:9px 10px 11px;display:none;flex-direction:column;gap:9px;background:var(--cv-bg)}
+.side-panel .subsec.open .subbody{display:flex}
+.side-panel .ctl-top{display:flex;align-items:center;gap:8px;min-width:0}
+.side-panel .ctl-top label{font-size:11.5px;flex:1 1 auto;color:var(--cv-ink);white-space:nowrap}
+.side-panel .ctl-top input[type=range]{flex:1.5;min-width:40px;accent-color:var(--cv-accent)}
+.side-panel .ctl-block{display:flex;flex-direction:column;gap:5px;min-width:0}
+.side-panel .ctl-block label{font-size:11.5px;color:var(--cv-ink)}
+.side-panel input.num{width:62px;font-family:var(--cv-mono);font-size:11.5px;text-align:right;
+  border:1px solid var(--cv-border);border-radius:3px;padding:3px 5px;background:var(--cv-bg);color:var(--cv-ink);outline:none}
+.side-panel input.num.txt{text-align:left;width:158px}
+.side-panel input.num:focus{border-color:var(--cv-accent)}
+.side-panel input[type=text]:not(.num),.side-panel input[type=number]:not(.num){width:100%;font-family:var(--cv-mono);font-size:11.5px;
+  border:1px solid var(--cv-border);border-radius:3px;padding:4px 7px;background:var(--cv-bg);color:var(--cv-ink);outline:none}
+.side-panel input[type=text]:focus,.side-panel input[type=number]:focus{border-color:var(--cv-accent)}
+.side-panel input[type=range]{-webkit-appearance:none;width:100%;height:3px;background:var(--cv-line);border-radius:2px;outline:none}
+.side-panel input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:var(--cv-accent);cursor:pointer}
+.side-panel input[type=range]::-moz-range-thumb{width:13px;height:13px;border:none;border-radius:50%;background:var(--cv-accent);cursor:pointer}
+.side-panel input.swatch{width:28px;height:22px;padding:1px 2px;border:1px solid var(--cv-border);border-radius:3px;background:none;cursor:pointer}
+.side-panel select.sel{font-family:var(--cv-sans);font-size:11.5px;border:1px solid var(--cv-border);border-radius:3px;
+  padding:4px 5px;background:var(--cv-bg);color:var(--cv-ink);outline:none;flex:1.5;min-width:0;max-width:100%;
+  -webkit-appearance:none;appearance:none;background-image:none}
+.side-panel select.sel:focus{border-color:var(--cv-accent)}
+.side-panel .toggle{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--cv-ink-mid);cursor:pointer}
+.side-panel .toggle input{accent-color:var(--cv-accent);width:13px;height:13px;cursor:pointer}
+.side-panel .rv2{font-family:var(--cv-mono);font-size:11px;min-width:26px;text-align:right;color:var(--cv-ink-mid)}
+.side-panel .hint{font-size:10.5px;color:var(--cv-ink-faint);line-height:1.5}
+.side-panel .sizerow{display:flex;align-items:center;gap:6px}
+.side-panel .btn2{width:100%;font-family:var(--cv-sans);font-size:12px;font-weight:500;border-radius:4px;padding:7px 10px;
+  background:var(--cv-accent);color:#fff;border:none;cursor:pointer;transition:opacity .15s;margin-bottom:6px}
+.side-panel .btn2:last-child{margin-bottom:0}
+.side-panel .btn2:hover:not(:disabled){opacity:.88}
+.side-panel .btn2:disabled{opacity:.35;cursor:not-allowed}
+.side-panel .btn2.ghost{background:transparent;color:var(--cv-accent);border:1.5px solid var(--cv-accent);padding:5.5px 10px}
+.fi-label{font-size:10px;color:#888;margin-top:7px;margin-bottom:2px}
+.fi-label .ok{color:#2a7a3b;font-size:9px;font-weight:normal}
+.fi-label .warn{color:var(--accent);font-size:9px;font-weight:normal}
+.empty-hint{font-family:var(--cv-mono,var(--mono));font-size:10px;color:var(--cv-ink-faint,#aaa);line-height:1.7;padding:6px 0 2px}
+.meta-missing{background:#FBDCE6 !important;border-color:#D6567F !important}
+
+/* Dataset cards — bespoke to this app; no equivalent in Sorption_Unit_Converter */
+.ds-card{border:1.5px solid var(--cv-border);margin-bottom:8px;background:var(--cv-bg);position:relative}
+.ds-card:last-child{margin-bottom:0}
+.ds-header{display:flex;align-items:center;justify-content:space-between;padding:6px 9px;background:var(--cv-paper2);border-bottom:1px solid var(--cv-line);cursor:pointer;user-select:none}
+.ds-header:hover{background:var(--cv-accent-soft)}
+.ds-del{background:none;border:none;cursor:pointer;font-size:11px;color:#aaa;padding:0 2px;line-height:1}
+.ds-del:hover{color:var(--cv-accent)}
+.ds-arr{font-size:11px;color:var(--cv-ink-faint);transition:transform .2s;margin-left:4px;flex-shrink:0}
+.ds-card:not(.collapsed) .ds-arr{transform:rotate(90deg);color:var(--cv-accent)}
+.ds-card.collapsed .ds-body{display:none}
+.ds-grip{cursor:grab;color:#bbb;font-size:13px;line-height:1;user-select:none;flex-shrink:0;padding:0 2px}
+.ds-grip:active{cursor:grabbing}
+.ds-card.dragging{opacity:.35}
+.ds-card.drag-over{box-shadow:inset 0 2px 0 var(--cv-accent)}
+.ds-color{width:18px;height:18px;padding:0;border:1px solid var(--cv-border);border-radius:3px;cursor:pointer;background:none;flex-shrink:0}
+.ds-legend{flex:1;min-width:0;border:none !important;background:transparent !important;font-family:var(--cv-sans);
+  font-size:11px;color:var(--cv-ink);outline:none;padding:1px 3px !important;border-radius:2px;margin:0 4px;width:auto !important}
+.ds-legend:focus{background:#fff !important;box-shadow:0 0 0 1px var(--cv-accent)}
+.ds-body{padding:8px 9px;display:flex;flex-direction:column;gap:9px}
+.ds-info{font-family:var(--cv-mono);font-size:9px;color:#777;line-height:1.7}
+.ds-info span{color:var(--cv-ink)}
+.ds-warn{font-family:var(--cv-mono);font-size:9px;color:#D6567F;line-height:1.5}
+.ds-shaperow{display:flex;align-items:center;gap:8px}
+.ds-shaperow label{font-size:11.5px;color:var(--cv-ink);flex:1 1 auto}
+.ds-shaperow select{flex:1.5}
+.ds-conv{border:1px solid var(--cv-line);border-radius:4px;padding:8px 9px;background:var(--cv-paper2)}
+.ds-conv .fi-label:first-child{margin-top:0}
+.ds-conv input,.ds-conv select{margin-bottom:2px}
+
+/* CENTRE */
+.centre{display:flex;flex-direction:column;overflow:hidden;min-height:0}
+.chart-wrap{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}
+.chart-inner{flex:1;min-height:0;position:relative}
+canvas.plot{position:absolute;top:0;left:0;width:100%;height:100%}
+#status{padding:4px 16px;font-family:var(--mono);font-size:10px;color:#999;border-top:1px solid var(--rule);flex-shrink:0;letter-spacing:.05em}
+#status.ok{color:#2a7a3b}#status.err{color:var(--accent)}
+
+/* Guide */
+.g-sec{font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin:18px 0 6px;padding-bottom:4px;border-bottom:1px solid var(--rule)}
+.g-sec:first-child{margin-top:0}
+.g-code{font-family:var(--mono);font-size:11px;background:var(--cream);padding:1px 5px;border:1px solid var(--pale)}
+.g-table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:8px}
+.g-table th{background:var(--cream);padding:4px 10px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.08em;border-bottom:1.5px solid var(--rule)}
+.g-table td{padding:4px 10px;border-bottom:1px solid var(--pale)}
+.g-table td:first-child{font-family:var(--mono);font-size:11px;white-space:nowrap}
+.modal-veil{position:fixed;inset:0;background:rgba(15,14,13,.4);display:none;
+  align-items:center;justify-content:center;z-index:200}
+.modal-veil.show{display:flex}
+.modal{background:var(--paper);border:1.5px solid var(--rule);border-radius:8px;
+  width:min(720px,90vw);max-height:85vh;overflow-y:auto;padding:22px 26px;
+  box-shadow:0 12px 40px rgba(15,14,13,.3)}
+.modal h2{font-family:var(--serif);font-weight:600;font-size:21px;margin-bottom:4px}
+.modal .modal-sub{font-family:var(--mono);font-size:9px;letter-spacing:.15em;text-transform:uppercase;color:var(--accent);margin-bottom:16px}
+.modal .close-x{float:right;border:none;background:none;font-size:20px;line-height:1;cursor:pointer;color:#888;padding:0 0 0 10px}
+.modal .close-x:hover{color:var(--accent)}
+.modal p{margin-bottom:10px;line-height:1.55}
+
+/* Character picker */
+.char-grid{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px}
+.char-cell{width:38px;height:46px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  cursor:pointer;border:1px solid var(--rule);border-radius:5px;background:var(--cream);
+  transition:background .12s,border-color .12s;user-select:none;gap:2px}
+.char-cell:hover{background:var(--pale);border-color:var(--accent)}
+.char-cell.copied{background:var(--accent) !important;border-color:var(--accent) !important}
+.char-cell.copied .char-code{color:rgba(255,255,255,.7) !important}
+.char-cell.copied .char-glyph{color:#fff !important}
+.char-code{font-size:7.5px;color:#888;font-family:var(--mono);line-height:1}
+.char-glyph{font-size:1.3em;color:var(--ink);line-height:1}
+.char-toast{font-family:var(--mono);font-size:11px;color:var(--accent);min-height:1.4em;margin-bottom:6px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Isotherm Plotter</h1>
+  <span class="spacer"></span>
+  <button class="hbtn" id="charsBtn">Characters</button>
+  <button class="hbtn" id="guideBtn">Guide</button>
+</header>
+<div class="app" id="app">
+
+<!-- ═══════════════════════  LEFT SIDEBAR  ══════════════════════ -->
+<aside class="sidebar side-panel">
+
+  <!-- Shared Axes -->
+  <div class="section open" id="sec-axes-shared">
+    <div class="sechead" onclick="tog(this)">Shared Axes<span class="tri">&#8250;</span></div>
+    <div class="sbody">
+      <div class="ctl-block">
+        <label>Pressure display unit</label>
+        <select class="sel" id="pDisplayUnit" onchange="redraw()">
+          <option value="bar" selected>bar</option>
+          <option value="mbar">mbar</option>
+          <option value="Pa">Pa</option>
+          <option value="kPa">kPa</option>
+          <option value="MPa">MPa</option>
+          <option value="atm">atm</option>
+          <option value="mmHg">mmHg (torr)</option>
+          <option value="psi">psi</option>
+        </select>
+      </div>
+      <div class="ctl-block">
+        <label>Required uptake unit</label>
+        <select class="sel" id="qRequiredUnit" onchange="onRequiredUnitChange()">
+          <option value="">Auto (from first dataset)</option>
+        </select>
+      </div>
+      <div id="unitStatus" class="hint"></div>
+    </div>
+  </div>
+
+  <!-- Datasets -->
+  <div class="section open" id="sec-datasets">
+    <div class="sechead" onclick="tog(this)">Datasets<span class="tri">&#8250;</span></div>
+    <div class="sbody">
+      <div id="dsList"></div>
+      <div id="dsEmpty" class="empty-hint">Drag and drop one or more CSV files anywhere on this window to load isotherms — fitted output from Isotherm_Fit, or converted data from Sorption_Unit_Converter.</div>
+    </div>
+  </div>
+
+</aside>
+
+<!-- ═══════════════════════  CENTRE  ══════════════════════ -->
+<div class="centre">
+  <div class="chart-wrap">
+    <div class="chart-inner" id="chartInner">
+      <canvas class="plot" id="cvMain"></canvas>
+    </div>
+  </div>
+  <div id="status"></div>
+</div>
+
+<!-- ═══════════════════════  RIGHT PANEL  ══════════════════════ -->
+<div class="cpanel side-panel">
+
+  <div class="section" id="sec-axes">
+    <div class="sechead" onclick="tog(this)">Axes &amp; Labels<span class="tri">&#8250;</span></div>
+    <div class="sbody">
+
+      <div class="subsec">
+        <div class="subhead2" onclick="tog2(this)">Axis Ranges<span class="tri2">&#8250;</span></div>
+        <div class="subbody">
+          <div class="ctl-top"><label>X min</label><input type="number" class="num" id="xMin" placeholder="auto" oninput="redraw()"></div>
+          <div class="ctl-top"><label>X max</label><input type="number" class="num" id="xMax" placeholder="auto" oninput="redraw()"></div>
+          <div class="ctl-top"><label>Y min</label><input type="number" class="num" id="yMin" placeholder="auto" oninput="redraw()"></div>
+          <div class="ctl-top"><label>Y max</label><input type="number" class="num" id="yMax" placeholder="auto" oninput="redraw()"></div>
+        </div>
+      </div>
+
+      <div class="subsec">
+        <div class="subhead2" onclick="tog2(this)">Axis Labels<span class="tri2">&#8250;</span></div>
+        <div class="subbody">
+          <div class="ctl-top"><label>Axis label font</label>
+            <select class="sel" id="font" onchange="redraw()">
+              <option value="Arial,sans-serif" selected>Arial</option>
+              <option value="'Times New Roman',serif">Times New Roman</option>
+              <option value="'Helvetica Neue',Helvetica,sans-serif">Helvetica</option>
+              <option value="Georgia,serif">Georgia</option>
+              <option value="Garamond,serif">Garamond</option>
+              <option value="'Palatino Linotype',serif">Palatino</option>
+              <option value="'Century Schoolbook',serif">Century Schoolbook</option>
+            </select>
+          </div>
+          <div class="ctl-top"><label>Axis label size</label><input type="range" id="axSz" min="8" max="72" value="36" oninput="V(this);redraw()"><span class="rv2">36</span></div>
+          <div class="ctl-top"><label>X-axis label</label><input type="text" class="num txt" id="xLbl" placeholder="auto" oninput="redraw()"></div>
+          <div class="ctl-top"><label>Y-axis label</label><input type="text" class="num txt" id="yLbl" placeholder="auto" oninput="redraw()"></div>
+          <div class="ctl-top"><label>X-axis label offset</label><input type="range" id="xLblOff" min="-20" max="60" value="0" oninput="V(this);redraw()"><span class="rv2">0</span></div>
+          <div class="ctl-top"><label>Y-axis label offset</label><input type="range" id="yLblOff" min="-20" max="60" value="0" oninput="V(this);redraw()"><span class="rv2">0</span></div>
+        </div>
+      </div>
+
+      <div class="subsec">
+        <div class="subhead2" onclick="tog2(this)">Frame &amp; Ticks<span class="tri2">&#8250;</span></div>
+        <div class="subbody">
+          <div class="ctl-top"><label>Frame width</label><input type="range" id="frameW" min="0.5" max="5" step=".5" value="3" oninput="V(this);redraw()"><span class="rv2">3</span></div>
+          <div class="ctl-top"><label>Tick label font</label>
+            <select class="sel" id="tickFont" onchange="redraw()">
+              <option value="" selected>Same as axis</option>
+              <option value="Arial,sans-serif">Arial</option>
+              <option value="'Times New Roman',serif">Times New Roman</option>
+              <option value="'Helvetica Neue',Helvetica,sans-serif">Helvetica</option>
+              <option value="Georgia,serif">Georgia</option>
+              <option value="Garamond,serif">Garamond</option>
+              <option value="'Palatino Linotype',serif">Palatino</option>
+              <option value="'Century Schoolbook',serif">Century Schoolbook</option>
+            </select>
+          </div>
+          <div class="ctl-top"><label>Tick label size</label><input type="range" id="tkSz" min="8" max="64" value="30" oninput="V(this);redraw()"><span class="rv2">30</span></div>
+          <div class="ctl-top"><label>Tick length</label><input type="range" id="tickLen" min="2" max="16" value="8" oninput="V(this);redraw()"><span class="rv2">8</span></div>
+          <div class="ctl-top"><label>Tick direction</label><select class="sel" id="tickDir" oninput="redraw()"><option value="in">Inward</option><option value="out" selected>Outward</option></select></div>
+          <div class="ctl-top"><label>X-axis tick interval</label><input type="number" class="num" id="xTickStep" placeholder="auto" min="0" step="any" oninput="redraw()"></div>
+          <div class="ctl-top"><label>Y-axis tick interval</label><input type="number" class="num" id="yTickStep" placeholder="auto" min="0" step="any" oninput="redraw()"></div>
+        </div>
+      </div>
+
+      <div class="subsec">
+        <div class="subhead2" onclick="tog2(this)">Gridlines<span class="tri2">&#8250;</span></div>
+        <div class="subbody">
+          <label class="toggle"><input type="checkbox" id="gridV" oninput="redraw()"> Vertical gridlines</label>
+          <label class="toggle"><input type="checkbox" id="gridH" oninput="redraw()"> Horizontal gridlines</label>
+          <div class="ctl-top"><label>Grid color</label><input type="color" class="swatch" id="gridCol" value="#dddddd" oninput="redraw()"></div>
+          <div class="ctl-top"><label>Grid width</label><input type="range" id="gridW" min="0.5" max="3" step=".5" value="1" oninput="V(this);redraw()"><span class="rv2">1</span></div>
+          <div class="ctl-top"><label>Grid line style</label>
+            <select class="sel" id="gridStyle" oninput="redraw()">
+              <option value="solid" selected>Solid</option>
+              <option value="dashed">Dashed</option>
+              <option value="dotted">Dotted</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="section" id="sec-data">
+    <div class="sechead" onclick="tog(this)">Data Appearance<span class="tri">&#8250;</span></div>
+    <div class="sbody">
+      <div class="subhead">Points</div>
+      <div class="ctl-top"><label>Size</label><input type="range" id="ptSz" min="2" max="16" value="7" oninput="V(this);redraw()"><span class="rv2">7</span></div>
+      <div class="ctl-top"><label>Open-symbol line width</label><input type="range" id="openW" min="0.5" max="4" step="0.5" value="1.75" oninput="V(this);redraw()"><span class="rv2">1.75</span></div>
+      <hr class="divider">
+      <div class="subhead">Fitted line</div>
+      <div class="ctl-top"><label>Width</label><input type="range" id="lnW" min="0.5" max="6" step="0.5" value="2" oninput="V(this);redraw()"><span class="rv2">2</span></div>
+      <div class="hint">Each dataset keeps its own colour and marker shape, set in the Datasets list on the left. Sorption points are drawn filled, desorption points open — so shapes still read in black-and-white.</div>
+    </div>
+  </div>
+
+  <div class="section" id="sec-annot">
+    <div class="sechead" onclick="tog(this)">Legend<span class="tri">&#8250;</span></div>
+    <div class="sbody">
+      <label class="toggle"><input type="checkbox" id="leg" checked oninput="redraw()"> Show legend</label>
+      <div class="ctl-top"><label>Font</label>
+        <select class="sel" id="legFont" oninput="redraw()">
+          <option value="'Palatino Linotype',Palatino,Georgia,serif" selected>Palatino</option>
+          <option value="Georgia,serif">Georgia</option>
+          <option value="'Times New Roman',serif">Times New Roman</option>
+          <option value="Arial,sans-serif">Arial</option>
+          <option value="'Helvetica Neue',Helvetica,sans-serif">Helvetica</option>
+          <option value="'Century Schoolbook',serif">Century Schoolbook</option>
+        </select>
+      </div>
+      <div class="ctl-top"><label>Legend size</label><input type="range" id="legSz" min="8" max="40" value="24" oninput="V(this);redraw()"><span class="rv2">24</span></div>
+      <div class="hint">Drag the legend inside the plot to reposition it.</div>
+    </div>
+  </div>
+
+  <div class="section" id="sec-output">
+    <div class="sechead" onclick="tog(this)">Output<span class="tri">&#8250;</span></div>
+    <div class="sbody">
+      <div class="ctl-block">
+        <label>Size preset</label>
+        <select class="sel" id="sizePreset" onchange="onSizePresetChange()" style="width:100%">
+          <option value="fit" selected>Fit window</option>
+          <option value="1004x709">Single column &middot; 85 &times; 60 mm @300 dpi</option>
+          <option value="1004x532">Single column &middot; 85 &times; 45 mm @300 dpi</option>
+          <option value="2008x1181">Double column &middot; 170 &times; 100 mm @300 dpi</option>
+          <option value="custom">Custom&hellip;</option>
+        </select>
+      </div>
+      <div class="sizerow" id="sizeInputRow" style="display:none">
+        <input type="number" class="num" id="expW" value="1004" min="300" max="6000" step="10" oninput="redraw()">
+        <span class="hint">&times;</span>
+        <input type="number" class="num" id="expH" value="709" min="200" max="4000" step="10" oninput="redraw()">
+        <span class="hint">px</span>
+      </div>
+      <button class="btn2" onclick="savePlot()">Save Plot Image</button>
+      <button class="btn2 ghost" onclick="copyPlot()">Copy Plot to Clipboard</button>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- ═══════════════════════  GUIDE MODAL  ══════════════════════ -->
+<div class="modal-veil" id="guideVeil">
+  <div class="modal">
+    <button class="close-x" id="guideCloseBtn">&times;</button>
+    <h2>Isotherm Plotter — Guide</h2>
+    <div class="modal-sub">How this app reads your files and builds the figure</div>
+
+    <div class="g-sec">Purpose</div>
+    <p>This app has one job: load several sorption isotherm CSV files and draw them together as a single publication-ready figure. It does not fit equations or convert units itself — use <span class="g-code">Isotherm_Fit</span> to fit a model, and <span class="g-code">Sorption_Unit_Converter</span> to put raw data into consistent units, then drop the resulting files in here.</p>
+
+    <div class="g-sec">Loading files</div>
+    <p>Drag and drop one or more CSV files anywhere on the window. Each file becomes one entry in the <b>Datasets</b> list on the left. There is no file-picker button — drop is the only way in.</p>
+
+    <div class="g-sec">Accepted file formats</div>
+    <table class="g-table">
+      <tr><th>Source</th><th>What the app reads</th></tr>
+      <tr><td><span class="g-code">Isotherm_Fit</span> output</td><td>Metadata header, the <span class="g-code">Model</span>/<span class="g-code">Parameter,Value,Std Error</span> block, and the <span class="g-code">Pressure,Uptake,Fitted,Residual</span> table. <b>Uptake</b> becomes the data points.</td></tr>
+      <tr><td><span class="g-code">Sorption_Unit_Converter</span> output</td><td>Metadata header and a <span class="g-code">Pressure (unit),Uptake (unit)</span> table. If the file has two blocks of data separated by a blank line, the first block is treated as sorption and the second as desorption.</td></tr>
+    </table>
+
+    <div class="g-sec">Fitted lines are recomputed, not just connected</div>
+    <p>When a file carries a recognised <span class="g-code">Model</span> name and its fitted parameters, the fitted-line overlay is recomputed directly from that equation — the same 26 isotherm models used in Isotherm_Fit, IAST_Calculator and Sorption_Enthalpy — sampled at 400 points across the dataset's pressure range. This gives a properly smooth curve rather than straight segments between the (often sparse or unevenly spaced) fitted values already sitting in the file. A card's <b>Fitted line</b> toggle shows <b>✓ smooth curve</b> when this succeeds. If the model name isn't recognised, or a parameter needed to evaluate it is missing, the toggle instead shows <b>⚠ straight segments</b> and falls back to connecting the file's own <span class="g-code">Fitted</span> column values.</p>
+
+    <div class="g-sec">Sorption / desorption legs</div>
+    <p>A dataset with two blocks of data gets independent <b>Sorption</b> and <b>Desorption</b> toggles in its card. Sorption points are always drawn filled; desorption points are drawn open, in the same colour and shape. A dataset with only one block gets a single <b>Data points</b> toggle instead.</p>
+
+    <div class="g-sec">Marker shapes</div>
+    <p>Each dataset gets its own marker shape as well as its own colour, chosen from the <b>Marker shape</b> dropdown in its card and cycled automatically as datasets are loaded. Only shapes with both a filled and an open form are offered — circle, square, triangle, diamond, inverted triangle — so datasets stay distinguishable by shape and the sorption/desorption fill convention even in a figure printed in black only.</p>
+
+    <div class="g-sec">Pressure units</div>
+    <p>Each dataset's pressure unit is read from its metadata (or guessed from the column header, or assumed to be bar as a last resort — flagged in the card if so). All datasets are then converted automatically to the single <b>Pressure display unit</b> chosen at the top of the left sidebar, so mixed-unit files can still share one x-axis.</p>
+
+    <div class="g-sec">Uptake units</div>
+    <p>The <b>Required uptake unit</b> control at the top of the sidebar is set automatically from the first dataset you load, and every other dataset is converted to it — using the same conversion engine as Sorption_Unit_Converter. If a dataset's own uptake unit is missing, select it in the card. If it differs from the required unit, the card shows a <b>Convert to required uptake unit</b> box asking only for whatever that specific conversion actually needs (never all of it): sorptive molecular weight for a mass⇄moles conversion, host mass for a per-gram⇄absolute conversion, host formula or molecular weight for mol/mol. Sorptive identity and molecular weight are detected automatically where possible (from the file's own metadata, or looked up by gas name); a host formula is parsed into a molecular weight automatically too. Any value still missing shows pink, and the card states plainly what conversion is being applied — or what it's still waiting on, with that dataset left out of the plot until then.</p>
+
+    <div class="g-sec">Publication output</div>
+    <p>The right-hand panel controls axis ranges, fonts, tick styling, gridlines, point/line size, and the legend — the same controls used across the other apps in this set. <b>Save Plot Image</b> and <b>Copy Plot to Clipboard</b> render the figure at the chosen output size.</p>
+  </div>
+</div>
+
+<!-- ═══════════════════════  CHARACTERS MODAL  ══════════════════════ -->
+<div class="modal-veil" id="charsVeil">
+  <div class="modal">
+    <button class="close-x" id="charsCloseBtn">&times;</button>
+    <h2>Special Characters</h2>
+    <div class="modal-sub">Click a character to copy it</div>
+
+    <div class="g-sec">Superscript — for units like mmol g<sup>&minus;1</sup></div>
+    <div id="grid-super" class="char-grid"></div>
+    <div id="toast-super" class="char-toast"></div>
+
+    <div class="g-sec">Subscript — for formulae like CO<sub>2</sub></div>
+    <div id="grid-sub" class="char-grid"></div>
+    <div id="toast-sub" class="char-toast"></div>
+
+    <div class="g-sec">Common scientific symbols</div>
+    <div id="grid-sci" class="char-grid"></div>
+    <div id="toast-sci" class="char-toast"></div>
+
+    <div class="g-sec">Greek letters</div>
+    <div id="grid-greek" class="char-grid"></div>
+    <div id="toast-greek" class="char-toast"></div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  GENERIC HELPERS
+// ═══════════════════════════════════════════════════════════════
+function tog(h){h.closest('.section').classList.toggle('open')}
+function tog2(h){h.closest('.subsec').classList.toggle('open')}
+function V(el,dp){el.nextElementSibling.textContent=parseFloat(el.value).toFixed(dp||0)}
+function gv(id){return document.getElementById(id).value}
+function gb(id){return document.getElementById(id).checked}
+function gn(id){const v=parseFloat(gv(id));return isNaN(v)?null:v}
+function st(msg,cls){const e=document.getElementById('status');e.innerHTML=msg;e.className=cls||''}
+function fmt(v,sig=4){
+  if(v===undefined||v===null||isNaN(v))return'--';
+  const a=Math.abs(v);if(a===0)return'0';
+  if(a>=1e5||a<1e-4)return parseFloat(v.toPrecision(sig)).toExponential(sig-1);
+  return parseFloat(v.toPrecision(sig)).toString();
+}
+
+function manualTicks(mn,mx,step,fallback){
+  if(!(step>0))return fallback(mn,mx);
+  const ticks=[];const eps=step*1e-6;
+  let v=Math.ceil((mn-eps)/step)*step;
+  for(;v<=mx+eps;v+=step)ticks.push(parseFloat(v.toPrecision(10)));
+  return ticks;
+}
+
+function fmtTickSet(ticks){
+  if(!ticks||ticks.length===0) return ()=>'';
+  const a0=Math.abs(ticks[0]||0), aLast=Math.abs(ticks[ticks.length-1]||0);
+  const maxAbs=Math.max(a0,aLast,...ticks.map(v=>Math.abs(v)));
+  if(maxAbs>=1e5||(maxAbs>0&&maxAbs<1e-3)){
+    return v=>{ if(!isFinite(v))return''; return parseFloat(v.toPrecision(3)).toExponential(); };
+  }
+  let step=0;
+  if(ticks.length>1){
+    const gaps=[];
+    for(let i=1;i<ticks.length;i++) gaps.push(Math.abs(ticks[i]-ticks[i-1]));
+    gaps.sort((a,b)=>a-b);
+    step=gaps[Math.floor(gaps.length/2)];
+  }
+  let dp=0;
+  if(step>0&&step<1){ dp=Math.max(0,Math.ceil(-Math.log10(step)+0.5)); dp=Math.min(dp,10); }
+  if(dp===0){ const hasFrac=ticks.some(v=>Math.abs(v-Math.round(v))>1e-9); if(hasFrac) dp=1; }
+  return v=>{ if(!isFinite(v))return''; if(v===0) return dp>0?'0.'+'0'.repeat(dp):'0'; return v.toFixed(dp); };
+}
+
+function gridDashFor(style){
+  return style.gridStyle==='dashed' ? [4,3] : style.gridStyle==='dotted' ? [1,2.5] : [];
+}
+
+const PALETTE = ['#b84a2e','#2a5caa','#2a7a3b','#8a4fa0','#c07820','#1a9090','#d04080','#606060','#7a5030','#303070'];
+// Recognised gas formulae (GAS_LIST keys) get their digits auto-subscripted
+// for display — CO2 -> CO₂, C2H4 -> C₂H₄ — since every canonical key is a
+// plain chemical formula, a blanket digit replace is always correct here.
+const SUBSCRIPT_DIGITS={'0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉'};
+function subscriptFormula(name){ return (name||'').replace(/[0-9]/g,d=>SUBSCRIPT_DIGITS[d]); }
+function dispName(ds,idx){
+  if(ds.legend && ds.legend.trim()) return ds.legend.trim();
+  if(ds.gasKey) return subscriptFormula(ds.gasKey);
+  return ds.sorptive || ('Dataset '+(idx+1));
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MARKER SHAPES
+//  Only shapes with both a filled and an open form are offered, so
+//  datasets stay distinguishable even in a black-only figure: colour
+//  tells them apart when available, shape (and the existing filled/
+//  open sorption/desorption convention) tells them apart without it.
+// ═══════════════════════════════════════════════════════════════
+const SHAPE_PALETTE = ['circle','square','triangle','diamond','triangle-down'];
+const SHAPE_LABELS = {circle:'Circle',square:'Square',triangle:'Triangle',diamond:'Diamond','triangle-down':'Triangle (down)'};
+
+// Draws one marker centred at (cx,cy). `size` is the nominal diameter
+// (matches the Data Appearance "Size" slider, same as a circle's).
+// Non-circular shapes are scaled to roughly match a circle's visual
+// area rather than its bounding box, so mixed shapes read as similar
+// weight on the page.
+function drawMarker(ctx,cx,cy,shape,size,color,open,openW,plotBg){
+  const r=size/2;
+  ctx.beginPath();
+  switch(shape){
+    case 'square': {
+      const s=r*1.7;
+      ctx.rect(cx-s/2,cy-s/2,s,s);
+      break;
+    }
+    case 'triangle': {
+      const s=r*2.1, h=s*0.866;
+      ctx.moveTo(cx,cy-h*0.6);
+      ctx.lineTo(cx-s/2,cy+h*0.4);
+      ctx.lineTo(cx+s/2,cy+h*0.4);
+      ctx.closePath();
+      break;
+    }
+    case 'triangle-down': {
+      const s=r*2.1, h=s*0.866;
+      ctx.moveTo(cx,cy+h*0.6);
+      ctx.lineTo(cx-s/2,cy-h*0.4);
+      ctx.lineTo(cx+s/2,cy-h*0.4);
+      ctx.closePath();
+      break;
+    }
+    case 'diamond': {
+      const s=r*1.35;
+      ctx.moveTo(cx,cy-s);
+      ctx.lineTo(cx+s,cy);
+      ctx.lineTo(cx,cy+s);
+      ctx.lineTo(cx-s,cy);
+      ctx.closePath();
+      break;
+    }
+    default: // circle
+      ctx.arc(cx,cy,r,0,2*Math.PI);
+  }
+  if(open){ ctx.fillStyle=plotBg; ctx.fill(); ctx.strokeStyle=color; ctx.lineWidth=openW; ctx.stroke(); }
+  else { ctx.fillStyle=color; ctx.fill(); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  UNITS
+// ═══════════════════════════════════════════════════════════════
+function fmtPUnit(u){
+  const m={'bar':'bar','mbar':'mbar','kPa':'kPa','MPa':'MPa','atm':'atm','Pa':'Pa','mmHg':'mmHg','psi':'psi'};
+  return m[u]||u;
+}
+const Q_UNITS = [
+  {k:'mmol/g',label:'mmol/g'},
+  {k:'mol/kg',label:'mol/kg'},
+  {k:'cc(STP)/g',label:'cm³(STP)/g'},
+  {k:'g/g',label:'g/g'},
+  {k:'wt%',label:'wt%'},
+  {k:'mg/g',label:'mg/g'},
+  {k:'ug/g',label:'µg/g'},
+  {k:'mol/mol',label:'mol/mol'},
+  {k:'mmol',label:'mmol (absolute)'},
+  {k:'mg_abs',label:'mg (absolute)'},
+  {k:'ug_abs',label:'µg (absolute)'},
+  {k:'g_abs',label:'g (absolute)'},
+  {k:'cm3_abs',label:'cm³(STP) (absolute)'}
+];
+function fmtQUnit(u){
+  const m={'mmol/g':'mmol g⁻¹','mol/kg':'mol kg⁻¹','cc(STP)/g':'cm³(STP) g⁻¹',
+    'g/g':'g g⁻¹','wt%':'wt %','mg/g':'mg g⁻¹','ug/g':'µg g⁻¹','mol/mol':'mol mol⁻¹',
+    'mmol':'mmol','mg_abs':'mg','ug_abs':'µg','g_abs':'g','cm3_abs':'cm³(STP)'};
+  return m[u]||u||'';
+}
+function qUnitKnown(u){ return !!u && Q_UNITS.some(q=>q.k===u); }
+
+// ═══════════════════════════════════════════════════════════════
+//  UNIT CONVERSION ENGINE — ported from Sorption_Unit_Converter, so
+//  a mismatched dataset can be converted in place rather than just
+//  flagged. Same gas-property table, molecular-formula parser, and
+//  direct-conversion math (touches gas MW only when the amount kind
+//  changes, host mass only when the normalisation changes).
+// ═══════════════════════════════════════════════════════════════
+const GAS_MW={Ar:39.948,CO2:44.010,CH4:16.043,N2:28.014,O2:31.999,H2:2.016,C2H2:26.038,C2H4:28.053,C2H6:30.069,C3H6:42.080,C3H8:44.096,C4H10:58.122,'i-C4H10':58.122,'n-C4H10':58.122,C6H6:78.112,CO:28.010,COS:60.075,CS2:76.143,H2O:18.015,H2S:34.081,He:4.003,Kr:83.798,N2O:44.013,NH3:17.031,NO:30.006,NO2:46.005,SO2:64.064,Xe:131.293,CH3OH:32.042,CH3CH2OH:46.068,CH3CN:41.053,'n-C5H12':72.149,'n-C6H14':86.175};
+const GAS_LIST=['Ar','C2H2','C2H4','C2H6','C3H6','C3H8','C4H10','C6H6','CH4','CO','CO2','COS','CS2','H2','H2O','H2S','He','Kr','N2','N2O','NH3','NO','NO2','O2','SO2','Xe','CH3OH','CH3CH2OH','CH3CN','i-C4H10','n-C4H10','n-C5H12','n-C6H14'];
+
+function detectGas(s){
+  const sl=(s||'').toLowerCase().replace(/[\s\-_]/g,'');
+  const map={
+    ar:'Ar',argon:'Ar', c2h2:'C2H2',acetylene:'C2H2',ethyne:'C2H2',
+    c2h4:'C2H4',ethylene:'C2H4',ethene:'C2H4', c2h6:'C2H6',ethane:'C2H6',
+    c3h6:'C3H6',propene:'C3H6',propylene:'C3H6', c3h8:'C3H8',propane:'C3H8',
+    c4h10:'C4H10',butane:'C4H10',nc4h10:'C4H10',nbutane:'C4H10',
+    c6h6:'C6H6',benzene:'C6H6', ch4:'CH4',methane:'CH4',
+    co:'CO',carbonmonoxide:'CO', co2:'CO2',carbondioxide:'CO2',
+    cos:'COS',carbonylsulfide:'COS',carbonylsulphide:'COS',
+    cs2:'CS2',carbondisulfide:'CS2',carbondisulphide:'CS2',
+    h2:'H2',hydrogen:'H2', h2o:'H2O',water:'H2O',
+    h2s:'H2S',hydrogensulfide:'H2S',hydrogensulphide:'H2S',
+    he:'He',helium:'He', kr:'Kr',krypton:'Kr',
+    n2:'N2',nitrogen:'N2', n2o:'N2O',nitrousoxide:'N2O',
+    nh3:'NH3',ammonia:'NH3', no:'NO',nitricoxide:'NO',
+    no2:'NO2',nitrogendioxide:'NO2', o2:'O2',oxygen:'O2',
+    so2:'SO2',sulfurdioxide:'SO2',sulphurdioxide:'SO2', xe:'Xe',xenon:'Xe',
+    ch3oh:'CH3OH',methanol:'CH3OH', ch3ch2oh:'CH3CH2OH',ethanol:'CH3CH2OH',c2h5oh:'CH3CH2OH',
+    ch3cn:'CH3CN',acetonitrile:'CH3CN',
+    ic4h10:'i-C4H10',isobutane:'i-C4H10',ibutane:'i-C4H10',
+    nc5h12:'n-C5H12',npentane:'n-C5H12',pentane:'n-C5H12',
+    nc6h14:'n-C6H14',nhexane:'n-C6H14',hexane:'n-C6H14'
+  };
+  return map[sl]||null;
+}
+
+const AW={H:1.008,He:4.003,Li:6.941,Be:9.012,B:10.811,C:12.011,N:14.007,O:15.999,F:18.998,Ne:20.180,Na:22.990,Mg:24.305,Al:26.982,Si:28.086,P:30.974,S:32.065,Cl:35.453,Ar:39.948,K:39.098,Ca:40.078,Sc:44.956,Ti:47.867,V:50.942,Cr:51.996,Mn:54.938,Fe:55.845,Co:58.933,Ni:58.693,Cu:63.546,Zn:65.38,Ga:69.723,Ge:72.630,As:74.922,Se:78.960,Br:79.904,Kr:83.798,Rb:85.468,Sr:87.620,Y:88.906,Zr:91.224,Nb:92.906,Mo:95.960,Ru:101.07,Rh:102.906,Pd:106.42,Ag:107.868,Cd:112.411,In:114.818,Sn:118.710,Sb:121.760,Te:127.600,I:126.904,Xe:131.293,Cs:132.905,Ba:137.327,La:138.905,Ce:140.116,Pr:140.908,Nd:144.242,Sm:150.360,Eu:151.964,Gd:157.250,Tb:158.925,Dy:162.500,Ho:164.930,Er:167.259,Tm:168.934,Yb:173.054,Lu:174.967,Hf:178.490,Ta:180.948,W:183.840,Re:186.207,Os:190.230,Ir:192.217,Pt:195.084,Au:196.967,Hg:200.590,Tl:204.383,Pb:207.200,Bi:208.980,Th:232.038,U:238.029};
+function parseMolecularFormula(formula){
+  let s=(formula||'').replace(/\s/g,''),pos=0;
+  function parseGroup(){
+    let counts={};
+    while(pos<s.length){
+      if(s[pos]===')'||s[pos]===']') break;
+      if(s[pos]==='('||s[pos]==='['){pos++;const sub=parseGroup();pos++;const n=parseNum();for(const[el,c] of Object.entries(sub))counts[el]=(counts[el]||0)+c*n;}
+      else if(s[pos]>='A'&&s[pos]<='Z'){let el=s[pos++];while(pos<s.length&&s[pos]>='a'&&s[pos]<='z')el+=s[pos++];if(!AW[el])throw new Error('Unknown element: '+el);const n=parseNum();counts[el]=(counts[el]||0)+n;}
+      else pos++;
+    }
+    return counts;
+  }
+  function parseNum(){let n='';while(pos<s.length&&(s[pos]>='0'&&s[pos]<='9'||s[pos]==='.')){n+=s[pos++];}return n?parseFloat(n):1;}
+  try{const c=parseGroup();let mw=0;for(const[el,n] of Object.entries(c))mw+=AW[el]*n;return{mw,error:null};}
+  catch(e){return{mw:null,error:e.message};}
+}
+
+const VM_STP=22.414; // ideal-gas molar volume at STP, mL/mmol
+const VDW={ // van der Waals a (L²·atm/mol²), b (L/mol) for real-gas STP correction
+  CO2:{a:3.640,b:0.04267}, CH4:{a:2.253,b:0.04278}, N2:{a:1.390,b:0.03913},
+  O2:{a:1.360,b:0.03183},  H2:{a:0.2444,b:0.02661}, C2H4:{a:4.552,b:0.05821},
+  C2H6:{a:5.562,b:0.06380},C3H6:{a:8.664,b:0.08245},C3H8:{a:9.385,b:0.09049},
+  H2O:{a:5.536,b:0.03049}, SO2:{a:6.803,b:0.05636}, H2S:{a:4.490,b:0.04287},
+  NH3:{a:4.169,b:0.03707}, Ar:{a:1.355,b:0.03201},  He:{a:0.03457,b:0.02370},
+  Kr:{a:2.349,b:0.03978},  Xe:{a:4.250,b:0.05105},
+  C2H2:{a:4.516,b:0.05220}, C4H10:{a:14.66,b:0.12260},
+  NO:{a:1.358,b:0.02789},   NO2:{a:5.354,b:0.04424},  N2O:{a:3.832,b:0.04415}
+};
+function vmSTP(gasKey){
+  if(!gasKey || !VDW[gasKey]) return VM_STP;
+  const{a,b}=VDW[gasKey];
+  const P=1.0, T=273.15, R=0.08206;
+  let V=R*T/P;
+  for(let i=0;i<50;i++) V=R*T/(P+a/(V*V))+b;
+  return V;
+}
+
+// Classifies each uptake unit by amount `kind` (moles/mass/vol) and `norm`
+// (relative to host mass, or absolute total). convertQty only invokes gas
+// MW when the kind changes and host mass only when the norm changes —
+// exactly when they're genuinely needed, nothing more.
+const UNIT_INFO = {
+  'mmol/g':     {kind:'moles', norm:'rel', factor:1},
+  'mol/kg':     {kind:'moles', norm:'rel', factor:1},
+  'cc(STP)/g':  {kind:'vol',   norm:'rel', factor:1},
+  'g/g':        {kind:'mass',  norm:'rel', factor:1000},
+  'wt%':        {kind:'mass',  norm:'rel', factor:10},
+  'mg/g':       {kind:'mass',  norm:'rel', factor:1},
+  'ug/g':       {kind:'mass',  norm:'rel', factor:0.001},
+  'mmol':       {kind:'moles', norm:'abs', factor:1},
+  'mg_abs':     {kind:'mass',  norm:'abs', factor:1},
+  'ug_abs':     {kind:'mass',  norm:'abs', factor:0.001},
+  'g_abs':      {kind:'mass',  norm:'abs', factor:1000},
+  'cm3_abs':    {kind:'vol',   norm:'abs', factor:1},
+};
+
+// mol/mol is outside UNIT_INFO (needs host MW, not host mass) — pivot
+// through mmol/g for that one pair only.
+function qToMmolG_molmol(v,mwHost){ return mwHost ? v*1000/mwHost : null; }
+function qFromMmolG_molmol(v,mwHost){ return mwHost ? v*mwHost/1000 : null; }
+
+// Which metadata a specific qIn→qOut pair genuinely requires.
+function metaRequirements(qIn,qOut){
+  if(qIn===qOut) return {gas:false,mass:false,host:false};
+  if(qIn==='mol/mol'||qOut==='mol/mol'){
+    // mol/mol always pivots through mmol/g via host MW; also needs gas MW
+    // if the other side isn't already a molar (moles) unit.
+    const other=qIn==='mol/mol'?qOut:qIn;
+    const otherInfo=UNIT_INFO[other];
+    return {gas: otherInfo ? otherInfo.kind!=='moles' : true, mass:false, host:true};
+  }
+  const A=UNIT_INFO[qIn], B=UNIT_INFO[qOut];
+  if(!A||!B) return {gas:false,mass:false,host:false};
+  return {
+    gas:  (A.kind==='mass')!==(B.kind==='mass'),  // mass⇄moles or mass⇄volume needs gas MW
+    mass: A.norm!==B.norm,                        // relative⇄absolute needs host mass
+    host: false
+  };
+}
+
+// Direct conversion for any pair covered by UNIT_INFO (plus mol/mol via
+// the mmol/g pivot). prm = {mwGas, massHost, mwHost, gasKey}.
+function convertQty(v,qIn,qOut,prm){
+  if(qIn===qOut) return v;
+  const{mwGas:G, massHost:M, mwHost:H, gasKey}=prm;
+  if(qIn==='mol/mol'||qOut==='mol/mol'){
+    let mmolG;
+    if(qIn==='mol/mol'){ mmolG=qToMmolG_molmol(v,H); }
+    else {
+      const A=UNIT_INFO[qIn]; if(!A) return null;
+      let val=v*A.factor, kind=A.kind;
+      if(kind!=='moles'){
+        const vm=vmSTP(gasKey);
+        if(kind==='mass'){ if(!G) return null; val=val/G; }
+        else if(kind==='vol'){ val=val/vm; }
+      }
+      if(A.norm==='abs'){ if(!M) return null; val=val/(M/1000); }
+      mmolG=val;
+    }
+    if(mmolG===null) return null;
+    if(qOut==='mol/mol') return qFromMmolG_molmol(mmolG,H);
+    const B=UNIT_INFO[qOut]; if(!B) return null;
+    let val=mmolG, kind='moles';
+    if(kind!==B.kind){
+      const vm=vmSTP(gasKey);
+      if(B.kind==='mass'){ if(!G) return null; val=val*G; }
+      else if(B.kind==='vol'){ val=val*vm; }
+    }
+    if(B.norm==='abs'){ if(!M) return null; val=val*(M/1000); }
+    return val/B.factor;
+  }
+  const A=UNIT_INFO[qIn], B=UNIT_INFO[qOut];
+  if(!A||!B) return null;
+  let val=v*A.factor, kind=A.kind;
+  if(kind!==B.kind){
+    const vm=vmSTP(gasKey);
+    if(kind==='mass'&&B.kind==='moles'){       if(!G) return null; val=val/G; }
+    else if(kind==='moles'&&B.kind==='mass'){  if(!G) return null; val=val*G; }
+    else if(kind==='moles'&&B.kind==='vol'){   val=val*vm; }
+    else if(kind==='vol'&&B.kind==='moles'){   val=val/vm; }
+    else if(kind==='mass'&&B.kind==='vol'){    if(!G) return null; val=(val/G)*vm; }
+    else if(kind==='vol'&&B.kind==='mass'){    if(!G) return null; val=(val/vm)*G; }
+    kind=B.kind;
+  }
+  if(A.norm!==B.norm){
+    if(!M) return null;
+    val = A.norm==='rel' ? val*(M/1000) : val/(M/1000);
+  }
+  return val/B.factor;
+}
+
+// Resolves whether/how a dataset's own uptake unit can reach the shared
+// target unit: 'match' (already equal, nothing to do), 'ready' (different
+// but all needed metadata present — .convert(v) does the conversion),
+// 'blocked' (different, metadata still missing — .missing lists what),
+// or 'unknown' (native unit or target not recognised at all).
+function resolveConversion(d,ref){
+  if(!ref || !d.qUnit || !qUnitKnown(d.qUnit) || !qUnitKnown(ref)) return {status:'unknown'};
+  if(d.qUnit===ref) return {status:'match'};
+  const req=metaRequirements(d.qUnit,ref);
+  const prm={mwGas:d.sorptiveMW||null, massHost:d.hostMass||null, mwHost:d.hostMW||null, gasKey:d.gasKey||null};
+  const missing=[];
+  if(req.gas && !prm.mwGas) missing.push('sorptive molecular weight');
+  if(req.mass && !prm.massHost) missing.push('host mass');
+  if(req.host && !prm.mwHost) missing.push('host molecular weight');
+  if(missing.length) return {status:'blocked', req, missing};
+  return {status:'ready', req, convert:v=>convertQty(v,d.qUnit,ref,prm)};
+}
+
+function pToBar(v,u){
+  switch(u){
+    case 'mbar': return v/1000;
+    case 'Pa':   return v/1e5;
+    case 'kPa':  return v/100;
+    case 'MPa':  return v*10;
+    case 'atm':  return v*1.01325;
+    case 'mmHg': return v*0.00133322;
+    case 'psi':  return v*0.0689476;
+    default:     return v;
+  }
+}
+function pFromBar(v,u){
+  switch(u){
+    case 'mbar': return v*1000;
+    case 'Pa':   return v*1e5;
+    case 'kPa':  return v*100;
+    case 'MPa':  return v/10;
+    case 'atm':  return v/1.01325;
+    case 'mmHg': return v/0.00133322;
+    case 'psi':  return v/0.0689476;
+    default:     return v;
+  }
+}
+function detectPressureUnit(s){
+  s=(s||'').toLowerCase();
+  if(/\bmpa\b/.test(s))  return 'MPa';
+  if(/\bkpa\b/.test(s))  return 'kPa';
+  if(/\bmbar\b/.test(s)) return 'mbar';
+  if(/\bbar\b/.test(s))  return 'bar';
+  if(/\batm\b/.test(s))  return 'atm';
+  if(/\btorr\b/.test(s)||/\bmmhg\b/.test(s)) return 'mmHg';
+  if(/\bpsi\b/.test(s))  return 'psi';
+  if(/\bpa\b/.test(s))   return 'Pa';
+  return null;
+}
+function detectPressureUnitKeyword(s){
+  const sl=(s||'').toLowerCase().replace(/[_\s-]/g,'');
+  const direct={'bar':'bar','mbar':'mbar','kpa':'kPa','mpa':'MPa','atm':'atm','pa':'Pa','mmhg':'mmHg','torr':'mmHg','psi':'psi'};
+  if(direct[sl]) return direct[sl];
+  return detectPressureUnit(s);
+}
+
+// Map a raw header/value string to a known uptake unit — ported verbatim
+// from Sorption_Unit_Converter's detectUptakeUnit(), so a bare unit header
+// like "ug" (no "/g" denominator) reads as absolute micrograms exactly as
+// it does there, not as a per-gram ratio.
+function detectUptakeUnit(s){
+  const sl=(s||'').toLowerCase().replace(/\s/g,'');
+  if(/µg\/mg|ug\/mg/.test(sl))           return 'ug/mg_host';
+  if(/mg\/mg/.test(sl))                  return 'mg/mg_host';
+  if(/µg_abs|ug_abs|ugabs/.test(sl))     return 'ug_abs';
+  if(/mg_abs|mgabs/.test(sl))            return 'mg_abs';
+  if(/g_abs|gram.*abs|abs.*gram/.test(sl)) return 'g_abs';
+  if(/^mmol$/.test(sl))                  return 'mmol';
+  if(/cm3_abs|cc_abs|cc\(stp\)abs|cc.*stp.*abs/.test(sl)) return 'cm3_abs';
+  if(/µg\/g|ug\/g/.test(sl))             return 'ug/g';
+  if(/mg\/g/.test(sl))                   return 'mg/g';
+  if(/microgram/.test(sl))               return 'ug_abs';
+  if(/milligram/.test(sl))               return 'mg_abs';
+  if(/^µg$|^ug$/.test(sl))              return 'ug_abs';
+  if(/^mg$/.test(sl))                    return 'mg_abs';
+  if(/^g$/.test(sl))                     return 'g_abs';
+  if(/mmol\/g/.test(sl))                 return 'mmol/g';
+  if(/mol\/mol/.test(sl))                return 'mol/mol';
+  if(/mol\/kg/.test(sl))                 return 'mol/kg';
+  if(/(cc|cm3|ml).*stp/.test(sl))        return /\/g/.test(sl) ? 'cc(STP)/g' : 'cm3_abs';
+  if(/cm3\/g|cc\/g/.test(sl))            return 'cc(STP)/g';
+  if(/wt\s*%|wt%/.test(sl))             return 'wt%';
+  if(/g\/g/.test(sl))                    return 'g/g';
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CSV PARSER
+//  Reads Isotherm_Fit output (Model / Parameter,Value,Std Error /
+//  Correlation Matrix / Pressure,Uptake,Fitted,Residual) and
+//  Sorption_Unit_Converter output (metadata + Pressure (u),Uptake (u),
+//  optionally two blocks separated by a blank/comma-only line for
+//  sorption then desorption).
+// ═══════════════════════════════════════════════════════════════
+function parseIsothermCSV(text){
+  const lines=text.split(/\r?\n/);
+  const result={
+    model:null, params:{}, sorptive:null, sorptiveMW:null, tempK:null,
+    hostFormula:null, hostMW:null, hostMass:null,
+    pUnit:null, pUnitSource:null,     // 'keyword'|'header'|'default'
+    qUnit:null, qUnitSource:null,     // 'keyword'|'header'|null
+    blocks:[],                        // [{P:[],Q:[],Fitted:[]}, ...]
+    error:null
+  };
+  let paramMode=false, dataMode=false, hasFittedCol=false, curBlock=null;
+  function newBlock(){ curBlock={P:[],Q:[],Fitted:[]}; result.blocks.push(curBlock); }
+
+  for(const rawLine of lines){
+    const line=rawLine.trim();
+    const isBlank = !line || /^[,\s;\t]*$/.test(line);
+    if(isBlank){
+      if(dataMode) curBlock=null; // next data row (if any) starts a fresh block
+      continue;
+    }
+    if(line[0]==='#') continue; // informational comment line — ignore
+
+    // Comma, tab, or semicolon delimited — matches Sorption_Unit_Converter.
+    const cols=line.split(/,|\t|;/).map(s=>s.trim());
+    const c0=cols[0]||'', c1=cols[1]||'', c2=cols[2]||'';
+
+    if(c0==='Model'){ result.model=c1; paramMode=false; dataMode=false; continue; }
+    if(c0==='Sorptive'){ result.sorptive=c1; continue; }
+    if(c0==='Parameter'&&c1==='Value'){ paramMode=true; dataMode=false; continue; }
+    if(c0==='Correlation Matrix'){ paramMode=false; dataMode=false; continue; }
+
+    // Data-table header row: "Pressure[...],Uptake[...][,Fitted,Residual]" —
+    // matches both Isotherm_Fit's literal "Pressure,Uptake,Fitted,Residual"
+    // and Sorption_Unit_Converter's "Pressure (bar),Uptake (mmol/g)". Always
+    // resets paramMode in case no Correlation Matrix block was present.
+    if(!dataMode && /^pressure\b/i.test(c0) && /^uptake\b/i.test(c1)){
+      paramMode=false; dataMode=true;
+      hasFittedCol = cols.some(c=>c.toLowerCase()==='fitted');
+      if(!result.pUnit){ const u=detectPressureUnit(c0); if(u){result.pUnit=u; result.pUnitSource='header';} }
+      if(!result.qUnit){
+        const m=c1.match(/\(([^)]+)\)/);
+        const u = m ? (detectUptakeUnit(m[1])||m[1]) : detectUptakeUnit(c1);
+        if(u){result.qUnit=u; result.qUnitSource='header';}
+      }
+      newBlock();
+      continue;
+    }
+
+    const key=c0.toLowerCase().replace(/[_\s]/g,'');
+    if(!dataMode && !paramMode){
+      if(key==='pressureunits'||key==='punits'){ const u=detectPressureUnitKeyword(c1); if(u){result.pUnit=u; result.pUnitSource='keyword';} continue; }
+      if(key==='uptakeunits'||key==='qunits'){ const u=detectUptakeUnit(c1); if(u){result.qUnit=u; result.qUnitSource='keyword';} continue; }
+      if(key==='sorptivemw'||key==='mwgas'){ const v=parseFloat(c1); if(isFinite(v)&&v>0) result.sorptiveMW=v; continue; }
+      if(key==='temperaturek'||key==='tempk'||key==='tk'){ const v=parseFloat(c1); if(isFinite(v)&&v>0) result.tempK=v; continue; }
+      if(key==='temperaturec'||key==='tempc'||key==='tc'){ const v=parseFloat(c1); if(isFinite(v)) result.tempK=v+273.15; continue; }
+      if(key==='hostformula'){ if(c1) result.hostFormula=c1; continue; }
+      if(key==='hostmw'){ const v=parseFloat(c1); if(isFinite(v)&&v>0) result.hostMW=v; continue; }
+      if(key==='hostmass'){ const v=parseFloat(c1); if(isFinite(v)&&v>0) result.hostMass=v; continue; }
+
+      // Generic bare-unit header row (Sorption_Unit_Converter style, e.g.
+      // "mbar,ug" with no "Pressure"/"Uptake" wording at all) — try each
+      // column as a unit string in its own right. Doesn't `continue`: if
+      // this line isn't actually a header, it just falls through and fails
+      // the numeric data-row test below like any other unrecognised line.
+      const p0=parseFloat(c0), p1=parseFloat(c1);
+      if(isNaN(p0)&&isNaN(p1)&&c0&&c1){
+        if(!result.pUnit){ const u=detectPressureUnit(c0); if(u){result.pUnit=u; result.pUnitSource='header';} }
+        if(!result.qUnit){ const u=detectUptakeUnit(c1); if(u){result.qUnit=u; result.qUnitSource='header';} }
+      }
+    }
+
+    if(paramMode){
+      if(c0&&c1!==''&&!isNaN(parseFloat(c1))){
+        if(c0!=='R2'&&c0!=='SSR') result.params[c0]=parseFloat(c1);
+      }
+      continue;
+    }
+
+    if(!dataMode){
+      // No recognized header was ever found (e.g. a bare "P,n" style file) —
+      // start capturing as soon as we see an actual numeric (P, Q) pair, and
+      // silently skip any other unrecognized text row before that.
+      const P0=parseFloat(c0), Q0=parseFloat(c1);
+      if(isFinite(P0)&&P0>0&&isFinite(Q0)&&Q0>=0){ dataMode=true; newBlock(); }
+      else continue;
+    }
+    if(dataMode){
+      if(!curBlock) newBlock();
+      const P=parseFloat(c0), Q=parseFloat(c1);
+      if(isFinite(P)&&P>0&&isFinite(Q)&&Q>=0){
+        curBlock.P.push(P); curBlock.Q.push(Q);
+        if(hasFittedCol){ const F=parseFloat(c2); curBlock.Fitted.push(isFinite(F)?F:NaN); }
+      }
+    }
+  }
+
+  if(!result.pUnit){ result.pUnit='bar'; result.pUnitSource='default'; }
+  result.blocks = result.blocks.filter(b=>b.P.length>0);
+  if(!result.blocks.length) result.error='No numeric Pressure/Uptake data found in file';
+  return result;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ISOTHERM MODEL EQUATIONS
+//  Mirrors the 26 equations in Isotherm_Fit — same model display
+//  names (matched against the CSV's "Model,<name>" row) and the same
+//  CSV parameter-name keys (matched against the Parameter,Value,Std
+//  Error block), so a fitted dataset's smooth curve is recomputed
+//  from its actual equation rather than just connecting the file's
+//  own Fitted values with straight segments. See IAST_Calculator and
+//  Sorption_Enthalpy for the equivalent qModel() used there.
+// ═══════════════════════════════════════════════════════════════
+const MOD = {
+  bet:{name:'BET', params:['nm','C','p0'],
+    fn:(p,[qm,C,p0])=>{if(p<=0||p>=p0)return 0;const x=p/p0;return(qm*C*x)/((1-x)*(1+(C-1)*x))}},
+  henry:{name:'Henry (Linear)', params:['KH'],
+    fn:(p,[KH])=>KH*p},
+  freundlich:{name:'Freundlich', params:['Kf','n'],
+    fn:(p,[Kf,n])=>p<=0?0:Kf*Math.pow(p,1/n)},
+  langmuir:{name:'Langmuir', params:['nm','K'],
+    fn:(p,[qm,K])=>(qm*K*p)/(1+K*p)},
+  lang2:{name:'Dual-Site Langmuir', params:['q1','K1','q2','K2'],
+    fn:(p,[q1,K1,q2,K2])=>(q1*K1*p)/(1+K1*p)+(q2*K2*p)/(1+K2*p)},
+  lf:{name:'Langmuir-Freundlich (Sips)', params:['nm','a (=k^m)','m'],
+    fn:(p,[mn,a,m])=>{if(p<=0)return 0;const v=a*Math.pow(p,m);return(mn*v)/(1+v)}},
+  langmuirfreu:{name:'Langmuir-Freundlich (K-form)', params:['nm','K','m'],
+    fn:(p,[nm,K,m])=>{if(p<=0)return 0;const Kpm=Math.pow(K*p,m);return nm*Kpm/(1+Kpm)}},
+  lf2:{name:'Dual-Site Langmuir-Freundlich', params:['nm1','a1','m1','nm2','a2','m2'],
+    fn:(p,[nm1,a1,m1,nm2,a2,m2])=>{if(p<=0)return 0;const v1=a1*Math.pow(p,m1),v2=a2*Math.pow(p,m2);return(nm1*v1)/(1+v1)+(nm2*v2)/(1+v2)}},
+  toth:{name:'Toth', params:['nm','K','t'],
+    fn:(p,[qm,K,t])=>{if(p<=0)return 0;const Kp=K*p;return(qm*Kp)/Math.pow(1+Math.pow(Kp,t),1/t)}},
+  temkin:{name:'Temkin', params:['AT','bT'],
+    fn:(p,[AT,bT])=>p<=0||AT*p<=0?0:(1/bT)*Math.log(AT*p)},
+  dr:{name:'Dubinin-Radushkevich', params:['nm','beta'],
+    fn:(p,[qm,b])=>{if(p<=0)return 0;const e=Math.log(1+1/p);return qm*Math.exp(-b*e*e)}},
+  rp:{name:'Redlich-Peterson', params:['KR','aR','beta'],
+    fn:(p,[KR,aR,b])=>p<=0?0:(KR*p)/(1+aR*Math.pow(p,b))},
+  hill:{name:'Hill (Cooperative)', params:['nm','n','Kd'],
+    fn:(p,[qm,n,Kd])=>{if(p<=0)return 0;const pn=Math.pow(p,n),Kdn=Math.pow(Kd,n);return qm*pn/(Kdn+pn)}},
+  radke:{name:'Radke-Prausnitz', params:['nm','K','n'],
+    fn:(p,[qm,K,n])=>{if(p<=0)return 0;return(qm*K*p)/(qm+K*Math.pow(p,1/n))}},
+  unilan:{name:'UniLan', params:['nm','c','K0'],
+    fn:(p,[nm,c,K0])=>{if(p<=0||c<=0)return 0;const ec=Math.exp(c);return(nm/(2*c))*Math.log((1+K0*p*ec)/(1+K0*p/ec))}},
+  obrien:{name:"O'Brien & Myers", params:['nm','K','c'],
+    fn:(p,[nm,K,c])=>{if(p<=0)return 0;const Kp=K*p,th=Kp/(1+Kp);return nm*(th+c*th*(1-th)*(1-2*th))}},
+  jovanovic:{name:'Jovanovic', params:['nm','K'],
+    fn:(p,[nm,K])=>nm*(1-Math.exp(-K*p))},
+  jovafreun:{name:'Jovanovic-Freundlich', params:['nm','K','n'],
+    fn:(p,[nm,K,n])=>{if(p<=0)return 0;return nm*(1-Math.exp(-K*Math.pow(p,n)))}},
+  fritz:{name:'Fritz-Schluender', params:['a','b','alpha','beta'],
+    fn:(p,[a,b,al,be])=>{if(p<=0)return 0;return(a*Math.pow(p,al))/(1+b*Math.pow(p,be))}},
+  khan:{name:'Khan', params:['nm','bK','aK'],
+    fn:(p,[nm,bK,aK])=>{if(p<=0)return 0;return(nm*bK*p)/Math.pow(1+bK*p,aK)}},
+  harkinjura:{name:'Harkin-Jura', params:['A','B'],
+    fn:(p,[A,B])=>{if(p<=0)return 0;const lp=Math.log10(p),d=B-lp;return d>0?Math.sqrt(A/d):0}},
+  halsey:{name:'Halsey', params:['A','n'],
+    fn:(p,[A,n])=>{if(p<=0||p>=1)return 0;return Math.pow(A/Math.log(1/p),1/n)}},
+  macmillan:{name:'FHH (Frenkel-Halsey-Hill)', params:['nm','K','n'],
+    fn:(p,[nm,K,n])=>{if(p<=0||p>=1)return 0;return nm*Math.exp(-K*Math.pow(Math.log(1/p),1/n))}},
+  polanyi:{name:'Polanyi-Dubinin (DA)', params:['W0','E','n'],
+    fn:(p,[W0,E,n])=>{if(p<=0)return 0;const eps=Math.log(1+1/p);return W0*Math.exp(-Math.pow(eps/E,n))}},
+  berthelot:{name:'Modified Berthelot', params:['KH','c','p0'],
+    fn:(p,[KH,c,p0])=>{if(p<=0)return 0;return KH*p*Math.exp(-c*p/p0)}},
+  virial:{name:'Virial', params:['A0','A1','A2'],
+    fn:(p,[A0,A1,A2])=>{
+      if(p<=0)return 0;
+      const lnp=Math.log(p);
+      const g=q=>Math.log(q)+A0+A1*q+A2*q*q-lnp;
+      let lo=1e-12,glo=g(lo),t=0;
+      while(glo>=0&&lo>1e-30&&t<100){lo*=0.1;glo=g(lo);t++;}
+      let hi=lo,ghi=glo,found=false;
+      for(let it=0;it<400;it++){hi*=1.3;ghi=g(hi);if(ghi>=0){found=true;break;}if(hi>1e9)break;lo=hi;glo=ghi;}
+      if(!found)return hi;
+      for(let it=0;it<200;it++){const m=0.5*(lo+hi),gm=g(m);if(gm===0||(hi-lo)<1e-13*(1+m))return m;if(gm<0)lo=m;else hi=m;}
+      return 0.5*(lo+hi);
+    }}
+};
+
+// Match a CSV "Model,<name>" string back to a MOD key by exact
+// (case/punctuation-insensitive) name comparison — the exported name
+// is always the literal mod.name string, so this is a direct lookup.
+function resolveModelKey(rawName){
+  if(!rawName) return null;
+  const norm=s=>s.toLowerCase().replace(/[^a-z0-9]+/g,'');
+  const target=norm(rawName);
+  for(const k in MOD){ if(norm(MOD[k].name)===target) return k; }
+  return null;
+}
+
+// Recompute a smooth fitted curve directly from the model equation and
+// fitted parameters, sampled log-spaced across the dataset's own
+// pressure range (native pressure unit — converted to the display
+// unit only when building the plot series). Returns null if the model
+// name isn't recognised or a required parameter is missing, so the
+// caller can fall back to the file's own (coarser) Fitted column.
+function computeFitCurve(d){
+  const key=resolveModelKey(d.model);
+  if(!key) return null;
+  const mod=MOD[key];
+  const args=mod.params.map(pr=>d.params[pr]);
+  if(args.some(v=>!isFinite(v))) return null;
+  const allP=d.adsP.concat(d.desP).filter(p=>p>0);
+  if(!allP.length) return null;
+  const pMin=Math.min(...allP), pMax=Math.max(...allP);
+  const logMin=Math.log10(Math.max(pMin*0.1,1e-12));
+  const logMax=Math.log10(pMax*1.02);
+  const pts=[];
+  for(let i=0;i<=400;i++){
+    const P=Math.pow(10,logMin+(logMax-logMin)*i/400);
+    let q;
+    try{ q=mod.fn(P,args); }catch(e){ q=NaN; }
+    if(isFinite(q)&&q>=0) pts.push({p:P,q});
+  }
+  return pts.length>1 ? pts : null;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DATA MODEL
+// ═══════════════════════════════════════════════════════════════
+let datasets=[];
+let dsCount=0;
+let dsDragIdx=null;
+let requiredQUnit=''; // '' = auto (first loaded dataset's unit)
+let sourceFileHandle=null; // FileSystemFileHandle of the most recently dropped file, so Save dialogs default to its folder
+
+function addDatasetFromFile(file){
+  const id=++dsCount;
+  const color=PALETTE[(datasets.length)%PALETTE.length];
+  const shape=SHAPE_PALETTE[(datasets.length)%SHAPE_PALETTE.length];
+  const ds={
+    id, filename:file.name, legend:'', color, shape, collapsed:false,
+    model:null, params:{}, sorptive:null, tempK:null, hostFormula:null,
+    adsP:[], adsQ:[], desP:[], desQ:[], hasDes:false,
+    fitP:[], fitQ:[], hasFit:false, fitKind:null,
+    pUnit:'bar', pUnitSource:'default', qUnit:null, qUnitSource:null,
+    // Unit-conversion metadata (Sorption_Unit_Converter engine) — each
+    // resolved automatically where possible, then user-editable.
+    gasKey:null,
+    sorptiveMW:null, sorptiveMWSource:null,   // 'csv'|'lookup'|'manual'|null
+    hostMW:null, hostMWSource:null,           // 'csv'|'formula'|'manual'|null
+    hostMass:null, hostMassSource:null,       // 'csv'|'manual'|null
+    adsVisible:true, desVisible:true, fitVisible:true,
+    loaded:false, error:null
+  };
+  datasets.push(ds);
+  renderDsList();
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const parsed=parseIsothermCSV(e.target.result);
+    const d=datasets.find(x=>x.id===id);
+    if(!d) return;
+    if(parsed.error){ d.error=parsed.error; renderDsList(); refreshUnitValidation(); return; }
+    d.model=parsed.model;
+    d.params=parsed.params;
+    d.sorptive=parsed.sorptive;
+    d.tempK=parsed.tempK;
+    d.hostFormula=parsed.hostFormula;
+    d.pUnit=parsed.pUnit; d.pUnitSource=parsed.pUnitSource;
+    d.qUnit=parsed.qUnit; d.qUnitSource=parsed.qUnitSource;
+
+    // Resolve conversion metadata: CSV values first, then automatic
+    // lookups (gas identity → MW, host formula → MW), leaving the rest
+    // for the user to fill in via the dataset card.
+    d.gasKey = parsed.sorptive ? detectGas(parsed.sorptive) : null;
+    if(parsed.sorptiveMW!=null){ d.sorptiveMW=parsed.sorptiveMW; d.sorptiveMWSource='csv'; }
+    else if(d.gasKey && GAS_MW[d.gasKey]!=null){ d.sorptiveMW=GAS_MW[d.gasKey]; d.sorptiveMWSource='lookup'; }
+    if(parsed.hostMW!=null){ d.hostMW=parsed.hostMW; d.hostMWSource='csv'; }
+    else if(parsed.hostFormula){
+      const r=parseMolecularFormula(parsed.hostFormula);
+      if(!r.error){ d.hostMW=r.mw; d.hostMWSource='formula'; }
+    }
+    if(parsed.hostMass!=null){ d.hostMass=parsed.hostMass; d.hostMassSource='csv'; }
+
+    const ads=parsed.blocks[0]||{P:[],Q:[],Fitted:[]};
+    const des=parsed.blocks[1]||null;
+    d.adsP=ads.P; d.adsQ=ads.Q;
+    d.hasDes = !!(des && des.P.length);
+    d.desP = d.hasDes ? des.P : [];
+    d.desQ = d.hasDes ? des.Q : [];
+
+    const fitPts=[];
+    parsed.blocks.forEach(b=>{
+      b.P.forEach((p,i)=>{ const f=b.Fitted[i]; if(isFinite(f)) fitPts.push({p,q:f}); });
+    });
+    fitPts.sort((a,b)=>a.p-b.p);
+    d.hasFit = fitPts.length>0;
+    d.fitP = fitPts.map(pt=>pt.p);
+    d.fitQ = fitPts.map(pt=>pt.q);
+    d.fitKind = d.hasFit ? 'discrete' : null;
+
+    // Prefer a smooth curve recomputed from the model equation itself —
+    // the file's own Fitted column is only sampled at the raw data
+    // points, which draws as visibly straight segments on a linear axis
+    // when points are sparse or unevenly spaced.
+    if(d.model){
+      const smooth=computeFitCurve(d);
+      if(smooth){
+        d.fitP=smooth.map(pt=>pt.p);
+        d.fitQ=smooth.map(pt=>pt.q);
+        d.hasFit=true;
+        d.fitKind='model';
+      } else if(d.hasFit){
+        d.fitKind='discrete-unresolved'; // had a Fitted column, but couldn't recompute a smooth curve
+      }
+    }
+
+    d.loaded=true;
+    renderDsList();
+    refreshUnitValidation();
+    redraw();
+    st('Loaded — '+file.name,'ok');
+  };
+  reader.onerror=()=>{
+    const d=datasets.find(x=>x.id===id);
+    if(d){ d.error='Could not read file'; renderDsList(); }
+  };
+  reader.readAsText(file);
+}
+
+function removeDataset(id){
+  datasets=datasets.filter(d=>d.id!==id);
+  renderDsList();
+  refreshUnitValidation();
+  redraw();
+}
+
+function handleFiles(files){
+  for(const f of files) addDatasetFromFile(f);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  UNIT VALIDATION
+// ═══════════════════════════════════════════════════════════════
+function currentRefUnit(){
+  let ref=requiredQUnit;
+  if(!ref){
+    const first=datasets.find(d=>d.loaded && qUnitKnown(d.qUnit));
+    ref = first ? first.qUnit : '';
+  }
+  return ref;
+}
+function refreshUnitValidation(){
+  const ref=currentRefUnit();
+  const sel=document.getElementById('qRequiredUnit');
+  if(sel && document.activeElement!==sel) sel.value=requiredQUnit;
+
+  const loaded=datasets.filter(d=>d.loaded);
+  const statusEl=document.getElementById('unitStatus');
+  if(!loaded.length){
+    statusEl.innerHTML='Load a dataset to establish the required uptake unit.';
+  } else if(!ref){
+    statusEl.innerHTML='No dataset has a recognised uptake unit yet — select one manually below, or set the required unit above.';
+  } else {
+    let nMatch=0, nReady=0, nBlocked=0, nUnknown=0;
+    loaded.forEach(d=>{
+      const r=resolveConversion(d,ref);
+      if(r.status==='match') nMatch++;
+      else if(r.status==='ready') nReady++;
+      else if(r.status==='blocked') nBlocked++;
+      else nUnknown++;
+    });
+    const parts=[];
+    if(nMatch) parts.push(nMatch+' already in '+fmtQUnit(ref));
+    if(nReady) parts.push(nReady+' converted to '+fmtQUnit(ref));
+    if(nBlocked) parts.push(nBlocked+' need'+(nBlocked===1?'s':'')+' more metadata to convert');
+    if(nUnknown) parts.push(nUnknown+' with an unrecognised uptake unit');
+    if(!nBlocked && !nUnknown){
+      statusEl.innerHTML='<span style="color:#2a7a3b">✓ All '+loaded.length+' dataset'+(loaded.length!==1?'s':'')+' are plotted in '+fmtQUnit(ref)+' ('+parts.join(', ')+').</span>';
+    } else {
+      statusEl.innerHTML='<span style="color:#D6567F">'+parts.join(', ')+' — see the highlighted fields below.</span>';
+    }
+  }
+  renderDsList();
+}
+function onRequiredUnitChange(){
+  requiredQUnit = gv('qRequiredUnit');
+  refreshUnitValidation();
+  redraw();
+}
+function onDsQUnit(id,val){
+  const d=datasets.find(x=>x.id===id);
+  if(!d) return;
+  d.qUnit=val||null; d.qUnitSource=val?'manual':null;
+  refreshUnitValidation();
+  redraw();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  LEFT PANEL — DATASET LIST
+// ═══════════════════════════════════════════════════════════════
+function renderDsList(){
+  const el=document.getElementById('dsList');
+  const empty=document.getElementById('dsEmpty');
+  empty.style.display = datasets.length ? 'none' : '';
+  el.innerHTML='';
+
+  const ref=currentRefUnit();
+
+  datasets.forEach((d,idx)=>{
+    const div=document.createElement('div');
+    const unitBad = d.loaded && !d.qUnit;
+    div.className='ds-card'+(d.collapsed?' collapsed':'');
+    div.id='ds-card-'+d.id;
+    div.draggable=true;
+    div.dataset.idx=idx;
+
+    const nameVal = dispName(d,idx);
+
+    let bodyHtml='';
+    if(d.error){
+      bodyHtml = '<div class="ds-warn">'+d.error+' ('+d.filename+')</div>';
+    } else if(!d.loaded){
+      bodyHtml = '<div class="ds-info">Reading '+d.filename+'…</div>';
+    } else {
+      const rows=[];
+      if(d.hasDes){
+        rows.push('<label class="toggle"><input type="checkbox" data-role="ads" '+(d.adsVisible?'checked':'')+'> Sorption ('+d.adsP.length+' pts)</label>');
+        rows.push('<label class="toggle"><input type="checkbox" data-role="des" '+(d.desVisible?'checked':'')+'> Desorption ('+d.desP.length+' pts)</label>');
+      } else {
+        rows.push('<label class="toggle"><input type="checkbox" data-role="ads" '+(d.adsVisible?'checked':'')+'> Data points ('+d.adsP.length+' pts)</label>');
+      }
+      if(d.hasFit){
+        const fitNote = d.fitKind==='model' ? '<span class="ok">✓ smooth curve</span>'
+                       : d.fitKind==='discrete-unresolved' ? '<span class="warn">⚠ straight segments</span>' : '';
+        rows.push('<label class="toggle"><input type="checkbox" data-role="fit" '+(d.fitVisible?'checked':'')+'> Fitted line '+fitNote+'</label>');
+      }
+
+      const shapeOpts = SHAPE_PALETTE.map(s=>'<option value="'+s+'"'+(d.shape===s?' selected':'')+'>'+SHAPE_LABELS[s]+'</option>').join('');
+      const qOpts = Q_UNITS.map(u=>'<option value="'+u.k+'"'+(d.qUnit===u.k?' selected':'')+'>'+u.label+'</option>').join('');
+      const qBadge = d.qUnitSource==='keyword' ? '<span class="ok">✓ from file</span>'
+                   : d.qUnitSource==='header'  ? '<span class="ok">✓ from header</span>' : '';
+
+      // Unit conversion — only surfaced (and only asks for what it needs)
+      // when this dataset's own unit differs from the shared target.
+      const conv = ref ? resolveConversion(d,ref) : {status:'unknown'};
+      let convHtml='';
+      if(ref && d.qUnit && d.qUnit!==ref && conv.status!=='unknown'){
+        const req=conv.req||{gas:false,mass:false,host:false};
+        const frows=[];
+        if(req.gas){
+          const gasOpts=GAS_LIST.map(g=>'<option value="'+g+'"'+(d.gasKey===g?' selected':'')+'>'+g+'</option>').join('');
+          frows.push('<div class="fi-label">Sorptive gas</div><select class="sel" data-role="gasKey"><option value="">— select —</option>'+gasOpts+'</select>');
+          const mwBadge = d.sorptiveMWSource==='csv' ? '<span class="ok">✓ from file</span>' : d.sorptiveMWSource==='lookup' ? '<span class="ok">✓ looked up</span>' : '';
+          frows.push('<div class="fi-label">Sorptive MW (g mol⁻¹) '+mwBadge+'</div><input type="number" min="0" step="0.001" class="'+(!d.sorptiveMW?'meta-missing':'')+'" data-role="sorptiveMW" value="'+(d.sorptiveMW||'')+'" placeholder="e.g. 44.01">');
+        }
+        if(req.mass){
+          const massBadge = d.hostMassSource==='csv' ? '<span class="ok">✓ from file</span>' : '';
+          frows.push('<div class="fi-label">Host mass (mg) '+massBadge+'</div><input type="number" min="0" step="0.001" class="'+(!d.hostMass?'meta-missing':'')+'" data-role="hostMass" value="'+(d.hostMass||'')+'" placeholder="e.g. 24.7">');
+        }
+        if(req.host){
+          const hostBadge = d.hostMWSource==='formula' ? '<span class="ok">✓ from formula</span>' : d.hostMWSource==='csv' ? '<span class="ok">✓ from file</span>' : '';
+          frows.push('<div class="fi-label">Host formula</div><input type="text" data-role="hostFormula" value="'+(d.hostFormula||'').replace(/"/g,'&quot;')+'" placeholder="e.g. C24H16N2O8Zn2">');
+          frows.push('<div class="fi-label">Host MW (g mol⁻¹) '+hostBadge+'</div><input type="number" min="0" step="0.01" class="'+(!d.hostMW?'meta-missing':'')+'" data-role="hostMW" value="'+(d.hostMW||'')+'" placeholder="e.g. 259.44">');
+        }
+        const statusLine = conv.status==='ready'
+          ? '<div class="ds-info" style="color:#2a7a3b">✓ Converting '+fmtQUnit(d.qUnit)+' → '+fmtQUnit(ref)+'</div>'
+          : '<div class="ds-warn">Needs '+conv.missing.join(' and ')+' to convert '+fmtQUnit(d.qUnit)+' → '+fmtQUnit(ref)+' — excluded from the plot until then.</div>';
+        convHtml = '<div class="ds-conv"><div class="fi-label">Convert to required uptake unit</div>'+frows.join('')+statusLine+'</div>';
+      }
+
+      const info=[];
+      if(d.model) info.push('<span style="color:#aaa">Model:</span> <span>'+d.model+'</span>');
+      const pKeys=Object.keys(d.params);
+      if(pKeys.length) info.push(pKeys.slice(0,6).map(k=>'<span style="color:#aaa">'+k+':</span> <span>'+fmt(d.params[k],5)+'</span>').join(' &nbsp;'));
+      if(d.sorptive) info.push('<span style="color:#aaa">Sorptive:</span> <span>'+d.sorptive+'</span>');
+      if(d.tempK!=null) info.push('<span style="color:#aaa">T:</span> <span>'+d.tempK+' K</span>');
+      if(d.hostFormula) info.push('<span style="color:#aaa">Host:</span> <span>'+d.hostFormula+'</span>');
+      info.push('<span style="color:#aaa">Pressure unit:</span> <span>'+fmtPUnit(d.pUnit)+(d.pUnitSource==='default'?' ⚠':'')+'</span>');
+      info.push('<span style="color:#aaa">File:</span> <span>'+d.filename+'</span>');
+
+      bodyHtml = ''
+        + rows.join('')
+        + '<div class="ds-shaperow"><label>Marker shape</label><select class="sel" data-role="shape">'+shapeOpts+'</select></div>'
+        + '<hr class="divider">'
+        + '<div class="fi-label">Uptake unit '+qBadge+'</div>'
+        + '<select class="sel'+(unitBad?' meta-missing':'')+'" data-role="qunit"><option value="">— select —</option>'+qOpts+'</select>'
+        + (unitBad ? '<div class="ds-warn">Uptake unit unknown — select one below.</div>' : '')
+        + convHtml
+        + (d.fitKind==='discrete-unresolved' ? '<div class="ds-warn">Model "'+d.model+'" not recognized, or a fitted parameter is missing — the fitted line connects the file\'s own Fitted values instead of a recomputed smooth curve.</div>' : '')
+        + '<div class="ds-info">'+info.join('<br>')+'</div>';
+    }
+
+    div.innerHTML =
+      '<div class="ds-header" id="ds-hdr-'+d.id+'">'
+      + '<span class="ds-grip" title="Drag to reorder">&#x28FF;</span>'
+      + '<input type="color" class="ds-color" value="'+d.color+'" title="Colour">'
+      + '<input type="text" class="ds-legend" value="'+nameVal.replace(/"/g,'&quot;')+'" title="Legend label" placeholder="Dataset '+(idx+1)+'">'
+      + '<span style="display:flex;align-items:center;gap:2px">'
+      +   '<span class="ds-arr">&#8250;</span>'
+      +   '<button class="ds-del" title="Remove">✕</button>'
+      + '</span>'
+      + '</div>'
+      + '<div class="ds-body" id="ds-body-'+d.id+'">'+bodyHtml+'</div>';
+
+    const colorIn=div.querySelector('.ds-color');
+    colorIn.addEventListener('click',e=>e.stopPropagation());
+    colorIn.addEventListener('input',()=>{ d.color=colorIn.value; redraw(); });
+
+    const legendIn=div.querySelector('.ds-legend');
+    legendIn.addEventListener('click',e=>e.stopPropagation());
+    legendIn.addEventListener('change',()=>{ d.legend=legendIn.value.trim(); redraw(); });
+
+    const rmBtn=div.querySelector('.ds-del');
+    rmBtn.addEventListener('click',e=>{ e.stopPropagation(); removeDataset(d.id); });
+
+    const adsCb=div.querySelector('[data-role=ads]');
+    if(adsCb) adsCb.addEventListener('change',()=>{ d.adsVisible=adsCb.checked; redraw(); });
+    const desCb=div.querySelector('[data-role=des]');
+    if(desCb) desCb.addEventListener('change',()=>{ d.desVisible=desCb.checked; redraw(); });
+    const fitCb=div.querySelector('[data-role=fit]');
+    if(fitCb) fitCb.addEventListener('change',()=>{ d.fitVisible=fitCb.checked; redraw(); });
+    const qSel=div.querySelector('[data-role=qunit]');
+    if(qSel) qSel.addEventListener('change',()=>onDsQUnit(d.id,qSel.value));
+    const shapeSel=div.querySelector('[data-role=shape]');
+    if(shapeSel) shapeSel.addEventListener('change',()=>{ d.shape=shapeSel.value; redraw(); });
+
+    const gasSel=div.querySelector('[data-role=gasKey]');
+    if(gasSel) gasSel.addEventListener('change',()=>{
+      d.gasKey=gasSel.value||null;
+      if(d.gasKey && GAS_MW[d.gasKey]!=null && d.sorptiveMWSource!=='manual'){ d.sorptiveMW=GAS_MW[d.gasKey]; d.sorptiveMWSource='lookup'; }
+      refreshUnitValidation(); redraw();
+    });
+    // Metadata text/number fields: update the chart live as the user types
+    // (`input`), but only rebuild the card list itself — which would
+    // otherwise steal focus mid-keystroke — once they leave the field
+    // (`change`), refreshing pink highlights and the conversion status.
+    const mwIn=div.querySelector('[data-role=sorptiveMW]');
+    if(mwIn){
+      mwIn.addEventListener('click',e=>e.stopPropagation());
+      mwIn.addEventListener('input',()=>{ const v=parseFloat(mwIn.value); d.sorptiveMW=isFinite(v)&&v>0?v:null; d.sorptiveMWSource='manual'; redraw(); });
+      mwIn.addEventListener('change',()=>refreshUnitValidation());
+    }
+    const massIn=div.querySelector('[data-role=hostMass]');
+    if(massIn){
+      massIn.addEventListener('click',e=>e.stopPropagation());
+      massIn.addEventListener('input',()=>{ const v=parseFloat(massIn.value); d.hostMass=isFinite(v)&&v>0?v:null; d.hostMassSource='manual'; redraw(); });
+      massIn.addEventListener('change',()=>refreshUnitValidation());
+    }
+    const formIn=div.querySelector('[data-role=hostFormula]');
+    if(formIn){
+      formIn.addEventListener('click',e=>e.stopPropagation());
+      formIn.addEventListener('input',()=>{
+        d.hostFormula=formIn.value.trim()||null;
+        if(d.hostFormula){
+          const r=parseMolecularFormula(d.hostFormula);
+          if(!r.error){ d.hostMW=r.mw; d.hostMWSource='formula'; }
+        }
+        redraw();
+      });
+      formIn.addEventListener('change',()=>refreshUnitValidation());
+    }
+    const hostMwIn=div.querySelector('[data-role=hostMW]');
+    if(hostMwIn){
+      hostMwIn.addEventListener('click',e=>e.stopPropagation());
+      hostMwIn.addEventListener('input',()=>{ const v=parseFloat(hostMwIn.value); d.hostMW=isFinite(v)&&v>0?v:null; d.hostMWSource='manual'; redraw(); });
+      hostMwIn.addEventListener('change',()=>refreshUnitValidation());
+    }
+
+    // Drag-to-reorder
+    div.addEventListener('dragstart',e=>{
+      dsDragIdx=idx; div.classList.add('dragging');
+      e.dataTransfer.effectAllowed='move';
+      try{e.dataTransfer.setData('text/plain',String(idx));}catch(_){}
+    });
+    div.addEventListener('dragend',()=>{
+      el.querySelectorAll('.ds-card').forEach(c=>c.classList.remove('dragging','drag-over'));
+      dsDragIdx=null;
+    });
+    div.addEventListener('dragover',e=>{
+      if(dsDragIdx===null) return;
+      e.preventDefault(); e.dataTransfer.dropEffect='move';
+      el.querySelectorAll('.ds-card').forEach(c=>c.classList.remove('drag-over'));
+      if(idx!==dsDragIdx) div.classList.add('drag-over');
+    });
+    div.addEventListener('dragleave',()=>div.classList.remove('drag-over'));
+    div.addEventListener('drop',e=>{
+      if(dsDragIdx===null) return;
+      e.preventDefault();
+      const dst=idx;
+      if(dsDragIdx===dst) return;
+      const [moved]=datasets.splice(dsDragIdx,1);
+      datasets.splice(dst,0,moved);
+      renderDsList(); redraw();
+    });
+
+    const hdr=div.querySelector('#ds-hdr-'+d.id);
+    if(hdr) hdr.addEventListener('click',()=>{ d.collapsed=!d.collapsed; div.classList.toggle('collapsed',d.collapsed); });
+
+    el.appendChild(div);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CHART STYLE
+// ═══════════════════════════════════════════════════════════════
+function getChartStyle(){
+  return {
+    font:   gv('font'),
+    tickFont: gv('tickFont')||'',
+    axSz:   parseInt(document.getElementById('axSz').value),
+    tkSz:   parseInt(document.getElementById('tkSz').value),
+    axCol:  '#000000',
+    gridV:  gb('gridV'), gridH: gb('gridH'),
+    gridCol:gv('gridCol'),
+    gridW:  parseFloat(document.getElementById('gridW').value),
+    gridStyle: gv('gridStyle')||'solid',
+    tickDir:gv('tickDir')||'out',
+    tickLen:parseInt(document.getElementById('tickLen').value),
+    xTickStep: parseFloat(gv('xTickStep'))||0,
+    yTickStep: parseFloat(gv('yTickStep'))||0,
+    xLblOff: parseFloat(gv('xLblOff'))||0,
+    yLblOff: parseFloat(gv('yLblOff'))||0,
+    frameW: parseFloat(document.getElementById('frameW').value),
+    chartBg:'#ffffff',
+    plotBg: '#ffffff',
+    lnW:    parseFloat(document.getElementById('lnW').value),
+    ptSz:   parseFloat(document.getElementById('ptSz').value),
+    openW:  parseFloat(document.getElementById('openW').value),
+    leg:    gb('leg'),
+    legFont:gv('legFont')||"'Palatino Linotype',Palatino,Georgia,serif",
+    legSz:  parseInt(document.getElementById('legSz').value),
+    xMinO:  gn('xMin'), xMaxO:gn('xMax'), yMinO:gn('yMin'), yMaxO:gn('yMax'),
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  LEGEND — draggable, mixed point/line entries
+// ═══════════════════════════════════════════════════════════════
+const legendPositions={dx:0,dy:0};
+let legendBox=null;
+
+function drawLegendList(ctx, entries, style, ML, MT, PW, PH){
+  if(!style.leg || !entries.length) return;
+  ctx.save();
+  ctx.beginPath();ctx.rect(ML,MT,PW,PH);ctx.clip();
+  const legSz=style.legSz;
+  ctx.font=legSz+'px '+style.legFont;
+  ctx.textBaseline='middle'; ctx.textAlign='left';
+  const lh=legSz+6, pad=8, swatchW=18;
+  const off=legendPositions;
+  const maxTextW = Math.max(...entries.map(e=>ctx.measureText(e.label).width));
+  const boxW = swatchW+8+maxTextW+pad*2;
+  const boxH = entries.length*lh+pad*0.6;
+  const bx = ML+pad+off.dx, by = MT+pad+off.dy;
+  legendBox = {x:bx-4, y:by-4, w:boxW, h:boxH};
+  let ly = by+lh/2;
+  entries.forEach(en=>{
+    const lx=bx;
+    if(en.style==='line'){
+      ctx.strokeStyle=en.color;ctx.lineWidth=Math.max(1.5,style.lnW);
+      ctx.setLineDash([]);
+      ctx.beginPath();ctx.moveTo(lx,ly);ctx.lineTo(lx+swatchW,ly);ctx.stroke();
+      ctx.fillStyle=style.axCol; ctx.fillText(en.label, lx+swatchW+5, ly);
+    } else {
+      const sz=Math.max(6,style.ptSz);
+      drawMarker(ctx,lx+swatchW/2,ly,en.shape||'circle',sz,en.color,en.style==='point-open',style.openW,style.plotBg);
+      ctx.fillStyle=style.axCol; ctx.fillText(en.label, lx+swatchW+5, ly);
+    }
+    ly+=lh;
+  });
+  ctx.restore();
+}
+
+let legendDrag=null;
+function wireLegendDrag(cvs){
+  if(!cvs || cvs.dataset.legWired) return;
+  cvs.dataset.legWired='1';
+  function toLogical(e){
+    const rect=cvs.getBoundingClientRect();
+    const rx=rect.width?cvs.width/rect.width:1, ry=rect.height?cvs.height/rect.height:1;
+    return {mx:(e.clientX-rect.left)*rx, my:(e.clientY-rect.top)*ry};
+  }
+  cvs.addEventListener('mousedown', e=>{
+    const{mx,my}=toLogical(e);
+    if(legendBox && mx>=legendBox.x && mx<=legendBox.x+legendBox.w && my>=legendBox.y && my<=legendBox.y+legendBox.h){
+      legendDrag={startMX:mx, startMY:my, startDx:legendPositions.dx, startDy:legendPositions.dy};
+      cvs.style.cursor='grabbing';
+      e.preventDefault();
+    }
+  });
+  cvs.addEventListener('mousemove', e=>{
+    const{mx,my}=toLogical(e);
+    if(legendDrag){
+      legendPositions.dx=legendDrag.startDx+(mx-legendDrag.startMX);
+      legendPositions.dy=legendDrag.startDy+(my-legendDrag.startMY);
+      redraw();
+    } else {
+      cvs.style.cursor = (legendBox && mx>=legendBox.x&&mx<=legendBox.x+legendBox.w&&my>=legendBox.y&&my<=legendBox.y+legendBox.h) ? 'grab' : 'default';
+    }
+  });
+  window.addEventListener('mouseup', ()=>{ if(legendDrag){ legendDrag=null; cvs.style.cursor='default'; } });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MAIN CHART
+// ═══════════════════════════════════════════════════════════════
+function activeDatasets(){
+  const ref=currentRefUnit();
+  if(!ref) return [];
+  return datasets.filter(d=>{
+    if(!d.loaded || d.error) return false;
+    const r=resolveConversion(d,ref);
+    return r.status==='match' || r.status==='ready';
+  });
+}
+
+function buildSeries(){
+  const pDisp=gv('pDisplayUnit')||'bar';
+  const ref=currentRefUnit();
+  const series=[]; // {kind:'ads'|'des'|'fit', color, data:[{x,y}]}
+  const legendEntries=[];
+  const active=activeDatasets();
+  active.forEach((d,idx)=>{
+    const name=dispName(d,datasets.indexOf(d));
+    const toX=p=>pFromBar(pToBar(p,d.pUnit),pDisp);
+    const conv=resolveConversion(d,ref);
+    const toY=conv.status==='ready' ? conv.convert : (v=>v);
+    let legendGiven=false;
+    if(d.adsVisible && d.adsP.length){
+      series.push({kind:'ads',color:d.color,shape:d.shape,data:d.adsP.map((p,i)=>({x:toX(p),y:toY(d.adsQ[i])}))});
+      legendEntries.push({label:d.hasDes?name+' (sorption)':name, color:d.color, shape:d.shape, style:'point'});
+      legendGiven=true;
+    }
+    if(d.hasDes && d.desVisible && d.desP.length){
+      series.push({kind:'des',color:d.color,shape:d.shape,data:d.desP.map((p,i)=>({x:toX(p),y:toY(d.desQ[i])}))});
+      legendEntries.push({label:name+' (desorption)', color:d.color, shape:d.shape, style:'point-open'});
+      legendGiven=true;
+    }
+    if(d.hasFit && d.fitVisible && d.fitP.length){
+      series.push({kind:'fit',color:d.color,data:d.fitP.map((p,i)=>({x:toX(p),y:toY(d.fitQ[i])}))});
+      if(!legendGiven){ legendEntries.push({label:name+' (fit)', color:d.color, style:'line'}); legendGiven=true; }
+    }
+  });
+  return {series, legendEntries, pDisp};
+}
+
+function drawMainChart(cvs){
+  if(!cvs || !cvs.width || !cvs.height) return;
+  wireLegendDrag(cvs);
+  const style=getChartStyle();
+  const ctx=cvs.getContext('2d');
+  const W=cvs.width, H=cvs.height;
+  ctx.fillStyle=style.chartBg; ctx.fillRect(0,0,W,H);
+
+  const {series, legendEntries, pDisp}=buildSeries();
+  if(!datasets.length){
+    ctx.fillStyle='#bbb'; ctx.font='12px '+style.font;
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('Drag and drop CSV files here to plot isotherms',W/2,H/2);
+    return;
+  }
+  if(!series.length){
+    ctx.fillStyle='#bbb'; ctx.font='12px '+style.font;
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('Nothing to plot — check the uptake units in the Datasets list',W/2,H/2);
+    return;
+  }
+
+  let xAll=[], yAll=[];
+  series.forEach(s=>s.data.forEach(pt=>{xAll.push(pt.x);yAll.push(pt.y);}));
+  let xMin=style.xMinO!==null?style.xMinO:0;
+  let xMax=style.xMaxO!==null?style.xMaxO:Math.max(...xAll);
+  let yMin=style.yMinO!==null?style.yMinO:0;
+  let yMax=style.yMaxO!==null?style.yMaxO:Math.max(...yAll);
+  const xPad=(xMax-xMin)*0.04||xMax*0.04||0.1;
+  if(style.xMinO===null) xMin=Math.max(0,xMin-xPad);
+  if(style.xMaxO===null) xMax=xMax+xPad;
+  if(xMin===xMax){xMin=0;xMax=xMax*1.1||1;}
+  if(yMin===yMax){yMin=0;yMax=yMax*1.1||1;}
+  if(style.yMaxO===null) yMax=yMax*1.05;
+
+  function nt(mn,mx,n){const raw=(mx-mn)/n;const mag=Math.pow(10,Math.floor(Math.log10(raw)));const nice=[1,2,2.5,5,10].find(f=>f*mag>=raw)||10;const step=nice*mag;const t=[];for(let v=Math.ceil(mn/step)*step;v<=mx+1e-10;v+=step)t.push(parseFloat(v.toPrecision(10)));return t;}
+  const xT=manualTicks(xMin,xMax,style.xTickStep,(a,b)=>nt(a,b,7));
+  const yT=manualTicks(yMin,yMax,style.yTickStep,(a,b)=>nt(a,b,6));
+  const fmtXs=fmtTickSet(xT), fmtYs=fmtTickSet(yT);
+  const tickFont=style.tickFont||style.font;
+
+  const tLen=style.tickLen;
+  ctx.font=style.tkSz+'px '+tickFont;
+  const yTickStrs=yT.map(fmtYs);
+  const maxYTickW = yTickStrs.length ? Math.max(...yTickStrs.map(s=>ctx.measureText(s).width)) : style.tkSz;
+  const yLblX=6, yLblThickness=style.axSz*1.05, yLblGap=8;
+  const ML = yLblX + yLblThickness + yLblGap + maxYTickW + tLen + 6 + style.yLblOff;
+  const MR = 20;
+  const MT = 14;
+  const MB = tLen + style.tkSz*1.3 + style.axSz*1.15 + style.xLblOff;
+  const PW=W-ML-MR, PH=H-MT-MB;
+
+  ctx.fillStyle=style.plotBg; ctx.fillRect(ML,MT,PW,PH);
+  const toX=x=>ML+(x-xMin)/(xMax-xMin)*PW;
+  const toY=y=>MT+PH-(y-yMin)/(yMax-yMin)*PH;
+
+  if(style.gridV||style.gridH){
+    ctx.save();ctx.strokeStyle=style.gridCol;ctx.lineWidth=style.gridW;ctx.setLineDash(gridDashFor(style));
+    if(style.gridV) xT.forEach(v=>{if(v<xMin||v>xMax)return;const cx=toX(v);ctx.beginPath();ctx.moveTo(cx,MT);ctx.lineTo(cx,MT+PH);ctx.stroke();});
+    if(style.gridH) yT.forEach(v=>{if(v<yMin||v>yMax)return;const cy=toY(v);ctx.beginPath();ctx.moveTo(ML,cy);ctx.lineTo(ML+PW,cy);ctx.stroke();});
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  ctx.save();ctx.beginPath();ctx.rect(ML,MT,PW,PH);ctx.clip();
+  // Lines first (fitted curves), then points on top
+  series.filter(s=>s.kind==='fit').forEach(s=>{
+    ctx.beginPath();ctx.strokeStyle=s.color;ctx.lineWidth=style.lnW;ctx.setLineDash([]);
+    let first=true;
+    s.data.forEach(pt=>{
+      if(!isFinite(pt.x)||!isFinite(pt.y)){first=true;return;}
+      const cx=toX(pt.x),cy=toY(pt.y);
+      if(first){ctx.moveTo(cx,cy);first=false;}else ctx.lineTo(cx,cy);
+    });
+    ctx.stroke();
+  });
+  series.filter(s=>s.kind==='ads').forEach(s=>{
+    s.data.forEach(pt=>{
+      if(!isFinite(pt.x)||!isFinite(pt.y)) return;
+      const cx=toX(pt.x),cy=toY(pt.y);
+      drawMarker(ctx,cx,cy,s.shape,style.ptSz,s.color,false,style.openW,style.plotBg);
+    });
+  });
+  series.filter(s=>s.kind==='des').forEach(s=>{
+    s.data.forEach(pt=>{
+      if(!isFinite(pt.x)||!isFinite(pt.y)) return;
+      const cx=toX(pt.x),cy=toY(pt.y);
+      drawMarker(ctx,cx,cy,s.shape,style.ptSz,s.color,true,style.openW,style.plotBg);
+    });
+  });
+  ctx.restore();
+
+  ctx.save();
+  ctx.strokeStyle=style.axCol; ctx.lineWidth=style.frameW;
+  ctx.strokeRect(ML,MT,PW,PH);
+
+  ctx.fillStyle=style.axCol;
+  ctx.font=style.tkSz+'px '+tickFont;
+  ctx.textBaseline='top'; ctx.textAlign='center';
+  const drawIn=(style.tickDir==='in'), drawOut=(style.tickDir==='out');
+  ctx.lineWidth=style.frameW*0.6;
+  xT.forEach(v=>{
+    if(v<xMin||v>xMax) return;
+    const cx=toX(v);
+    if(drawOut){ctx.beginPath();ctx.moveTo(cx,MT+PH);ctx.lineTo(cx,MT+PH+tLen);ctx.stroke();}
+    if(drawIn){ctx.beginPath();ctx.moveTo(cx,MT+PH);ctx.lineTo(cx,MT+PH-tLen);ctx.stroke();}
+    ctx.fillText(fmtXs(v),cx,MT+PH+tLen+2);
+  });
+  ctx.textAlign='right'; ctx.textBaseline='middle';
+  yT.forEach(v=>{
+    if(v<yMin||v>yMax) return;
+    const cy=toY(v);
+    if(drawOut){ctx.beginPath();ctx.moveTo(ML,cy);ctx.lineTo(ML-tLen,cy);ctx.stroke();}
+    if(drawIn){ctx.beginPath();ctx.moveTo(ML,cy);ctx.lineTo(ML+tLen,cy);ctx.stroke();}
+    ctx.fillText(fmtYs(v),ML-tLen-2,cy);
+  });
+
+  ctx.font=style.axSz+'px '+style.font; ctx.fillStyle=style.axCol;
+  const ref=currentRefUnit();
+  const xLblAuto='Pressure / '+fmtPUnit(pDisp);
+  const yLblAuto=ref?('Uptake / '+fmtQUnit(ref)):'Uptake';
+  const xLblTxt=(gv('xLbl')||'').trim()||xLblAuto;
+  const yLblTxt=(gv('yLbl')||'').trim()||yLblAuto;
+  // The offset sliders move the axis (frame + ticks, via ML/MB above) rather
+  // than the label itself — the label stays anchored at a fixed, always-
+  // on-canvas position, so it can never be pushed off the panel.
+  ctx.textAlign='center'; ctx.textBaseline='bottom';
+  ctx.fillText(xLblTxt, ML+PW/2, H-4);
+  ctx.save(); ctx.translate(yLblX, MT+PH/2); ctx.rotate(-Math.PI/2);
+  ctx.textBaseline='top';
+  ctx.fillText(yLblTxt, 0, 0);
+  ctx.restore();
+
+  drawLegendList(ctx, legendEntries, style, ML, MT, PW, PH);
+  ctx.restore();
+}
+
+function sizeSingleCanvas(cvs, container){
+  const preset=gv('sizePreset')||'fit';
+  if(preset==='fit'){
+    cvs.style.width=''; cvs.style.height='';
+    cvs.width=Math.max(1,container.clientWidth); cvs.height=Math.max(1,container.clientHeight);
+    return;
+  }
+  const [W,H]=figureLogicalSize();
+  const availW=container.clientWidth, availH=container.clientHeight;
+  const scale=Math.min(1, availW/W, availH/H);
+  cvs.width=Math.round(W); cvs.height=Math.round(H);
+  cvs.style.width=Math.round(W*scale)+'px';
+  cvs.style.height=Math.round(H*scale)+'px';
+}
+
+function figureLogicalSize(){
+  const preset=gv('sizePreset')||'fit';
+  if(preset==='custom'){
+    return [Math.max(300,parseInt(gv('expW'))||1004), Math.max(200,parseInt(gv('expH'))||709)];
+  }
+  if(preset!=='fit'){
+    const parts=preset.split('x').map(Number);
+    if(parts.length===2 && parts.every(n=>!isNaN(n))) return parts;
+  }
+  const cvs=document.getElementById('chartInner');
+  if(cvs && cvs.clientWidth) return [cvs.clientWidth, cvs.clientHeight];
+  return [1200,900];
+}
+
+function onSizePresetChange(){
+  const p=gv('sizePreset')||'fit';
+  document.getElementById('sizeInputRow').style.display = p==='custom' ? 'flex' : 'none';
+  redraw();
+}
+
+function redraw(){
+  const cvs=document.getElementById('cvMain');
+  if(!cvs) return;
+  sizeSingleCanvas(cvs, document.getElementById('chartInner'));
+  drawMainChart(cvs);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  EXPORT
+// ═══════════════════════════════════════════════════════════════
+function buildExportCanvas(W,H){
+  const oc=document.createElement('canvas'); oc.width=W; oc.height=H;
+  drawMainChart(oc);
+  return oc;
+}
+
+function savePlot(){
+  const [W,H]=figureLogicalSize();
+  const comp=buildExportCanvas(W,H);
+  const mimeType='image/png';
+  const names=datasets.map((d,i)=>dispName(d,i)).join('_').replace(/[^A-Za-z0-9_]+/g,'_').slice(0,60)||'isotherms';
+  const defaultName='isotherm_plot_'+names+'.png';
+  const dataUrl=comp.toDataURL(mimeType,0.96);
+  const byteStr=atob(dataUrl.split(',')[1]);
+  const ab=new Uint8Array(byteStr.length);
+  for(let i=0;i<byteStr.length;i++) ab[i]=byteStr.charCodeAt(i);
+  const imgBlob=new Blob([ab],{type:mimeType});
+  if(window.showSaveFilePicker){
+    const opts={ suggestedName: defaultName, types:[{description:'PNG image',accept:{[mimeType]:['.png']}}] };
+    if(sourceFileHandle) opts.startIn=sourceFileHandle;
+    window.showSaveFilePicker(opts)
+    .then(fh=>fh.createWritable()).then(w=>w.write(imgBlob).then(()=>w.close())).then(()=>{
+      st('Plot saved — '+defaultName,'ok');
+    }).catch(e=>{if(e.name!=='AbortError') st('Save failed: '+e.message,'err');});
+  } else {
+    const a=document.createElement('a');a.href=dataUrl;a.download=defaultName;a.click();
+    st('Plot downloaded — '+defaultName+'. (Use Chrome/Edge for a save dialog.)','ok');
+  }
+}
+
+async function copyPlot(){
+  const [W,H]=figureLogicalSize();
+  const comp=buildExportCanvas(W,H);
+  try{
+    const blob=await new Promise(res=>comp.toBlob(res,'image/png'));
+    await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);
+    st('Plot copied to clipboard.','ok');
+  } catch(err){
+    st('Copy to clipboard not supported in this browser.','err');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DRAG-AND-DROP
+// ═══════════════════════════════════════════════════════════════
+function isFileDrag(e){ return e.dataTransfer && [...e.dataTransfer.types].includes('Files'); }
+const appEl=document.getElementById('app');
+document.addEventListener('dragover',e=>{ if(!isFileDrag(e)) return; e.preventDefault(); appEl.classList.add('drag-active'); });
+document.addEventListener('dragleave',e=>{ if(e.relatedTarget===null) appEl.classList.remove('drag-active'); });
+document.addEventListener('drop',e=>{
+  if(!isFileDrag(e)) return;
+  e.preventDefault(); appEl.classList.remove('drag-active');
+  const items=[...e.dataTransfer.items].filter(it=>it.kind==='file');
+  // DataTransferItems are only valid synchronously during this handler, so every
+  // getAsFileSystemHandle()/getAsFile() call must be kicked off here — before any
+  // await — rather than one at a time in a for-await loop (which would invalidate
+  // the remaining items after the first await and silently drop the rest).
+  const handlePromises=items.map(it=> it.getAsFileSystemHandle ? it.getAsFileSystemHandle().catch(()=>null) : Promise.resolve(null));
+  const fallbackFiles=items.map(it=> it.getAsFile ? it.getAsFile() : null);
+  Promise.all(handlePromises).then(async handles=>{
+    const files=[];
+    for(let i=0;i<items.length;i++){
+      const handle=handles[i];
+      let file=fallbackFiles[i];
+      if(handle){ try{ file=await handle.getFile(); }catch(_){} }
+      if(file && /\.csv$/i.test(file.name)){ files.push(file); if(handle) sourceFileHandle=handle; }
+    }
+    if(files.length) handleFiles(files);
+    else st('Drop one or more .csv files.','err');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  GUIDE MODAL
+// ═══════════════════════════════════════════════════════════════
+document.getElementById('guideBtn').addEventListener('click',()=>document.getElementById('guideVeil').classList.add('show'));
+document.getElementById('guideCloseBtn').addEventListener('click',()=>document.getElementById('guideVeil').classList.remove('show'));
+document.getElementById('guideVeil').addEventListener('click',e=>{ if(e.target.id==='guideVeil') e.currentTarget.classList.remove('show'); });
+
+// ═══════════════════════════════════════════════════════════════
+//  CHARACTER PICKER — click any glyph to copy it to the clipboard.
+//  Superscript/subscript sets are curated (not a raw Unicode block
+//  scan) since U+2071-2073 aren't superscript 1/2/3 — those are
+//  taken from Latin-1 Supplement (U+00B9/B2/B3) instead.
+// ═══════════════════════════════════════════════════════════════
+// Copies text via the Clipboard API where available, falling back to a
+// hidden-textarea execCommand copy for browsers/contexts that don't grant
+// clipboard-write (e.g. some sandboxed or non-secure origins).
+function copyText(text){
+  if(navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text);
+  return new Promise((resolve,reject)=>{
+    try{
+      const ta=document.createElement('textarea');
+      ta.value=text; ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      const ok=document.execCommand('copy');
+      document.body.removeChild(ta);
+      ok ? resolve() : reject(new Error('execCommand copy failed'));
+    }catch(e){ reject(e); }
+  });
+}
+function buildCharCell(grid,toastId,ch,hex){
+  const cell=document.createElement('div');
+  cell.className='char-cell';
+  cell.title='U+'+hex+' · click to copy';
+  const codeEl=document.createElement('span'); codeEl.className='char-code'; codeEl.textContent='U+'+hex;
+  const glyphEl=document.createElement('span'); glyphEl.className='char-glyph'; glyphEl.textContent=ch;
+  cell.appendChild(codeEl); cell.appendChild(glyphEl);
+  cell.addEventListener('click',()=>{
+    const toast=document.getElementById(toastId);
+    copyText(ch).then(()=>{
+      cell.classList.add('copied');
+      if(toast) toast.textContent='Copied "'+ch+'"  U+'+hex;
+      setTimeout(()=>{ cell.classList.remove('copied'); if(toast) toast.textContent=''; },1400);
+    }).catch(()=>{
+      if(toast){ toast.textContent='Clipboard access not available in this browser.'; setTimeout(()=>{ toast.textContent=''; },2000); }
+    });
+  });
+  grid.appendChild(cell);
+}
+function buildCharGrid(gridId,toastId,chars){
+  const grid=document.getElementById(gridId);
+  if(!grid) return;
+  chars.forEach(ch=>{
+    const hex=ch.codePointAt(0).toString(16).toUpperCase().padStart(4,'0');
+    buildCharCell(grid,toastId,ch,hex);
+  });
+}
+buildCharGrid('grid-super','toast-super',
+  ['⁰','¹','²','³','⁴','⁵','⁶','⁷','⁸','⁹','⁺','⁻','⁼','⁽','⁾','ⁿ','ⁱ']);
+buildCharGrid('grid-sub','toast-sub',
+  ['₀','₁','₂','₃','₄','₅','₆','₇','₈','₉','₊','₋','₌','₍','₎','ₐ','ₑ','ₒ','ₓ']);
+buildCharGrid('grid-sci','toast-sci',
+  ['µ','°','±','·','Å','−','×','÷','∞','≈','≤','≥','‰','′','″']);
+buildCharGrid('grid-greek','toast-greek',
+  ['α','β','γ','δ','Δ','ε','θ','λ','μ','π','Σ','σ','χ','Ω']);
+
+document.getElementById('charsBtn').addEventListener('click',()=>document.getElementById('charsVeil').classList.add('show'));
+document.getElementById('charsCloseBtn').addEventListener('click',()=>document.getElementById('charsVeil').classList.remove('show'));
+document.getElementById('charsVeil').addEventListener('click',e=>{ if(e.target.id==='charsVeil') e.currentTarget.classList.remove('show'); });
+
+// ═══════════════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════════════
+Q_UNITS.forEach(u=>{
+  const sel=document.getElementById('qRequiredUnit');
+  const opt=document.createElement('option');
+  opt.value=u.k; opt.textContent=u.label;
+  sel.appendChild(opt);
+});
+['axSz','tkSz','gridW','tickLen','frameW','lnW','ptSz','legSz','openW','xLblOff','yLblOff'].forEach(id=>{
+  const el=document.getElementById(id);
+  if(!el) return;
+  const sp=el.nextElementSibling;
+  if(sp) sp.textContent=parseFloat(el.value).toFixed(0);
+});
+window.addEventListener('resize',redraw);
+refreshUnitValidation();
+redraw();
+st('Drag and drop CSV files to begin.','');
+</script>
+</body>
+</html>
