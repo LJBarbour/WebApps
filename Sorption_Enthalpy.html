@@ -490,40 +490,42 @@ function detectPressureKeyword(s){
 // ═══════════════════════════════════════════════════════════════
 //  MODEL FUNCTIONS  q(P, params)
 // ═══════════════════════════════════════════════════════════════
+// Exact Isotherm_Fit display names for each internal model key (this app's
+// own key names — dsl/dslf/lfk/fhh/da — are left as-is; only the matching
+// logic changes). Matching is by exact name after stripping ALL punctuation
+// (not just hyphen/space/underscore), so names containing parentheses,
+// apostrophes or ampersands — e.g. "Langmuir-Freundlich (Sips)",
+// "O'Brien & Myers", "FHH (Frenkel-Halsey-Hill)" — are recognised instead
+// of silently falling through to 'unknown' as they did before.
+const MODEL_NAMES={
+  bet:'BET', henry:'Henry (Linear)', freundlich:'Freundlich', langmuir:'Langmuir',
+  dsl:'Dual-Site Langmuir', lf:'Langmuir-Freundlich (Sips)', lfk:'Langmuir-Freundlich (K-form)',
+  dslf:'Dual-Site Langmuir-Freundlich', toth:'Toth', temkin:'Temkin',
+  dr:'Dubinin-Radushkevich', rp:'Redlich-Peterson', hill:'Hill (Cooperative)',
+  radke:'Radke-Prausnitz', unilan:'UniLan', obrien:"O'Brien & Myers",
+  jovanovic:'Jovanovic', jovafreun:'Jovanovic-Freundlich', fritz:'Fritz-Schluender',
+  khan:'Khan', harkinjura:'Harkin-Jura', halsey:'Halsey',
+  fhh:'FHH (Frenkel-Halsey-Hill)', da:'Polanyi-Dubinin (DA)', berthelot:'Modified Berthelot',
+  virial:'Virial'
+};
 function canonicalModel(raw){
-  if(!raw)return'unknown';
-  const s=raw.trim().toLowerCase().replace(/[-\s_]+/g,'');
-  if(s==='henry'||s==='henryslaw'||s==='henrylinear')return'henry';
-  if(s==='langmuir')return'langmuir';
-  if(s==='freundlich')return'freundlich';
-  if(s==='langmuirfreundlich'||s==='sips'||s==='lf'||s==='langmuirfreundlichsips')return'lf';
-  if(s==='langmuirfreundlichkform'||s==='lfkform')return'lfk';
-  if(s==='dualsitelangmuir'||s==='dsl'||s==='lang2'||s==='doublesitelangmuir')return'dsl';
-  if(s==='dualsitelangmuirfreundlich'||s==='dslf'||s==='lf2'||s==='doublesitelangmuirfreundlich')return'dslf';
-  if(s==='toth')return'toth';
-  if(s==='temkin')return'temkin';
-  if(s==='dubininradushkevich'||s==='dr'||s==='mdr')return'dr';
-  if(s==='redlichpeterson'||s==='rp')return'rp';
-  if(s==='hill'||s==='hillcooperative')return'hill';
-  if(s==='radkeprausnitz'||s==='radke')return'radke';
-  if(s==='unilan')return'unilan';
-  if(s==='obrienandmyers'||s==="o'brienandmyers"||s==='obrienmyers'||s==='obrien')return'obrien';
-  if(s==='jovanovic')return'jovanovic';
-  if(s==='jovanovicfreundlich'||s==='jovafreun')return'jovafreun';
-  if(s==='fritzschluender'||s==='fritz')return'fritz';
-  if(s==='khan')return'khan';
-  if(s==='harkinjura')return'harkinjura';
-  if(s==='halsey')return'halsey';
-  if(s==='fhh'||s==='frenkelhalseyhill'||s==='macmillan')return'fhh';
-  if(s==='polanyidubinin'||s==='da'||s==='polanyi')return'da';
-  if(s==='modifiedberthelot'||s==='berthelot')return'berthelot';
-  if(s==='bet'||s==='brunauremmettteller')return'bet';
-  if(s==='interpolation'||s==='numerical'||s==='spline')return'numerical';
-  return'unknown';
+  if(!raw) return 'unknown';
+  const norm=s=>s.toLowerCase().replace(/[^a-z0-9]+/g,'');
+  const target=norm(raw);
+  for(const k in MODEL_NAMES){ if(norm(MODEL_NAMES[k])===target) return k; }
+  return 'unknown';
 }
 
-function qModel(P,model,p){
+// P is always passed in bar (the solver's normalised frame). Converted to
+// the isotherm's own native pressure unit here — at the boundary — rather
+// than by pre-rescaling each model's parameters (which previously covered
+// only 8 of the 25 analytical models; the other 17 were silently evaluated
+// with un-rescaled parameters against bar-scale pressure whenever a file's
+// Pressure_Units wasn't already bar).
+function qModel(P,model,p,pUnit){
   if(P<=0)return 0;
+  if(model==='numerical')return interpLinear(p.rawP,p.rawQ,P); // rawP pre-normalised to bar in loadFile
+  P=pFromBar(P,pUnit||'bar');
   switch(model){
     case'henry':  return p.KH*P;
     case'langmuir':return(p.nm*p.K*P)/(1+p.K*P);
@@ -550,7 +552,18 @@ function qModel(P,model,p){
     case'da':{const eps=Math.log(1+1/P);return p.W0*Math.exp(-Math.pow(eps/p.E,p.n));}
     case'berthelot':return p.KH*P*Math.exp(-p.c*P/p.p0);
     case'bet':{if(P>=p.p0)return 0;const x=P/p.p0;return(p.nm*p.C*x)/((1-x)*(1+(p.C-1)*x));}
-    case'numerical':return interpLinear(p.rawP,p.rawQ,P);
+    case'virial':{
+      const A0=p.A0,A1=p.A1,A2=p.A2;
+      const lnp=Math.log(P);
+      const g=q=>Math.log(q)+A0+A1*q+A2*q*q-lnp;
+      let lo=1e-12,glo=g(lo),t=0;
+      while(glo>=0&&lo>1e-30&&t<100){lo*=0.1;glo=g(lo);t++;}
+      let hi=lo,ghi=glo,found=false;
+      for(let it=0;it<400;it++){hi*=1.3;ghi=g(hi);if(ghi>=0){found=true;break;}if(hi>1e9)break;lo=hi;glo=ghi;}
+      if(!found)return hi;
+      for(let it=0;it<200;it++){const m=0.5*(lo+hi),gm=g(m);if(gm===0||(hi-lo)<1e-13*(1+m))return m;if(gm<0)lo=m;else hi=m;}
+      return 0.5*(lo+hi);
+    }
     default:return 0;
   }
 }
@@ -569,39 +582,42 @@ function interpLinear(xs,ys,x){
 //  ISOTHERM INVERSION  — find P such that qModel(P,model,params) = q_target
 // ═══════════════════════════════════════════════════════════════
 // Analytical inverses for the common models; bisection for the rest.
-function invertModel(q,model,p){
+// Returns P in bar (matching qModel's own convention), regardless of which
+// path is used: the analytical branches solve in the isotherm's native
+// pressure unit (since p.KH/p.K/etc. are un-rescaled, straight from the
+// CSV) and convert the result to bar at the end; bisectInvert works
+// directly in bar throughout by calling qModel (which itself converts to
+// native internally), so it needs no such conversion.
+function invertModel(q,model,p,pUnit){
   if(q<=0)return 0;
+  pUnit=pUnit||'bar';
+  let Pn; // native-unit pressure from the analytical inverse, or sentinel for bisection
   switch(model){
-    case'henry':  return p.KH>0?q/p.KH:null;
-    case'langmuir':{const d=p.nm-q;return(d>0&&p.K>0)?q/(p.K*d):null;}
-    case'freundlich':return p.Kf>0&&p.n>0?Math.pow(q/p.Kf,p.n):null;
-    case'lf':{if(q>=p.nm||p.a<=0||p.m<=0)return null;const r=q/(p.nm-q);return r>0?Math.pow(r/p.a,1/p.m):null;}
-    case'lfk':{if(q>=p.nm||p.K<=0||p.m<=0)return null;const r=q/(p.nm-q);return r>0?Math.pow(r,1/p.m)/p.K:null;}
-    case'toth':{if(q>=p.nm||p.K<=0||p.t<=0)return null;const r=q/p.nm;return(1/p.K)*Math.pow(Math.pow(r,-p.t)-1,-1/p.t);}
-    case'dsl':case'dslf':case'unilan':case'obrien':case'jovafreun':
-    case'radke':case'rp':case'hill':case'jovanovic':case'temkin':
-    case'khan':case'fritz':case'harkinjura':case'halsey':
-    case'fhh':case'da':case'berthelot':case'dr':
-    case'bet':case'numerical':case'lfk':
-      return bisectInvert(q,model,p);
-    default:return bisectInvert(q,model,p);
+    case'henry':  Pn=p.KH>0?q/p.KH:null;break;
+    case'langmuir':{const d=p.nm-q;Pn=(d>0&&p.K>0)?q/(p.K*d):null;break;}
+    case'freundlich':Pn=p.Kf>0&&p.n>0?Math.pow(q/p.Kf,p.n):null;break;
+    case'lf':{if(q>=p.nm||p.a<=0||p.m<=0){Pn=null;break;}const r=q/(p.nm-q);Pn=r>0?Math.pow(r/p.a,1/p.m):null;break;}
+    case'lfk':{if(q>=p.nm||p.K<=0||p.m<=0){Pn=null;break;}const r=q/(p.nm-q);Pn=r>0?Math.pow(r,1/p.m)/p.K:null;break;}
+    case'toth':{if(q>=p.nm||p.K<=0||p.t<=0){Pn=null;break;}const r=q/p.nm;Pn=(1/p.K)*Math.pow(Math.pow(r,-p.t)-1,-1/p.t);break;}
+    default: return bisectInvert(q,model,p,pUnit);
   }
+  if(Pn===null||!isFinite(Pn)||Pn<=0)return null;
+  return pToBar(Pn,pUnit);
 }
 
-function bisectInvert(q,model,p){
-  // Find bracket
+function bisectInvert(q,model,p,pUnit){
+  // Find bracket (in bar — qModel converts to native internally per call)
   let lo=1e-12,hi=1.0;
-  const qLo=qModel(lo,model,p);
-  const qMax=qModel(hi,model,p);
+  const qMax=qModel(hi,model,p,pUnit);
   if(q>qMax){
     // expand hi
-    for(let k=0;k<80;k++){hi*=4;if(qModel(hi,model,p)>=q)break;if(hi>1e12)return null;}
+    for(let k=0;k<80;k++){hi*=4;if(qModel(hi,model,p,pUnit)>=q)break;if(hi>1e12)return null;}
   }
-  if(qModel(lo,model,p)>q)return null; // cannot reach q even at near-zero P
+  if(qModel(lo,model,p,pUnit)>q)return null; // cannot reach q even at near-zero P
   // Bisection (120 iterations → ~40 significant digits)
   for(let k=0;k<120;k++){
     const mid=(lo+hi)/2;
-    if(qModel(mid,model,p)<q)lo=mid;else hi=mid;
+    if(qModel(mid,model,p,pUnit)<q)lo=mid;else hi=mid;
     if((hi-lo)<1e-12*(lo+hi+1e-20))break;
   }
   return(lo+hi)/2;
@@ -659,43 +675,16 @@ function parseIsothermCSV(text){
   return result;
 }
 
-// Map parsed CSV params dict to the named params object expected by qModel
-// App 4 uses a mix of csv names; we normalise them here.
+// Map parsed CSV params dict to the named params object expected by qModel.
+// Only renames the one CSV key with special characters unsuitable as a
+// plain property name ("a (=k^m)" -> "a"); no pressure rescaling here —
+// qModel() converts pressure at the boundary per call instead (see there),
+// so every model gets correct unit handling uniformly instead of only the
+// subset that had a case in a hand-maintained rescaling switch.
 function normaliseParams(model,csvParams,pUnit){
   const p=Object.assign({},csvParams);
-  // rename common aliases
-  if(p['nm']!==undefined){
-    // generic nm -> model-specific name
-  }
-  // Langmuir: csv has 'nm','K'
-  // LF (sips): csv has 'nm','a (=k^m)' -> 'a', 'm'
   if(p['a (=k^m)']!==undefined){p.a=p['a (=k^m)'];delete p['a (=k^m)'];}
   if(p['k (=a^(1/m))']!==undefined)delete p['k (=a^(1/m))'];
-  // Langmuir uses nm,K internally
-  if(model==='langmuir'){p.nm=p.nm??p['nm'];p.K=p.K??p['K'];}
-  // DSL: q1,K1,q2,K2
-  // DSLF: nm1,a1,m1,nm2,a2,m2
-  // Toth: nm,K,t
-  // Freundlich: Kf,n
-  // Henry: KH
-  // Temkin: AT,bT
-  // DR: nm,beta
-  // Berthelot: KH,c,p0
-
-  // Rescale pressure params to bar
-  const s=pToBar(1,pUnit);
-  if(s===1||!pUnit||pUnit==='bar')return p;
-  switch(model){
-    case'henry':  if(p.KH)p.KH/=s;break;
-    case'langmuir':if(p.K)p.K/=s;break;
-    case'freundlich':if(p.Kf&&p.n)p.Kf/=Math.pow(s,1/p.n);break;
-    case'lf':if(p.a&&p.m)p.a/=Math.pow(s,p.m);break;
-    case'lfk':if(p.K&&p.m)p.K/=s;break;
-    case'dsl':if(p.K1)p.K1/=s;if(p.K2)p.K2/=s;break;
-    case'dslf':if(p.a1&&p.m1)p.a1/=Math.pow(s,p.m1);if(p.a2&&p.m2)p.a2/=Math.pow(s,p.m2);break;
-    case'toth':if(p.K)p.K/=s;break;
-    default:break;
-  }
   return p;
 }
 
@@ -736,6 +725,21 @@ function syncRangeInputs(tab){
 function dispName(iso){
   return (iso.legend&&iso.legend.trim()) || (iso.tempK!=null?iso.tempK.toFixed(1)+' K':'Isotherm');
 }
+
+// Recognised gas formulae get their digits auto-subscripted for display —
+// CO2 -> CO₂ — wherever the sorptive name itself is shown (this app's own
+// legend is temperature-keyed by design, since a Clausius-Clapeyron run is
+// always one gas across several temperatures, so this applies to the
+// per-card "Sorptive:" readout rather than dispName()).
+const GAS_LIST=['Ar','C2H2','C2H4','C2H6','C3H6','C3H8','C4H10','C6H6',
+  'CH4','Cl2','CO','CO2','COS','CS2','H2','H2O','H2S',
+  'HCl','HF','He','Kr','N2','N2O','NH3','NO','NO2',
+  'O2','PH3','SF6','SO2','Xe',
+  'i-C4H10','n-C4H10','n-C5H12','n-C6H14',
+  'C2H5OH','CH3OH','CH3CN'];
+const SUBSCRIPT_DIGITS={'0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉'};
+function subscriptFormula(name){ return (name||'').replace(/[0-9]/g,d=>SUBSCRIPT_DIGITS[d]); }
+function dispGasName(name){ return (name && GAS_LIST.includes(name)) ? subscriptFormula(name) : name; }
 
 function addIsothermFromFile(file){
   const id=++compCount;
@@ -805,7 +809,7 @@ function renderIsoList(){
       const info=document.createElement('div');
       info.className='iso-info';
       info.innerHTML=`<span style="color:#aaa">Model:</span> <span>${iso.model_raw||'—'}</span><br>`+
-        (iso.sorptive?`<span style="color:#aaa">Sorptive:</span> <span>${iso.sorptive}</span><br>`:'')+
+        (iso.sorptive?`<span style="color:#aaa">Sorptive:</span> <span>${dispGasName(iso.sorptive)}</span><br>`:'')+
         (iso.sorptiveMW?`<span style="color:#aaa">MW:</span> <span>${iso.sorptiveMW} g mol⁻¹</span><br>`:'')+
         (iso.filename?`<span style="color:#aaa">File:</span> <span>${iso.filename}</span><br>`:'')+
         `<span style="color:#aaa">P units:</span> <span>${iso.pUnit}</span>`+
@@ -975,7 +979,7 @@ function runCC(){
       const qMaxPerIso=active.map(iso=>{
         const pBar=iso.rawP.map(p=>pToBar(p,iso.pUnit));
         const pMax=Math.max(...pBar);
-        return qModel(pMax,iso.model,iso.params);
+        return qModel(pMax,iso.model,iso.params,iso.pUnit);
       });
       const qOverlapMax=Math.min(...qMaxPerIso)*0.97; // 97% of min max-q
 
@@ -995,7 +999,7 @@ function runCC(){
       for(const q of qs){
         const pts=[];
         for(const iso of active){
-          const P_bar=invertModel(q,iso.model,iso.params);
+          const P_bar=invertModel(q,iso.model,iso.params,iso.pUnit);
           if(P_bar===null||!isFinite(P_bar)||P_bar<=0){nFailed++;continue;}
           const P_display=pFromBar(P_bar,pUnit);
           pts.push({T:iso.tempK,lnP:Math.log(P_bar),P:P_display,color:iso.color});
@@ -1459,7 +1463,7 @@ function renderIsoChart(){
     const curvePts=[];
     for(let i=0;i<=400;i++){
       const P=Math.pow(10,logPMin+(logPMax-logPMin)*i/400);
-      const q=qModel(P,iso.model,iso.params);
+      const q=qModel(P,iso.model,iso.params,iso.pUnit);
       if(isFinite(q)&&q>=0)curvePts.push({x:pFromBar(P,pUnit),y:q});
     }
     series.push({label:dispName(iso),color:iso.color,data:curvePts});

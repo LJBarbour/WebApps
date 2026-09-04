@@ -617,7 +617,13 @@ function fmtTickSet(ticks){
 
 // Default colour palette
 const PALETTE = ['#b84a2e','#2a5caa','#2a7a3b','#8a4fa0','#c07820','#1a9090','#d04080','#606060','#7a5030','#303070'];
-function dispName(c){ return (c.legend&&c.legend.trim()) || c.name || '?'; }
+// Recognised gas formulae (GAS_LIST entries) get their digits auto-
+// subscripted for display — CO2 -> CO₂ — since every GAS_LIST entry is
+// a plain chemical formula, a blanket digit replace is always correct.
+const SUBSCRIPT_DIGITS={'0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉'};
+function subscriptFormula(name){ return (name||'').replace(/[0-9]/g,d=>SUBSCRIPT_DIGITS[d]); }
+function dispGasName(name){ return (name && GAS_LIST.includes(name) && name!=='Custom') ? subscriptFormula(name) : name; }
+function dispName(c){ return (c.legend&&c.legend.trim()) || dispGasName(c.name) || '?'; }
 
 // ═══════════════════════════════════════════════════════════════
 //  GAS LIST
@@ -643,134 +649,112 @@ let activeTab = 'iso';
 
 // ═══════════════════════════════════════════════════════════════
 //  ISOTHERM MODELS  q(P, params)
+//  All 26 equations from Isotherm_Fit, ported verbatim (same display
+//  names and CSV parameter-name keys) so every model it can export is
+//  read here too — see Isotherm_Plotter's identical MOD table, which
+//  this mirrors exactly. Each model's fn operates directly in the
+//  pressure/uptake units the file was fitted in; qModel() below does
+//  the bar<->native pressure conversion at the boundary instead of
+//  pre-rescaling parameters, so there is exactly one code path for
+//  every model (no per-model rescaling formulas to keep in sync).
 // ═══════════════════════════════════════════════════════════════
+const MOD = {
+  bet:{name:'BET', params:['nm','C','p0'],
+    fn:(p,[qm,C,p0])=>{if(p<=0||p>=p0)return 0;const x=p/p0;return(qm*C*x)/((1-x)*(1+(C-1)*x))}},
+  henry:{name:'Henry (Linear)', params:['KH'],
+    fn:(p,[KH])=>KH*p},
+  freundlich:{name:'Freundlich', params:['Kf','n'],
+    fn:(p,[Kf,n])=>p<=0?0:Kf*Math.pow(p,1/n)},
+  langmuir:{name:'Langmuir', params:['nm','K'],
+    fn:(p,[qm,K])=>(qm*K*p)/(1+K*p)},
+  lang2:{name:'Dual-Site Langmuir', params:['q1','K1','q2','K2'],
+    fn:(p,[q1,K1,q2,K2])=>(q1*K1*p)/(1+K1*p)+(q2*K2*p)/(1+K2*p)},
+  lf:{name:'Langmuir-Freundlich (Sips)', params:['nm','a (=k^m)','m'],
+    fn:(p,[mn,a,m])=>{if(p<=0)return 0;const v=a*Math.pow(p,m);return(mn*v)/(1+v)}},
+  langmuirfreu:{name:'Langmuir-Freundlich (K-form)', params:['nm','K','m'],
+    fn:(p,[nm,K,m])=>{if(p<=0)return 0;const Kpm=Math.pow(K*p,m);return nm*Kpm/(1+Kpm)}},
+  lf2:{name:'Dual-Site Langmuir-Freundlich', params:['nm1','a1','m1','nm2','a2','m2'],
+    fn:(p,[nm1,a1,m1,nm2,a2,m2])=>{if(p<=0)return 0;const v1=a1*Math.pow(p,m1),v2=a2*Math.pow(p,m2);return(nm1*v1)/(1+v1)+(nm2*v2)/(1+v2)}},
+  toth:{name:'Toth', params:['nm','K','t'],
+    fn:(p,[qm,K,t])=>{if(p<=0)return 0;const Kp=K*p;return(qm*Kp)/Math.pow(1+Math.pow(Kp,t),1/t)}},
+  temkin:{name:'Temkin', params:['AT','bT'],
+    fn:(p,[AT,bT])=>p<=0||AT*p<=0?0:(1/bT)*Math.log(AT*p)},
+  dr:{name:'Dubinin-Radushkevich', params:['nm','beta'],
+    fn:(p,[qm,b])=>{if(p<=0)return 0;const e=Math.log(1+1/p);return qm*Math.exp(-b*e*e)}},
+  rp:{name:'Redlich-Peterson', params:['KR','aR','beta'],
+    fn:(p,[KR,aR,b])=>p<=0?0:(KR*p)/(1+aR*Math.pow(p,b))},
+  hill:{name:'Hill (Cooperative)', params:['nm','n','Kd'],
+    fn:(p,[qm,n,Kd])=>{if(p<=0)return 0;const pn=Math.pow(p,n),Kdn=Math.pow(Kd,n);return qm*pn/(Kdn+pn)}},
+  radke:{name:'Radke-Prausnitz', params:['nm','K','n'],
+    fn:(p,[qm,K,n])=>{if(p<=0)return 0;return(qm*K*p)/(qm+K*Math.pow(p,1/n))}},
+  unilan:{name:'UniLan', params:['nm','c','K0'],
+    fn:(p,[nm,c,K0])=>{if(p<=0||c<=0)return 0;const ec=Math.exp(c);return(nm/(2*c))*Math.log((1+K0*p*ec)/(1+K0*p/ec))}},
+  obrien:{name:"O'Brien & Myers", params:['nm','K','c'],
+    fn:(p,[nm,K,c])=>{if(p<=0)return 0;const Kp=K*p,th=Kp/(1+Kp);return nm*(th+c*th*(1-th)*(1-2*th))}},
+  jovanovic:{name:'Jovanovic', params:['nm','K'],
+    fn:(p,[nm,K])=>nm*(1-Math.exp(-K*p))},
+  jovafreun:{name:'Jovanovic-Freundlich', params:['nm','K','n'],
+    fn:(p,[nm,K,n])=>{if(p<=0)return 0;return nm*(1-Math.exp(-K*Math.pow(p,n)))}},
+  fritz:{name:'Fritz-Schluender', params:['a','b','alpha','beta'],
+    fn:(p,[a,b,al,be])=>{if(p<=0)return 0;return(a*Math.pow(p,al))/(1+b*Math.pow(p,be))}},
+  khan:{name:'Khan', params:['nm','bK','aK'],
+    fn:(p,[nm,bK,aK])=>{if(p<=0)return 0;return(nm*bK*p)/Math.pow(1+bK*p,aK)}},
+  harkinjura:{name:'Harkin-Jura', params:['A','B'],
+    fn:(p,[A,B])=>{if(p<=0)return 0;const lp=Math.log10(p),d=B-lp;return d>0?Math.sqrt(A/d):0}},
+  halsey:{name:'Halsey', params:['A','n'],
+    fn:(p,[A,n])=>{if(p<=0||p>=1)return 0;return Math.pow(A/Math.log(1/p),1/n)}},
+  macmillan:{name:'FHH (Frenkel-Halsey-Hill)', params:['nm','K','n'],
+    fn:(p,[nm,K,n])=>{if(p<=0||p>=1)return 0;return nm*Math.exp(-K*Math.pow(Math.log(1/p),1/n))}},
+  polanyi:{name:'Polanyi-Dubinin (DA)', params:['W0','E','n'],
+    fn:(p,[W0,E,n])=>{if(p<=0)return 0;const eps=Math.log(1+1/p);return W0*Math.exp(-Math.pow(eps/E,n))}},
+  berthelot:{name:'Modified Berthelot', params:['KH','c','p0'],
+    fn:(p,[KH,c,p0])=>{if(p<=0)return 0;return KH*p*Math.exp(-c*p/p0)}},
+  virial:{name:'Virial', params:['A0','A1','A2'],
+    fn:(p,[A0,A1,A2])=>{
+      if(p<=0)return 0;
+      const lnp=Math.log(p);
+      const g=q=>Math.log(q)+A0+A1*q+A2*q*q-lnp;
+      let lo=1e-12,glo=g(lo),t=0;
+      while(glo>=0&&lo>1e-30&&t<100){lo*=0.1;glo=g(lo);t++;}
+      let hi=lo,ghi=glo,found=false;
+      for(let it=0;it<400;it++){hi*=1.3;ghi=g(hi);if(ghi>=0){found=true;break;}if(hi>1e9)break;lo=hi;glo=ghi;}
+      if(!found)return hi;
+      for(let it=0;it<200;it++){const m=0.5*(lo+hi),gm=g(m);if(gm===0||(hi-lo)<1e-13*(1+m))return m;if(gm<0)lo=m;else hi=m;}
+      return 0.5*(lo+hi);
+    }}
+};
 
-// Normalise model name to a canonical key
+// Normalise model name to a canonical key by exact (punctuation/case
+// insensitive) match against MOD[k].name — the exported name is always
+// the literal display name, so this is a direct lookup, not a fuzzy
+// synonym list (which drifts out of sync as new models are added).
 function canonicalModel(raw){
   if(!raw) return 'unknown';
-  const s = raw.trim().toLowerCase().replace(/[-\s_]+/g,'');
-  if(s==='henry'||s==='henryslaw') return 'henry';
-  if(s==='langmuir') return 'langmuir';
-  if(s==='freundlich') return 'freundlich';
-  if(s==='langmuirfreundlich'||s==='sips'||s==='lf') return 'lf';
-  if(s==='dualsitelangmuir'||s==='dsl'||s==='doublesite langmuir'||s==='dualsite') return 'dsl';
-  if(s==='dualsitelangmuirfreundlich'||s==='dslf'||s==='dualsite langmuirfreundlich'||s==='doublesitelangmuirfreundlich') return 'dslf';
-  if(s==='toth') return 'toth';
-  if(s==='bet'||s==='brunauremmettteller') return 'bet';
-  if(s==='unilan') return 'unilan';
-  if(s==='klotz') return 'klotz';
-  if(s==='quadratic') return 'quadratic';
-  if(s==='temkin') return 'temkin';
-  if(s==='virial') return 'virial';
-  if(s==='mdr'||s==='dubininradushkevich') return 'dr';
-  if(s==='dubininastakhov'||s==='da') return 'da';
-  if(s==='interpolation'||s==='spline'||s==='numerical') return 'numerical';
+  const norm=s=>s.toLowerCase().replace(/[^a-z0-9]+/g,'');
+  const target=norm(raw);
+  for(const k in MOD){ if(norm(MOD[k].name)===target) return k; }
   return 'unknown';
 }
 
-// Return a copy of params rescaled so the model works in bar, given original pUnit
-function rescaleParamsToBar(model, params, pUnit){
-  if(pUnit==='bar') return params;
-  const p = Object.assign({}, params);
-  // scale factor: 1 [pUnit] = s bar, so P_bar = P_orig * s
-  // To convert: if model expects P in pUnit, and we feed P_bar,
-  // we substitute P_orig = P_bar / s, i.e. replace a with a/s^m (for LF-type)
-  const s = pToBar(1, pUnit); // 1 unit → bar
-  switch(model){
-    case 'henry':
-      // q = K*P; K has units [q]/[P]. Rescale K: K_bar = K_orig / s
-      p.K = params.K / s;
-      break;
-    case 'langmuir':
-      // q = nm*a*P/(1+a*P); a has units 1/[P]. Rescale: a_bar = a_orig / s
-      p.a = params.a / s;
-      break;
-    case 'freundlich':
-      // q = K*P^n; K has units [q]/[P]^n. K_bar = K_orig / s^n
-      p.K = params.K / Math.pow(s, params.n);
-      break;
-    case 'lf':
-      // q = nm*a*P^m/(1+a*P^m); a has units 1/[P]^m. a_bar = a_orig / s^m
-      p.a = params.a / Math.pow(s, params.m);
-      break;
-    case 'dsl':
-      p.a1 = params.a1 / s;
-      p.a2 = params.a2 / s;
-      break;
-    case 'dslf':
-      p.a1 = params.a1 / Math.pow(s, params.m1);
-      p.a2 = params.a2 / Math.pow(s, params.m2);
-      break;
-    case 'toth':
-      p.a = params.a / s;
-      break;
-    case 'numerical':
-      // rawP already normalised to bar in loadFile/onCompPUnit
-      break;
-    default:
-      break;
+// Evaluates a component's fitted isotherm at pressure P_bar (always in
+// bar, since every caller works in the solver's bar-normalised frame).
+// Converts to the component's own native pressure unit at the boundary
+// (rather than pre-rescaling parameters) and looks up parameter values
+// straight from the CSV's own names via MOD[model].params.
+function qModel(P_bar, model, params, pUnit){
+  if(P_bar<=0) return 0;
+  if(model==='numerical'){
+    // rawP is pre-normalised to bar in loadFile/onCompPUnit — no conversion here.
+    return interpLinear(params.rawP, params.rawQ, P_bar);
   }
-  return p;
-}
-
-// Same rescaling for uptake: all analytical models return values in original
-// qUnit. We need them in mmol/g. Scale by qToMmolG(1, qUnit).
-function rescaleParamsQToMmolG(model, params, qUnit){
-  if(qUnit==='mmol/g'||qUnit==='mol/kg') return params;
-  const p = Object.assign({}, params);
-  const s = qToMmolG(1, qUnit); // 1 qUnit → mmol/g
-  switch(model){
-    case 'henry':   p.K  = params.K  * s; break;
-    case 'langmuir':p.nm = params.nm * s; break;
-    case 'freundlich': p.K = params.K * s; break;
-    case 'lf':      p.nm = params.nm * s; break;
-    case 'dsl':     p.nm1= params.nm1* s; p.nm2= params.nm2* s; break;
-    case 'dslf':    p.nm1= params.nm1* s; p.nm2= params.nm2* s; break;
-    case 'toth':    p.nm = params.nm * s; break;
-    case 'numerical':
-      if(p.rawQ) p.rawQ = params.rawQ.map(q=>q*s);
-      break;
-    default: break;
-  }
-  return p;
-}
-
-function qModel(P, model, p){
-  if(P<=0) return 0;
-  switch(model){
-    case 'henry':  return p.K*P;
-    case 'langmuir': return p.nm*p.a*P/(1+p.a*P);
-    case 'freundlich': return p.K*Math.pow(P,p.n);
-    case 'lf':  {const x=p.a*Math.pow(P,p.m); return p.nm*x/(1+x);}
-    case 'dsl':  return p.nm1*p.a1*P/(1+p.a1*P) + p.nm2*p.a2*P/(1+p.a2*P);
-    case 'dslf': {const x1=p.a1*Math.pow(P,p.m1),x2=p.a2*Math.pow(P,p.m2); return p.nm1*x1/(1+x1)+p.nm2*x2/(1+x2);}
-    case 'toth': return p.nm*p.a*P/Math.pow(1+Math.pow(p.a*P,p.t),1/p.t);
-    case 'bet':  return p.nm*p.C*P/((1-P/p.Ps)*(1+(p.C-1)*P/p.Ps));
-    case 'quadratic': return (p.Ka+2*p.Kaa*P)*P/(1+p.Ka*P+p.Kaa*P*P);
-    case 'temkin': {
-      // q = nm*(1 - exp(-a*P)) iterative; simple Temkin: q=nm*ln(a*P)/a_t
-      // Use generic: q = q_sat*(RT/Δε)*ln(a*P)
-      return p.qm*(Math.log(1+p.a*P));
-    }
-    case 'unilan': {
-      const s=p.s, c=p.c, nm=p.nm;
-      if(Math.abs(s)<1e-10) return nm*c*P/(1+c*P);
-      return (nm/(2*s))*Math.log((1+c*Math.exp(s)*P)/(1+c*Math.exp(-s)*P));
-    }
-    case 'dr': {
-      const eps=8.314*p.T*Math.log(p.Ps/P);
-      return p.nm*Math.exp(-Math.pow(eps/p.E,2));
-    }
-    case 'da': {
-      const eps=8.314*p.T*Math.log(p.Ps/P);
-      return p.nm*Math.exp(-Math.pow(eps/p.E,p.n));
-    }
-    case 'numerical': {
-      // Interpolate from raw arrays stored in params
-      return interpLinear(p.rawP, p.rawQ, P);
-    }
-    default: return 0;
-  }
+  const mod=MOD[model];
+  if(!mod) return 0;
+  const P_native = pFromBar(P_bar, pUnit||'bar');
+  const args = mod.params.map(k=>params[k]);
+  if(args.some(v=>!isFinite(v))) return 0;
+  let q;
+  try{ q=mod.fn(P_native, args); }catch(e){ q=NaN; }
+  return isFinite(q) ? q : 0;
 }
 
 function interpLinear(xs, ys, x){
@@ -787,36 +771,20 @@ function interpLinear(xs, ys, x){
 //  SPREADING PRESSURE  Ψ(P) = ∫₀ᴾ q(t)/t dt
 // ═══════════════════════════════════════════════════════════════
 
-function spreadingPressure(P, model, params){
+// Ψ(P) is evaluated by numerical quadrature for every model uniformly
+// (rather than hand-derived analytical formulas per model) — one code
+// path that automatically covers all 26 equations, since it only needs
+// qModel() to evaluate correctly, not a closed-form integral.
+function spreadingPressure(P, model, params, pUnit){
   if(P<=0) return 0;
-  switch(model){
-    case 'henry':
-      return params.K*P;
-    case 'langmuir':
-      return params.nm*Math.log(1+params.a*P);
-    case 'freundlich':
-      return params.K*Math.pow(P,params.n)/params.n;
-    case 'lf':{
-      const x=Math.pow(params.a*P,params.m);
-      return params.nm/params.m*Math.log(1+x);
-    }
-    case 'dsl':
-      return params.nm1*Math.log(1+params.a1*P) + params.nm2*Math.log(1+params.a2*P);
-    case 'dslf':{
-      const x1=Math.pow(params.a1*P,params.m1), x2=Math.pow(params.a2*P,params.m2);
-      return params.nm1/params.m1*Math.log(1+x1) + params.nm2/params.m2*Math.log(1+x2);
-    }
-    default:
-      // Numerical Gaussian quadrature (20-point GL on [0,P], after variable transform)
-      return spreadingPressureNumerical(P, model, params);
-  }
+  return spreadingPressureNumerical(P, model, params, pUnit);
 }
 
 // 20-point Gauss-Legendre nodes and weights on [-1,1]
 const GL20_NODES = [-0.9931286,-0.9639719,-0.9122344,-0.8391170,-0.7463061,-0.6360537,-0.5108670,-0.3737061,-0.2277859,-0.0765265,0.0765265,0.2277859,0.3737061,0.5108670,0.6360537,0.7463061,0.8391170,0.9122344,0.9639719,0.9931286];
 const GL20_WGTS = [0.0176140,0.0406014,0.0626720,0.0832767,0.1019301,0.1181945,0.1316886,0.1420961,0.1491730,0.1527534,0.1527534,0.1491730,0.1420961,0.1316886,0.1181945,0.1019301,0.0832767,0.0626720,0.0406014,0.0176140];
 
-function spreadingPressureNumerical(P, model, params){
+function spreadingPressureNumerical(P, model, params, pUnit){
   // Integrate q(t)/t from eps to P, use log-transform t=exp(u) for stability near 0
   const eps = 1e-12;
   const a = Math.log(eps), b = Math.log(P);
@@ -827,7 +795,7 @@ function spreadingPressureNumerical(P, model, params){
     const u = mid + half*GL20_NODES[i];
     const t = Math.exp(u);
     // integrand in log space: q(t)/t * dt/du = q(t)/t * t = q(t)
-    sum += GL20_WGTS[i]*qModel(t,model,params);
+    sum += GL20_WGTS[i]*qModel(t,model,params,pUnit);
   }
   return sum*half;
 }
@@ -852,14 +820,14 @@ function solveIAST(components, y, Ptot, tol=1e-10){
     // Expand upper bound until Ψ(hi) >= target
     let hi = Math.max(Ptot * 10, 1.0);
     for(let k=0; k<60; k++){
-      if(spreadingPressure(hi, comp.model, comp.params) >= targetPsi) break;
+      if(spreadingPressure(hi, comp.model, comp.params, comp.pUnit) >= targetPsi) break;
       hi *= 4;
       if(hi > 1e12) break;
     }
     let lo = eps, hi2 = hi;
     for(let k=0; k<120; k++){
       const mid = (lo + hi2) / 2;
-      if(spreadingPressure(mid, comp.model, comp.params) < targetPsi) lo = mid;
+      if(spreadingPressure(mid, comp.model, comp.params, comp.pUnit) < targetPsi) lo = mid;
       else hi2 = mid;
       if((hi2 - lo) < tol * (lo + hi2 + eps)) break;
     }
@@ -869,7 +837,7 @@ function solveIAST(components, y, Ptot, tol=1e-10){
   // For a given p0 = P0[0], compute the sum Σ x_i = Σ y_i*Ptot/P0_i.
   // This is monotone decreasing in p0, so we can bisect on it too.
   function sumXatP0(p0){
-    const psi0 = spreadingPressure(p0, components[0].model, components[0].params);
+    const psi0 = spreadingPressure(p0, components[0].model, components[0].params, components[0].pUnit);
     const P0   = [p0];
     for(let i=1; i<N; i++) P0.push(findP0(psi0, components[i]));
     let s = 0;
@@ -901,7 +869,7 @@ function solveIAST(components, y, Ptot, tol=1e-10){
   const xRaw = y.map((yi,i) => yi * Ptot / Math.max(P0[i], eps));
   const xSum = xRaw.reduce((s,v) => s+v, 0);
   const x    = xRaw.map(v => v / Math.max(xSum, eps));
-  const qS   = P0.map((pi,i) => Math.max(qModel(pi, components[i].model, components[i].params), eps));
+  const qS   = P0.map((pi,i) => Math.max(qModel(pi, components[i].model, components[i].params, components[i].pUnit), eps));
   const invQ = x.reduce((s,xi,i) => s + xi/qS[i], 0);
   const qtot = 1 / Math.max(invQ, eps);
   const qi   = x.map(xi => xi * qtot);
@@ -1147,7 +1115,7 @@ function renderCompList(){
     div.dataset.idx=idx;
 
     const gasOpts = GAS_LIST.map(g=>`<option value="${g}"${comp.name===g?' selected':''}>${g}</option>`).join('');
-    const autoLegend = comp.name==='Custom' ? (comp.customName||('Component '+(idx+1))) : (comp.name||('Component '+(idx+1)));
+    const autoLegend = comp.name==='Custom' ? (comp.customName||('Component '+(idx+1))) : (dispGasName(comp.name)||('Component '+(idx+1)));
     const legendVal = comp.legend || autoLegend;
 
     div.innerHTML=`
@@ -1273,17 +1241,7 @@ function loadFile(id, file){
     if(parsed.error){st('Error in '+file.name+': '+parsed.error,'err');return;}
     comp.model_raw = parsed.model;
     comp.model = canonicalModel(parsed.model);
-    comp.params = parsed.params;
-
-    // Normalise parameter names: App 4 exports DSL as q1,K1,q2,K2
-    // but the IAST engine expects nm1,a1,nm2,a2
-    if(comp.model==='dsl'||comp.model==='dslf'){
-      const p=comp.params;
-      if(p.q1!==undefined){p.nm1=p.q1;delete p.q1;}
-      if(p.K1!==undefined){p.a1 =p.K1;delete p.K1;}
-      if(p.q2!==undefined){p.nm2=p.q2;delete p.q2;}
-      if(p.K2!==undefined){p.a2 =p.K2;delete p.K2;}
-    }
+    comp.params = parsed.params; // keyed by the file's own CSV parameter names — qModel() reads them directly via MOD[model].params
     comp.rawP = parsed.rawP;
     comp.rawQ = parsed.rawQ;
     comp.filename = file.name;
@@ -1301,7 +1259,7 @@ function loadFile(id, file){
     if(parsed.sorptive){
       comp.name=parsed.sorptive;
       comp.sorptive_in_file=true;
-      if(!comp.legend) comp.legend=parsed.sorptive;
+      if(!comp.legend) comp.legend=dispGasName(parsed.sorptive);
     } else {
       comp.sorptive_in_file=false;
     }
@@ -1316,10 +1274,12 @@ function loadFile(id, file){
     comp.rawP_bar  = comp.rawP.map(p => pToBar(p,  comp.pUnit));
     comp.rawQ_mmolg = comp.rawQ.map(q => qToMmolG(q, comp.qUnit));
 
-    // For numerical model: store raw arrays in params
+    // For numerical model: store raw arrays in params, pressure pre-normalised
+    // to bar since qModel() feeds this interpolation table bar values directly
+    // (no per-call unit conversion for the 'numerical' fallback).
     if(comp.model==='unknown'||comp.model==='numerical'){
       comp.model='numerical';
-      comp.params.rawP=comp.rawP;
+      comp.params.rawP=comp.rawP_bar;
       comp.params.rawQ=comp.rawQ;
     }
 
@@ -1507,11 +1467,13 @@ function runIAST(){
 
       // Build normalised component objects (params in bar / mmol/g)
       const normComps = components.map(c=>{
-        let p = rescaleParamsToBar(c.model, c.params, c.pUnit||'bar');
-        p = rescaleParamsQToMmolG(c.model, p, c.qUnit||'mmol/g');
+        // Params stay in their native (as-fitted) units — qModel() converts
+        // pressure at the boundary per call, keyed by pUnit below; uptake
+        // needs no rescaling since qToMmolG is a no-op (Isotherm_Fit always
+        // exports mmol/g).
         // Store the max measured pressure (in bar) so the solver doesn't extrapolate wildly
         const pMaxBar = c.rawP.length ? pToBar(Math.max(...c.rawP), c.pUnit||'bar') : Infinity;
-        return {model:c.model, params:p, pMaxBar};
+        return {model:c.model, params:c.params, pUnit:c.pUnit||'bar', pMaxBar};
       });
 
       // User pressure inputs are in pUnits; convert to bar for the solver
@@ -2122,7 +2084,6 @@ function renderIsoIntoCanvas(cvs, panelId, title){
     const cPU=c.pUnit||'bar';
     const pts=c.rawP.map((p,i)=>({x:pToBar(p,cPU), y:c.rawQ[i]}));
     series.push({label:dispName(c), color:c.color, data:pts, scatter:true});
-    const paramsBar=rescaleParamsToBar(c.model,c.params,cPU);
     const pMinBar=Math.min(...pts.map(pt=>pt.x));
     const pMaxBar=Math.max(...pts.map(pt=>pt.x));
     const logMin=Math.log10(Math.max(pMinBar*0.1,1e-10));
@@ -2130,7 +2091,7 @@ function renderIsoIntoCanvas(cvs, panelId, title){
     const curvePts=[];
     for(let i=0;i<=400;i++){
       const P=Math.pow(10,logMin+(logMax-logMin)*i/400);
-      const q=qModel(P,c.model,paramsBar);
+      const q=qModel(P,c.model,c.params,cPU);
       if(isFinite(q)&&q>=0) curvePts.push({x:P,y:q});
     }
     series.push({label:null,color:c.color,data:curvePts,dash:null});
