@@ -1,0 +1,1201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PNG to MP4</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@300;600&family=DM+Sans:wght@400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#FAF6EE;--paper:#F3EDE0;--paper2:#EDE6D4;--ink:#2C2416;--ink-mid:#6B5C3E;
+  --ink-faint:#B8A98A;--accent:#4A6FA5;--accent-soft:#EEF3FA;--line:#DDD5C0;--border:#CEC3AA;
+  --ok:#4E8367;--ok-bg:#EBF4EE;--ok-bd:#B0D4BB;
+  --warn:#8A5A00;--warn-bg:#FDF8EE;--warn-bd:#E8D8A0;
+  --err:#B03020;--err-bg:#FDF0EE;--err-bd:#E8B0A8;
+  --mono:'DM Mono',monospace;--sans:'DM Sans',sans-serif;--display:'Fraunces',serif;
+}
+html,body{height:100%;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:13px}
+body{display:flex;flex-direction:column;overflow:hidden}
+::-webkit-scrollbar{width:7px;height:7px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+
+/* -- Header -- */
+header{flex-shrink:0;padding:10px 18px 9px;border-bottom:1.5px solid var(--line);
+       display:flex;align-items:baseline;gap:12px}
+header h1{font-family:var(--display);font-weight:600;font-size:19px;color:var(--ink)}
+header .sub{font-size:10px;color:var(--ink-mid);font-family:var(--mono);letter-spacing:.5px}
+header .spacer{flex:1}
+header .cap{font-family:var(--mono);font-size:9.5px;letter-spacing:.5px;padding:2px 8px;border-radius:10px;
+  border:1px solid var(--line);color:var(--ink-faint)}
+header .cap.ok{color:var(--ok);border-color:var(--ok-bd);background:var(--ok-bg)}
+header .cap.bad{color:var(--err);border-color:var(--err-bd);background:var(--err-bg)}
+
+/* -- Body -- */
+.body{flex:1;display:flex;min-height:0}
+
+/* -- Left sidebar -- */
+.left{width:308px;flex-shrink:0;border-right:1.5px solid var(--line);background:var(--paper);
+      overflow-y:auto;padding:14px 13px}
+.s-head{font-family:var(--mono);font-size:9.5px;letter-spacing:1.1px;text-transform:uppercase;
+        color:var(--ink-faint);margin:14px 0 7px;padding-bottom:4px;border-bottom:1px solid var(--line)}
+.s-head:first-child{margin-top:0}
+
+.f-row{display:flex;align-items:center;gap:6px;margin-bottom:7px}
+.f-row:last-child{margin-bottom:0}
+.f-row label{font-family:var(--mono);font-size:9.5px;color:var(--ink-faint);flex:none;min-width:62px;letter-spacing:.04em}
+.f-row select,.f-row input[type=number],.f-row input[type=text]{flex:1;min-width:0;padding:4px 7px;
+  border:1px solid var(--border);border-radius:3px;font-family:var(--mono);font-size:11px;
+  background:var(--bg);color:var(--ink);outline:none}
+.f-row select:focus,.f-row input:focus{border-color:var(--accent)}
+.f-row input[type=color]{width:30px;height:24px;padding:1px 2px;border:1px solid var(--border);
+  border-radius:3px;cursor:pointer;background:none;flex:none}
+.f-row input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;cursor:pointer;flex:none}
+.f-row .unit{font-family:var(--mono);font-size:10px;color:var(--ink-faint);flex:none}
+.f-row input[type=range]{-webkit-appearance:none;flex:1;height:3px;background:var(--line);border-radius:2px;outline:none}
+.f-row input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;
+  border-radius:50%;background:var(--accent);cursor:pointer}
+.f-row .rv{font-family:var(--mono);font-size:11px;color:var(--ink);min-width:34px;text-align:right}
+.f-row .hint{font-family:var(--mono);font-size:10px;color:var(--ink-faint)}
+
+.format-note{font-family:var(--mono);font-size:9.5px;color:var(--ink-faint);line-height:1.5;margin-top:4px}
+.format-note code{font-family:var(--mono);color:var(--ink-mid)}
+
+.mini-btn{font-family:var(--mono);font-size:9.5px;letter-spacing:.6px;text-transform:uppercase;
+   color:var(--accent);background:transparent;border:1px solid var(--border);border-radius:3px;
+   padding:3px 8px;cursor:pointer;transition:background .15s;white-space:nowrap}
+.mini-btn:hover{background:var(--accent-soft);border-color:var(--accent)}
+.mini-btn:disabled{opacity:.35;cursor:default}
+.mini-btn.danger{color:var(--err);border-color:var(--border)}
+.mini-btn.danger:hover{background:var(--err-bg);border-color:var(--err-bd)}
+
+.btn{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:8px;
+  background:var(--accent);color:#fff;border:none;border-radius:4px;font-family:var(--sans);
+  font-size:13px;font-weight:500;cursor:pointer;transition:opacity .15s;margin-top:6px}
+.btn:hover{opacity:.88} .btn:disabled{opacity:.38;cursor:default}
+.btn.ghost{background:transparent;color:var(--accent);border:1.5px solid var(--accent);margin-top:4px}
+.btn.danger{background:transparent;color:var(--err);border:1px solid var(--err-bd)}
+.btn.danger:hover{background:var(--err-bg)}
+
+/* -- Centre -- */
+.centre{flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.c-toolbar{flex-shrink:0;border-bottom:1px solid var(--line);background:var(--paper);
+  padding:6px 14px;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--ink-mid)}
+.c-toolbar .spacer{flex:1}
+.c-toolbar .folder{font-family:var(--mono);font-size:10.5px;color:var(--ink);overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap;max-width:340px}
+
+/* -- Progress -- */
+.prog-bar-bg{height:4px;background:var(--paper2);overflow:hidden;flex-shrink:0}
+.prog-bar-fill{height:100%;background:var(--accent);transition:width .12s;width:0%}
+
+/* -- Stage -- */
+.stage{flex:1;position:relative;min-height:0;display:flex;align-items:center;justify-content:center;
+  background:var(--paper2);overflow:hidden;padding:12px}
+.stage.drag-over{outline:2px solid var(--accent);outline-offset:-5px}
+#viewCanvas{max-width:100%;max-height:100%;display:none;
+  box-shadow:0 1px 4px rgba(44,36,22,.18);background:#fff;image-rendering:auto}
+.empty-state{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:10px;cursor:pointer;text-align:center;padding:20px}
+.empty-state .es-icon{font-size:40px;color:var(--ink-faint)}
+.empty-state h2{font-family:var(--display);font-weight:600;font-size:18px;color:var(--ink-mid)}
+.empty-state p{font-family:var(--mono);font-size:11px;color:var(--ink-faint);line-height:1.7}
+
+/* -- Transport -- */
+.transport{flex-shrink:0;border-top:1px solid var(--line);background:var(--paper);
+  padding:7px 14px;display:flex;align-items:center;gap:10px}
+.transport button{background:transparent;border:1px solid var(--border);border-radius:3px;
+  width:28px;height:24px;cursor:pointer;color:var(--ink-mid);font-size:11px;line-height:1;
+  display:flex;align-items:center;justify-content:center;transition:background .12s,color .12s}
+.transport button:hover:not(:disabled){background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.transport button:disabled{opacity:.3;cursor:default}
+.transport button.play{width:34px}
+#scrub{-webkit-appearance:none;flex:1;height:3px;background:var(--line);border-radius:2px;outline:none;min-width:60px}
+#scrub::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;
+  background:var(--accent);cursor:pointer}
+#scrub:disabled::-webkit-slider-thumb{background:var(--border);cursor:default}
+.tp-read{font-family:var(--mono);font-size:10.5px;color:var(--ink-mid);white-space:nowrap}
+.tp-name{font-family:var(--mono);font-size:10.5px;color:var(--ink-faint);overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap;max-width:260px;flex-shrink:1}
+
+/* -- Status bar -- */
+.statusbar{flex-shrink:0;border-top:1px solid var(--line);padding:3px 14px;font-family:var(--mono);
+  font-size:10px;color:var(--ink-mid);display:flex;justify-content:space-between;align-items:center;gap:14px}
+.statusbar .msg-ok{color:var(--ok)} .statusbar .msg-err{color:var(--err)} .statusbar .msg-warn{color:var(--warn)}
+#sbLeft{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#sbRight{white-space:nowrap;flex-shrink:0}
+
+#toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%) translateY(10px);
+  background:var(--ink);color:var(--bg);font-family:var(--mono);font-size:11px;
+  padding:6px 14px;border-radius:5px;opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;z-index:60}
+#toast.show{opacity:.94;transform:translateX(-50%) translateY(0)}
+
+.pill{display:inline-block;font-family:var(--mono);font-size:9px;padding:2px 7px;border-radius:10px;
+  background:var(--paper2);color:var(--ink-faint);border:1px solid var(--line)}
+</style>
+</head>
+<body>
+<header>
+  <h1>PNG to MP4</h1>
+  <span class="sub">image sequence &rarr; movie &middot; local &middot; offline &mdash; nothing is uploaded</span>
+  <span class="spacer"></span>
+  <span class="cap" id="capBadge">checking encoder&hellip;</span>
+</header>
+<div class="body">
+
+<!-- == LEFT SIDEBAR == -->
+<div class="left">
+
+  <div class="s-head">Source</div>
+  <div class="f-row"><label>Files</label><span class="hint" id="srcCount">none loaded</span></div>
+  <div class="f-row"><label>Frame size</label><span class="hint" id="srcDims">&mdash;</span></div>
+  <button class="mini-btn" id="pickFolderBtn" style="width:100%;margin-top:2px">Choose folder&hellip;</button>
+
+  <div class="s-head">Frame range</div>
+  <div class="f-row"><label>First</label>
+    <input type="number" id="rangeFrom" min="1" step="1" value="1" style="width:74px;flex:none">
+    <label style="min-width:26px;text-align:right">Last</label>
+    <input type="number" id="rangeTo" min="1" step="1" style="width:74px;flex:none"></div>
+  <div class="f-row"><label>Use every</label>
+    <input type="number" id="rangeStep" min="1" step="1" value="1" style="width:56px;flex:none">
+    <span class="unit">th image</span></div>
+  <p class="format-note" id="rangeNote"></p>
+
+  <div class="s-head">Timing</div>
+  <div class="f-row"><label>Frame rate</label>
+    <input type="number" id="fps" min="1" max="120" step="1" value="10" style="width:62px;flex:none">
+    <span class="unit">fps</span>
+    <select id="fpsPreset" style="flex:1"><option value="">preset&hellip;</option>
+      <option value="5">5</option><option value="10">10</option><option value="12">12</option>
+      <option value="15">15</option><option value="24">24</option><option value="25">25</option>
+      <option value="30">30</option><option value="60">60</option></select></div>
+  <p class="format-note" id="durNote"></p>
+
+  <div class="s-head">Output size</div>
+  <div class="f-row"><label>Preset</label>
+    <select id="sizePreset">
+      <option value="src" selected>Source size</option>
+      <option value="1920">1920 px wide</option>
+      <option value="1280">1280 px wide</option>
+      <option value="1080p">1920 &times; 1080</option>
+      <option value="720p">1280 &times; 720</option>
+      <option value="custom">Custom&hellip;</option>
+    </select></div>
+  <div class="f-row"><label>Width</label>
+    <input type="number" id="outW" min="16" max="7680" step="2" style="width:74px;flex:none">
+    <label style="min-width:26px;text-align:right">Ht</label>
+    <input type="number" id="outH" min="16" max="4320" step="2" style="width:74px;flex:none"></div>
+  <div class="f-row"><label>Fit</label>
+    <select id="fitMode">
+      <option value="contain" selected>Fit inside (letterbox)</option>
+      <option value="cover">Fill frame (crop)</option>
+      <option value="stretch">Stretch to fit</option>
+    </select></div>
+  <div class="f-row"><label>Backdrop</label><input type="color" id="bgCol" value="#000000">
+    <span class="hint">letterbox / padding colour</span></div>
+  <p class="format-note">H.264 needs even dimensions &mdash; odd values are rounded down.</p>
+
+  <div class="s-head">Quality</div>
+  <div class="f-row"><label>Level</label>
+    <input type="range" id="qual" min="1" max="9" step="1" value="5">
+    <span class="rv" id="qualVal">5</span></div>
+  <p class="format-note" id="qualNote"></p>
+  <div class="f-row"><label>Keyframes</label>
+    <input type="number" id="gopSec" min="0.2" max="30" step="0.2" value="2" style="width:62px;flex:none">
+    <span class="unit">s apart</span></div>
+  <p class="format-note">Closer keyframes scrub more smoothly but enlarge the file.</p>
+
+  <div class="s-head">Overlay</div>
+  <div class="f-row"><label>Text</label><input type="text" id="ovText" placeholder="e.g. {n}/{total}  {t}"></div>
+  <p class="format-note">Tokens: <code>{n}</code> frame no. &middot; <code>{total}</code> &middot;
+     <code>{name}</code> filename &middot; <code>{stem}</code> name without extension &middot;
+     <code>{t}</code> elapsed time. Leave blank for none.</p>
+  <div class="f-row"><label>Interval</label>
+    <input type="number" id="ovInterval" min="0" step="any" value="10" style="width:62px;flex:none">
+    <span class="unit">s between images</span></div>
+  <div class="f-row"><label>Start at</label>
+    <input type="number" id="ovStart" step="any" value="0" style="width:62px;flex:none">
+    <span class="unit">s</span></div>
+  <div class="f-row"><label>Position</label>
+    <select id="ovPos">
+      <option value="bl" selected>Bottom left</option><option value="br">Bottom right</option>
+      <option value="tl">Top left</option><option value="tr">Top right</option>
+    </select></div>
+  <div class="f-row"><label>Size</label>
+    <input type="range" id="ovSize" min="1" max="8" step="0.5" value="3.5">
+    <span class="rv" id="ovSizeVal">3.5%</span></div>
+  <div class="f-row"><label>Colour</label><input type="color" id="ovCol" value="#ffffff">
+    <input type="checkbox" id="ovShadow" checked><span class="hint">drop shadow</span></div>
+
+  <div class="s-head">Export</div>
+  <div class="f-row"><label>Filename</label><input type="text" id="outName" placeholder="movie"></div>
+  <button class="btn" id="renderBtn" disabled>Create MP4&hellip;</button>
+  <button class="mini-btn danger" id="cancelBtn" style="width:100%;margin-top:6px;display:none">Cancel</button>
+  <button class="btn danger" id="clearBtn" disabled style="margin-top:8px">Clear</button>
+  <p class="format-note" id="exportNote"></p>
+
+</div>
+
+<!-- == CENTRE == -->
+<div class="centre">
+  <div class="c-toolbar">
+    <span class="pill" id="folderPill" style="display:none">folder</span>
+    <span class="folder" id="folderLbl">No folder loaded</span>
+    <span class="spacer"></span>
+    <span id="statusLbl">Drop the first image anywhere to begin</span>
+  </div>
+  <div class="prog-bar-bg"><div class="prog-bar-fill" id="progFill"></div></div>
+  <div class="stage" id="stage">
+    <canvas id="viewCanvas"></canvas>
+    <div class="empty-state" id="emptyState">
+      <div class="es-icon">&#x1F39E;</div>
+      <h2>Drop the first image here</h2>
+      <p>The whole folder is loaded and sorted by name.<br>
+      Dropping the <em>folder</em> itself skips the confirmation step.<br>
+      <span style="font-size:9.5px">PNG &middot; JPEG &middot; BMP &middot; WebP &middot; GIF &middot; AVIF</span></p>
+    </div>
+  </div>
+  <div class="transport">
+    <button id="btnFirst" title="First frame" disabled>&#x23EE;</button>
+    <button id="btnPrev" title="Previous frame" disabled>&#x25C0;</button>
+    <button class="play" id="btnPlay" title="Preview (space)" disabled>&#x25B6;</button>
+    <button id="btnNext" title="Next frame" disabled>&#x25B6;&#xFE0E;</button>
+    <button id="btnLast" title="Last frame" disabled>&#x23ED;</button>
+    <input type="range" id="scrub" min="0" max="0" value="0" disabled>
+    <span class="tp-read" id="tpRead">&mdash;</span>
+    <span class="tp-name" id="tpName"></span>
+  </div>
+  <div class="statusbar">
+    <span id="sbLeft"></span><span id="sbRight"></span>
+  </div>
+</div>
+
+</div><!-- /body -->
+
+<input type="file" id="dirInput" webkitdirectory directory multiple style="display:none">
+<div id="toast"></div>
+
+<script>
+'use strict';
+
+// ============================================================
+// STATE
+// ============================================================
+var IMG_EXT = ['png','jpg','jpeg','bmp','webp','gif','avif','jfif','pjpeg'];
+var EXT_MIME = {png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',jfif:'image/jpeg',pjpeg:'image/jpeg',
+                bmp:'image/bmp',webp:'image/webp',gif:'image/gif',avif:'image/avif'};
+
+var state = {
+  items:      [],      // {name, file, handle}  -- ALL images found, sorted
+  dirHandle:  null,    // FileSystemDirectoryHandle for the source folder (save-dialog anchor)
+  fileHandle: null,    // handle of the dropped file (fallback save-dialog anchor)
+  folderName: '',
+  autoName:   '',      // last filename this app derived from a folder name
+  srcW: 0, srcH: 0,    // dimensions of the first image
+  cur: 0,              // current index into the SELECTED frame list
+  playing: false,
+  rendering: false,
+  cancelReq: false
+};
+
+// Decoded-bitmap cache for preview. Values are Promises of ImageBitmap.
+var CACHE_MAX = 24;
+var cache = new Map();
+
+var NAT = new Intl.Collator(undefined, {numeric:true, sensitivity:'base'});
+
+// ============================================================
+// DOM
+// ============================================================
+function $(id){ return document.getElementById(id); }
+var stage=$('stage'), viewCanvas=$('viewCanvas'), emptyState=$('emptyState');
+var srcCount=$('srcCount'), srcDims=$('srcDims'), folderLbl=$('folderLbl'), folderPill=$('folderPill');
+var rangeFrom=$('rangeFrom'), rangeTo=$('rangeTo'), rangeStep=$('rangeStep'), rangeNote=$('rangeNote');
+var fpsIn=$('fps'), fpsPreset=$('fpsPreset'), durNote=$('durNote');
+var sizePreset=$('sizePreset'), outW=$('outW'), outH=$('outH'), fitMode=$('fitMode'), bgCol=$('bgCol');
+var qual=$('qual'), qualVal=$('qualVal'), qualNote=$('qualNote'), gopSec=$('gopSec');
+var ovText=$('ovText'), ovInterval=$('ovInterval'), ovStart=$('ovStart'), ovPos=$('ovPos');
+var ovSize=$('ovSize'), ovSizeVal=$('ovSizeVal'), ovCol=$('ovCol'), ovShadow=$('ovShadow');
+var outName=$('outName'), renderBtn=$('renderBtn'), cancelBtn=$('cancelBtn'), clearBtn=$('clearBtn');
+var exportNote=$('exportNote'), progFill=$('progFill'), statusLbl=$('statusLbl');
+var sbLeft=$('sbLeft'), sbRight=$('sbRight'), capBadge=$('capBadge');
+var btnFirst=$('btnFirst'), btnPrev=$('btnPrev'), btnPlay=$('btnPlay'), btnNext=$('btnNext'), btnLast=$('btnLast');
+var scrub=$('scrub'), tpRead=$('tpRead'), tpName=$('tpName'), dirInput=$('dirInput');
+
+var viewCtx = viewCanvas.getContext('2d');
+var work = document.createElement('canvas');       // offscreen frame at output size
+var workCtx = work.getContext('2d', {alpha:false});
+
+function showToast(m){ var t=$('toast'); t.textContent=m; t.classList.add('show');
+  clearTimeout(showToast._t); showToast._t=setTimeout(function(){t.classList.remove('show');},2200); }
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function fmtSz(b){ return b<1024?b+' B':b<1048576?(b/1024).toFixed(1)+' KB':b<1073741824?(b/1048576).toFixed(1)+' MB':(b/1073741824).toFixed(2)+' GB'; }
+function setProgress(f){ progFill.style.width = Math.max(0,Math.min(100, f*100)) + '%'; }
+function say(msg, cls){ sbLeft.innerHTML = cls ? '<span class="msg-'+cls+'">'+esc(msg)+'</span>' : esc(msg); }
+
+// ============================================================
+// CAPABILITY CHECK
+// ============================================================
+var hasWebCodecs = (typeof window.VideoEncoder === 'function' && typeof window.VideoFrame === 'function');
+(function(){
+  if(!hasWebCodecs){
+    capBadge.textContent = 'WebCodecs unavailable';
+    capBadge.className = 'cap bad';
+    capBadge.title = 'This browser cannot encode H.264 in-page. Use Chrome or Edge.';
+  } else {
+    capBadge.textContent = 'H.264 encoder ready';
+    capBadge.className = 'cap ok';
+  }
+})();
+
+// ============================================================
+// FOLDER ACQUISITION
+// ============================================================
+function extOf(name){ var i=name.lastIndexOf('.'); return i<0?'':name.slice(i+1).toLowerCase(); }
+function stemOf(name){ var i=name.lastIndexOf('.'); return i<0?name:name.slice(0,i); }
+function isImage(name){ return IMG_EXT.indexOf(extOf(name)) >= 0; }
+
+/* Sort by name, numerically aware, so xxx_9 sorts before xxx_10 even when the
+   digit counts differ. Leading zeros make this a non-issue for well-formed
+   sequences; this keeps ragged ones in order too. */
+function sortItems(list){ list.sort(function(a,b){ return NAT.compare(a.name, b.name); }); return list; }
+
+async function loadFromDirHandle(dh){
+  var list = [];
+  for await (var entry of dh.values()){
+    if(entry.kind === 'file' && isImage(entry.name)) list.push({name:entry.name, handle:entry, file:null});
+  }
+  state.dirHandle = dh;
+  await adoptList(list, dh.name);
+}
+
+/* Legacy drag-and-drop directory entry (works without File System Access API,
+   and without any permission prompt). readEntries() returns at most ~100
+   entries per call, so it must be drained in a loop until it returns empty. */
+function readAllEntries(reader){
+  return new Promise(function(resolve, reject){
+    var out = [];
+    (function step(){
+      reader.readEntries(function(batch){
+        if(!batch.length){ resolve(out); return; }
+        out = out.concat(Array.prototype.slice.call(batch));
+        step();
+      }, reject);
+    })();
+  });
+}
+async function loadFromDirEntry(de){
+  var entries = await readAllEntries(de.createReader());
+  var list = [];
+  for(var i=0;i<entries.length;i++){
+    var en = entries[i];
+    if(en.isFile && isImage(en.name)){
+      list.push({name:en.name, entry:en, handle:null, file:null});
+    }
+  }
+  // Resolve File objects up front (these entries are cheap handles, not data).
+  await Promise.all(list.map(function(it){
+    return new Promise(function(res){ it.entry.file(function(f){ it.file=f; res(); }, function(){ res(); }); });
+  }));
+  list = list.filter(function(it){ return it.file; });
+  await adoptList(list, de.name);
+}
+
+async function loadFromFileList(files, folderHint){
+  var list = [];
+  for(var i=0;i<files.length;i++){
+    var f = files[i];
+    if(isImage(f.name)) list.push({name:f.name, file:f, handle:null});
+  }
+  await adoptList(list, folderHint || '');
+}
+
+async function adoptList(list, folderName){
+  if(!list.length){ showToast('No images found in that folder.'); say('No supported image files were found.', 'warn'); return; }
+  sortItems(list);
+  clearCache();
+  state.items = list;
+  state.folderName = folderName || '';
+  state.cur = 0;
+  rangeFrom.value = 1;
+  rangeTo.value = list.length;
+  rangeStep.value = 1;
+  // Follow the folder name, but never overwrite one the user typed themselves.
+  if(!outName.value || outName.value === state.autoName){
+    state.autoName = folderName ? sanitiseName(folderName) : 'movie';
+    outName.value = state.autoName;
+  }
+
+  // Measure the first image; it sets the default output size.
+  try{
+    var bmp = await createImageBitmap(await fileOf(list[0]));
+    state.srcW = bmp.width; state.srcH = bmp.height;
+    bmp.close();
+  }catch(e){ state.srcW = 0; state.srcH = 0; }
+
+  // A new sequence always starts from its own dimensions -- otherwise a custom
+  // size left over from a previous folder silently distorts or letterboxes it.
+  sizePreset.value = 'src';
+  applySizePreset();
+  updateUI();
+  await showFrame(0);
+  say(list.length + ' image' + (list.length===1?'':'s') + ' loaded' + (folderName ? ' from "'+folderName+'"' : '') + '.', 'ok');
+}
+
+function sanitiseName(s){ return s.replace(/[\\/:*?"<>|]+/g,'_').replace(/\s+/g,'_').slice(0,80); }
+
+function fileOf(item){
+  if(item.file) return Promise.resolve(item.file);
+  if(item.handle) return item.handle.getFile();
+  return Promise.reject(new Error('No file for ' + item.name));
+}
+
+// -- Drop handling ------------------------------------------------------
+stage.addEventListener('dragover', function(e){ e.preventDefault(); stage.classList.add('drag-over'); });
+stage.addEventListener('dragleave', function(){ stage.classList.remove('drag-over'); });
+document.addEventListener('dragover', function(e){ e.preventDefault(); });
+document.addEventListener('drop', onDrop);
+
+async function onDrop(e){
+  e.preventDefault();
+  stage.classList.remove('drag-over');
+  if(state.rendering){ showToast('Busy rendering — cancel first.'); return; }
+  var dt = e.dataTransfer;
+  if(!dt) return;
+
+  // DataTransferItem members must be read synchronously inside the handler.
+  var items = Array.prototype.slice.call(dt.items || []).filter(function(i){ return i.kind === 'file'; });
+  var handlePromises = items.map(function(i){
+    return i.getAsFileSystemHandle ? i.getAsFileSystemHandle().catch(function(){ return null; }) : Promise.resolve(null);
+  });
+  var entries = items.map(function(i){ return i.webkitGetAsEntry ? i.webkitGetAsEntry() : null; });
+  var plainFiles = Array.prototype.slice.call(dt.files || []);
+
+  var handles = await Promise.all(handlePromises);
+
+  // 1. A folder was dropped -> enumerate it directly. No prompt at all.
+  var dh = handles.find(function(h){ return h && h.kind === 'directory'; });
+  if(dh){ say('Reading folder…'); await loadFromDirHandle(dh); return; }
+  var de = entries.find(function(en){ return en && en.isDirectory; });
+  if(de){ say('Reading folder…'); await loadFromDirEntry(de); return; }
+
+  // 2. Image file(s) dropped.
+  var fh = handles.find(function(h){ return h && h.kind === 'file'; });
+  state.fileHandle = fh || null;
+  state.dirHandle = null;
+
+  if(plainFiles.length > 1){
+    // Several images selected and dragged together: use exactly those.
+    await loadFromFileList(plainFiles, '');
+    return;
+  }
+
+  // 3. A single image. The browser gives no way to list its siblings from a
+  //    file handle, so open the directory picker anchored ON that file --
+  //    it lands in the containing folder, needing only a confirm click.
+  if(fh && window.showDirectoryPicker){
+    var dropped = null;
+    try{ dropped = await fh.getFile(); }catch(err){}
+    say('Confirm the folder to load every image beside "' + (dropped ? dropped.name : fh.name) + '"…');
+    try{
+      var picked = await window.showDirectoryPicker({ id:'pngtomp4-src', mode:'read', startIn: fh });
+      await loadFromDirHandle(picked);
+      return;
+    }catch(err){
+      if(err && err.name === 'AbortError'){
+        if(dropped){ await loadFromFileList([dropped], ''); say('Folder scan cancelled — only the dropped image was loaded.', 'warn'); }
+        return;
+      }
+      // No user activation (some browsers do not treat "drop" as a gesture),
+      // or the picker is unavailable: fall back to an explicit button.
+      if(dropped) await loadFromFileList([dropped], '');
+      say('Click "Choose folder…" to load the rest of the sequence.', 'warn');
+      showToast('Click "Choose folder…" in the sidebar to load the whole folder.');
+      return;
+    }
+  }
+
+  // 4. No File System Access API at all.
+  if(plainFiles.length){
+    await loadFromFileList(plainFiles, '');
+    say('Use "Choose folder…" to load the whole sequence in this browser.', 'warn');
+  }
+}
+
+// -- Explicit folder chooser -------------------------------------------
+$('pickFolderBtn').addEventListener('click', pickFolder);
+emptyState.addEventListener('click', pickFolder);
+async function pickFolder(){
+  if(state.rendering) return;
+  if(window.showDirectoryPicker){
+    try{
+      var opts = { id:'pngtomp4-src', mode:'read' };
+      if(state.dirHandle) opts.startIn = state.dirHandle;
+      else if(state.fileHandle) opts.startIn = state.fileHandle;
+      var dh = await window.showDirectoryPicker(opts);
+      say('Reading folder…');
+      await loadFromDirHandle(dh);
+    }catch(err){ if(err && err.name !== 'AbortError') showToast('Could not open folder: ' + err.message); }
+  } else {
+    dirInput.click();
+  }
+}
+dirInput.addEventListener('change', async function(){
+  var files = Array.prototype.slice.call(dirInput.files);
+  var hint = '';
+  if(files.length && files[0].webkitRelativePath) hint = files[0].webkitRelativePath.split('/')[0];
+  await loadFromFileList(files, hint);
+  dirInput.value = '';
+});
+
+// ============================================================
+// FRAME SELECTION (range + step)
+// ============================================================
+function selection(){
+  var n = state.items.length;
+  if(!n) return [];
+  var a = Math.max(1, Math.min(n, parseInt(rangeFrom.value,10) || 1));
+  var b = Math.max(1, Math.min(n, parseInt(rangeTo.value,10) || n));
+  if(b < a){ var t=a; a=b; b=t; }
+  var st = Math.max(1, parseInt(rangeStep.value,10) || 1);
+  var out = [];
+  for(var i = a-1; i <= b-1; i += st) out.push(i);
+  return out;
+}
+var sel = [];
+function refreshSelection(){
+  sel = selection();
+  scrub.max = Math.max(0, sel.length - 1);
+  if(state.cur >= sel.length) state.cur = Math.max(0, sel.length - 1);
+  scrub.value = state.cur;
+  var fps = getFps();
+  rangeNote.textContent = sel.length ? sel.length + ' of ' + state.items.length + ' images selected' : 'No frames selected';
+  durNote.textContent = sel.length ? 'Movie length: ' + fmtDur(sel.length / fps) + '  (' + sel.length + ' frames @ ' + fps + ' fps)' : '';
+}
+function getFps(){ var v = parseFloat(fpsIn.value); return (isFinite(v) && v > 0) ? Math.min(120, v) : 10; }
+function fmtDur(s){
+  if(s < 60) return s.toFixed(1) + ' s';
+  var m = Math.floor(s/60), r = s - m*60;
+  return m + ' min ' + r.toFixed(0) + ' s';
+}
+function fmtClock(s){
+  var neg = s < 0; s = Math.abs(s);
+  var h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s % 60;
+  var frac = Math.abs(sec - Math.round(sec)) > 1e-6;
+  var ss = frac ? sec.toFixed(1).padStart(4,'0') : String(Math.round(sec)).padStart(2,'0');
+  var str = (h ? h + ':' + String(m).padStart(2,'0') : String(m)) + ':' + ss;
+  return (neg ? '-' : '') + str;
+}
+
+// ============================================================
+// OUTPUT SIZE
+// ============================================================
+function even(v){ v = Math.round(v); return v - (v % 2); }
+function applySizePreset(){
+  var p = sizePreset.value;
+  if(p === 'custom') return;
+  if(!state.srcW){ return; }
+  var w, h;
+  if(p === 'src'){ w = state.srcW; h = state.srcH; }
+  else if(p === '1080p'){ w = 1920; h = 1080; }
+  else if(p === '720p'){ w = 1280; h = 720; }
+  else { w = parseInt(p,10); h = Math.round(state.srcH * w / state.srcW); }
+  outW.value = Math.max(16, even(w));
+  outH.value = Math.max(16, even(h));
+}
+function getOut(){
+  var w = Math.max(16, even(parseInt(outW.value,10) || state.srcW || 640));
+  var h = Math.max(16, even(parseInt(outH.value,10) || state.srcH || 480));
+  return {w:w, h:h};
+}
+
+// ============================================================
+// BITMAP CACHE
+// ============================================================
+function clearCache(){
+  cache.forEach(function(p){ p.then(function(b){ try{ b.close(); }catch(e){} }, function(){}); });
+  cache.clear();
+}
+function getBitmap(idx){
+  if(cache.has(idx)) return cache.get(idx);
+  var p = fileOf(state.items[idx]).then(function(f){ return createImageBitmap(f); });
+  cache.set(idx, p);
+  p.catch(function(){ cache.delete(idx); });
+  if(cache.size > CACHE_MAX){
+    var keys = Array.from(cache.keys());
+    for(var i=0; i<keys.length && cache.size > CACHE_MAX; i++){
+      var k = keys[i];
+      if(k === idx) continue;
+      var old = cache.get(k); cache.delete(k);
+      old.then(function(b){ try{ b.close(); }catch(e){} }, function(){});
+    }
+  }
+  return p;
+}
+function prefetch(from, count){
+  for(var i=1; i<=count; i++){
+    var j = from + i;
+    if(j < sel.length) getBitmap(sel[j]).catch(function(){});
+  }
+}
+
+// ============================================================
+// FRAME RENDERING
+// ============================================================
+function drawInto(ctx, bmp, W, H){
+  ctx.fillStyle = bgCol.value || '#000000';
+  ctx.fillRect(0, 0, W, H);
+  var mode = fitMode.value;
+  if(mode === 'stretch'){ ctx.drawImage(bmp, 0, 0, W, H); return; }
+  var s = (mode === 'cover') ? Math.max(W/bmp.width, H/bmp.height) : Math.min(W/bmp.width, H/bmp.height);
+  var w = bmp.width * s, h = bmp.height * s;
+  ctx.drawImage(bmp, (W - w)/2, (H - h)/2, w, h);
+}
+
+function overlayFor(seqPos, item){
+  var tpl = ovText.value;
+  if(!tpl) return '';
+  var interval = parseFloat(ovInterval.value); if(!isFinite(interval)) interval = 0;
+  var start = parseFloat(ovStart.value); if(!isFinite(start)) start = 0;
+  var elapsed = start + seqPos * interval;
+  return tpl.replace(/\{n\}/g, String(seqPos + 1))
+            .replace(/\{total\}/g, String(sel.length))
+            .replace(/\{name\}/g, item.name)
+            .replace(/\{stem\}/g, stemOf(item.name))
+            .replace(/\{t\}/g, fmtClock(elapsed));
+}
+
+function drawOverlay(ctx, W, H, text){
+  if(!text) return;
+  var px = Math.max(9, H * (parseFloat(ovSize.value)/100));
+  var pad = Math.round(px * 0.6);
+  ctx.save();
+  ctx.font = '500 ' + px.toFixed(1) + 'px "DM Mono", ui-monospace, Consolas, monospace';
+  ctx.textBaseline = 'alphabetic';
+  var pos = ovPos.value;
+  var x = (pos === 'br' || pos === 'tr') ? W - pad : pad;
+  var y = (pos === 'bl' || pos === 'br') ? H - pad : pad + px;
+  ctx.textAlign = (pos === 'br' || pos === 'tr') ? 'right' : 'left';
+  if(ovShadow.checked){
+    ctx.shadowColor = 'rgba(0,0,0,0.85)';
+    ctx.shadowBlur = Math.max(2, px * 0.18);
+    ctx.shadowOffsetX = Math.max(1, px * 0.05);
+    ctx.shadowOffsetY = Math.max(1, px * 0.05);
+  }
+  ctx.fillStyle = ovCol.value || '#ffffff';
+  ctx.fillText(text, x, y);
+  ctx.restore();
+}
+
+/* Renders selection position `pos` into the offscreen work canvas at output size. */
+async function renderToWork(pos){
+  var o = getOut();
+  if(work.width !== o.w || work.height !== o.h){ work.width = o.w; work.height = o.h; }
+  var idx = sel[pos];
+  var bmp = await getBitmap(idx);
+  drawInto(workCtx, bmp, o.w, o.h);
+  drawOverlay(workCtx, o.w, o.h, overlayFor(pos, state.items[idx]));
+  return o;
+}
+
+async function showFrame(pos){
+  refreshSelection();
+  if(!sel.length){ viewCanvas.style.display='none'; emptyState.style.display='flex'; return; }
+  pos = Math.max(0, Math.min(sel.length - 1, pos));
+  state.cur = pos;
+  scrub.value = pos;
+  var item = state.items[sel[pos]];
+  try{
+    var o = await renderToWork(pos);
+    if(viewCanvas.width !== o.w || viewCanvas.height !== o.h){ viewCanvas.width=o.w; viewCanvas.height=o.h; }
+    viewCtx.drawImage(work, 0, 0);
+    viewCanvas.style.display = 'block';
+    emptyState.style.display = 'none';
+  }catch(e){
+    say('Could not decode "' + item.name + '": ' + e.message, 'err');
+  }
+  tpRead.textContent = (pos+1) + ' / ' + sel.length + '   ' + fmtClock(pos / getFps());
+  tpName.textContent = item.name;
+  prefetch(pos, 4);
+}
+
+// ============================================================
+// PREVIEW PLAYBACK
+// ============================================================
+var playTimer = null;
+function setPlaying(on){
+  state.playing = on;
+  btnPlay.innerHTML = on ? '&#x23F8;' : '&#x25B6;';
+  btnPlay.title = on ? 'Pause (space)' : 'Preview (space)';
+  if(!on && playTimer){ clearTimeout(playTimer); playTimer = null; }
+  if(on) tick();
+}
+async function tick(){
+  if(!state.playing) return;
+  var t0 = performance.now();
+  var next = state.cur + 1;
+  if(next >= sel.length) next = 0;
+  await showFrame(next);
+  if(!state.playing) return;
+  var target = 1000 / getFps();
+  var wait = Math.max(0, target - (performance.now() - t0));
+  playTimer = setTimeout(tick, wait);
+}
+btnPlay.addEventListener('click', function(){ setPlaying(!state.playing); });
+btnFirst.addEventListener('click', function(){ setPlaying(false); showFrame(0); });
+btnLast.addEventListener('click', function(){ setPlaying(false); showFrame(sel.length-1); });
+btnPrev.addEventListener('click', function(){ setPlaying(false); showFrame(state.cur-1); });
+btnNext.addEventListener('click', function(){ setPlaying(false); showFrame(state.cur+1); });
+scrub.addEventListener('input', function(){ setPlaying(false); showFrame(parseInt(scrub.value,10)||0); });
+document.addEventListener('keydown', function(e){
+  if(/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
+  if(!sel.length || state.rendering) return;
+  if(e.code === 'Space'){ e.preventDefault(); setPlaying(!state.playing); }
+  else if(e.key === 'ArrowLeft'){ e.preventDefault(); setPlaying(false); showFrame(state.cur-1); }
+  else if(e.key === 'ArrowRight'){ e.preventDefault(); setPlaying(false); showFrame(state.cur+1); }
+  else if(e.key === 'Home'){ e.preventDefault(); setPlaying(false); showFrame(0); }
+  else if(e.key === 'End'){ e.preventDefault(); setPlaying(false); showFrame(sel.length-1); }
+});
+
+// ============================================================
+// ===================  MP4 WRITER (ISO BMFF)  ================
+// A plain, non-fragmented MP4 holding one H.264 video track, written with
+// the moov box AHEAD of mdat (the equivalent of ffmpeg's -movflags
+// +faststart) and 4:2:0 8-bit chroma -- the same container shape and pixel
+// format as CrystalVoidChannel's libx264 output, which is what Windows
+// Media Foundation (and therefore PowerPoint) is happiest with.
+// ============================================================
+function b_u8(){ return new Uint8Array(Array.prototype.slice.call(arguments)); }
+function b_u16(v){ return new Uint8Array([(v>>>8)&255, v&255]); }
+function b_u32(v){ v = v >>> 0; return new Uint8Array([(v>>>24)&255, (v>>>16)&255, (v>>>8)&255, v&255]); }
+function b_str(s){ var a=new Uint8Array(s.length); for(var i=0;i<s.length;i++) a[i]=s.charCodeAt(i)&255; return a; }
+function b_cat(parts){
+  var n=0, i;
+  for(i=0;i<parts.length;i++) n += parts[i].length;
+  var o=new Uint8Array(n), k=0;
+  for(i=0;i<parts.length;i++){ o.set(parts[i], k); k += parts[i].length; }
+  return o;
+}
+function b_box(type){
+  var body = b_cat(Array.prototype.slice.call(arguments, 1));
+  return b_cat([b_u32(body.length + 8), b_str(type), body]);
+}
+function b_full(type, version, flags){
+  var rest = Array.prototype.slice.call(arguments, 3);
+  return b_box.apply(null, [type, b_u8(version), b_u8((flags>>>16)&255, (flags>>>8)&255, flags&255)].concat(rest));
+}
+var UNITY_MATRIX = b_cat([b_u32(0x00010000), b_u32(0), b_u32(0),
+                          b_u32(0), b_u32(0x00010000), b_u32(0),
+                          b_u32(0), b_u32(0), b_u32(0x40000000)]);
+
+/**
+ * @param {Uint8Array[]} samples      encoded H.264 access units (AVCC length-prefixed)
+ * @param {number[]}     syncIdx      1-based indices of key frames
+ * @param {Uint8Array}   avcC         the encoder's decoder-configuration record
+ * @param {number} width,height       coded frame size
+ * @param {number} timescale, delta   media timescale and per-sample duration
+ */
+function buildMp4(samples, syncIdx, avcC, width, height, timescale, delta){
+  var n = samples.length;
+  var duration = n * delta;
+  var sizes = new Array(n);
+  var mdatPayload = 0;
+  for(var i=0;i<n;i++){ sizes[i] = samples[i].length; mdatPayload += sizes[i]; }
+
+  var ftyp = b_box('ftyp', b_str('isom'), b_u32(512),
+                   b_str('isom'), b_str('iso2'), b_str('avc1'), b_str('mp41'));
+
+  function moovWith(chunkOffset){
+    var mvhd = b_full('mvhd', 0, 0,
+      b_u32(0), b_u32(0), b_u32(timescale), b_u32(duration),
+      b_u32(0x00010000), b_u16(0x0100), new Uint8Array(10),
+      UNITY_MATRIX, new Uint8Array(24), b_u32(2));
+
+    var tkhd = b_full('tkhd', 0, 7,
+      b_u32(0), b_u32(0), b_u32(1), b_u32(0), b_u32(duration),
+      new Uint8Array(8), b_u16(0), b_u16(0), b_u16(0), b_u16(0),
+      UNITY_MATRIX, b_u32(width * 65536), b_u32(height * 65536));
+
+    var mdhd = b_full('mdhd', 0, 0,
+      b_u32(0), b_u32(0), b_u32(timescale), b_u32(duration),
+      b_u16(0x55C4), b_u16(0));                       // 0x55C4 = 'und'
+
+    var hdlr = b_full('hdlr', 0, 0, b_u32(0), b_str('vide'), new Uint8Array(12), b_str('VideoHandler\0'));
+    var vmhd = b_full('vmhd', 0, 1, b_u16(0), b_u16(0), b_u16(0), b_u16(0));
+    var dinf = b_box('dinf', b_full('dref', 0, 0, b_u32(1), b_full('url ', 0, 1)));
+
+    var avc1 = b_box('avc1',
+      new Uint8Array(6), b_u16(1),
+      b_u16(0), b_u16(0), b_u32(0), b_u32(0), b_u32(0),
+      b_u16(width), b_u16(height),
+      b_u32(0x00480000), b_u32(0x00480000),
+      b_u32(0), b_u16(1),
+      new Uint8Array(32),                              // compressorname
+      b_u16(0x0018), b_u16(0xFFFF),
+      b_box('avcC', avcC),
+      /* Without a colour description the decoder has to guess a matrix, and
+         guesses BT.601 for SD-height content -- while the WebCodecs encoder
+         works in BT.709. Measured on a 640x480 test render, that mismatch
+         alone moved rgb(0,40,200) to rgb(5,34,192) on the round trip.
+         Greyscale is immune (R=G=B leaves both chroma planes at zero), so it
+         only ever showed up in colour frames. nclx: BT.709 primaries /
+         transfer / matrix, limited (video) range. */
+      b_box('colr', b_str('nclx'), b_u16(1), b_u16(1), b_u16(1), b_u8(0)),
+      b_box('pasp', b_u32(1), b_u32(1)));
+
+    var stsd = b_full('stsd', 0, 0, b_u32(1), avc1);
+    var stts = b_full('stts', 0, 0, b_u32(1), b_u32(n), b_u32(delta));
+    var syncParts = [b_u32(syncIdx.length)];
+    for(var s=0;s<syncIdx.length;s++) syncParts.push(b_u32(syncIdx[s]));
+    var stss = b_full.apply(null, ['stss', 0, 0].concat(syncParts));
+    var stsc = b_full('stsc', 0, 0, b_u32(1), b_u32(1), b_u32(n), b_u32(1));
+    var szParts = [b_u32(0), b_u32(n)];
+    for(var z=0;z<n;z++) szParts.push(b_u32(sizes[z]));
+    var stsz = b_full.apply(null, ['stsz', 0, 0].concat(szParts));
+    var stco = b_full('stco', 0, 0, b_u32(1), b_u32(chunkOffset));
+
+    var stbl = b_box('stbl', stsd, stts, stss, stsc, stsz, stco);
+    var minf = b_box('minf', vmhd, dinf, stbl);
+    var mdia = b_box('mdia', mdhd, hdlr, minf);
+    var trak = b_box('trak', tkhd, mdia);
+    return b_box('moov', mvhd, trak);
+  }
+
+  // Two passes: stco entries are a fixed 4 bytes, so the moov length does not
+  // change when the real offset is substituted for the placeholder.
+  var moovProbe = moovWith(0);
+  var mdatStart = ftyp.length + moovProbe.length;      // byte offset of the mdat box header
+  var moov = moovWith(mdatStart + 8);
+  if(moov.length !== moovProbe.length) throw new Error('internal: moov size drifted between passes');
+  if(mdatStart + 8 + mdatPayload > 0xFFFFFFFF) throw new Error('Video exceeds 4 GB — reduce quality, size or frame count.');
+
+  var parts = [ftyp, moov, b_u32(mdatPayload + 8), b_str('mdat')];
+  for(var k=0;k<n;k++) parts.push(samples[k]);
+  return new Blob(parts, {type:'video/mp4'});
+}
+
+// ============================================================
+// H.264 LEVEL / CODEC STRING
+// ============================================================
+var LEVELS = [
+  {id:0x1E, fs:1620,   mbps:40500},    // 3.0
+  {id:0x1F, fs:3600,   mbps:108000},   // 3.1
+  {id:0x20, fs:5120,   mbps:216000},   // 3.2
+  {id:0x28, fs:8192,   mbps:245760},   // 4.0
+  {id:0x2A, fs:8704,   mbps:522240},   // 4.2
+  {id:0x32, fs:22080,  mbps:589824},   // 5.0
+  {id:0x33, fs:36864,  mbps:983040},   // 5.1
+  {id:0x34, fs:36864,  mbps:2073600},  // 5.2
+  {id:0x3C, fs:139264, mbps:4177920}   // 6.0
+];
+/* Every H.264 level tops out at 36864 macroblocks per frame (level 5.2/6.0
+   aside, which no browser encoder here accepts), i.e. about 4096x2304. Say so
+   BEFORE a long render rather than failing at the end of one. */
+var MAX_MB = 36864;
+function sizeProblem(w, h){
+  var mb = Math.ceil(w/16) * Math.ceil(h/16);
+  if(mb <= MAX_MB) return '';
+  // Shrink until it genuinely fits: a straight sqrt(MAX_MB/mb) scale can still
+  // land over the limit once each axis is rounded UP to whole macroblocks.
+  var scale = Math.sqrt(MAX_MB / mb), sw = w, sh = h;
+  for(var k = 0; k < 40; k++){
+    sw = Math.max(16, even(w * scale)); sh = Math.max(16, even(h * scale));
+    if(Math.ceil(sw/16) * Math.ceil(sh/16) <= MAX_MB) break;
+    scale *= 0.99;
+  }
+  return 'Too large for H.264: ' + w + '×' + h + ' exceeds the ~4096×2304 ceiling. ' +
+         'Try ' + sw + '×' + sh + ' or smaller.';
+}
+function codecCandidates(w, h, fps){
+  var mb = Math.ceil(w/16) * Math.ceil(h/16);
+  var mbps = mb * fps;
+  var out = [];
+  for(var i=0;i<LEVELS.length;i++){
+    var L = LEVELS[i];
+    if(L.fs >= mb && L.mbps >= mbps){
+      var hex = L.id.toString(16).toUpperCase().padStart(2,'0');
+      out.push('avc1.6400' + hex);   // High
+      out.push('avc1.4D00' + hex);   // Main
+      out.push('avc1.4200' + hex);   // Baseline
+    }
+  }
+  return out;
+}
+async function chooseConfig(w, h, fps, bitrate){
+  var problem = sizeProblem(w, h);
+  if(problem) throw new Error(problem);
+  var cands = codecCandidates(w, h, fps);
+  if(!cands.length) throw new Error('Frame size ' + w + '×' + h + ' at ' + fps + ' fps is beyond every H.264 level. Reduce the output size or the frame rate.');
+  var lastErr = null;
+  for(var i=0;i<cands.length;i++){
+    var cfg = {
+      codec: cands[i], width: w, height: h,
+      bitrate: bitrate, framerate: fps,
+      bitrateMode: 'variable',
+      latencyMode: 'quality',
+      avc: {format: 'avc'}
+    };
+    try{
+      var sup = await VideoEncoder.isConfigSupported(cfg);
+      if(sup && sup.supported) return sup.config || cfg;
+    }catch(e){ lastErr = e; }
+  }
+  throw new Error('This browser’s H.264 encoder refused every configuration for ' + w + '×' + h +
+                  ' at ' + fps + ' fps. Try a smaller output size' +
+                  (lastErr ? ' (' + lastErr.message + ')' : '') + '.');
+}
+
+// ============================================================
+// QUALITY -> BITRATE
+// ============================================================
+// bits per pixel per frame; 1 (small) .. 9 (near-lossless-looking)
+var BPP = [0.020, 0.035, 0.055, 0.080, 0.110, 0.150, 0.210, 0.300, 0.450];
+function bitrateFor(w, h, fps){
+  var q = Math.max(1, Math.min(9, parseInt(qual.value,10) || 5));
+  return Math.max(120000, Math.round(w * h * fps * BPP[q-1]));
+}
+function refreshQualNote(){
+  var q = Math.max(1, Math.min(9, parseInt(qual.value,10) || 5));
+  qualVal.textContent = q;
+  var o = getOut(), fps = getFps();
+  var br = bitrateFor(o.w, o.h, fps);
+  var words = ['very small','small','compact','compact','balanced','good','high','very high','maximum'];
+  var est = sel.length ? '  ·  ~' + fmtSz(br * (sel.length / fps) / 8) + ' estimated' : '';
+  qualNote.textContent = words[q-1] + '  ·  ' + (br/1e6).toFixed(2) + ' Mbps target' + est;
+}
+
+// ============================================================
+// RENDER TO MP4
+// ============================================================
+renderBtn.addEventListener('click', renderMovie);
+cancelBtn.addEventListener('click', function(){ state.cancelReq = true; cancelBtn.disabled = true; });
+
+async function renderMovie(){
+  if(state.rendering) return;
+  refreshSelection();
+  if(!sel.length){ showToast('No frames selected.'); return; }
+  if(!hasWebCodecs){
+    showToast('This browser has no WebCodecs H.264 encoder — use Chrome or Edge.');
+    say('WebCodecs is unavailable in this browser, so MP4 encoding is not possible here.', 'err');
+    return;
+  }
+  setPlaying(false);
+
+  var o = getOut(), fps = getFps();
+  var timescale = Math.round(fps * 1000);
+  var delta = 1000;
+  var bitrate = bitrateFor(o.w, o.h, fps);
+  var gopFrames = Math.max(1, Math.round(Math.max(0.2, parseFloat(gopSec.value) || 2) * fps));
+
+  state.rendering = true; state.cancelReq = false;
+  renderBtn.disabled = true; clearBtn.disabled = true;
+  cancelBtn.style.display = 'block'; cancelBtn.disabled = false;
+  setProgress(0);
+  say('Configuring encoder…');
+
+  var samples = [], syncIdx = [], avcC = null, encodeErr = null, bytes = 0;
+  var encoder = null;
+
+  try{
+    var cfg = await chooseConfig(o.w, o.h, fps, bitrate);
+    encoder = new VideoEncoder({
+      output: function(chunk, meta){
+        if(!avcC && meta && meta.decoderConfig && meta.decoderConfig.description){
+          var d = meta.decoderConfig.description;
+          avcC = (d instanceof ArrayBuffer) ? new Uint8Array(d) : new Uint8Array(d.buffer, d.byteOffset, d.byteLength).slice();
+        }
+        var buf = new Uint8Array(chunk.byteLength);
+        chunk.copyTo(buf);
+        samples.push(buf);
+        bytes += buf.length;
+        if(chunk.type === 'key') syncIdx.push(samples.length);
+      },
+      error: function(e){ encodeErr = e; }
+    });
+    encoder.configure(cfg);
+
+    statusLbl.textContent = 'Encoding…';
+    var t0 = performance.now();
+
+    for(var i=0; i<sel.length; i++){
+      if(state.cancelReq) throw new Error('__cancelled__');
+      if(encodeErr) throw encodeErr;
+
+      await renderToWork(i);                                   // decode + compose one image
+      var frame = new VideoFrame(work, {
+        timestamp: Math.round(i * 1e6 / fps),
+        duration:  Math.round(1e6 / fps)
+      });
+      encoder.encode(frame, {keyFrame: (i % gopFrames) === 0});
+      frame.close();
+
+      // Back-pressure: never let the encoder queue grow without bound, or the
+      // frames waiting in it -- not the source files -- become the memory cost.
+      while(encoder.encodeQueueSize > 6){
+        await new Promise(function(r){ setTimeout(r, 1); });
+        if(encodeErr) throw encodeErr;
+      }
+
+      if((i % 3) === 0 || i === sel.length - 1){
+        setProgress((i + 1) / sel.length * 0.97);
+        var el = (performance.now() - t0) / 1000;
+        var rate = (i + 1) / Math.max(0.001, el);
+        var eta = (sel.length - i - 1) / Math.max(0.001, rate);
+        statusLbl.textContent = 'Encoding ' + (i+1) + ' / ' + sel.length +
+          '  (' + rate.toFixed(1) + ' fps, ' + (eta > 1 ? '~' + fmtDur(eta) + ' left' : 'almost done') + ')';
+        sbRight.textContent = fmtSz(bytes) + ' encoded';
+        // Repaint the preview so the operator can watch it go past.
+        if(viewCanvas.width !== o.w || viewCanvas.height !== o.h){ viewCanvas.width=o.w; viewCanvas.height=o.h; }
+        viewCtx.drawImage(work, 0, 0);
+        viewCanvas.style.display = 'block'; emptyState.style.display = 'none';
+        await new Promise(function(r){ requestAnimationFrame(function(){ r(); }); });
+      }
+    }
+
+    statusLbl.textContent = 'Flushing encoder…';
+    await encoder.flush();
+    if(encodeErr) throw encodeErr;
+    if(!samples.length) throw new Error('The encoder produced no frames.');
+    if(!avcC) throw new Error('The encoder did not return an H.264 configuration record.');
+    if(!syncIdx.length) syncIdx = [1];
+
+    setProgress(0.985);
+    statusLbl.textContent = 'Writing MP4…';
+    var blob = buildMp4(samples, syncIdx, avcC, o.w, o.h, timescale, delta);
+    samples = null;
+
+    var fname = (sanitiseName(outName.value.trim()) || 'movie').replace(/\.mp4$/i, '') + '.mp4';
+    var saved = await saveBlob(blob, fname);
+    setProgress(1);
+    if(saved === 'saved'){
+      say('Saved ' + fname + ' — ' + sel.length + ' frames, ' + o.w + '×' + o.h + ', ' +
+          fmtDur(sel.length/fps) + ', ' + fmtSz(blob.size) + '.', 'ok');
+      showToast('Saved ' + fname);
+    } else if(saved === 'downloaded'){
+      say('Downloaded ' + fname + ' to your browser’s download folder — ' + fmtSz(blob.size) +
+          ' (this browser could not offer a folder picker).', 'warn');
+    } else {
+      say('Save cancelled — the encoded movie was discarded.', 'warn');
+    }
+    sbRight.textContent = fmtSz(blob.size);
+
+  }catch(err){
+    if(err && err.message === '__cancelled__'){ say('Render cancelled.', 'warn'); setProgress(0); }
+    else { console.error(err); say('Render failed: ' + (err && err.message ? err.message : err), 'err'); showToast('Render failed — see the status bar.'); setProgress(0); }
+  }finally{
+    try{ if(encoder && encoder.state !== 'closed') encoder.close(); }catch(e){}
+    state.rendering = false; state.cancelReq = false;
+    cancelBtn.style.display = 'none';
+    renderBtn.disabled = false; clearBtn.disabled = false;
+    statusLbl.textContent = sel.length + ' frame' + (sel.length===1?'':'s') + ' selected';
+    updateUI();
+    if(sel.length) showFrame(state.cur);
+  }
+}
+
+// ============================================================
+// SAVING
+// ============================================================
+async function saveBlob(blob, fname){
+  if(window.showSaveFilePicker){
+    try{
+      var opts = {
+        suggestedName: fname,
+        types: [{description:'MP4 video', accept:{'video/mp4':['.mp4']}}]
+      };
+      // Anchor the dialog on the folder the images came from.
+      if(state.dirHandle) opts.startIn = state.dirHandle;
+      else if(state.fileHandle) opts.startIn = state.fileHandle;
+      else opts.startIn = 'videos';
+      var fh = await window.showSaveFilePicker(opts);
+      var w = await fh.createWritable();
+      await w.write(blob);
+      await w.close();
+      return 'saved';
+    }catch(e){
+      if(e && e.name === 'AbortError') return 'cancelled';
+      // fall through to a plain download
+    }
+  }
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = fname;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+  return 'downloaded';
+}
+
+// ============================================================
+// UI WIRING
+// ============================================================
+function updateUI(){
+  var n = state.items.length;
+  refreshSelection();
+  srcCount.textContent = n ? n + ' image' + (n===1?'':'s') : 'none loaded';
+  srcDims.textContent = state.srcW ? state.srcW + ' × ' + state.srcH + ' px' : '—';
+  folderLbl.textContent = state.folderName ? state.folderName : (n ? '(loose files — no folder)' : 'No folder loaded');
+  folderPill.style.display = state.folderName ? 'inline-block' : 'none';
+  var can = sel.length > 0 && !state.rendering;
+  renderBtn.disabled = !can;
+  clearBtn.disabled = !n || state.rendering;
+  [btnFirst,btnPrev,btnPlay,btnNext,btnLast].forEach(function(b){ b.disabled = !can; });
+  scrub.disabled = !can;
+  if(!state.rendering) statusLbl.textContent = n ? (sel.length + ' frame' + (sel.length===1?'':'s') + ' selected') : 'Drop the first image anywhere to begin';
+  var o = getOut();
+  var prob = sizeProblem(o.w, o.h);
+  if(prob){
+    exportNote.innerHTML = '<span class="msg-err" style="color:var(--err)">' + esc(prob) + '</span>';
+    renderBtn.disabled = true;
+  } else {
+    exportNote.textContent = sel.length
+      ? o.w + '×' + o.h + ' · ' + getFps() + ' fps · ' + fmtDur(sel.length/getFps()) + ' · H.264 / MP4'
+      : '';
+  }
+  refreshQualNote();
+}
+
+[rangeFrom, rangeTo, rangeStep].forEach(function(el){
+  el.addEventListener('change', function(){ state.cur = 0; updateUI(); if(sel.length) showFrame(0); });
+});
+fpsIn.addEventListener('input', function(){ updateUI(); });
+fpsPreset.addEventListener('change', function(){ if(fpsPreset.value){ fpsIn.value = fpsPreset.value; fpsPreset.value=''; updateUI(); } });
+sizePreset.addEventListener('change', function(){ applySizePreset(); updateUI(); if(sel.length) showFrame(state.cur); });
+[outW, outH].forEach(function(el){
+  el.addEventListener('change', function(){ sizePreset.value='custom'; updateUI(); if(sel.length) showFrame(state.cur); });
+});
+[fitMode, bgCol, ovText, ovInterval, ovStart, ovPos, ovCol].forEach(function(el){
+  el.addEventListener('input', function(){ if(sel.length) showFrame(state.cur); });
+});
+ovShadow.addEventListener('change', function(){ if(sel.length) showFrame(state.cur); });
+ovSize.addEventListener('input', function(){ ovSizeVal.textContent = parseFloat(ovSize.value).toFixed(1)+'%'; if(sel.length) showFrame(state.cur); });
+qual.addEventListener('input', refreshQualNote);
+gopSec.addEventListener('change', refreshQualNote);
+
+clearBtn.addEventListener('click', function(){
+  if(state.rendering) return;
+  setPlaying(false);
+  clearCache();
+  state.items = []; state.dirHandle = null; state.fileHandle = null; state.folderName = '';
+  state.srcW = 0; state.srcH = 0; state.cur = 0;
+  outName.value = ''; state.autoName = '';
+  viewCanvas.style.display = 'none'; emptyState.style.display = 'flex';
+  tpRead.textContent = '—'; tpName.textContent = '';
+  sbLeft.textContent = ''; sbRight.textContent = '';
+  setProgress(0);
+  updateUI();
+});
+
+// ============================================================
+// INIT
+// ============================================================
+ovSizeVal.textContent = parseFloat(ovSize.value).toFixed(1)+'%';
+updateUI();
+
+// Exposed purely so the pipeline can be driven programmatically when testing.
+window.__p2m = {state:state, buildMp4:buildMp4, chooseConfig:chooseConfig, adoptList:adoptList,
+                renderMovie:renderMovie, saveBlob:saveBlob, selection:function(){return sel;}};
+</script>
+</body>
+</html>
