@@ -91,6 +91,9 @@ main{flex:1 1 auto;display:flex;min-height:0}
 #viewport{position:absolute;inset:0}
 #viewport canvas{display:block;width:100%;height:100%}
 #viewport.dragging{outline:2px dashed var(--accent);outline-offset:-8px}
+.guest-dropzone{border:2px dashed var(--border);border-radius:6px;padding:20px 10px;margin:6px 0;
+  text-align:center;font-size:11px;color:var(--ink-faint);transition:border-color .15s,background .15s}
+.guest-dropzone.dragging{border-color:var(--accent);background:var(--accent-soft)}
 #lassoSvg{position:absolute;inset:0;pointer-events:none;display:none;width:100%;height:100%}
 #lassoSvg.active{display:block}
 #lassoPath{stroke-width:1.5;stroke-dasharray:5 3}
@@ -2598,7 +2601,7 @@ select.sel:focus{border-color:var(--accent)}
     atomRoughness: DISPLAY_DEFAULTS.atomRoughness, atomMetalness: DISPLAY_DEFAULTS.atomMetalness, atomReflectivity: DISPLAY_DEFAULTS.atomReflectivity,
     guestAtoms: null, guestName: "", guestScale: 1.0, guestBatch: 0, showGuest: true,
     guestGroups: [], cutBonds: {}, cutBondSignatures: {}, extraBonds: {}, extraBondSignatures: {}, bondEditMode: false, bondEditPair: [],
-    bondSelectionEnabled: false, atomEditUiMode: null, lastClickedAtomUid: null,
+    bondSelectionEnabled: false, atomEditUiMode: null, lastClickedAtomUid: null, guestDragMode: false,
     undoStack: [], selectedBonds: {}, guestColorMode: "component",
     hostBondRadius: 0.12, guestBondRadius: 0.12,
     hostColors: {}, guestColors: {}, defaultColors: {}, page: "model",
@@ -2683,6 +2686,30 @@ select.sel:focus{border-color:var(--accent)}
   var pickDownX = 0, pickDownY = 0, pickMoved = false;
   var draggedLabel = null, draggedLabelDepth = 0, draggedLabelGrabOffset = null;
   var draggedAtom = null, draggedAtomIsGuest = false, draggedAtomDepth = 0, draggedAtomGrabOffset = null, draggedAtomMoved = false;
+  /* "Drag/reorient guest" mode -- draggedGuestAtoms is the rigid body grabbed
+     and moved/rotated together. For a guest with no host-symmetry ASU link
+     (draggedGuestLinked false -- see tryGrabGuestForDrag), that's every atom
+     sharing the grabbed atom's own .batch, moved by raw Cartesian delta with
+     no further consequence. For an ASU-linked guest (one registered into
+     state.cifAsymUnit by handleGuestCifDrop, so growth can generate further
+     symmetry-related copies of it -- see growSphereOfInclusion), it's only
+     the ONE symmetry instance actually clicked (same .batch AND the same
+     opIndex/cellI/cellJ/cellK), and each of its atoms is fed through
+     moveAtomTo() rather than moved directly: moveAtomTo already recovers the
+     asymmetric-unit fractional position from wherever this copy is dragged
+     to and cascades it to every OTHER copy sharing that atom's auIndex (see
+     its own comment), so a symmetry-related instance updates by the actual
+     crystallographic relationship (e.g. moving one inversion-related copy
+     toward the inversion centre moves its mate the same way) instead of
+     rigidly translating/rotating alongside it. draggedGuestDepth/
+     draggedGuestLastWorld are guestMove's own depth-locked-plane bookkeeping
+     (same idea as draggedAtomDepth/draggedAtomGrabOffset above, but
+     expressed as a running per-frame world-space delta instead of a single
+     grab offset, since a rigid group has no one point to keep glued to the
+     cursor); draggedGuestCentroid is guestRotate's own fixed pivot -- the
+     grabbed INSTANCE's centroid, not the whole component's -- computed once
+     at grab time. */
+  var draggedGuestAtoms = null, draggedGuestMoved = false, draggedGuestDepth = 0, draggedGuestLastWorld = null, draggedGuestCentroid = null, draggedGuestLinked = false;
 
   function syncControllerFromCamera() {
     var offset = new THREE.Vector3().subVectors(camera.position, camTarget);
@@ -3016,6 +3043,57 @@ select.sel:focus{border-color:var(--accent)}
     draggedAtomGrabOffset = world.clone().sub(ndcToWorldAtDepth(clientX, clientY, draggedAtomDepth));
     return true;
   }
+  /* "Drag/reorient guest" mode grabs whichever GUEST atom is under the
+     cursor. If it's ASU-linked (auIndex !== undefined -- registered by
+     handleGuestCifDrop, or grown from one that was), only the SAME SYMMETRY
+     INSTANCE (its own .batch, further narrowed to atoms sharing its exact
+     opIndex/cellI/cellJ/cellK) is grabbed -- a different, symmetry-related
+     instance of the same guest component is left for moveAtomTo()'s own
+     cascade to update correctly (see draggedGuestLinked's own comment
+     above), not dragged along rigidly. Otherwise (a guest with no host
+     symmetry to attach to) every atom sharing its .batch is grabbed as one
+     rigid body, same as before. Returns false if the click didn't land on a
+     guest atom, same fallback contract as tryGrabAtomForMove -- the camera
+     can still be orbited (or a different guest grabbed) without leaving the
+     mode. isCtrl picks rotate vs move for this WHOLE drag gesture, decided
+     once at grab time (matching how Ctrl is only ever read at drag-start
+     elsewhere in this file, e.g. lassoFragMode). */
+  function tryGrabGuestForDrag(clientX, clientY, isCtrl) {
+    var hit = resolveClickTarget(clientX, clientY);
+    if (!hit || !hit.atom || !hit.isGuest) return false;
+    var clicked = hit.atom;
+    draggedGuestLinked = clicked.auIndex !== undefined && state.isCif && !state.symmetryForgotten && state.cifFracToCart;
+    var group = (state.guestAtoms || []).filter(function (a) {
+      if (a.batch !== clicked.batch) return false;
+      if (!draggedGuestLinked) return true;
+      return a.opIndex === clicked.opIndex && a.cellI === clicked.cellI && a.cellJ === clicked.cellJ && a.cellK === clicked.cellK;
+    });
+    if (!group.length) return false;
+    draggedGuestAtoms = group; draggedGuestMoved = false;
+    var n = group.length, i, sx = 0, sy = 0, sz = 0;
+    for (i = 0; i < n; i++) { sx += group[i].x; sy += group[i].y; sz += group[i].z; }
+    var cx = sx / n, cy = sy / n, cz = sz / n;
+    if (isCtrl) {
+      dragMode = "guestRotate";
+      draggedGuestCentroid = [cx, cy, cz];
+    } else {
+      dragMode = "guestMove";
+      /* Depth-locked to the GROUP's own centroid, exactly like
+         tryGrabAtomForMove locks to the single grabbed atom -- "drag in the
+         screen's x-y plane" behaviour, reaching depth means rotating the
+         view first and continuing to drag, same as every other depth-locked
+         drag in this file. Tracked as a running per-frame world delta
+         (draggedGuestLastWorld), not a fixed grab offset, since a rigid
+         group has no single point to keep glued to the cursor -- each
+         frame just adds however far the unprojected cursor moved since
+         last frame to every atom in the group. */
+      var off = centroid();
+      var worldCentroid = new THREE.Vector3(cx + off[0], cy + off[1], cz + off[2]);
+      draggedGuestDepth = worldCentroid.project(activeCam).z;
+      draggedGuestLastWorld = ndcToWorldAtDepth(clientX, clientY, draggedGuestDepth);
+    }
+    return true;
+  }
   function onCanvasPointerDown(e) {
     if (state.videoExporting) return;
     if (state.autoRotating) stopAutoRotate(); /* manual interaction always wins over the auto-spin */
@@ -3033,6 +3111,9 @@ select.sel:focus{border-color:var(--accent)}
       } else if (state.atomEditUiMode === "move" && tryGrabAtomForMove(e.clientX, e.clientY)) {
         /* handled entirely inside tryGrabAtomForMove() -- dragMode is
            already set to "atomMove" */
+      } else if (state.guestDragMode && tryGrabGuestForDrag(e.clientX, e.clientY, e.ctrlKey)) {
+        /* handled entirely inside tryGrabGuestForDrag() -- dragMode is
+           already set to "guestMove" or "guestRotate" */
       } else {
         /* a label under the cursor takes priority over rotating -- grabbing a
            label to move it has to work regardless of where else on the
@@ -3105,6 +3186,64 @@ select.sel:focus{border-color:var(--accent)}
       if (Math.abs(e.clientX - pickDownX) > 4 || Math.abs(e.clientY - pickDownY) > 4) pickMoved = true;
       return;
     }
+    if (dragMode === "guestMove") {
+      /* Same depth-locked-plane idea as atomMove, but expressed as a running
+         per-frame world delta (see tryGrabGuestForDrag's own comment) added
+         to every atom in the grabbed instance. An ASU-linked instance feeds
+         its new position through moveAtomTo() atom by atom instead of
+         setting x/y/z directly, so a symmetry-related instance elsewhere
+         updates by the real crystallographic relationship rather than
+         translating along with this one (see draggedGuestLinked's own
+         comment); an unlinked guest still just translates rigidly. */
+      if (!draggedGuestMoved) { pushUndo(); draggedGuestMoved = true; }
+      var newWorld = ndcToWorldAtDepth(e.clientX, e.clientY, draggedGuestDepth);
+      var delta = newWorld.clone().sub(draggedGuestLastWorld);
+      draggedGuestLastWorld = newWorld;
+      for (var gi = 0; gi < draggedGuestAtoms.length; gi++) {
+        var gAtom = draggedGuestAtoms[gi];
+        if (draggedGuestLinked) moveAtomTo(gAtom, gAtom.x + delta.x, gAtom.y + delta.y, gAtom.z + delta.z);
+        else { gAtom.x += delta.x; gAtom.y += delta.y; gAtom.z += delta.z; }
+      }
+      renderStructure();
+      if (Math.abs(e.clientX - pickDownX) > 4 || Math.abs(e.clientY - pickDownY) > 4) pickMoved = true;
+      return;
+    }
+    if (dragMode === "guestRotate") {
+      /* Trackball-style rotation about the grabbed INSTANCE's own fixed
+         centroid (draggedGuestCentroid, set once at grab time) -- built from
+         the CAMERA's current world-space up/right axes (unlike dragMode
+         "rotate" above, which post-multiplies camOrient itself and so gets
+         away with using LOCAL (0,1,0)/(1,0,0) axes; rotating separate object
+         points needs those axes explicitly transformed into world space
+         first), so a horizontal drag always spins the guest about whatever
+         axis currently looks vertical on screen, regardless of the view's
+         own orientation -- same visual feel as orbiting the camera itself. */
+      var gdx = e.clientX - lastX, gdy = e.clientY - lastY;
+      lastX = e.clientX; lastY = e.clientY;
+      if (!draggedGuestMoved) { pushUndo(); draggedGuestMoved = true; }
+      var upW = new THREE.Vector3(0, 1, 0).applyQuaternion(camOrient);
+      var rightW = new THREE.Vector3(1, 0, 0).applyQuaternion(camOrient);
+      /* Unlike dragMode "rotate" above (which turns the CAMERA, so the scene
+         only appears to counter-rotate), this turns the object itself --
+         the same nominal -gdx/-gdy signs there would spin it backwards
+         relative to the drag, so this uses the opposite sign to make the
+         guest visibly follow the cursor like a grabbed trackball. */
+      var qYaw = new THREE.Quaternion().setFromAxisAngle(upW, gdx * ROTATE_SPEED * state.rotateSensitivity);
+      var qPitch = new THREE.Quaternion().setFromAxisAngle(rightW, gdy * ROTATE_SPEED * state.rotateSensitivity);
+      var qFrame = qYaw.multiply(qPitch);
+      var gcx = draggedGuestCentroid[0], gcy = draggedGuestCentroid[1], gcz = draggedGuestCentroid[2];
+      for (var ri = 0; ri < draggedGuestAtoms.length; ri++) {
+        var ga = draggedGuestAtoms[ri];
+        var gp = new THREE.Vector3(ga.x - gcx, ga.y - gcy, ga.z - gcz);
+        gp.applyQuaternion(qFrame);
+        var tx = gp.x + gcx, ty = gp.y + gcy, tz = gp.z + gcz;
+        if (draggedGuestLinked) moveAtomTo(ga, tx, ty, tz);
+        else { ga.x = tx; ga.y = ty; ga.z = tz; }
+      }
+      renderStructure();
+      if (Math.abs(e.clientX - pickDownX) > 4 || Math.abs(e.clientY - pickDownY) > 4) pickMoved = true;
+      return;
+    }
     var dx = e.clientX - lastX, dy = e.clientY - lastY;
     var prevX = lastX, prevY = lastY;
     lastX = e.clientX; lastY = e.clientY;
@@ -3159,6 +3298,13 @@ select.sel:focus{border-color:var(--accent)}
         setStatus("Moved " + draggedAtom.el + " atom.", false);
       }
       draggedAtom = null; draggedAtomGrabOffset = null;
+    } else if (dragMode === "guestMove" || dragMode === "guestRotate") {
+      if (draggedGuestMoved) {
+        updateGuestInfo(); refreshBondCleanupElements(); updateSelectionInfo();
+        repositionLabels();
+        setStatus((dragMode === "guestRotate" ? "Rotated" : "Moved") + " guest component.", false);
+      }
+      draggedGuestAtoms = null; draggedGuestCentroid = null; draggedGuestLastWorld = null; draggedGuestLinked = false;
     }
     if ((dragMode === "rotate" || dragMode === "roll") && pickMoved) { updateViewDirectionReadout(); repositionLabels(); }
     dragMode = null;
@@ -4924,7 +5070,7 @@ select.sel:focus{border-color:var(--accent)}
        snapping between compass directions as the dragged atom sweeps past
        others. That one case already has its own proper settle point at
        drag-release instead (onWindowPointerUp's atomMove branch). */
-    if (dragMode !== "atomMove") repositionLabels();
+    if (dragMode !== "atomMove" && dragMode !== "guestMove" && dragMode !== "guestRotate") repositionLabels();
     updateClipPlane(); /* fresh label sprites just got created -- reapply the current clip plane to them */
   }
   function updateLabelScales() {
@@ -7692,6 +7838,7 @@ select.sel:focus{border-color:var(--accent)}
   }
   function setVoidUiMode(mode) {
     state.voidUiMode = (state.voidUiMode === mode) ? null : mode;
+    if (state.voidUiMode) exitGuestDragMode(); /* the click-hijacking modes are mutually exclusive */
     state.voidSelectedFragments = {};
     state.voidSelectedChannels = {};
     renderVoidMeshes();
@@ -9250,6 +9397,7 @@ select.sel:focus{border-color:var(--accent)}
    * cancel it (see exitAtomEditMode() and its call sites). */
   function setAtomEditUiMode(mode) {
     state.atomEditUiMode = (state.atomEditUiMode === mode) ? null : mode;
+    if (state.atomEditUiMode) exitGuestDragMode(); /* the click-hijacking modes are mutually exclusive */
     syncAtomEditButtons();
   }
   function syncAtomEditButtons() {
@@ -9261,6 +9409,28 @@ select.sel:focus{border-color:var(--accent)}
     if (!state.atomEditUiMode) return;
     state.atomEditUiMode = null;
     syncAtomEditButtons();
+  }
+  /* "Drag/reorient guest" -- a third click-hijacking mode alongside grow
+     mode, bond-edit mode, and atom-edit create/move mode, following the
+     exact same red/ghost toggle convention (see setAtomEditUiMode's own
+     comment above). Mutually exclusive with all three: turning this one on
+     exits the others (below), and each of them exits this one in turn (see
+     their own call sites). */
+  function setGuestDragMode(on) {
+    state.guestDragMode = (typeof on === "boolean") ? on : !state.guestDragMode;
+    if (state.guestDragMode) { exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); }
+    var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = state.guestDragMode ? "move" : "";
+    syncGuestDragButton();
+  }
+  function syncGuestDragButton() {
+    var btn = document.getElementById("guestDragBtn");
+    if (btn) btn.className = "btn" + (state.guestDragMode ? " grow-active" : " ghost");
+  }
+  function exitGuestDragMode() {
+    if (!state.guestDragMode) return;
+    state.guestDragMode = false;
+    var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = "";
+    syncGuestDragButton();
   }
   function createAtomAtClick(clientX, clientY) {
     /* Placed on the plane through the camera's own orbit pivot (camTarget),
@@ -10233,7 +10403,7 @@ select.sel:focus{border-color:var(--accent)}
     state.bondEditMode = on;
     state.bondEditPair = [];
     renderBondEditHighlight();
-    if (on) exitGrowMode(); /* the two interactive click-hijacking modes are mutually exclusive */
+    if (on) { exitGrowMode(); exitGuestDragMode(); } /* the interactive click-hijacking modes are mutually exclusive */
     var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = on ? "crosshair" : "";
     updateBondEditModeBtnLabel();
   }
@@ -11196,7 +11366,40 @@ select.sel:focus{border-color:var(--accent)}
     renderStructure(); renderUnitCell(); refreshSymmetryUI();
     setStatus("Symmetry information discarded. Atoms, guests, and bonds can still be edited individually, but growth and automatic symmetry-linked changes are no longer available. This cannot be undone.", false);
   }
+  function syncGuestAsuRootsFromCurrentPositions() {
+    /* A guest atom registered into state.cifAsymUnit (see handleGuestCifDrop)
+       keeps growing from wherever it was when it was DROPPED, unless its
+       ASU record is refreshed -- "Drag/reorient guest" moves/rotates the
+       whole rigid component directly (a running Cartesian delta, see
+       onWindowPointerMove's own "guestMove"/"guestRotate" comments), it
+       never touches fx/fy/fz or state.cifAsymUnit the way moveAtomTo()
+       already does for a single dragged host atom. Rather than keep every
+       guest drag frame in sync (awkward once a component also contains its
+       OWN already-grown symmetry copies -- see this function's own limit
+       below), this is called once, fresh, right before growth runs: only
+       each guest's own untransformed root copy (opIndex/cell all zero,
+       exactly isAsuAtom's own definition) feeds back into its ASU entry,
+       since that's the one copy identity/no-offset always describes,
+       regardless of how many times it's been dragged since. A component
+       that's already been grown and is then rigidly moved/rotated as a
+       whole keeps its existing copies visually consistent with each other
+       (a rigid transform preserves every mutual distance/angle) but not
+       with the ORIGINAL symmetry operators relating them to the root any
+       more -- growing further from the new position is correct for new
+       copies; the already-placed ones are a known, accepted limitation
+       rather than something this quietly re-derives. */
+    if (!state.isCif || state.symmetryForgotten || !state.cifFracToCart || !state.guestAtoms) return;
+    for (var i = 0; i < state.guestAtoms.length; i++) {
+      var a = state.guestAtoms[i];
+      if (a.auIndex === undefined || a.opIndex !== 0 || a.cellI !== 0 || a.cellJ !== 0 || a.cellK !== 0) continue;
+      var f = K.cartToFrac(state.cifFracToCart, [a.x, a.y, a.z]);
+      a.fx = f[0]; a.fy = f[1]; a.fz = f[2];
+      var au = state.cifAsymUnit[a.auIndex];
+      if (au) { au.fx = f[0]; au.fy = f[1]; au.fz = f[2]; }
+    }
+  }
   function growFromSeed(seedAtom) {
+    syncGuestAsuRootsFromCurrentPositions();
     var candidates = findGrowthCandidates(seedAtom);
     if (!candidates.length) { setStatus("No new symmetry-connected atoms found from this atom.", true); return; }
     var added, label;
@@ -11208,6 +11411,7 @@ select.sel:focus{border-color:var(--accent)}
   }
   function growSphereOfInclusion(center, radius) {
     if (!state.isCif) { setStatus("Sphere of inclusion needs a CIF-based host.", true); return; }
+    syncGuestAsuRootsFromCurrentPositions();
     var au = state.cifAsymUnit, symops = state.cifSymops;
     var minCell = Math.min(state.cifCell.a, state.cifCell.b, state.cifCell.c);
     var cellRange = Math.max(5, Math.ceil(radius / minCell) + 1);
@@ -11359,7 +11563,13 @@ select.sel:focus{border-color:var(--accent)}
     if (saveCifBtn) saveCifBtn.disabled = !state.isCif || state.symmetryForgotten || !state.cifOriginalText;
     var auInfo = document.getElementById("auInfo");
     if (auInfo && state.isCif) {
-      auInfo.innerHTML = "<div>Asymmetric unit: " + state.cifAsymUnit.length + " atom" + (state.cifAsymUnit.length === 1 ? "" : "s") +
+      /* host-only count -- a guest atom registered into cifAsymUnit for
+         symmetry growth (isGuestAsu, see handleGuestCifDrop) is excluded,
+         matching "Currently displayed" right below it, which was already
+         state.atoms.length (host-only) rather than counting guest atoms too */
+      var hostAuCount = 0;
+      for (var hi = 0; hi < state.cifAsymUnit.length; hi++) if (!state.cifAsymUnit[hi].isGuestAsu) hostAuCount++;
+      auInfo.innerHTML = "<div>Asymmetric unit: " + hostAuCount + " atom" + (hostAuCount === 1 ? "" : "s") +
         "</div><div>Currently displayed: " + (state.atoms ? state.atoms.length : 0) + " atoms</div>";
     }
     refreshSymOpDropdown();
@@ -11927,7 +12137,7 @@ select.sel:focus{border-color:var(--accent)}
     if (state.cifAsymUnit) {
       for (var i = 0; i < state.cifAsymUnit.length; i++) {
         var au = state.cifAsymUnit[i];
-        if (au.deleted || au.el === "Xx") continue; /* Xx = a centroid marker never promoted to a real element */
+        if (au.deleted || au.el === "Xx" || au.isGuestAsu) continue; /* Xx = a centroid marker never promoted to a real element; isGuestAsu = a guest atom's own ASU entry (see handleGuestCifDrop), never part of the saved HOST file */
         out.push({ label: au.label, el: au.el, fx: au.fx, fy: au.fy, fz: au.fz, occ: (au.occ != null ? au.occ : 1.0), uiso: au.uiso, uij: au.uij });
       }
     }
@@ -12082,6 +12292,77 @@ select.sel:focus{border-color:var(--accent)}
     state.guestGroups.push({ id: id, name: name || ("Guest " + id), visible: true, color: GROUP_PALETTE[(id - 1) % GROUP_PALETTE.length] });
     return id;
   }
+  /* "Add guest" drop zone's own handler -- text is a CIF containing just one
+     guest molecule (its OWN cell, not the host's), dropped separately from
+     the main viewport's own CIF/RES/INS drop handling (which always means
+     "replace the host"). Every atom in the file's own _atom_site loop is
+     taken literally, one guest atom each -- this file's own cell/symmetry
+     (if it has any at all) is only ever used to convert ITS fractional
+     coordinates to Cartesian, never read as symmetry information itself.
+     The molecule's own centroid is recentred to the origin, so it always
+     starts from the same known, predictable point regardless of where it
+     happened to sit in its own source file -- ready to be dragged from
+     there (see "Drag/reorient guest" below) into whichever void/channel
+     it's being tested against.
+     Whenever the HOST still has usable symmetry, each of this guest's own
+     atoms is ALSO registered as a new entry in the host's own asymmetric
+     unit (state.cifAsymUnit), at identity/no cell offset -- exactly the
+     "untransformed ASU copy" convention every host atom already uses (see
+     isAsuAtom/deleteSelectedAtoms's own opIndex===0-and-no-cell check). This
+     is what lets Grow (a plain click or sphere of inclusion) generate
+     further symmetry-related copies of the guest, routed into this same
+     guest component by commitGrownAtoms()'s existing guestAuGroup lookup --
+     the same mechanism that already handles a HOST atom reassigned to guest
+     via "Move selection to". Each pushed entry is flagged isGuestAsu so the
+     handful of genuinely host-only consumers (Save CIF, the Structural
+     Parameters formula/ASU-count, the Host tab's own asymmetric-unit
+     readout) can filter it back out. With no host symmetry to attach to,
+     this falls back to the old untracked free rigid body (no auIndex at
+     all), and dragging/rotating it only ever moves this one placed copy. */
+  function handleGuestCifDrop(text, name) {
+    if (!state.atoms || !state.atoms.length) { setStatus("Load a host structure first.", true); return; }
+    var cif;
+    try { cif = K.parseCIF(text); } catch (e) { setStatus("Could not parse this guest CIF file.", true); return; }
+    if (!cif.atoms || !cif.atoms.length) { setStatus("No atom coordinates found in the guest CIF (expected an _atom_site_fract_x loop).", true); return; }
+    if (!(cif.cell.a > 0 && cif.cell.b > 0 && cif.cell.c > 0)) { setStatus("No usable unit cell parameters found in the guest CIF.", true); return; }
+    var M = K.fracToCartMatrix(cif.cell);
+    var n = cif.atoms.length, i, cart = [], sx = 0, sy = 0, sz = 0;
+    for (i = 0; i < n; i++) {
+      var c = K.fracToCart(M, [cif.atoms[i].fx, cif.atoms[i].fy, cif.atoms[i].fz]);
+      cart.push(c);
+      sx += c[0]; sy += c[1]; sz += c[2];
+    }
+    var ccx = sx / n, ccy = sy / n, ccz = sz / n;
+    var canRegisterAsu = !!(state.isCif && !state.symmetryForgotten && state.cifFracToCart && state.cifSymops && state.cifSymops.length);
+    var newAtoms = [];
+    for (i = 0; i < n; i++) {
+      var el = cif.atoms[i].el;
+      var atomObj = {
+        el: el, x: cart[i][0] - ccx, y: cart[i][1] - ccy, z: cart[i][2] - ccz,
+        r: K.vdw(el), cr: K.cov(el), color: K.cpk(el),
+        isCentroid: false, selected: false, hidden: false
+      };
+      if (canRegisterAsu) {
+        var f = K.cartToFrac(state.cifFracToCart, [atomObj.x, atomObj.y, atomObj.z]);
+        var auIndex = state.cifAsymUnit.length;
+        state.cifAsymUnit.push({ el: el, fx: f[0], fy: f[1], fz: f[2], occ: 1.0, isGuestAsu: true });
+        atomObj.auIndex = auIndex; atomObj.opIndex = 0; atomObj.cellI = 0; atomObj.cellJ = 0; atomObj.cellK = 0;
+        atomObj.fx = f[0]; atomObj.fy = f[1]; atomObj.fz = f[2];
+      }
+      newAtoms.push(atomObj);
+    }
+    pushUndo();
+    assignUids(newAtoms);
+    var groupId = createGuestGroup();
+    for (i = 0; i < newAtoms.length; i++) newAtoms[i].batch = groupId;
+    applyColors(newAtoms, state.guestColors);
+    state.guestAtoms = (state.guestAtoms || []).concat(newAtoms);
+    refreshGuestAtomColors();
+    recomputeViewOffset();
+    renderStructure(); updateGuestInfo(); buildGuestColorEditor(); buildGuestGroupsUI(); refreshBondCleanupElements(); refreshReassignElementOptions(); updateSelectionInfo();
+    setStatus("Added guest \"" + (name || "guest") + "\": " + n + " atom" + (n === 1 ? "" : "s") + ", centred at the origin" +
+      (canRegisterAsu ? " (grow it by symmetry from Grow > Mouse or Sphere of inclusion, same as a host atom)" : "") + ".", false);
+  }
   function refreshHostAtomColors(atomsSubset) {
     var atoms = atomsSubset || state.atoms;
     if (!atoms) return;
@@ -12201,7 +12482,12 @@ select.sel:focus{border-color:var(--accent)}
     function row(label, value, title) { return "<div class='rrow'" + (title ? " title=\"" + title + "\"" : "") + "><span>" + label + "</span><b>" + value + "</b></div>"; }
     var html = "";
     html += row("File", state.name || "&mdash;");
-    if (state.cifAsymUnit) html += row("Formula", formula(state.cifAsymUnit));
+    /* excludes any guest atom registered into cifAsymUnit for symmetry
+       growth (see handleGuestCifDrop's own isGuestAsu flag) -- this panel
+       summarizes the loaded HOST file itself; updateGuestInfo() already
+       reports the guest's own formula separately. */
+    var hostAsu = state.cifAsymUnit ? state.cifAsymUnit.filter(function (a) { return !a.isGuestAsu; }) : null;
+    if (hostAsu) html += row("Formula", formula(hostAsu));
     var sg = tags["_symmetry_space_group_name_H-M"] || tags["_space_group_name_H-M_alt"];
     if (sg) html += row("Space group", formatSpaceGroupSymbol(sg));
     /* _res_titl_space_group is this app's own key (see loadResText()), set
@@ -12224,8 +12510,8 @@ select.sel:focus{border-color:var(--accent)}
     html += row("Density", density ? (parseFloat(density).toFixed(3) + " g/cm" + U.cube) : "not recorded");
     var temp = tags["_diffrn_ambient_temperature"] || tags["_cell_measurement_temperature"];
     html += row("Temperature", temp ? (parseFloat(temp).toFixed(0) + " K") : "unknown");
-    if (state.cifAsymUnit) {
-      html += row("Atoms in ASU", state.cifAsymUnit.length);
+    if (hostAsu) {
+      html += row("Atoms in ASU", hostAsu.length);
       var anisoCount = 0, npdCount = 0;
       for (var ai = 0; ai < state.cifAsymUnit.length; ai++) {
         var auAtom = state.cifAsymUnit[ai];
@@ -13449,6 +13735,44 @@ select.sel:focus{border-color:var(--accent)}
     guestTab.appendChild(el("div", "hint", "Guest components:"));
     var ggbox = el("div", "sbody"); ggbox.id = "guestGroupsBox"; ggbox.innerHTML = "<div class='dim'>No guest components yet.</div>"; guestTab.appendChild(ggbox);
 
+    /* ---- Add guest ----
+       Simulates dropping a whole extra guest molecule into the structure,
+       for testing whether a real guest fits a void/channel this app has
+       already found. Deliberately a SEPARATE drop zone from the main
+       viewport's own CIF/RES/INS drop handling (which always means "replace
+       the host") -- its own dragover/drop listeners stop propagation so a
+       guest CIF dropped here can never be mistaken for a new host. See
+       handleGuestCifDrop()'s own comment for what "just one guest molecule"
+       means and why it's placed as a free (non-symmetry-tracked) rigid
+       body. */
+    var addGuestTab = subsection(structC, "Add guest", false, function (isOpen) { if (!isOpen) exitGuestDragMode(); });
+    addGuestTab.parentElement.id = "addGuestSection";
+    var addGuestHint = el("div", "hint");
+    addGuestHint.textContent = "Drop a CIF containing just one guest molecule here to add it as a new guest component, centred at the origin.";
+    addGuestTab.appendChild(addGuestHint);
+    var guestDropZone = el("div", "guest-dropzone", "Drop guest CIF here");
+    addGuestTab.appendChild(guestDropZone);
+    ["dragenter", "dragover"].forEach(function (ev) {
+      guestDropZone.addEventListener(ev, function (e) { e.preventDefault(); e.stopPropagation(); guestDropZone.classList.add("dragging"); });
+    });
+    guestDropZone.addEventListener("dragleave", function (e) { e.preventDefault(); e.stopPropagation(); guestDropZone.classList.remove("dragging"); });
+    guestDropZone.addEventListener("drop", function (e) {
+      e.preventDefault(); e.stopPropagation();
+      guestDropZone.classList.remove("dragging");
+      var f = e.dataTransfer.files[0]; if (!f) return;
+      var rd = new FileReader();
+      rd.onload = function () { handleGuestCifDrop(rd.result, f.name); };
+      rd.readAsText(f);
+    });
+    /* "Drag/reorient guest" -- see setGuestDragMode()'s own comment for the
+       mutual-exclusion contract shared with grow mode/bond-edit mode/atom-
+       edit mode, and tryGrabGuestForDrag()/onWindowPointerMove's own
+       comments for the actual drag/rotate mechanics. */
+    var guestDragRow = el("div", "btnrow");
+    var guestDragBtn = button(guestDragRow, "Drag/reorient guest", "ghost", function () { setGuestDragMode(); });
+    guestDragBtn.id = "guestDragBtn";
+    addGuestTab.appendChild(guestDragRow);
+
     /* ---- Create/Move Atoms ----
        Click-driven, mode-based atom placement/repositioning -- see
        setAtomEditUiMode()/createAtomAtClick()/moveAtomTo() for the mechanics.
@@ -13460,7 +13784,7 @@ select.sel:focus{border-color:var(--accent)}
        something atoms are explicitly moved into afterwards (see "Move
        selection to" above), not a place new atoms start out. */
     var createElRow = el("div", "ctl-inline");
-    createElRow.appendChild(el("label", "plain", "Element"));
+    createElRow.appendChild(el("label", "plain", "New atom type"));
     var createSel = document.createElement("select"); createSel.className = "sel sel-narrow"; createSel.id = "createAtomEl";
     createElRow.appendChild(createSel);
     atomEditTab.appendChild(createElRow);
@@ -13498,8 +13822,8 @@ select.sel:focus{border-color:var(--accent)}
 
     /* ---- Atoms ---- */
     /* Order matches MG's Structure > Edit atoms exactly where the same
-       controls exist: Select all/Clear selection, Delete selection/Undo
-       delete, Move to ASU/Generate centroid, a repeated "Delete all
+       controls exist: Select all/Clear selection, Delete selection/Undo,
+       Move to ASU/Generate centroid, a repeated "Delete all
        symmetry-generated atoms", then Reassign element to. Hide selected/
        Unhide all is Display-only now (MG doesn't duplicate it here either).
        CV-only additions (host/guest "Move selection to", "Calculate
@@ -13511,7 +13835,7 @@ select.sel:focus{border-color:var(--accent)}
     atomsTab.appendChild(selAllRow);
     var erow = el("div", "btnrow");
     button(erow, "Delete selection", "ghost", deleteSelectedAtoms);
-    button(erow, "Undo delete", "ghost", undoEdit);
+    button(erow, "Undo", "ghost", undoEdit);
     atomsTab.appendChild(erow);
     var actionGrid = el("div", "btnrow");
     var moveToAsuBtn = button(actionGrid, "Move to ASU", "ghost", moveSelectedAtomsToAsu);
@@ -13812,7 +14136,7 @@ select.sel:focus{border-color:var(--accent)}
 
     /* Order matches MG's Structure > Edit bonds where the same controls
        exist: Allow bond selection, readout, Select all/Clear selection, Cut
-       selected/Undo cut, Reinstate all bonds, Clear all enforced bonds,
+       selected/Undo, Reinstate all bonds, Clear all enforced bonds,
        divider, Interactive bond editor, then the bulk delete-by-element-
        pair-and-range controls ending in Delete matching bonds. "Show H
        bonds" moved to Display, inline with Show unit cell (matching MG's
@@ -13833,7 +14157,7 @@ select.sel:focus{border-color:var(--accent)}
     bondsTab.appendChild(bondSelAllRow);
     var bondRow = el("div", "btnrow");
     button(bondRow, "Cut selected", "ghost", cutSelectedBonds);
-    button(bondRow, "Undo cut", "ghost", undoEdit);
+    button(bondRow, "Undo", "ghost", undoEdit);
     bondsTab.appendChild(bondRow);
     var reinstateRow = el("div", "btnrow");
     button(reinstateRow, "Reinstate all bonds", "ghost", reinstateAllBonds);
@@ -14225,7 +14549,7 @@ select.sel:focus{border-color:var(--accent)}
 
     var growModeBtn = button(mouseTab, "", "prominent", function () {
       state.growMode = !state.growMode;
-      if (state.growMode) exitBondEditMode();
+      if (state.growMode) { exitBondEditMode(); exitGuestDragMode(); }
       var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = state.growMode ? "crosshair" : "";
       updateGrowModeBtnLabel();
     });
@@ -14676,6 +15000,16 @@ select.sel:focus{border-color:var(--accent)}
       if (vp && vp.contains(e.target)) return;
       exitAtomEditMode();
     }, true);
+    /* Same convention for guest drag/reorient mode: any click outside the
+       Add guest subsection or the viewport cancels it. */
+    document.addEventListener("click", function (e) {
+      if (!state.guestDragMode) return;
+      var sec = document.getElementById("addGuestSection");
+      var vp = document.getElementById("viewport");
+      if (sec && sec.contains(e.target)) return;
+      if (vp && vp.contains(e.target)) return;
+      exitGuestDragMode();
+    }, true);
     window.addEventListener("keydown", function (e) {
       /* spacebar and the rotation keys only act when focus isn't in a control
          (a text box, dropdown, button, etc.) -- otherwise let them behave
@@ -14808,9 +15142,8 @@ select.sel:focus{border-color:var(--accent)}
          confirm-before-overwrite path as the "Load model..." button, and a
          dropped .MAC file, which goes into the Macro memo (same confirm-
          before-overwrite path loadMacroFile()'s own picker uses) instead of
-         replacing the structure. A guest is created afterwards by selecting
-         atoms and using "Move selection to" > New guest group, not by
-         dropping a separate file. */
+         replacing the structure. A guest-only CIF goes to its own drop zone
+         under Structure > Add guest (see handleGuestCifDrop) instead of here. */
       var f = e.dataTransfer.files[0]; if (!f) return;
       if (/\.mac$/i.test(f.name)) { handleMacroFileSelected(f); return; }
       var item = e.dataTransfer.items && e.dataTransfer.items[0];
@@ -14948,12 +15281,12 @@ select.sel:focus{border-color:var(--accent)}
       "<p>This is also how disordered guests with more than one component are separated: select one component's atoms and move them to a new guest group, then repeat for each remaining component. Guest components are listed in the <b>Guest</b> tab with an atom count and their own show/hide checkbox, and \"Select\" there re-selects all of a component's atoms at once -- useful for correcting a mistake by moving atoms out of the wrong group. If deleting or moving atoms empties a component completely, it disappears from the list and the remaining ones are renumbered so there's no gap -- the numbers are just labels and aren't used for anything else, so this has no other effect. Ctrl-click's whole-fragment shortcut can mis-select across two disorder components that happen to sit close together, since that's indistinguishable from a real bond by geometry alone; when that happens, select atom by atom instead.</p>" +
       "<h3>Cutting a bond</h3>" +
       "<p>Click directly on a bond (rather than an atom) to select it, then \"Cut selected\" to sever it. This only ever affects what's drawn and what ctrl-click's fragment selection follows. It exists for the one case nothing automatic can fix: two atoms that happen to sit a normal bond-length apart even though they shouldn't be connected (most often two disorder components overlapping), which is otherwise indistinguishable from a real bond. Bonds shorter than a physically reasonable minimum are already excluded automatically and never need cutting. For a CIF-based structure, cutting a bond also cuts every symmetry-equivalent copy of it -- the same pair of asymmetric unit atoms at exactly the same distance elsewhere in the structure -- rather than just the one instance clicked.</p>" +
-      "<p>\"Delete matching bonds\" does the same thing in bulk: choose two elements (either can be \"Any\" to match regardless of what it's bonded to), a distance range, and whether to cut bonds outside or inside that range, and every current bond between an atom of each chosen element (across host and guest together) meeting that criterion is cut in one action. This needs care -- it's easy to remove bonds you meant to keep if the range is too narrow, or miss the ones you meant to cut if it's too wide. If nothing gets cut, the status message says why: either matching bonds exist but sit outside the range given (showing their actual distance), or no such bond exists at all -- which can happen even when two atoms look close enough, since a minimum realistic bond length is always enforced and anything closer than that is never treated as a bond in the first place, in rendering or in this cleanup, consistently. \"Undo cut\" reverses a cut like any other edit if the result isn't what was intended.</p>" +
+      "<p>\"Delete matching bonds\" does the same thing in bulk: choose two elements (either can be \"Any\" to match regardless of what it's bonded to), a distance range, and whether to cut bonds outside or inside that range, and every current bond between an atom of each chosen element (across host and guest together) meeting that criterion is cut in one action. This needs care -- it's easy to remove bonds you meant to keep if the range is too narrow, or miss the ones you meant to cut if it's too wide. If nothing gets cut, the status message says why: either matching bonds exist but sit outside the range given (showing their actual distance), or no such bond exists at all -- which can happen even when two atoms look close enough, since a minimum realistic bond length is always enforced and anything closer than that is never treated as a bond in the first place, in rendering or in this cleanup, consistently. \"Undo\" reverses a cut like any other edit if the result isn't what was intended.</p>" +
       "<p><b>Interactive bond editor</b> (Structure &gt; Edit bonds) is a second way to reach the same cut behaviour, plus the one thing plain bond-clicking can't do: force a bond into existence between two atoms that aren't actually close enough to bond. Turn it on, then click two atoms in sequence -- clicking the same pending atom again un-picks it; once a second, different atom is picked, the pair resolves immediately, cutting the bond between them if one already exists or forcing one into existence (regardless of distance) if not, and the pending pair clears either way, ready for a fresh pick. For a CIF-based structure, a forced bond is cascaded to every symmetry-equivalent pair the same way a cut is -- present now or grown later. \"Clear all enforced bonds\" is the dedicated opposite of this (distinct from \"Reinstate all bonds\", which only undoes cuts): it removes every manually-forced bond in one step, leaving any bond that's also genuinely distance-based unaffected, since that one is found on its own merits regardless. Turning on grow mode (Grow &gt; Mouse) automatically turns this off and vice versa, since both hijack a plain click for their own purpose.</p>" +
       "<h3>Show H bonds</h3>" +
       "<p>Unchecked by default. When on, every currently-displayed atom (host and guest together, whichever layers are visible) is scanned for probable hydrogen bonds and each one found is drawn as a short red dashed line. This is a geometric estimate, not a quantum-mechanical one: a hydrogen counts as a candidate donor if it's covalently bonded to exactly one N, O, S, or Cl atom, and a bond is drawn to any other N, O, S, or Cl atom that sits within a plausible contact distance of that hydrogen and roughly in line with its own donor -- the same two criteria (distance and near-linearity) tools like Mercury use for a first pass, so \"probable\" is the right word for what's shown rather than a certainty. It updates automatically whenever the structure changes, the same as ordinary bonds.</p>" +
       "<h3>Undo</h3>" +
-      "<p>\"Undo delete\" (Structure &gt; Edit atoms) and \"Undo cut\" (Structure &gt; Edit bonds) both trigger the same single shared history, so either one steps back through moving atoms, deleting atoms, and cutting bonds, in that order, one step at a time -- whichever of the two happens to be at hand works, regardless of which kind of edit is actually being undone. It does not cover loading files or changing element/display settings, which have their own separate reset controls.</p>" +
+      "<p>\"Undo\" (Structure &gt; Edit atoms) and \"Undo\" (Structure &gt; Edit bonds) both trigger the same single shared history, so either one steps back through moving atoms, deleting atoms, and cutting bonds, in that order, one step at a time -- whichever of the two happens to be at hand works, regardless of which kind of edit is actually being undone. It does not cover loading files or changing element/display settings, which have their own separate reset controls.</p>" +
       "<h3>Keeping symmetry consistent</h3>" +
       "<p>For a CIF-based structure, three things are always kept true of every asymmetric unit position, no matter which of its symmetry images is actually acted on: its element, and whether it belongs to host or a particular guest, are properties of the position itself, not of one copy of it. Changing either one on any single image -- the original or a symmetry-grown copy -- applies the same change to every other currently-displayed image of that same position automatically. \"Reassigned 3 atoms to Cl (2 symmetry-related atoms updated automatically)\" and similar messages confirm when this has happened.</p>" +
       "<p>Deletion works slightly differently, since it's reasonable to want either behaviour depending on what's being removed. Deleting the untransformed copy of an asymmetric unit atom -- the one with no symmetry operation or cell offset applied, effectively \"the atom as it appears in the asymmetric unit itself\" -- removes it from the asymmetric unit entirely: every symmetry image of it is deleted too, and growth will never regenerate it afterwards. Deleting a symmetry-grown copy on its own, leaving the asymmetric unit atom in place, is treated as a simple local edit instead -- just that one image goes, the asymmetric unit position is untouched, and growing again from a nearby atom can still recreate that same image later. \"Delete all symmetry-generated atoms\" and Undo both work the same way regardless of which of these removed anything. Because the whole-asymmetric-unit case is easy to trigger without meaning to, deleting a selection that includes one asks for confirmation first, naming how many atoms are involved before anything is actually removed.</p>" +
