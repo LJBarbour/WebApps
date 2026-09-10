@@ -2426,14 +2426,26 @@ select.sel:focus{border-color:var(--accent)}
 
   var scene, camera, trueOrthoCam, pseudoOrthoCam, activeCam, renderer;
   var clipPlane; /* single global cutaway plane (Display > Clipping Plane) -- its normal always tracks the current view direction, see updateClipPlane() */
-  var atomsGroup, bondsGroup, surfaceGroup, guestAtomsGroup, guestBondsGroup, hbondsGroup, selectionGroup, unitCellGroup, bondEditGroup, voidGroup, ringGroup, molSurfaceGroup, labelGroup;
+  var atomsGroup, bondsGroup, surfaceGroup, guestAtomsGroup, guestBondsGroup, hbondsGroup, selectionGroup, unitCellGroup, bondEditGroup, voidGroup, ringGroup, molSurfaceGroup, labelGroup, coordPolyGroup, coordPolyGuestGroup, molNeighborGroup;
+  /* Grow > Molecular neighbourhood's own preview shell -- NOT part of the
+     model (never touches state.atoms/state.guestAtoms) and deliberately
+     NOT recomputed on every render the way bonds/H-bonds are: the
+     candidate search (every asymmetric-unit atom x every symmetry operator
+     x a window of neighbouring cells, exactly buildBaseSymmetryImages'/
+     growSphereOfInclusion's own approach) is too expensive to redo on
+     every frame a live atom drag would otherwise trigger. Recomputed only
+     on the three events that could actually change it: turning the mode
+     on, changing the radius, and committing a fragment (see
+     refreshMolecularNeighborhood()); renderMolecularNeighborhood() just
+     redraws this cached list cheaply. */
+  var molNeighborAtoms = [];
   var voidMeshes = {}; /* compId -> array of THREE.Mesh currently in voidGroup, for the cheap visibility-toggle path */
   var nextMolSurfaceId = 1;
   var autoRotateLastT = null; /* last requestAnimationFrame timestamp seen while autorotating, for frame-rate-independent speed; not part of state, purely transient */
   var nextVoidCopyId = 1;
   var VOID_SELECT_COLOR_ACTIVE = 0xFACC15, VOID_SELECT_COLOR_INACTIVE = 0x3B82F6;
   var lightRig, keyLight, fillLight, rimLight;
-  var sphereGeo = null, selSphereGeo = null, highlightCylGeo = null, matCache = {}, npdCubeGeo = null;
+  var sphereGeo = null, selSphereGeo = null, highlightCylGeo = null, matCache = {}, npdCubeGeo = null, coordPolyEdgeGeo = null;
   var ELLIPSOID_PROB_SCALE = { "10": 0.7679, "30": 1.1953, "50": 1.5382, "75": 2.0275, "90": 2.5003, "95": 2.7955, "99": 3.3682 };
   /* every choice here is either a common system font needing no loading at
      all, or Fraunces (already loaded -- see the Google Fonts link in <head>),
@@ -2597,7 +2609,32 @@ select.sel:focus{border-color:var(--accent)}
     showLabels: false, labelSize: 2.6, labelColor: 0x2C2416, labelHalo: true,
     labelFont: "Arial, Helvetica, sans-serif",
     showUnitCell: true, growMode: false, growUnit: "frag", growBySphere: false, sphereRadius: 4.0,
+    /* Grow > Molecular neighbourhood -- see setMolNeighborMode()'s own
+       comment for the mutual-exclusion contract shared with the other
+       click-hijacking modes, and computeMolecularNeighborhood()'s for what
+       molNeighborRadius actually controls. */
+    molNeighborMode: false, molNeighborRadius: 2.7,
     unitCellColor: 0x8a7a5c, unitCellThickness: 0.04, unitCellAxisColors: true, showUnitCellLabels: true, showOnlyAsu: false, symmetryForgotten: false,
+    /* Coordination polyhedra (Style > Coordination Polyhedra) -- see
+       computeCoordinationPolyhedra()'s own comment for the ligand-finding
+       rule (formally bonded, same test as ordinary bonds). coordPolyColorMode
+       "element" colours each polyhedron by its own central metal atom's
+       current colour (matching CPK convention for polyhedron rendering
+       elsewhere); "single" uses coordPolyColor for all of them, same "by
+       element vs one colour" choice already offered for bonds (see
+       buildBondColorByRow). */
+    showCoordPolyhedra: false, coordPolyOpacity: 1.0, coordPolyColorMode: "element", coordPolyColor: 0xC9A227, coordPolyEdgeThickness: 0.035,
+    /* Visual Effects > Material's roughness/metalness/reflection-strength
+       sliders only ever drove atoms/bonds (elMaterial's shared matCache) --
+       coordination polyhedra, the molecular surface, and void/channel
+       surfaces each keep their own fixed look regardless, which is often
+       exactly what's wanted (a glossy metal atom next to a matte, obviously-
+       not-physical surface reads as clearer, not worse). These three
+       booleans opt a given category IN to following the same Material
+       settings instead, one at a time; all default off, so nothing already
+       on screen changes look until asked for. See updateMaterialAppearance()
+       for where this is actually applied. */
+    materialApplyCoordPoly: false, materialApplyMolSurface: false, materialApplyVoid: false,
     atomRoughness: DISPLAY_DEFAULTS.atomRoughness, atomMetalness: DISPLAY_DEFAULTS.atomMetalness, atomReflectivity: DISPLAY_DEFAULTS.atomReflectivity,
     guestAtoms: null, guestName: "", guestScale: 1.0, guestBatch: 0, showGuest: true,
     guestGroups: [], cutBonds: {}, cutBondSignatures: {}, extraBonds: {}, extraBondSignatures: {}, bondEditMode: false, bondEditPair: [],
@@ -2615,7 +2652,7 @@ select.sel:focus{border-color:var(--accent)}
     videoFps: 30,
     clipPlaneEnabled: false, clipPlaneOffset: 50, clipPlaneInvert: false,
     clipPlaneMode: "view", clipPlaneH: 1, clipPlaneK: 0, clipPlaneL: 0, clipPlaneHklConvention: "reciprocal",
-    clipPlaneApplyHost: true, clipPlaneApplyGuest: true, clipPlaneApplyVoid: true, clipPlaneApplyMolSurface: true, clipPlaneApplyUnitCell: true,
+    clipPlaneApplyHost: true, clipPlaneApplyGuest: true, clipPlaneApplyVoid: true, clipPlaneApplyChannel: true, clipPlaneApplyMolSurface: true, clipPlaneApplyUnitCell: true,
     macroRecording: false, macroPlaying: false, macroExportDirHandle: null,
     macroBatchFolder: false, macroBatchDirHandle: null
   };
@@ -2817,12 +2854,15 @@ select.sel:focus{border-color:var(--accent)}
              view/clip pair (see clipHklNormalCartesian).
          Falls back to "view" if no CIF is loaded or h=k=l=0.
      Applied per-material (not as a renderer-global clip), so it can be
-     switched on/off independently for each of the 5 structural component
-     types (state.clipPlaneApplyHost/Guest/Void/MolSurface/UnitCell, each
-     with its own Display > Clipping Plane checkbox) -- three.js has no way
+     switched on/off independently for each of the 6 structural component
+     types (state.clipPlaneApplyHost/Guest/Void/Channel/MolSurface/UnitCell,
+     each with its own Display > Clipping Plane checkbox -- Void and Channel
+     share one rendered THREE.Group but are still two independent settings,
+     applied per-component via each component's own .type, see
+     applyClipPlaneToGroups' own comment) -- three.js has no way
      to exempt an object from a renderer-global clip plane, so per-material
      assignment (applyClipPlaneToGroups, below) is the only way to make this
-     selective. Atom labels aren't one of the 5 toggleable types; they simply
+     selective. Atom labels aren't one of the 6 toggleable types; they simply
      always follow the plane while clipping is enabled, matching this
      feature's original (pre-selective) behaviour. Void/channel meshes keep
      their own, unrelated per-material cell-boundary clip planes (a
@@ -2890,6 +2930,24 @@ select.sel:focus{border-color:var(--accent)}
       else apply(obj.material);
     });
   }
+  function setMeshArrayClipPlanes(meshes, planes) {
+    /* Same as setGroupClipPlanes, but for an explicit array of meshes
+       rather than a whole THREE.Group -- voids and channels share one
+       group (voidGroup) but need two independently-toggleable "Apply to"
+       settings, so each component's own meshes (voidMeshes[comp.id]) are
+       addressed individually by comp.type instead. */
+    if (!meshes) return;
+    function apply(m) {
+      var base = (m.userData && m.userData.voidBaseClipPlanes) || [];
+      m.clippingPlanes = base.concat(planes);
+    }
+    for (var i = 0; i < meshes.length; i++) {
+      var mesh = meshes[i];
+      if (!mesh.material) continue;
+      if (Array.isArray(mesh.material)) mesh.material.forEach(apply);
+      else apply(mesh.material);
+    }
+  }
   function applyClipPlaneToGroups() {
     function planesFor(active) { return (state.clipPlaneEnabled && active) ? [clipPlane] : []; }
     var hostOn = state.clipPlaneApplyHost, guestOn = state.clipPlaneApplyGuest;
@@ -2897,8 +2955,19 @@ select.sel:focus{border-color:var(--accent)}
     setGroupClipPlanes(bondsGroup, planesFor(hostOn));
     setGroupClipPlanes(guestAtomsGroup, planesFor(guestOn));
     setGroupClipPlanes(guestBondsGroup, planesFor(guestOn));
+    setGroupClipPlanes(coordPolyGroup, planesFor(hostOn)); /* coordination polyhedra follow their own central metal's host/guest membership -- see computeCoordinationPolyhedra's isGuest tag */
+    setGroupClipPlanes(coordPolyGuestGroup, planesFor(guestOn));
     setGroupClipPlanes(hbondsGroup, planesFor(hostOn || guestOn)); /* H-bonds visually connect host and guest -- follow either */
-    setGroupClipPlanes(voidGroup, planesFor(state.clipPlaneApplyVoid));
+    /* Voids and channels share one THREE.Group (voidGroup) but get their
+       own independent "Apply to" checkbox now, so each component's own
+       meshes (voidMeshes[comp.id], the same per-component list the cheap
+       visibility toggle already uses) are addressed by comp.type rather
+       than blanket-applying one setting to the whole group. */
+    var voidPlanes = planesFor(state.clipPlaneApplyVoid), channelPlanes = planesFor(state.clipPlaneApplyChannel);
+    for (var vci = 0; vci < (state.voidComponents || []).length; vci++) {
+      var vComp = state.voidComponents[vci];
+      setMeshArrayClipPlanes(voidMeshes[vComp.id], vComp.type === "channel" ? channelPlanes : voidPlanes);
+    }
     setGroupClipPlanes(molSurfaceGroup, planesFor(state.clipPlaneApplyMolSurface));
     setGroupClipPlanes(unitCellGroup, planesFor(state.clipPlaneApplyUnitCell));
     setGroupClipPlanes(labelGroup, planesFor(true)); /* labels aren't one of the 5 toggleable component types -- always follow the plane while enabled */
@@ -3379,6 +3448,9 @@ select.sel:focus{border-color:var(--accent)}
     ringGroup = new THREE.Group(); scene.add(ringGroup);
     molSurfaceGroup = new THREE.Group(); scene.add(molSurfaceGroup);
     labelGroup = new THREE.Group(); scene.add(labelGroup);
+    coordPolyGroup = new THREE.Group(); scene.add(coordPolyGroup);
+    coordPolyGuestGroup = new THREE.Group(); scene.add(coordPolyGuestGroup);
+    molNeighborGroup = new THREE.Group(); scene.add(molNeighborGroup);
     window.addEventListener("resize", onResize); onResize(); animate();
   }
   function buildEnvironment() {
@@ -4338,6 +4410,19 @@ select.sel:focus{border-color:var(--accent)}
       matCache[key].metalness = state.atomMetalness;
       matCache[key].envMapIntensity = state.atomReflectivity;
     }
+    /* Coordination polyhedra, the molecular surface, and void/channel
+       surfaces each rebuild their own materials from scratch whenever
+       THEY'RE (re)rendered, rather than sharing atoms/bonds' own persistent,
+       in-place-mutated matCache -- so unlike the loop just above, keeping
+       one of these in step with a live roughness/metalness/reflectivity
+       drag means re-running its own render function, not just touching a
+       cached material. Only bothers for a category actually opted in via
+       Style > Coordination Polyhedra / Visual Effects > Material's own
+       three checkboxes (see their shared comment on state) -- skipped
+       entirely otherwise, same cost as today. */
+    if (state.materialApplyCoordPoly) renderCoordinationPolyhedra(centroid());
+    if (state.materialApplyMolSurface) renderMolSurfaceMeshes();
+    if (state.materialApplyVoid) renderVoidMeshes();
   }
   function sensPosFromValue(v) { return Math.round(1 + (v - 0.2) / 0.8 * 9); }
   function sensValueFromPos(p) { return 0.2 + (p - 1) / 9 * 0.8; }
@@ -4361,6 +4446,9 @@ select.sel:focus{border-color:var(--accent)}
     setVal("matRoughRange", s.atomRoughness);
     setVal("matMetalRange", s.atomMetalness);
     setVal("matReflRange", s.atomReflectivity);
+    setChecked("materialApplyCoordPolyTg", s.materialApplyCoordPoly);
+    setChecked("materialApplyMolSurfaceTg", s.materialApplyMolSurface);
+    setChecked("materialApplyVoidTg", s.materialApplyVoid);
   }
   function resetDisplaySettings() {
     var d = DISPLAY_DEFAULTS;
@@ -4389,7 +4477,9 @@ select.sel:focus{border-color:var(--accent)}
   function resetMaterialSettings() {
     var d = DISPLAY_DEFAULTS;
     state.atomRoughness = d.atomRoughness; state.atomMetalness = d.atomMetalness; state.atomReflectivity = d.atomReflectivity;
+    state.materialApplyCoordPoly = false; state.materialApplyMolSurface = false; state.materialApplyVoid = false;
     updateMaterialAppearance();
+    renderCoordinationPolyhedra(centroid()); renderMolSurfaceMeshes(); renderVoidMeshes(); /* the 3 "also apply to" toggles above may just have turned OFF -- updateMaterialAppearance() only ever re-renders a category that's still on, so turning one off needs its own explicit refresh back to its un-applied look */
     syncDisplayControlsUI();
     persistPreferences();
     setStatus("Material settings restored to defaults.", false);
@@ -4550,6 +4640,8 @@ select.sel:focus{border-color:var(--accent)}
     if (state.showGuest) renderMoleculeInto(hydrogenFilter(hideFilter(asuFilter(visibleGuestAtoms()))), "ballstick", state.guestScale, state.guestBondRadius, guestAtomsGroup, guestBondsGroup, off, true, state.guestBondColorMode, state.guestBondColor, ringData);
     if (state.showPrincipalAxes && ringData.length) renderPrincipalRings(ringData);
     renderHBonds(off);
+    renderCoordinationPolyhedra(off);
+    renderMolecularNeighborhood(off);
     renderLabels();
     renderSelection();
     syncNoAtomsOverlay();
@@ -4775,12 +4867,48 @@ select.sel:focus{border-color:var(--accent)}
     }
     return out;
   }
+  function addMetalBondCandidates(atoms, bondList) {
+    /* K.bonds()'s own tolerance (covalent-radius sum + 0.45 A) is tuned for
+       ordinary organic covalent bonds, and misses a genuine but longer
+       metal-ligand contact -- most notably a Jahn-Teller-elongated axial
+       bond (e.g. Cu-F to a semi-coordinating BF4- anion, often ~2.4-2.5 A
+       against a ~2.0 A equatorial Cu-N/O bond in the same complex), which a
+       fixed +0.45 A reach can fall just short of. This adds any pair with
+       at least one metal atom that bondLimit()'s own wider, metal-aware
+       tolerance would accept, on top of whatever the plain covalent test
+       already found -- never touching a metal-metal pair or two non-metal
+       atoms, which keep exactly whatever the ordinary test already decided
+       (see bondLimit's own comment). Anchored on the metal atoms specifically
+       (there are usually only a handful), so this stays cheap even for a
+       large currently-displayed structure. */
+    var have = {};
+    for (var i = 0; i < bondList.length; i++) { var b = bondList[i]; have[bondKey(atoms[b[0]].uid, atoms[b[1]].uid)] = true; }
+    var out = bondList.slice();
+    for (var a1 = 0; a1 < atoms.length; a1++) {
+      var A = atoms[a1];
+      if (A.isCentroid || !isMetalElement(A.el)) continue;
+      for (var a2 = 0; a2 < atoms.length; a2++) {
+        if (a2 === a1) continue;
+        var B = atoms[a2];
+        if (B.isCentroid || isMetalElement(B.el)) continue;
+        var key = bondKey(A.uid, B.uid);
+        if (have[key]) continue;
+        var dx = A.x - B.x, dy = A.y - B.y, dz = A.z - B.z, d2 = dx * dx + dy * dy + dz * dz;
+        var lim = bondLimit(A, B), minD = (A.el === "H" || B.el === "H") ? 0.4 : 1.0;
+        if (d2 > minD * minD && d2 < lim * lim && partsCanBond(A, B)) { out.push([a1, a2]); have[key] = true; }
+      }
+    }
+    return out;
+  }
   function computeBondsWithOverrides(atoms) {
     /* the single choke point every bond consumer (display cache, fragment
-       connectivity, bulk cleanup) goes through: real distance-based bonds,
-       plus manually forced ones and their symmetry cascade, minus anything
-       manually cut (an explicit cut always wins last) */
+       connectivity, bulk cleanup) goes through: real distance-based bonds
+       (plus any longer metal-ligand contact bondLimit's own wider tolerance
+       reaches, see addMetalBondCandidates), plus manually forced ones and
+       their symmetry cascade, minus anything manually cut (an explicit cut
+       always wins last) */
     var bondList = partBlockedBonds(atoms, crossBatchBonds(atoms, K.bonds(atoms, 0.45)));
+    bondList = addMetalBondCandidates(atoms, bondList);
     bondList = addExtraBondCandidates(atoms, bondList);
     bondList = addExtraBondSignatureCandidates(atoms, bondList);
     return filterCutBonds(atoms, bondList);
@@ -6473,8 +6601,10 @@ select.sel:focus{border-color:var(--accent)}
       geo.setIndex(iso.indices);
       var color = colorForMolSurface(s.id);
       function makeMat(side) {
+        var applyMat = state.materialApplyMolSurface;
         return new THREE.MeshStandardMaterial({
-          color: color, roughness: 0.4, metalness: 0.0,
+          color: color, roughness: applyMat ? state.atomRoughness : 0.4, metalness: applyMat ? state.atomMetalness : 0.0,
+          envMapIntensity: applyMat ? state.atomReflectivity : 1.0,
           transparent: isTransparent, opacity: state.molSurfaceOpacity,
           depthWrite: !isTransparent, side: side
         });
@@ -7612,8 +7742,10 @@ select.sel:focus{border-color:var(--accent)}
         return { outer: outerColorForVoid(comp.id), inner: innerColorForVoid(comp.id) };
       }
       function makeMat(side, color) {
+        var applyMat = state.materialApplyVoid;
         return new THREE.MeshStandardMaterial({
-          color: color, roughness: 0.35, metalness: 0.0,
+          color: color, roughness: applyMat ? state.atomRoughness : 0.35, metalness: applyMat ? state.atomMetalness : 0.0,
+          envMapIntensity: applyMat ? state.atomReflectivity : 1.0,
           transparent: isTransparent, opacity: state.voidSurfaceOpacity,
           depthWrite: !isTransparent, side: side
         });
@@ -7838,7 +7970,7 @@ select.sel:focus{border-color:var(--accent)}
   }
   function setVoidUiMode(mode) {
     state.voidUiMode = (state.voidUiMode === mode) ? null : mode;
-    if (state.voidUiMode) exitGuestDragMode(); /* the click-hijacking modes are mutually exclusive */
+    if (state.voidUiMode) { exitGuestDragMode(); exitMolNeighborMode(); } /* the click-hijacking modes are mutually exclusive */
     state.voidSelectedFragments = {};
     state.voidSelectedChannels = {};
     renderVoidMeshes();
@@ -9209,6 +9341,7 @@ select.sel:focus{border-color:var(--accent)}
     return function (a) { return a.batch === comp; };
   }
   function handleLeftClick(clientX, clientY, mods) {
+    if (state.molNeighborMode) { molecularNeighborhoodClick(clientX, clientY); return; }
     if (state.voidUiMode) { handleVoidSelectClick(clientX, clientY, mods); return; }
     if (state.atomEditUiMode === "create") { createAtomAtClick(clientX, clientY); return; }
     var hit = resolveClickTarget(clientX, clientY);
@@ -9397,7 +9530,7 @@ select.sel:focus{border-color:var(--accent)}
    * cancel it (see exitAtomEditMode() and its call sites). */
   function setAtomEditUiMode(mode) {
     state.atomEditUiMode = (state.atomEditUiMode === mode) ? null : mode;
-    if (state.atomEditUiMode) exitGuestDragMode(); /* the click-hijacking modes are mutually exclusive */
+    if (state.atomEditUiMode) { exitGuestDragMode(); exitMolNeighborMode(); } /* the click-hijacking modes are mutually exclusive */
     syncAtomEditButtons();
   }
   function syncAtomEditButtons() {
@@ -9418,9 +9551,36 @@ select.sel:focus{border-color:var(--accent)}
      their own call sites). */
   function setGuestDragMode(on) {
     state.guestDragMode = (typeof on === "boolean") ? on : !state.guestDragMode;
-    if (state.guestDragMode) { exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); }
+    if (state.guestDragMode) { exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitMolNeighborMode(); }
     var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = state.guestDragMode ? "move" : "";
     syncGuestDragButton();
+  }
+  /* Grow > Molecular neighbourhood -- same red/ghost "click-hijacking mode"
+     convention as growMode/bondEditMode/atomEditUiMode/guestDragMode (see
+     setGuestDragMode's own comment above): turning this on exits all four
+     of those, and each of them exits this one in turn (see their own call
+     sites). Also exits on its OWN three conditions from the feature spec:
+     the toggle button itself, closing the Molecular neighbourhood
+     subsection (see its own onToggle below), or leaving the Grow section
+     entirely -- both of those latter two funnel through here already,
+     mirroring exactly how atomEditUiMode's own subsection-close and
+     click-outside handling already work (see wireIO's own comment). */
+  function setMolNeighborMode(on) {
+    var next = (typeof on === "boolean") ? on : !state.molNeighborMode;
+    if (next === state.molNeighborMode) return;
+    state.molNeighborMode = next;
+    if (state.molNeighborMode) { exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitGuestDragMode(); setVoidUiMode(null); }
+    var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = state.molNeighborMode ? "crosshair" : "";
+    updateMolNeighborBtnLabel();
+    refreshMolecularNeighborhood(); /* computes+renders when turning on; renders nothing (see its own guard) when turning off, and clearGroup already ran inside renderMolecularNeighborhood either way */
+  }
+  function exitMolNeighborMode() {
+    if (!state.molNeighborMode) return;
+    state.molNeighborMode = false;
+    var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = "";
+    updateMolNeighborBtnLabel();
+    molNeighborAtoms = [];
+    renderStructure();
   }
   function syncGuestDragButton() {
     var btn = document.getElementById("guestDragBtn");
@@ -10403,7 +10563,7 @@ select.sel:focus{border-color:var(--accent)}
     state.bondEditMode = on;
     state.bondEditPair = [];
     renderBondEditHighlight();
-    if (on) { exitGrowMode(); exitGuestDragMode(); } /* the interactive click-hijacking modes are mutually exclusive */
+    if (on) { exitGrowMode(); exitGuestDragMode(); exitMolNeighborMode(); } /* the interactive click-hijacking modes are mutually exclusive */
     var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = on ? "crosshair" : "";
     updateBondEditModeBtnLabel();
   }
@@ -10799,7 +10959,7 @@ select.sel:focus{border-color:var(--accent)}
           var dx = cand.x - seedAtom.x, dy = cand.y - seedAtom.y, dz = cand.z - seedAtom.z;
           var d2 = dx * dx + dy * dy + dz * dz;
           if (d2 < 1e-6) continue; /* coincides with the seed itself */
-          var lim = cand.cr + seedAtom.cr + 0.45;
+          var lim = bondLimit(cand, seedAtom);
           var minD = (cand.el === "H" || seedAtom.el === "H") ? 0.4 : 1.0;
           var naturallyBonded = d2 > minD * minD && d2 < lim * lim && partsCanBond(cand, seedAtom);
           if (naturallyBonded || enforcedGrowthBondMatches(seedAtom.auIndex, cand.auIndex, Math.sqrt(d2))) out.push(cand);
@@ -10849,7 +11009,7 @@ select.sel:focus{border-color:var(--accent)}
     var fragByOckey = {}; /* cache the generated whole-ASU-under-transform per (op,cell) so it's built once even if several candidates share it -- but every candidate still gets its own component search below, since two candidates sharing a transform can belong to two different, disconnected molecules within the same asymmetric unit */
     function bonded(a, b) {
       var dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z, d2 = dx * dx + dy * dy + dz * dz;
-      var lim = a.cr + b.cr + 0.45, minD = (a.el === "H" || b.el === "H") ? 0.4 : 1.0;
+      var lim = bondLimit(a, b), minD = (a.el === "H" || b.el === "H") ? 0.4 : 1.0;
       if (d2 > minD * minD && d2 < lim * lim && partsCanBond(a, b)) return true;
       return enforcedGrowthBondMatches(a.auIndex, b.auIndex, Math.sqrt(d2));
     }
@@ -10940,6 +11100,31 @@ select.sel:focus{border-color:var(--accent)}
   var NONMETAL_ELEMENTS = { H: 1, He: 1, B: 1, C: 1, N: 1, O: 1, F: 1, Ne: 1, Si: 1, P: 1, S: 1, Cl: 1, Ar: 1,
     Ge: 1, As: 1, Se: 1, Br: 1, Kr: 1, Sb: 1, Te: 1, I: 1, Xe: 1, Po: 1, At: 1, Rn: 1, Og: 1 };
   function isMetalElement(el) { return !NONMETAL_ELEMENTS.hasOwnProperty(el); }
+  /* Extra reach, on top of the ordinary organic-covalent-bond tolerance
+     (covalent-radius sum + 0.45 A), for a bond between a metal and a
+     classic Lewis-base donor atom -- a genuine metal-donor contact is
+     routinely longer and more variable than a normal covalent bond, and a
+     Jahn-Teller-elongated axial contact (e.g. Cu-F to a semi-coordinating
+     BF4- anion, often ~2.4-2.5 A against a ~2.0 A equatorial Cu-N) can
+     exceed the plain tolerance entirely. Deliberately scoped to just these
+     donor elements, NOT "any nonmetal" -- widening it for every metal-
+     nonmetal pair indiscriminately swept in a carboxylate's own carbon atom
+     as a false "ligand" for a nearby Co in testing (2.84-2.87 A, well past
+     any real Co-C bond, but within reach of a blanket +0.35 A bonus), which
+     no metal ever genuinely bonds to like this. Never applied to a metal-
+     metal pair or when neither atom is a metal, so nothing about ordinary
+     organic bonding anywhere else changes. */
+  var METAL_DONOR_ELEMENTS = { O: 1, N: 1, F: 1, Cl: 1, Br: 1, I: 1, S: 1, Se: 1, P: 1, As: 1 };
+  var METAL_BOND_TOLERANCE_BONUS = 0.35;
+  function bondLimit(a, b, tol) {
+    var lim = a.cr + b.cr + (tol === undefined ? 0.45 : tol);
+    var aMetal = isMetalElement(a.el), bMetal = isMetalElement(b.el);
+    if (aMetal !== bMetal) {
+      var donor = aMetal ? b.el : a.el;
+      if (METAL_DONOR_ELEMENTS.hasOwnProperty(donor)) lim += METAL_BOND_TOLERANCE_BONUS;
+    }
+    return lim;
+  }
   function groupIntoLigandFragments(atoms) {
     /* Like groupIntoFragments, but cuts every bond that touches a metal atom
        before grouping, and never includes a metal atom in any group --
@@ -11011,7 +11196,7 @@ select.sel:focus{border-color:var(--accent)}
     var x = base.x + shift[0], y = base.y + shift[1], z = base.z + shift[2];
     var dx = x - seedAtom.x, dy = y - seedAtom.y, dz = z - seedAtom.z, d2 = dx * dx + dy * dy + dz * dz;
     if (d2 < 1e-6) return;
-    var lim = base.cr + seedAtom.cr + 0.45;
+    var lim = bondLimit(base, seedAtom);
     var minD = (base.el === "H" || seedAtom.el === "H") ? 0.4 : 1.0;
     if (d2 <= minD * minD || d2 >= lim * lim) return;
     if (skipMetals && isMetalElement(base.el)) return; /* the ligand-completion boundary: never add a metal atom, don't expand past it either -- see completeTruncatedLigands() */
@@ -11055,6 +11240,318 @@ select.sel:focus{border-color:var(--accent)}
       }
     }
     return out;
+  }
+  /* ---------------- Coordination polyhedra (Style > Coordination Polyhedra) ----------------
+   * For every currently-displayed metal atom, finds its full ligand set by
+   * symmetry -- every OTHER non-metal atom formally bonded to it, using
+   * exactly the same covalent-radius-sum test (and the same efficient
+   * nearest-image-shift symmetry search) as ordinary bond rendering and the
+   * ligand-completion feature, via findBondedImagesFast(metal, baseImages,
+   * true) -- takes the convex hull of that ligand set as the "true"
+   * coordination polyhedron, and renders only the hull FACES whose three
+   * vertex atoms are all actually on screen right now -- a partially grown
+   * structure shows a partial polyhedron (whichever faces happen to be
+   * complete), rather than requiring the whole sphere to close first, or
+   * (the wrong alternative) hulling just whatever's currently visible, which
+   * would draw a spurious face across two ligands that aren't really
+   * adjacent on the real polyhedron the moment a third, unrelated ligand is
+   * the only other one on screen. */
+  function convexHullFaces(points) {
+    /* Brute-force O(n^3) hull: a triple (i,j,k) is a hull face if every
+       OTHER point lies on one side of its plane (within tolerance) -- fine
+       for the small point counts a coordination sphere ever has (rarely
+       more than ~12). Accepted triples are then grouped by their (rounded,
+       sign-canonicalised) plane, since several coplanar ligands -- square
+       planar, trigonal bipyramidal's equatorial three, etc. -- pass this
+       test for every combination of themselves rather than just one clean
+       triangulation; each such group is re-triangulated as a fan across its
+       actual shared vertex set instead of keeping every redundant triple. */
+    var n = points.length, EPS = 0.02, faces = [];
+    if (n < 3) return faces;
+    if (n === 3) return [[0, 1, 2]];
+    function sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+    function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+    function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+    function norm(a) { return Math.sqrt(dot(a, a)); }
+    var groups = {}, groupOrder = [];
+    for (var i = 0; i < n; i++) for (var j = i + 1; j < n; j++) for (var k = j + 1; k < n; k++) {
+      var nrm = cross(sub(points[j], points[i]), sub(points[k], points[i]));
+      var len = norm(nrm);
+      if (len < 1e-6) continue; /* collinear triple -- no plane */
+      nrm = [nrm[0] / len, nrm[1] / len, nrm[2] / len];
+      var d = dot(nrm, points[i]);
+      var posSide = false, negSide = false;
+      for (var m = 0; m < n; m++) {
+        if (m === i || m === j || m === k) continue;
+        var s = dot(nrm, points[m]) - d;
+        if (s > EPS) posSide = true; else if (s < -EPS) negSide = true;
+      }
+      if (posSide && negSide) continue; /* points on both sides -- not a hull face */
+      /* canonicalise the plane's orientation (flip normal+offset together)
+         so the same physical plane always keys the same way regardless of
+         which of its three points happened to be i/j/k, or their winding */
+      if (nrm[0] < -1e-6 || (Math.abs(nrm[0]) <= 1e-6 && nrm[1] < -1e-6) || (Math.abs(nrm[0]) <= 1e-6 && Math.abs(nrm[1]) <= 1e-6 && nrm[2] < 0)) {
+        nrm = [-nrm[0], -nrm[1], -nrm[2]]; d = -d;
+      }
+      var key = nrm[0].toFixed(3) + "," + nrm[1].toFixed(3) + "," + nrm[2].toFixed(3) + "," + d.toFixed(3);
+      if (!groups.hasOwnProperty(key)) { groups[key] = { normal: nrm, verts: {} }; groupOrder.push(key); }
+      groups[key].verts[i] = 1; groups[key].verts[j] = 1; groups[key].verts[k] = 1;
+    }
+    for (var g = 0; g < groupOrder.length; g++) {
+      var grp = groups[groupOrder[g]];
+      var idxs = Object.keys(grp.verts).map(Number);
+      if (idxs.length < 3) continue;
+      if (idxs.length === 3) { faces.push(idxs); continue; }
+      /* fan-triangulate the coplanar polygon: build an in-plane 2D basis,
+         sort the shared vertices by angle around their own centroid, then
+         fan from the first one */
+      var nrm2 = grp.normal;
+      var arbitrary = Math.abs(nrm2[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+      var u = cross(nrm2, arbitrary); var ulen = norm(u); u = [u[0] / ulen, u[1] / ulen, u[2] / ulen];
+      var v = cross(nrm2, u);
+      var cx = 0, cy = 0, cz = 0;
+      for (var p = 0; p < idxs.length; p++) { cx += points[idxs[p]][0]; cy += points[idxs[p]][1]; cz += points[idxs[p]][2]; }
+      cx /= idxs.length; cy /= idxs.length; cz /= idxs.length;
+      var withAngle = idxs.map(function (idx) {
+        var rel = sub(points[idx], [cx, cy, cz]);
+        return { idx: idx, ang: Math.atan2(dot(rel, v), dot(rel, u)) };
+      });
+      withAngle.sort(function (a, b) { return a.ang - b.ang; });
+      for (var f = 1; f < withAngle.length - 1; f++) faces.push([withAngle[0].idx, withAngle[f].idx, withAngle[f + 1].idx]);
+    }
+    return faces;
+  }
+  function excludeHapticityRingCandidates(cands) {
+    /* A metal p-bonded (hapto-coordinated) to a whole ring -- ferrocene's
+       or Cp*'s cyclopentadienyl, bis(benzene)chromium's arene, a
+       cyclobutadiene or cyclooctatetraenyl ligand -- ends up with every
+       ring atom individually within plain bonding distance of the metal
+       (a real Fe-C(Cp) contact is ~2.0-2.1 A, well inside the ordinary
+       covalent-radius-sum test), so findBondedImagesFast returns the whole
+       ring as if each carbon were its own separate point-donor ligand.
+       Triangulating that fans out a set of faces to individual ring atoms
+       that don't correspond to anything chemically real -- the ring
+       coordinates as one whole p-system, not N separate ones. Detected
+       generally rather than by naming Cp/arene specifically: candidates
+       that are mutually bonded to EACH OTHER (ignoring the metal) into a
+       connected group of 3 or more, where the group has at least as many
+       bonds as atoms (so it actually contains a ring rather than just
+       being a chain that happens to touch the metal at both ends -- an
+       simple tree/chain of N atoms always has exactly N-1 bonds, so N or
+       more means a cycle exists), are excluded from the polyhedron
+       entirely, the same way the feature already excludes another metal
+       or a centroid marker. A single point-donor (a halide, a carbonyl
+       carbon, an isocyanide) never has this shape and is untouched. */
+    var n = cands.length;
+    var adj = [];
+    for (var i = 0; i < n; i++) adj.push([]);
+    var edgeCount = 0;
+    for (var i = 0; i < n; i++) for (var j = i + 1; j < n; j++) {
+      var A = cands[i], B = cands[j];
+      var dx = A.x - B.x, dy = A.y - B.y, dz = A.z - B.z, d2 = dx * dx + dy * dy + dz * dz;
+      var lim = A.cr + B.cr + 0.45, minD = (A.el === "H" || B.el === "H") ? 0.4 : 1.0;
+      if (d2 > minD * minD && d2 < lim * lim) { adj[i].push(j); adj[j].push(i); edgeCount++; }
+    }
+    if (!edgeCount) return cands; /* nothing bonded to anything else -- no ring possible, skip the component search entirely */
+    var seen = new Array(n).fill(false), exclude = {};
+    for (var s = 0; s < n; s++) {
+      if (seen[s]) continue;
+      var stack = [s], comp = [], compEdges = 0;
+      seen[s] = true;
+      while (stack.length) {
+        var k = stack.pop(); comp.push(k);
+        for (var a = 0; a < adj[k].length; a++) {
+          var nb = adj[k][a];
+          compEdges++;
+          if (!seen[nb]) { seen[nb] = true; stack.push(nb); }
+        }
+      }
+      compEdges /= 2; /* each undirected edge counted from both ends above */
+      if (comp.length >= 3 && compEdges >= comp.length) comp.forEach(function (idx) { exclude[idx] = true; });
+    }
+    if (!Object.keys(exclude).length) return cands;
+    return cands.filter(function (c, idx) { return !exclude[idx]; });
+  }
+  function computeCoordinationPolyhedra() {
+    var triangles = [];
+    if (!state.showCoordPolyhedra || !state.isCif || state.symmetryForgotten || !state.cifAsymUnit || !state.cifSymops || !state.cifFracToCart) return triangles;
+    var visible = [];
+    if (state.showHost) visible = visible.concat(hydrogenFilter(hideFilter(asuFilter(state.atoms))) || []);
+    if (state.showGuest) visible = visible.concat(hydrogenFilter(hideFilter(asuFilter(visibleGuestAtoms()))) || []);
+    /* Keyed by rounded POSITION, not by (auIndex,opIndex,cell) identity: on a
+       special position, more than one symmetry operator can map the same
+       asymmetric-unit atom onto the exact same physical point (e.g. a ligand
+       sitting on a mirror or a 2-fold that also happens to be a face of the
+       host's own point group) -- findBondedImagesFast's nearest-image search
+       is free to return EITHER of those equally-valid (auIndex,opIndex,cell)
+       labels for a given ligand, while the atom actually on screen (loaded
+       once, however it first arrived) carries only one of them. Matching by
+       identity missed this -- a real, currently-displayed ligand would read
+       as "not displayed" whenever the two labels didn't happen to agree,
+       silently dropping otherwise-complete faces. Position is what actually
+       determines "is this vertex on screen", so that's what this now checks,
+       at the same tolerance positionOccupied() already uses elsewhere for
+       exactly this kind of special-position coincidence. */
+    var visibleByPos = {};
+    for (var vi = 0; vi < visible.length; vi++) {
+      var va = visible[vi];
+      if (va.auIndex === undefined) continue;
+      visibleByPos[va.x.toFixed(3) + "," + va.y.toFixed(3) + "," + va.z.toFixed(3)] = va;
+    }
+    /* The actual, currently-EDITED bond graph among what's on screen right
+       now (manually forced or cut bonds included, via the exact same
+       choke point ordinary bond rendering itself goes through) -- so a
+       ligand a user has manually bonded to a metal (Interactive bond
+       editor) joins its coordination polyhedron immediately, and one
+       they've manually cut leaves it, without waiting on any distance
+       test. This only ever resolves whether an ALREADY-DISPLAYED atom
+       counts; a symmetry position that hasn't been grown in yet has no
+       bond to edit, so it's still found purely by bondLimit()'s own
+       (now Jahn-Teller-aware) distance test below. */
+    var editedBonds = computeBondsWithOverrides(visible);
+    var editedPartnersOf = {};
+    for (var eb = 0; eb < editedBonds.length; eb++) {
+      var e0 = editedBonds[eb][0], e1 = editedBonds[eb][1];
+      (editedPartnersOf[e0] || (editedPartnersOf[e0] = [])).push(e1);
+      (editedPartnersOf[e1] || (editedPartnersOf[e1] = [])).push(e0);
+    }
+    var baseImages = buildBaseSymmetryImages();
+    for (var mi = 0; mi < visible.length; mi++) {
+      var metal = visible[mi];
+      if (!isMetalElement(metal.el) || metal.isCentroid || metal.auIndex === undefined) continue;
+      var cands = findBondedImagesFast(metal, baseImages, true); /* true = skip other metals -- see this function's own header comment */
+      /* Reconcile against the edited bond graph: drop a candidate that IS
+         displayed but whose bond to this metal has been manually cut, and
+         add any displayed atom the editor has manually bonded to this metal
+         that the distance test alone didn't already find. */
+      var editedPartners = (editedPartnersOf[mi] || []).map(function (idx) { return visible[idx]; }).filter(function (a) { return !isMetalElement(a.el); });
+      cands = cands.filter(function (c) {
+        var displayedAtom = visibleByPos[c.x.toFixed(3) + "," + c.y.toFixed(3) + "," + c.z.toFixed(3)];
+        return !displayedAtom || editedPartners.indexOf(displayedAtom) !== -1;
+      });
+      for (var ep = 0; ep < editedPartners.length; ep++) {
+        var partner = editedPartners[ep];
+        var pkey = partner.x.toFixed(3) + "," + partner.y.toFixed(3) + "," + partner.z.toFixed(3);
+        var already = cands.some(function (c) { return c.x.toFixed(3) + "," + c.y.toFixed(3) + "," + c.z.toFixed(3) === pkey; });
+        if (!already) cands.push(partner);
+      }
+      cands = excludeHapticityRingCandidates(cands);
+      if (cands.length < 3) continue;
+      var pts = cands.map(function (c) { return [c.x, c.y, c.z]; });
+      var faces = convexHullFaces(pts);
+      for (var f = 0; f < faces.length; f++) {
+        var a = cands[faces[f][0]], b = cands[faces[f][1]], c = cands[faces[f][2]];
+        var va2 = visibleByPos[a.x.toFixed(3) + "," + a.y.toFixed(3) + "," + a.z.toFixed(3)];
+        var vb2 = visibleByPos[b.x.toFixed(3) + "," + b.y.toFixed(3) + "," + b.z.toFixed(3)];
+        var vc2 = visibleByPos[c.x.toFixed(3) + "," + c.y.toFixed(3) + "," + c.z.toFixed(3)];
+        /* isGuest follows the CENTRAL METAL, same as everything else in this
+           feature -- the whole polyhedron is one component's, regardless of
+           which side a bridging ligand vertex happens to sit on. Only a
+           guest atom ever carries .batch (see handleGuestCifDrop), so this
+           is the same test resolveClickTarget's own isGuest uses in spirit. */
+        if (va2 && vb2 && vc2) triangles.push({ metal: metal, a: va2, b: vb2, c: vc2, isGuest: metal.batch !== undefined });
+      }
+    }
+    return triangles;
+  }
+  function buildCoordinationPolyhedraInto(triangles, targetGroup, off) {
+    /* One host or guest subset's worth of faces + edge spines, built into
+       its OWN group -- see renderCoordinationPolyhedra's own comment for
+       why the split exists (Display > Clipping Plane's per-component
+       toggles need to reach a polyhedron the same way they already reach
+       everything else host/guest). */
+    if (!triangles.length) return;
+    var positions = new Float32Array(triangles.length * 9);
+    var colors = new Float32Array(triangles.length * 9);
+    var single = new THREE.Color(hexToCss(state.coordPolyColor));
+    for (var t = 0; t < triangles.length; t++) {
+      var tri = triangles[t], base = t * 9;
+      var verts = [tri.a, tri.b, tri.c];
+      for (var vi = 0; vi < 3; vi++) {
+        positions[base + vi * 3] = verts[vi].x + off[0];
+        positions[base + vi * 3 + 1] = verts[vi].y + off[1];
+        positions[base + vi * 3 + 2] = verts[vi].z + off[2];
+      }
+      var col = (state.coordPolyColorMode === "single") ? single : new THREE.Color(hexToCss(tri.metal.color));
+      for (var ci2 = 0; ci2 < 3; ci2++) { colors[base + ci2 * 3] = col.r; colors[base + ci2 * 3 + 1] = col.g; colors[base + ci2 * 3 + 2] = col.b; }
+    }
+    var geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    geo.computeVertexNormals();
+    /* At full opacity this needs to look genuinely solid -- depthWrite:false
+       (needed at any lower opacity so overlapping faces blend instead of
+       fighting over which one "wins") is exactly what let you see straight
+       through the polyhedron even at opacity 1: without it, nothing ever
+       blocks a farther face from also contributing its own colour to the
+       same pixel. transparent:false + depthWrite:true switches to ordinary
+       opaque depth-tested rendering instead, so the nearest face alone wins,
+       same as every other solid mesh in the scene. */
+    var opaque = state.coordPolyOpacity >= 0.999;
+    var applyMat = state.materialApplyCoordPoly;
+    var mat = new THREE.MeshStandardMaterial({
+      vertexColors: true, transparent: !opaque, opacity: state.coordPolyOpacity,
+      side: THREE.DoubleSide, depthWrite: opaque,
+      roughness: applyMat ? state.atomRoughness : 0.6, metalness: applyMat ? state.atomMetalness : 0.0,
+      envMapIntensity: applyMat ? state.atomReflectivity : 1.0
+    });
+    var mesh = new THREE.Mesh(geo, mat);
+    mesh.renderOrder = 5;
+    targetGroup.add(mesh);
+    /* Thin opaque "spine" along every hull edge, same idea as Mercury's own
+       coordination-polyhedron edges -- solid regardless of the faces' own
+       opacity (a crisp line reads better through a translucent face than a
+       matching-opacity one would), deduplicated so an edge shared by two
+       adjacent faces (the normal case -- every internal edge of a
+       polyhedron borders exactly two of its own faces) is drawn once, not
+       twice. */
+    if (!coordPolyEdgeGeo) coordPolyEdgeGeo = new THREE.CylinderGeometry(1, 1, 1, 8, 1, false);
+    var edgeSeen = {}, edgeMatCache = {};
+    function edgeKeyFor(atom) { return atom.auIndex + ":" + atom.opIndex + ":" + atom.cellI + ":" + atom.cellJ + ":" + atom.cellK; }
+    function addSpine(p0atom, p1atom, colorHex) {
+      var k0 = edgeKeyFor(p0atom), k1 = edgeKeyFor(p1atom);
+      var ek = k0 < k1 ? (k0 + "|" + k1) : (k1 + "|" + k0);
+      if (edgeSeen[ek]) return;
+      edgeSeen[ek] = true;
+      var dir = new THREE.Vector3(p1atom.x - p0atom.x, p1atom.y - p0atom.y, p1atom.z - p0atom.z);
+      var len = dir.length(); if (len < 1e-5) return;
+      var edgeMat = edgeMatCache[colorHex] || (edgeMatCache[colorHex] = new THREE.MeshStandardMaterial({
+        color: colorHex, roughness: applyMat ? state.atomRoughness : 0.5, metalness: applyMat ? state.atomMetalness : 0.0,
+        envMapIntensity: applyMat ? state.atomReflectivity : 1.0
+      }));
+      var edgeMesh = new THREE.Mesh(coordPolyEdgeGeo, edgeMat);
+      edgeMesh.scale.set(state.coordPolyEdgeThickness, len, state.coordPolyEdgeThickness);
+      edgeMesh.quaternion.setFromUnitVectors(YAXIS, dir.normalize());
+      edgeMesh.position.set(
+        (p0atom.x + p1atom.x) / 2 + off[0], (p0atom.y + p1atom.y) / 2 + off[1], (p0atom.z + p1atom.z) / 2 + off[2]
+      );
+      edgeMesh.renderOrder = 6;
+      targetGroup.add(edgeMesh);
+    }
+    for (var t2 = 0; t2 < triangles.length; t2++) {
+      var tri2 = triangles[t2];
+      var edgeColor = (state.coordPolyColorMode === "single") ? state.coordPolyColor : tri2.metal.color;
+      addSpine(tri2.a, tri2.b, edgeColor);
+      addSpine(tri2.b, tri2.c, edgeColor);
+      addSpine(tri2.c, tri2.a, edgeColor);
+    }
+  }
+  function renderCoordinationPolyhedra(off) {
+    clearGroup(coordPolyGroup); clearGroup(coordPolyGuestGroup);
+    var triangles = computeCoordinationPolyhedra();
+    if (!triangles.length) return;
+    /* Split by the central metal's own host/guest membership -- kept in two
+       separate THREE groups (mirroring atomsGroup/guestAtomsGroup) purely so
+       Display > Clipping Plane's "Apply to Host"/"Apply to Guest" toggles
+       can reach a polyhedron exactly the way they already reach every other
+       host/guest visual (see applyClipPlaneToGroups). Everything else about
+       the two subsets -- colour, opacity, material settings -- is the same,
+       so this is just a partition, not two different looks. */
+    var hostTriangles = triangles.filter(function (tr) { return !tr.isGuest; });
+    var guestTriangles = triangles.filter(function (tr) { return tr.isGuest; });
+    buildCoordinationPolyhedraInto(hostTriangles, coordPolyGroup, off);
+    buildCoordinationPolyhedraInto(guestTriangles, coordPolyGuestGroup, off);
+    updateClipPlane(); /* fresh polyhedron materials just got created -- reapply the current clip plane to them, same as renderUnitCell/renderMolSurfaceMeshes already do for their own fresh geometry */
   }
   function testFragmentClosure(seedAtoms, baseImages, skipMetals) {
     /* The dry-run half of "complete molecule(s)" -- nothing here ever
@@ -11438,6 +11935,218 @@ select.sel:focus{border-color:var(--accent)}
     var n = commitGrownAtoms(toAdd);
     setStatus("Sphere of inclusion added " + n + " atom" + (n === 1 ? "" : "s") + " within " + radius.toFixed(2) + " " + U.ang + label2 + ".", false);
   }
+  /* ---------------- Grow > Molecular neighbourhood ----------------
+   * A Mercury-style "what's nearby" preview: every symmetry-generated
+   * position not currently displayed, but within molNeighborRadius of AT
+   * LEAST ONE currently-displayed atom (host or guest, the union of their
+   * neighbourhoods, not the intersection -- requiring closeness to every
+   * atom in the whole structure at once would be an almost impossible
+   * bar). These never join the model on their own; clicking one commits
+   * the whole fragment it belongs to (see molecularNeighborhoodClick),
+   * exactly like an ordinary Fragment-unit grow click, and the shell is
+   * then refreshed from the new, larger displayed set. Leaving the mode
+   * (see setMolNeighborMode) discards whatever's left with no further
+   * action needed, since none of it was ever committed anywhere. */
+  function generateSymmetryPosition(auIndex, opIndex, ci, cj, ck) {
+    /* Same as generateSymmetryAtom, minus the ADP/ellipsoid work
+       (applyAdpToAtom -- a real eigendecomposition for any atom with
+       anisotropic displacement parameters, the dominant cost of that
+       function). A preview neighbour is always drawn as a plain black
+       sphere regardless, so nothing here would ever use that data --
+       computeMolecularNeighborhood can call this, cheaply, tens of
+       thousands of times for a single radius change; the real
+       generateSymmetryAtom is still what actually commits a fragment
+       (via findGrowthCandidates/expandToConnectedFragment), so nothing
+       ever ends up in the model without its proper ADP treatment. */
+    var au = state.cifAsymUnit[auIndex];
+    var f0 = K.applySymop(state.cifSymops[opIndex], [au.fx, au.fy, au.fz]);
+    var f = [f0[0] + ci, f0[1] + cj, f0[2] + ck];
+    var c = K.fracToCart(state.cifFracToCart, f);
+    var isCentroid = (au.el === "Xx");
+    return {
+      el: au.el, x: c[0], y: c[1], z: c[2],
+      r: isCentroid ? 0.2 : K.vdw(au.el), cr: isCentroid ? 0 : K.cov(au.el), color: isCentroid ? 0xffffff : K.cpk(au.el),
+      isCentroid: isCentroid, hidden: false,
+      auIndex: auIndex, opIndex: opIndex, cellI: ci, cellJ: cj, cellK: ck, fx: f[0], fy: f[1], fz: f[2],
+      part: au.part
+    };
+  }
+  function computeMolecularNeighborhood() {
+    var result = [];
+    if (!state.molNeighborMode || !state.isCif || state.symmetryForgotten || !state.cifAsymUnit || !state.cifSymops || !state.cifFracToCart) return result;
+    var radius = state.molNeighborRadius;
+    if (!isFinite(radius) || radius <= 0) return result;
+    var current = (state.atoms || []).concat(state.guestAtoms || []);
+    if (!current.length) return result;
+    syncGuestAsuRootsFromCurrentPositions();
+    var existing = existingCifKeySet();
+    /* Candidate search: for each currently-displayed atom (the "seed") and
+       each (asymmetric-unit atom, symmetry operator) combination (computed
+       ONCE via buildBaseSymmetryImages(), at cell (0,0,0), and shared
+       across every seed below -- there are only asymUnit.length *
+       symops.length of these, typically at most a few hundred), find the
+       SINGLE nearest periodic image of that combination to THIS seed --
+       via nearest-image-shift (round the fractional-coordinate difference
+       to the nearest integer), exactly findBondedImagesFast's own
+       technique, just with a plain distance test instead of a covalent-
+       bond one -- rather than sweeping every cell within some fixed
+       window of the ORIGIN and testing its distance to every current atom
+       (this function's own previous approach, and still growSphereOfInclusion's:
+       correct, but wastes the overwhelming majority of its work on
+       (au,op,cell) combinations nowhere near anything currently displayed,
+       and gets slower the more of the structure has already been grown
+       out -- exactly backwards for a shell meant to sit right at the
+       structure's own current edge). A real geometric neighbour within a
+       modest radius is always the closest image of its own kind to
+       SOMETHING nearby, the same assumption a covalent bond already
+       relies on -- so checking only the nearest image, from every current
+       atom's own perspective, finds the same candidates a full sweep
+       would, just without the wasted distance checks against everything
+       far away. The one exception (same asymmetric-unit atom under the
+       same operator as the seed itself, e.g. extending a 1D chain by one
+       more lattice translation) checks all 26 neighbouring cells instead
+       of just one, for the same reason findBondedImagesFast does. */
+    var baseImages = buildBaseSymmetryImages();
+    var foundByKey = {};
+    /* Matrix entries hoisted into plain locals -- tryNeighborShift inlines
+       the fractional-to-Cartesian multiply directly with these rather than
+       calling K.fracToCart per attempt (see its own comment). */
+    var __M = state.cifFracToCart, __M00 = __M[0][0], __M01 = __M[0][1], __M02 = __M[0][2],
+      __M10 = __M[1][0], __M11 = __M[1][1], __M12 = __M[1][2], __M20 = __M[2][0], __M21 = __M[2][1], __M22 = __M[2][2];
+    for (var si = 0; si < current.length; si++) {
+      var seedAtom = current[si];
+      for (var bi = 0; bi < baseImages.length; bi++) {
+        var base = baseImages[bi];
+        if (base.el === "Xx") continue; /* un-reassigned centroid marker -- never a real neighbour to preview */
+        if (base.auIndex === seedAtom.auIndex && base.opIndex === seedAtom.opIndex) {
+          for (var di = -1; di <= 1; di++) for (var dj = -1; dj <= 1; dj++) for (var dk = -1; dk <= 1; dk++) {
+            if (!di && !dj && !dk) continue;
+            tryNeighborShift(base, seedAtom, seedAtom.cellI + di, seedAtom.cellJ + dj, seedAtom.cellK + dk);
+          }
+        } else {
+          var ci = Math.round(seedAtom.fx - base.fx), cj = Math.round(seedAtom.fy - base.fy), ck = Math.round(seedAtom.fz - base.fz);
+          tryNeighborShift(base, seedAtom, ci, cj, ck);
+        }
+      }
+    }
+    function tryNeighborShift(base, seedAtom, ci, cj, ck) {
+      /* Plain arithmetic first (the matrix multiply inlined directly,
+         rather than going through K.fracToCart -- avoids both a function
+         call and an array allocation per attempt, the overwhelming
+         majority of which reject on distance alone) -- the string key and
+         its two hash lookups only get built for whatever actually passes,
+         a much smaller set than every (seed, base image) pair tried. */
+      var x = base.x + (__M00 * ci + __M01 * cj + __M02 * ck);
+      var y = base.y + (__M10 * ci + __M11 * cj + __M12 * ck);
+      var z = base.z + (__M20 * ci + __M21 * cj + __M22 * ck);
+      var dx = x - seedAtom.x, dy = y - seedAtom.y, dz = z - seedAtom.z;
+      if (dx * dx + dy * dy + dz * dz > radius * radius) return;
+      var key = base.auIndex + ":" + base.opIndex + ":" + ci + ":" + cj + ":" + ck;
+      if (existing[key] || foundByKey.hasOwnProperty(key)) return;
+      foundByKey[key] = generateSymmetryPosition(base.auIndex, base.opIndex, ci, cj, ck);
+    }
+    /* Contacts (which currently-displayed atoms a given candidate is close
+       enough to, for the dotted-line display): a second pass, now over a
+       far smaller set (only genuine candidates, not every probed
+       combination above), so a spatial grid over the current atoms --
+       bucketed at cell size = radius, so two points within radius of each
+       other can never be more than one bucket apart -- keeps this pass
+       cheap too, checking only each candidate's own 27 neighbouring
+       buckets rather than every currently-displayed atom. */
+    var grid = {};
+    function bkey(x, y, z) { return Math.floor(x / radius) + "," + Math.floor(y / radius) + "," + Math.floor(z / radius); }
+    for (var gi = 0; gi < current.length; gi++) {
+      var ga = current[gi], k = bkey(ga.x, ga.y, ga.z);
+      (grid[k] || (grid[k] = [])).push(ga);
+    }
+    for (var fk in foundByKey) {
+      if (!foundByKey.hasOwnProperty(fk)) continue;
+      var cand = foundByKey[fk];
+      var ix = Math.floor(cand.x / radius), iy = Math.floor(cand.y / radius), iz = Math.floor(cand.z / radius);
+      var contacts = [];
+      for (var dxi = -1; dxi <= 1; dxi++) for (var dyi = -1; dyi <= 1; dyi++) for (var dzi = -1; dzi <= 1; dzi++) {
+        var bucket = grid[(ix + dxi) + "," + (iy + dyi) + "," + (iz + dzi)];
+        if (!bucket) continue;
+        for (var b = 0; b < bucket.length; b++) {
+          var a2 = bucket[b];
+          var dx2 = cand.x - a2.x, dy2 = cand.y - a2.y, dz2 = cand.z - a2.z;
+          if (dx2 * dx2 + dy2 * dy2 + dz2 * dz2 <= radius * radius) contacts.push(a2);
+        }
+      }
+      if (contacts.length) result.push({ atom: cand, contacts: contacts });
+    }
+    return result;
+  }
+  function refreshMolecularNeighborhood() {
+    molNeighborAtoms = computeMolecularNeighborhood();
+    renderStructure();
+    if (state.molNeighborMode) {
+      if (!state.isCif || state.symmetryForgotten) setStatus("Molecular neighbourhood needs a CIF-based host that still has its symmetry information.", true);
+      else setStatus("Molecular neighbourhood: " + molNeighborAtoms.length + " new position" + (molNeighborAtoms.length === 1 ? "" : "s") + " within " + state.molNeighborRadius.toFixed(2) + " " + U.ang + ".", false);
+    }
+  }
+  function renderMolecularNeighborhood(off) {
+    clearGroup(molNeighborGroup);
+    if (!state.molNeighborMode || !molNeighborAtoms.length) return;
+    if (!sphereGeo) sphereGeo = new THREE.SphereGeometry(1, state.highDetail ? 48 : 20, state.highDetail ? 36 : 16);
+    var n = molNeighborAtoms.length;
+    var mat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.7, metalness: 0.0 });
+    var inst = new THREE.InstancedMesh(sphereGeo, mat, n);
+    inst.userData.atoms = molNeighborAtoms.map(function (e) { return e.atom; });
+    inst.userData.isMolNeighbor = true; /* tags this mesh for molecularNeighborhoodResolveClick's own dedicated raycast -- these are never selectable/bondable atoms, so resolveClickTarget itself never looks at this group */
+    var m4 = new THREE.Matrix4();
+    var linePositions = [];
+    for (var i = 0; i < n; i++) {
+      var entry = molNeighborAtoms[i], a = entry.atom;
+      var sc = atomDisplayRadius("ballstick", a.r, a.el, state.hostBondRadius, state.atomScale, a);
+      var x = a.x + off[0], y = a.y + off[1], z = a.z + off[2];
+      m4.makeScale(sc, sc, sc); m4.setPosition(x, y, z);
+      inst.setMatrixAt(i, m4);
+      for (var c = 0; c < entry.contacts.length; c++) {
+        var ct = entry.contacts[c];
+        linePositions.push(x, y, z, ct.x + off[0], ct.y + off[1], ct.z + off[2]);
+      }
+    }
+    inst.instanceMatrix.needsUpdate = true;
+    molNeighborGroup.add(inst);
+    if (linePositions.length) {
+      var lineGeo = new THREE.BufferGeometry();
+      lineGeo.setAttribute("position", new THREE.Float32BufferAttribute(linePositions, 3));
+      var lineMat = new THREE.LineDashedMaterial({ color: 0x000000, dashSize: 0.15, gapSize: 0.12 });
+      var lines = new THREE.LineSegments(lineGeo, lineMat);
+      lines.computeLineDistances(); /* THREE requires this for dashes to actually render, not solid lines */
+      molNeighborGroup.add(lines);
+    }
+  }
+  function molecularNeighborhoodResolveClick(clientX, clientY) {
+    var rect = renderer.domElement.getBoundingClientRect();
+    if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return null;
+    if (!raycaster) raycaster = new THREE.Raycaster();
+    var ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+    raycaster.setFromCamera(ndc, activeCam);
+    var hits = raycaster.intersectObjects(molNeighborGroup.children, false);
+    for (var i = 0; i < hits.length; i++) {
+      var mesh = hits[i].object;
+      if (mesh.userData && mesh.userData.isMolNeighbor && hits[i].instanceId !== undefined) return mesh.userData.atoms[hits[i].instanceId];
+    }
+    return null;
+  }
+  function molecularNeighborhoodClick(clientX, clientY) {
+    var seed = molecularNeighborhoodResolveClick(clientX, clientY);
+    if (!seed) return;
+    var candidates = findGrowthCandidates(seed);
+    if (!candidates.length) { setStatus("No new symmetry-connected atoms found from this position.", true); return; }
+    var grownCount = commitGrownAtoms(expandToConnectedFragment(candidates));
+    /* the shell around the newly-displayed atoms is different now -- recompute
+       it fresh, discarding whatever black atoms this click didn't touch and
+       adding whatever new ones the bigger structure now borders (any of
+       those that were already a black atom simply stop being regenerated,
+       since existingCifKeySet() now finds them among the real atoms). */
+    molNeighborAtoms = computeMolecularNeighborhood();
+    renderStructure();
+    setStatus("Grew " + grownCount + " atom" + (grownCount === 1 ? "" : "s") + " (connected fragment) -- molecular neighbourhood: " +
+      molNeighborAtoms.length + " new position" + (molNeighborAtoms.length === 1 ? "" : "s") + " within " + state.molNeighborRadius.toFixed(2) + " " + U.ang + ".", false);
+  }
   var unitCellCylGeo = null, unitCellSphereGeo = null;
   function addUnitCellEdge(p0, p1, color) {
     var dir = new THREE.Vector3(p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]);
@@ -11542,6 +12251,11 @@ select.sel:focus{border-color:var(--accent)}
     var btn = document.getElementById("growModeBtn"); if (!btn) return;
     btn.textContent = state.growMode ? "Interactive grow mode is ON \u2014 click an atom to grow" : "Interactive grow mode is OFF \u2014 click to turn on";
     btn.className = "btn prominent" + (state.growMode ? " grow-active" : " ghost");
+  }
+  function updateMolNeighborBtnLabel() {
+    var btn = document.getElementById("molNeighborBtn"); if (!btn) return;
+    btn.textContent = state.molNeighborMode ? "Molecular neighbourhood is ON \u2014 click a black atom to grow its fragment" : "Molecular neighbourhood is OFF \u2014 click to turn on";
+    btn.className = "btn prominent" + (state.molNeighborMode ? " grow-active" : " ghost");
   }
   function exitGrowMode() {
     if (!state.growMode) return;
@@ -12566,12 +13280,13 @@ select.sel:focus{border-color:var(--accent)}
         fillEnabled: state.fillEnabled, fillIntensity: state.fillIntensity,
         rimEnabled: state.rimEnabled, rimIntensity: state.rimIntensity,
         atomRoughness: state.atomRoughness, atomMetalness: state.atomMetalness, atomReflectivity: state.atomReflectivity,
+        materialApplyCoordPoly: state.materialApplyCoordPoly, materialApplyMolSurface: state.materialApplyMolSurface, materialApplyVoid: state.materialApplyVoid,
         labelSize: state.labelSize, labelColor: state.labelColor, labelHalo: state.labelHalo, labelFont: state.labelFont,
         dontWarnAviSize: state.dontWarnAviSize,
         clipPlaneOffset: state.clipPlaneOffset, clipPlaneInvert: state.clipPlaneInvert,
         clipPlaneMode: state.clipPlaneMode, clipPlaneH: state.clipPlaneH, clipPlaneK: state.clipPlaneK, clipPlaneL: state.clipPlaneL,
         clipPlaneApplyHost: state.clipPlaneApplyHost, clipPlaneApplyGuest: state.clipPlaneApplyGuest,
-        clipPlaneApplyVoid: state.clipPlaneApplyVoid, clipPlaneApplyMolSurface: state.clipPlaneApplyMolSurface,
+        clipPlaneApplyVoid: state.clipPlaneApplyVoid, clipPlaneApplyChannel: state.clipPlaneApplyChannel, clipPlaneApplyMolSurface: state.clipPlaneApplyMolSurface,
         clipPlaneApplyUnitCell: state.clipPlaneApplyUnitCell, clipPlaneHklConvention: state.clipPlaneHklConvention
         /* clipPlaneEnabled deliberately NOT persisted -- starting a fresh
            session with part of the structure invisible for no visible
@@ -12607,6 +13322,9 @@ select.sel:focus{border-color:var(--accent)}
       if (data.hasOwnProperty("atomRoughness")) state.atomRoughness = clamp(data.atomRoughness, 0, 1, state.atomRoughness);
       if (data.hasOwnProperty("atomMetalness")) state.atomMetalness = clamp(data.atomMetalness, 0, 0.9, state.atomMetalness);
       if (data.hasOwnProperty("atomReflectivity")) state.atomReflectivity = clamp(data.atomReflectivity, 0, 2, state.atomReflectivity);
+      if (typeof data.materialApplyCoordPoly === "boolean") state.materialApplyCoordPoly = data.materialApplyCoordPoly;
+      if (typeof data.materialApplyMolSurface === "boolean") state.materialApplyMolSurface = data.materialApplyMolSurface;
+      if (typeof data.materialApplyVoid === "boolean") state.materialApplyVoid = data.materialApplyVoid;
       if (data.hasOwnProperty("labelSize")) state.labelSize = clamp(data.labelSize, 1.0, 6.0, state.labelSize);
       if (typeof data.labelColor === "number") state.labelColor = data.labelColor;
       if (typeof data.labelHalo === "boolean") state.labelHalo = data.labelHalo;
@@ -12621,6 +13339,7 @@ select.sel:focus{border-color:var(--accent)}
       if (typeof data.clipPlaneApplyHost === "boolean") state.clipPlaneApplyHost = data.clipPlaneApplyHost;
       if (typeof data.clipPlaneApplyGuest === "boolean") state.clipPlaneApplyGuest = data.clipPlaneApplyGuest;
       if (typeof data.clipPlaneApplyVoid === "boolean") state.clipPlaneApplyVoid = data.clipPlaneApplyVoid;
+      if (typeof data.clipPlaneApplyChannel === "boolean") state.clipPlaneApplyChannel = data.clipPlaneApplyChannel;
       if (typeof data.clipPlaneApplyMolSurface === "boolean") state.clipPlaneApplyMolSurface = data.clipPlaneApplyMolSurface;
       if (typeof data.clipPlaneApplyUnitCell === "boolean") state.clipPlaneApplyUnitCell = data.clipPlaneApplyUnitCell;
       if (data.clipPlaneHklConvention === "reciprocal" || data.clipPlaneHklConvention === "direct") state.clipPlaneHklConvention = data.clipPlaneHklConvention;
@@ -13236,6 +13955,9 @@ select.sel:focus{border-color:var(--accent)}
       videoFps: state.videoFps,
       showUnitCell: state.showUnitCell, unitCellColor: state.unitCellColor,
       unitCellThickness: state.unitCellThickness, unitCellAxisColors: state.unitCellAxisColors,
+      showCoordPolyhedra: state.showCoordPolyhedra,
+      coordPolyOpacity: state.coordPolyOpacity, coordPolyColorMode: state.coordPolyColorMode, coordPolyColor: state.coordPolyColor,
+      coordPolyEdgeThickness: state.coordPolyEdgeThickness,
       ellipsoidProb: state.ellipsoidProb,
       showPrincipalAxes: state.showPrincipalAxes, principalAxisColor: state.principalAxisColor, principalAxisWidth: state.principalAxisWidth,
       showLabels: state.showLabels, labelSize: state.labelSize, labelColor: state.labelColor,
@@ -13255,6 +13977,7 @@ select.sel:focus{border-color:var(--accent)}
       bgColor: state.bgColor, pseudoOrtho: state.pseudoOrtho, highDetail: state.highDetail,
       fogOn: state.fogOn, fogDensity: state.fogDensity,
       atomRoughness: state.atomRoughness, atomMetalness: state.atomMetalness, atomReflectivity: state.atomReflectivity,
+      materialApplyCoordPoly: state.materialApplyCoordPoly, materialApplyMolSurface: state.materialApplyMolSurface, materialApplyVoid: state.materialApplyVoid,
       lightHeadlight: state.lightHeadlight, lightAngle: state.lightAngle,
       keyEnabled: state.keyEnabled, keyIntensity: state.keyIntensity,
       fillEnabled: state.fillEnabled, fillIntensity: state.fillIntensity,
@@ -13400,6 +14123,11 @@ select.sel:focus{border-color:var(--accent)}
     if (typeof data.unitCellColor === "number") state.unitCellColor = data.unitCellColor;
     if (typeof data.unitCellThickness === "number") state.unitCellThickness = data.unitCellThickness;
     if (typeof data.unitCellAxisColors === "boolean") state.unitCellAxisColors = data.unitCellAxisColors;
+    if (typeof data.showCoordPolyhedra === "boolean") state.showCoordPolyhedra = data.showCoordPolyhedra;
+    if (typeof data.coordPolyOpacity === "number") state.coordPolyOpacity = data.coordPolyOpacity;
+    if (typeof data.coordPolyEdgeThickness === "number") state.coordPolyEdgeThickness = data.coordPolyEdgeThickness;
+    if (typeof data.coordPolyColorMode === "string") state.coordPolyColorMode = data.coordPolyColorMode;
+    if (typeof data.coordPolyColor === "number") state.coordPolyColor = data.coordPolyColor;
     if (data.ellipsoidProb) state.ellipsoidProb = data.ellipsoidProb;
     var ellipsoidProbSelEl = document.getElementById("ellipsoidProbSelect"); if (ellipsoidProbSelEl) ellipsoidProbSelEl.value = state.ellipsoidProb;
     if (typeof data.showPrincipalAxes === "boolean") state.showPrincipalAxes = data.showPrincipalAxes;
@@ -13428,6 +14156,9 @@ select.sel:focus{border-color:var(--accent)}
     if (typeof data.atomRoughness === "number") state.atomRoughness = data.atomRoughness;
     if (typeof data.atomMetalness === "number") state.atomMetalness = data.atomMetalness;
     if (typeof data.atomReflectivity === "number") state.atomReflectivity = data.atomReflectivity;
+    if (typeof data.materialApplyCoordPoly === "boolean") state.materialApplyCoordPoly = data.materialApplyCoordPoly;
+    if (typeof data.materialApplyMolSurface === "boolean") state.materialApplyMolSurface = data.materialApplyMolSurface;
+    if (typeof data.materialApplyVoid === "boolean") state.materialApplyVoid = data.materialApplyVoid;
     updateMaterialAppearance();
     if (typeof data.lightHeadlight === "boolean") setLightMode(data.lightHeadlight);
     if (typeof data.lightAngle === "number") setLightAngle(data.lightAngle);
@@ -13711,6 +14442,36 @@ select.sel:focus{border-color:var(--accent)}
     ucRow.appendChild(ucColorWrap);
     unitCellBody.appendChild(ucRow);
     slider(unitCellBody, "Line thickness", 0.01, 0.15, 0.005, state.unitCellThickness, U.ang, function (v) { state.unitCellThickness = v; renderUnitCell(); });
+
+    /* ---- Coordination polyhedra ----
+       Triangulates the FULL, symmetry-derived ligand set of every currently-
+       displayed metal atom -- every other non-metal atom formally bonded to
+       it, same test as ordinary bonds (see computeCoordinationPolyhedra's
+       own comment) -- then draws only the hull faces whose three atoms are
+       actually on screen right now, so it fills in as more of the structure
+       is grown rather than needing every ligand present before showing
+       anything. No separate distance control: it's not a second, looser
+       notion of "coordinating" layered on top of what's already drawn as a
+       bond, just those same bonds' own donor atoms, triangulated. */
+    var coordPolyBody = subsection(styleC, "Coordination Polyhedra", false);
+    toggle(coordPolyBody, "Show coordination polyhedra", state.showCoordPolyhedra, function (b) { state.showCoordPolyhedra = b; renderStructure(); });
+    slider(coordPolyBody, "Opacity", 0.05, 1.0, 0.05, state.coordPolyOpacity, "", function (v) { state.coordPolyOpacity = v; renderStructure(); });
+    slider(coordPolyBody, "Edge thickness", 0.005, 0.12, 0.005, state.coordPolyEdgeThickness, U.ang, function (v) { state.coordPolyEdgeThickness = v; renderStructure(); });
+    /* "By metal element"/"Single colour" -- same row layout/radio mechanics
+       as buildBondColorByRow, but that helper's own labels ("Split colour")
+       don't fit here, so this is its own small copy rather than a reuse. */
+    var coordColorRow = el("div", "ctl-inline"); coordColorRow.style.gap = "14px";
+    var byElLbl = el("label", "radio");
+    var byElInp = document.createElement("input"); byElInp.type = "radio"; byElInp.name = "coordPolyColorMode" + Math.random(); byElInp.checked = state.coordPolyColorMode !== "single";
+    byElLbl.appendChild(byElInp); byElLbl.appendChild(el("span", null, "By metal element"));
+    var singleLbl2 = el("label", "radio");
+    var singleInp2 = document.createElement("input"); singleInp2.type = "radio"; singleInp2.name = byElInp.name; singleInp2.checked = state.coordPolyColorMode === "single";
+    singleLbl2.appendChild(singleInp2); singleLbl2.appendChild(el("span", null, "Single colour"));
+    byElInp.addEventListener("change", function () { if (byElInp.checked) { state.coordPolyColorMode = "element"; renderStructure(); } });
+    singleInp2.addEventListener("change", function () { if (singleInp2.checked) { state.coordPolyColorMode = "single"; renderStructure(); } });
+    coordColorRow.appendChild(byElLbl); coordColorRow.appendChild(singleLbl2);
+    coordColorRow.appendChild(colorSwatch(state.coordPolyColor, function (hex) { state.coordPolyColor = hex; renderStructure(); }));
+    coordPolyBody.appendChild(coordColorRow);
 
     /* ---- Host ---- */
     var hinfo = el("div", "readout"); hinfo.id = "hostInfo"; hinfo.innerHTML = "&mdash;"; hostTab.appendChild(hinfo);
@@ -14421,16 +15182,20 @@ select.sel:focus{border-color:var(--accent)}
     clipApplyGuestTg.id = "clipPlaneApplyGuestTg";
     clipBody.appendChild(clipApplyRow1);
     var clipApplyRow2 = el("div", "toggle-row2");
-    var clipApplyVoidTg = toggle(clipApplyRow2, "Voids / channels", state.clipPlaneApplyVoid, function (v) {
+    var clipApplyVoidTg = toggle(clipApplyRow2, "Voids", state.clipPlaneApplyVoid, function (v) {
       state.clipPlaneApplyVoid = v; updateClipPlane(); persistPreferences();
     });
     clipApplyVoidTg.id = "clipPlaneApplyVoidTg";
-    var clipApplyMolSurfTg = toggle(clipApplyRow2, "Molecular surface", state.clipPlaneApplyMolSurface, function (v) {
+    var clipApplyChannelTg = toggle(clipApplyRow2, "Channels", state.clipPlaneApplyChannel, function (v) {
+      state.clipPlaneApplyChannel = v; updateClipPlane(); persistPreferences();
+    });
+    clipApplyChannelTg.id = "clipPlaneApplyChannelTg";
+    clipBody.appendChild(clipApplyRow2);
+    var clipApplyRow3 = el("div", "toggle-row2");
+    var clipApplyMolSurfTg = toggle(clipApplyRow3, "Molecular surface", state.clipPlaneApplyMolSurface, function (v) {
       state.clipPlaneApplyMolSurface = v; updateClipPlane(); persistPreferences();
     });
     clipApplyMolSurfTg.id = "clipPlaneApplyMolSurfTg";
-    clipBody.appendChild(clipApplyRow2);
-    var clipApplyRow3 = el("div", "toggle-row2");
     var clipApplyUnitCellTg = toggle(clipApplyRow3, "Unit cell", state.clipPlaneApplyUnitCell, function (v) {
       state.clipPlaneApplyUnitCell = v; updateClipPlane(); persistPreferences();
     });
@@ -14478,7 +15243,7 @@ select.sel:focus{border-color:var(--accent)}
     syncAutoRotateButtons();
 
     var symC = section(left, "Grow", false, function (isOpen) {
-      if (!isOpen) exitGrowMode();
+      if (!isOpen) { exitGrowMode(); exitMolNeighborMode(); }
     });
     symC.parentElement.id = "symmetrySection"; symC.parentElement.style.display = "none";
     var auInfo = el("div", "readout"); auInfo.id = "auInfo"; auInfo.innerHTML = "<div class='dim'>No CIF loaded.</div>"; symC.appendChild(auInfo);
@@ -14530,26 +15295,48 @@ select.sel:focus{border-color:var(--accent)}
     symC.appendChild(el("hr", "divider"));
 
     function closeOtherGrowSubs(keepWrap) {
-      [mouseTab, packTab, symOpTab].forEach(function (body) {
+      [mouseTab, packTab, symOpTab, molNeighborTab].forEach(function (body) {
         if (body && body.parentElement !== keepWrap) body.parentElement.classList.remove("open");
       });
     }
     var mouseTab = subsection(symC, "Mouse", false, function (isOpen) {
-      exitGrowMode();
+      exitGrowMode(); exitMolNeighborMode();
       if (isOpen) closeOtherGrowSubs(mouseTab.parentElement);
     });
     var packTab = subsection(symC, "Pack", false, function (isOpen) {
-      exitGrowMode();
+      exitGrowMode(); exitMolNeighborMode();
       if (isOpen) closeOtherGrowSubs(packTab.parentElement);
     });
     var symOpTab = subsection(symC, "Symmetry", false, function (isOpen) {
-      exitGrowMode();
+      exitGrowMode(); exitMolNeighborMode();
       if (isOpen) closeOtherGrowSubs(symOpTab.parentElement);
     });
+    var molNeighborTab = subsection(symC, "Molecular neighbourhood", false, function (isOpen) {
+      exitGrowMode();
+      if (!isOpen) exitMolNeighborMode();
+      if (isOpen) closeOtherGrowSubs(molNeighborTab.parentElement);
+    });
+    molNeighborTab.parentElement.id = "molNeighborSection";
+    var molNeighborRadiusRow = el("div", "ctl-inline");
+    molNeighborRadiusRow.appendChild(el("label", "plain", "Sphere of inclusion"));
+    var molNeighborRadiusInp = document.createElement("input");
+    molNeighborRadiusInp.type = "number"; molNeighborRadiusInp.className = "num"; molNeighborRadiusInp.id = "molNeighborRadiusInp";
+    molNeighborRadiusInp.step = "0.1"; molNeighborRadiusInp.value = state.molNeighborRadius;
+    molNeighborRadiusInp.addEventListener("input", function () {
+      var v = parseFloat(molNeighborRadiusInp.value);
+      if (!isFinite(v) || v <= 0) return;
+      state.molNeighborRadius = v;
+      if (state.molNeighborMode) refreshMolecularNeighborhood();
+    });
+    molNeighborRadiusRow.appendChild(molNeighborRadiusInp); molNeighborRadiusRow.appendChild(el("span", "unit", U.ang));
+    molNeighborTab.appendChild(molNeighborRadiusRow);
+    var molNeighborBtn = button(molNeighborTab, "", "prominent", function () { setMolNeighborMode(); });
+    molNeighborBtn.id = "molNeighborBtn";
+    updateMolNeighborBtnLabel();
 
     var growModeBtn = button(mouseTab, "", "prominent", function () {
       state.growMode = !state.growMode;
-      if (state.growMode) { exitBondEditMode(); exitGuestDragMode(); }
+      if (state.growMode) { exitBondEditMode(); exitGuestDragMode(); exitMolNeighborMode(); }
       var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = state.growMode ? "crosshair" : "";
       updateGrowModeBtnLabel();
     });
@@ -14850,6 +15637,20 @@ select.sel:focus{border-color:var(--accent)}
     var reflSl = labelSlider(materialTab, "Reflection strength", 0.0, 2.0, 0.1, state.atomReflectivity, function (v) { state.atomReflectivity = v; updateMaterialAppearance(); persistPreferences(); });
     reflSl.id = "matReflRange";
     var matResetBtn = button(materialTab, "Restore material defaults", "mini", resetMaterialSettings);
+    materialTab.appendChild(el("div", "hint", "Also apply these to:"));
+    /* Each handler re-renders its OWN category directly, both ways -- unlike
+       the roughness/metalness/reflectivity sliders just above (which only
+       ever need to refresh a category that's currently opted in, via
+       updateMaterialAppearance()), TURNING a toggle OFF needs the exact same
+       kind of refresh as turning it on, back to that category's own fixed
+       look, which updateMaterialAppearance()'s own "only if still on" guard
+       would otherwise skip, leaving the old applied look stuck on screen. */
+    var applyVoidTg = toggle(materialTab, "Void / channel surfaces", state.materialApplyVoid, function (b) { state.materialApplyVoid = b; renderVoidMeshes(); persistPreferences(); });
+    applyVoidTg.id = "materialApplyVoidTg";
+    var applyMolSurfaceTg = toggle(materialTab, "Molecular surface", state.materialApplyMolSurface, function (b) { state.materialApplyMolSurface = b; renderMolSurfaceMeshes(); persistPreferences(); });
+    applyMolSurfaceTg.id = "materialApplyMolSurfaceTg";
+    var applyCoordPolyTg = toggle(materialTab, "Coordination polyhedra", state.materialApplyCoordPoly, function (b) { state.materialApplyCoordPoly = b; renderCoordinationPolyhedra(centroid()); persistPreferences(); });
+    applyCoordPolyTg.id = "materialApplyCoordPolyTg";
 
     var hlTg = toggle(lightingTab, "Light follows view", state.lightHeadlight, function (b) { setLightMode(b); persistPreferences(); });
     hlTg.id = "lightHeadlightTg";
@@ -15009,6 +15810,20 @@ select.sel:focus{border-color:var(--accent)}
       if (sec && sec.contains(e.target)) return;
       if (vp && vp.contains(e.target)) return;
       exitGuestDragMode();
+    }, true);
+    /* Same convention again for Molecular neighbourhood: any click outside
+       its own subsection or the viewport cancels it. Switching to a
+       DIFFERENT Grow subsection (Mouse/Pack/Symmetry) also exits it --
+       closeOtherGrowSubs collapses this one when another opens, which fires
+       its own onToggle(false) below, exactly mirroring how those other
+       three subsections already exit growMode on their own toggle. */
+    document.addEventListener("click", function (e) {
+      if (!state.molNeighborMode) return;
+      var sec = document.getElementById("molNeighborSection");
+      var vp = document.getElementById("viewport");
+      if (sec && sec.contains(e.target)) return;
+      if (vp && vp.contains(e.target)) return;
+      exitMolNeighborMode();
     }, true);
     window.addEventListener("keydown", function (e) {
       /* spacebar and the rotation keys only act when focus isn't in a control
@@ -15247,7 +16062,7 @@ select.sel:focus{border-color:var(--accent)}
       "<p>A SHELX <b>.res</b> or <b>.ins</b> file drops in exactly the same way and works identically from that point on -- same host/guest handling, same Grow panel, same everything -- since both formats are read into the same unit cell + symmetry operators + asymmetric unit shape internally; the one difference is that Save CIF stays disabled afterwards, since there's no original CIF text to splice edits back into. A <b>PART n</b> instruction in the file is read and remembered per atom: automatic bond generation never bonds two atoms that have different, both non-zero PART numbers, since SHELX uses PART specifically to mark alternative, mutually-exclusive disorder components that are never really present together -- PART 0 (the default, before any PART instruction, and every CIF-loaded atom, which has no PART concept at all) still bonds to anything. A negative PART number additionally stops bonds forming, across a symmetry operation, to a grown copy with any non-zero PART number -- the standard way of handling a group disordered across a special position (e.g. a solvent molecule sitting on an inversion centre) without it bonding to its own symmetry mate. <b>Shift+Ctrl+Alt+click</b> selects every currently-displayed atom sharing the clicked atom's PART number (a second click on the same part deselects them) -- only available for a PART-tagged, .res/.ins-derived structure; it does nothing on a CIF-loaded one, which has no PART numbers to select by.</p>" +
       "<h3>CIF and symmetry (Symmetry panel)</h3>" +
       "<p>Dropping a CIF reads the unit cell, the symmetry operators (from the file's own symmetry loop), and the asymmetric unit, then displays just the asymmetric unit -- not a complete molecule -- as the starting point. If the file actually contains more atoms than the true asymmetric unit (Mercury sometimes exports a whole completed molecule this way), the extra symmetry-equivalent copies are automatically detected and removed first, so what's displayed is always just the independent set. An atom sitting exactly on a special position (a mirror plane, an inversion centre, a rotation axis) is never duplicated when a symmetry operation maps it onto itself or onto another copy already present -- this is handled automatically throughout, not something to manage by hand.</p>" +
-      "<p>The <b>Grow</b> section appears once a CIF has been loaded, with the asymmetric unit and current atom count shown at the top, and its controls split into three submenus -- <b>Mouse</b>, <b>Pack</b>, and <b>Symmetry</b>.</p>" +
+      "<p>The <b>Grow</b> section appears once a CIF has been loaded, with the asymmetric unit and current atom count shown at the top, and its controls split into four submenus -- <b>Mouse</b>, <b>Pack</b>, <b>Symmetry</b>, and <b>Molecular neighbourhood</b>.</p>" +
       "<p>On the <b>Mouse</b> tab, the large button turns grow mode on or off -- solid when on, a visual reminder alongside the crosshair cursor that a plain click will grow rather than select. Two independent radio choices control how: <b>Bonds</b> requires the new atom to be covalently bonded to the one clicked, searched up to 5 unit cells away; <b>Sphere of inclusion</b> adds every symmetry-equivalent atom within the radius given next to it, regardless of bonding -- useful for filling out a coordination sphere or a solvent shell that isn't covalently continuous. Separately, <b>Atoms</b> adds just the one newly-connected atom; <b>Fragment</b> (the default) adds the whole covalently-connected molecule the new atom belongs to within its asymmetric unit, leaving the rest of that asymmetric unit alone; <b>ASU</b> adds the entire asymmetric unit instead, generated under whatever symmetry operation connects it -- everything in it, not just the connected molecule. The Fragment/ASU distinction matters when the asymmetric unit contains more than one physically separate molecule (say, a host and a guest together, or two independent solvent molecules): ASU would grow both together since they share the same symmetry transform, where Fragment grows only the one actually connected to what was clicked. Whether you click a host or a guest atom makes no difference to any of this.</p>" +
       "<p>The <b>Pack</b> tab grows by an explicit fractional-coordinate range instead of a click: set limits for a, b, and c (each defaults to 0 to 1, one full unit cell, and can range from -5 to 5), choose whether a fragment qualifies when <b>a fragment atom</b> falls within those limits or only when its <b>centroid</b> does, then press <b>Pack</b>. Every symmetry-related copy of the asymmetric unit meeting that condition is added in one step, each still a whole covalently-connected fragment (not split by Atoms/Fragment/ASU, which are Mouse-tab-only concepts).</p>" +
       "<p>The <b>Symmetry</b> tab applies one specific, explicitly chosen symmetry operation to whichever atoms are currently selected, rather than growing by proximity or by range. The dropdown lists every operator of this structure's space group exactly as the CIF itself expresses them (e.g. <span class='mono'>x,y,z</span> for identity, <span class='mono'>-x,y+0.5,-z</span> for a 2-fold screw axis parallel to b); choosing one fills in the 3x4 matrix beside it -- three rows of a rotation coefficient triple plus a translation, e.g. a c-glide perpendicular to b would read as rows (1,0,0,0), (0,-1,0,0), (0,0,-1,0.5). The rotation coefficients (always -1, 0, or 1 for any real symmetry operation) step through those three values with the small up/down arrows; the translations accept any typed value, since a screw or glide component is usually a fraction but there's no reason to restrict it to one. Apply doesn't reset any of this afterwards -- the matrix stays exactly as set until deliberately changed again, whether by picking a different operator from the dropdown or editing a box directly. Each row also has its own <b>-a/+a</b>, <b>-b/+b</b>, or <b>-c/+c</b> pair alongside it; pressing one always applies a fresh, plain +1 or -1 cell translation along that one axis to whatever's currently selected -- not a further nudge on top of whatever the matrix happened to already show -- and, unlike the rest of the matrix, does so immediately without needing Apply, since the point of a cell shift is usually to walk straight to a neighbouring copy one step at a time (it does overwrite the displayed matrix to show that plain translation, though, so what's about to happen is always visible first). With <b>Use M<sup>-1</sup></b> checked, Apply and the shift buttons alike carry out the matrix as given in reverse instead. Each selected atom is mapped through the operation to find its image; if that image is a position not already displayed, the atom is added there (correctly tracked for further growth or symmetry-aware deletion, exactly like any other grown atom), and if it's already present, that one atom is simply left alone rather than duplicated. With <b>Select new</b> checked, the originally-selected atoms are deselected once Apply runs and each one's image -- newly added or already there -- is selected in their place, which is what makes stepping a shift button repeatedly walk outward one cell at a time rather than needing to reselect anything by hand in between. With <b>Keep source format</b> checked, each newly-generated image copies the exact display colour and radius of the specific selected atom it was generated from, atom-by-atom, instead of whatever the \"Settings for new host/guest atoms\" dropdown would otherwise give it -- distinct from that dropdown's generic brush, and scoped only to Symmetry's own Apply and shift buttons, never Mouse or Pack growth.</p>" +
@@ -15259,6 +16074,9 @@ select.sel:focus{border-color:var(--accent)}
       "<p>Ctrl-Alt-click selects every currently-displayed atom that shares the same asymmetric unit origin as the one clicked -- every symmetry copy of that specific atom, across host and guest alike -- which is otherwise not something to find by hand once a structure has been grown out. This takes priority over grow mode, so it works the same way whether or not grow mode happens to be switched on.</p>" +
       "<p>If part of the asymmetric unit has been moved to a guest (e.g. an included CO<sub>2</sub>, moved there via \"Move selection to\" in Structure &gt; Edit atoms, the same way as in Mode 1), growth remembers that: every future symmetry-generated copy of that same asymmetric unit atom is added as a guest too, not host, from then on -- joining the same guest component it was already part of, rather than starting a new one each time. Clicking a guest atom in grow mode works exactly like clicking a host atom; there's no distinction between them for growth purposes.</p>" +
       "<p>The unit cell's colour and line thickness are both adjustable; edges are drawn the same way bonds are (as shaded cylinders, not flat lines), so they respond to lighting rather than looking flat. Its three edges from the origin can optionally be coloured in the deepest possible red/green/blue for a, b, c respectively, following the usual crystallographic convention, instead of the single default colour. The a, b, c edges are always labelled in italic, in whichever of black or white contrasts better with the current background (the same approach the lasso outline uses), so the labels stay readable regardless of colour scheme. All of this is purely visual and has no effect on growth.</p>" +
+      "<h3>Molecular neighbourhood</h3>" +
+      "<p>A different way of growing: rather than adding atoms outright, it previews what's nearby first, so a direction can be chosen before committing to it -- useful for a framework or polymer that could otherwise be extended in several different directions at once. Enter a <b>Sphere of inclusion</b> radius, then press the button below it (solid red while active, exactly like Mouse's own grow-mode button). Every symmetry-generated atom not currently displayed, but within that radius of at least one atom that already is (host or guest, whichever layer it would belong to), is shown as a plain black sphere, unbonded to anything, joined by a dotted line to each real atom it's close enough to -- these are a preview only, never added to the model, and cost nothing to leave on screen since they're recomputed only when the mode is turned on, the radius changes, or a fragment is added, not on every frame.</p>" +
+      "<p>Clicking one of these black spheres adds the whole connected fragment it belongs to -- the same Fragment-unit growth Mouse's own grow mode uses -- and the preview then refreshes around the newly-larger structure: any black sphere the new fragment happened to reach simply stops being previewed (it's a real atom now), and a fresh ring of black spheres appears around whatever's now the edge of the structure. Repeating this lets a structure be built out one fragment at a time, following whichever direction actually looks interesting, rather than growing everything within reach at once. Leaving Molecular neighbourhood -- pressing its button again, closing its own tab, switching to Mouse/Pack/Symmetry, or opening a different section entirely -- discards whatever black spheres are still on screen; nothing about them is ever kept. Like grow mode, it needs a CIF that still has its symmetry information.</p>" +
       "<p>The <b>Display</b> section, just below Grow, is always available. Its own general settings hold <b>Show hydrogen atoms</b> and <b>ASU only</b> as one paired row, then <b>Show unit cell</b> paired with <b>Show H bonds</b>; a <b>Background colour</b> swatch; <b>Centering</b> (All/Visible/Selected atoms, with an Apply button that only appears for \"Selected atoms\", since that mode is otherwise frozen at whatever it was last applied to); <b>Set scale</b>, an arbitrary whole-number reference for the current zoom level -- bigger means more zoomed in, updates live as you zoom, and can be typed into directly (it carries no physical unit; its purpose is matching the same apparent zoom between different structures rather than measuring anything); and duplicate <b>Select all</b> / <b>Clear selection</b> / <b>Hide selection</b> / <b>Unhide all</b> buttons for convenience, identical to the ones in Structure &gt; Edit atoms. Nested inside Display: <b>Direction</b>, a <b>View direction</b> set of crystallographic view shortcuts -- buttons for looking straight down each cell axis (a, b, c) and perpendicular to each pair-wise plane (bc, ac, ab), a general <b>[hkl]</b> field for viewing along any specific direction entered as its own three numbers, and <b>View along vector</b> / <b>View perpendicular to plane</b> (see \"Viewing along a vector or a plane\" below), which orient the camera from a selection of atoms instead. <b>Unit cell</b> holds a <b>Label axes</b> toggle for the a/b/c corner labels, a <b>RGB axes</b> option to colour the a/b/c edges red/green/blue, the cell's own <b>Cell colour</b>, and <b>line thickness</b> -- the show/hide toggle itself lives in Display's general settings above, not here.</p>" +
       "<p>Growing by clicking (atom or fragment), by sphere of inclusion, by an explicit packing range (Pack), and by a specific chosen symmetry operation or translation (Symmetry) are all implemented, as described above. Only CIFs with an explicit list of symmetry operators are supported -- one that gives only a space group name or number, with no operator list, is read as P1 (no symmetry) since looking up operators from thousands of possible space group settings isn't implemented.</p>" +
       "<h3>Host and guest are independent layers</h3>" +
