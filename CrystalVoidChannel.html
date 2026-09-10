@@ -9794,6 +9794,24 @@ select.sel:focus{border-color:var(--accent)}
     var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = "";
     syncGuestDragButton();
   }
+  /* Every "red button" click-hijacking mode at once -- used wherever the
+     atoms/structure a mode was interpreting clicks against are about to be
+     replaced wholesale (currently just loadAtoms(), see its own comment),
+     so none of them can be left pointing at stale positions or geometry
+     from the structure that's about to disappear. Each individual exit*
+     function/setVoidUiMode(null) is already a no-op when that mode isn't
+     active, so calling all of them unconditionally here is exactly as cheap
+     as guarding each one first, and can't miss a newly-added mode's own
+     guard condition. macro recording is deliberately NOT included -- it's
+     not a click-hijacking mode at all (nothing it does depends on which
+     structure is loaded), and forcibly stopping an in-progress recording
+     just because a new structure loaded (which a macro may legitimately do
+     partway through, e.g. loading each file in a folder batch) would be a
+     real, unwanted behaviour change of its own. */
+  function exitAllInteractiveModes() {
+    exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitGuestDragMode(); exitMolNeighborMode();
+    setVoidUiMode(null);
+  }
   function createAtomAtClick(clientX, clientY) {
     /* Placed on the plane through the camera's own orbit pivot (camTarget),
        facing the camera -- i.e. wherever the view currently happens to be
@@ -12336,9 +12354,30 @@ select.sel:focus{border-color:var(--accent)}
   function molecularNeighborhoodClick(clientX, clientY) {
     var seed = molecularNeighborhoodResolveClick(clientX, clientY);
     if (!seed) return;
-    var candidates = findGrowthCandidates(seed);
-    if (!candidates.length) { setStatus("No new symmetry-connected atoms found from this position.", true); return; }
+    /* findGrowthCandidates(seed) only ever finds atoms BONDED TO the seed --
+       it can never return the seed's own position, since that search looks
+       for undisplayed neighbours of an already-displayed atom, and the seed
+       itself isn't displayed yet. For a seed with at least one bonded
+       neighbour under its own symmetry transform, that neighbour becomes a
+       candidate whose own connected-fragment expansion happens to
+       rediscover the seed too (expandToConnectedFragment regenerates the
+       WHOLE asymmetric unit under a candidate's transform, which includes
+       the seed's own position) -- so an ordinary multi-atom molecule's seed
+       gets pulled in this way, indirectly. A genuinely isolated atom (a
+       lone ion with no bonds to anything, e.g. a lattice chloride) has no
+       such neighbour: candidates comes back empty, and the seed -- the one
+       thing actually clicked -- was silently never added. Passing seed
+       itself through as one more "candidate" fixes this uniformly, isolated
+       or not: expandToConnectedFragment only ever uses a candidate's own
+       (auIndex, opIndex, cell) to look up/regenerate the proper, fully
+       ADP-treated atom via generateSymmetryAtom -- the cheap preview object
+       itself (built by generateSymmetryPosition, deliberately skipping
+       ADP/ellipsoid work -- see its own comment) is never what actually
+       gets committed, only ever used to locate which position to
+       regenerate properly. */
+    var candidates = findGrowthCandidates(seed).concat([seed]);
     var grownCount = commitGrownAtoms(expandToConnectedFragment(candidates));
+    if (!grownCount) { setStatus("No new symmetry-connected atoms found from this position.", true); return; }
     /* the shell around the newly-displayed atoms is different now -- recompute
        it fresh, discarding whatever black atoms this click didn't touch and
        adding whatever new ones the bigger structure now borders (any of
@@ -12779,7 +12818,7 @@ select.sel:focus{border-color:var(--accent)}
        to parse at all (garbage/wrong format) -- that's much more likely an
        accidental wrong-file drop, where leaving the existing structure in
        place is the friendlier response. */
-    exitGrowMode();
+    exitAllInteractiveModes();
     state.atoms = null; state.name = "";
     state.isCif = false;
     state.cifCell = null; state.cifSymops = null; state.cifAsymUnit = null; state.cifFracToCart = null; state.cifTags = null;
@@ -12796,7 +12835,15 @@ select.sel:focus{border-color:var(--accent)}
   }
   function loadAtoms(atoms, name, cifMeta) {
     if (!atoms || !atoms.length) { setStatus("No atoms found.", true); return; }
-    exitGrowMode();
+    /* Every red-button click-hijacking mode (grow, bond edit, atom edit,
+       guest drag, molecular neighbourhood, void Move/Copy/Recolour) reads
+       and interprets clicks against the structure that's ABOUT to be
+       replaced wholesale below -- left on, each keeps its own button lit
+       red with no visible way left to turn it off, and molecular
+       neighbourhood in particular keeps showing its old black-atom preview
+       dots (computed from the structure being replaced) since nothing here
+       used to clear them. */
+    exitAllInteractiveModes();
     assignUids(atoms);
     var firstEver = !state.atoms && !state.everLoaded; state.everLoaded = true;
     state.atoms = atoms; state.name = name || "structure";
@@ -14245,7 +14292,7 @@ select.sel:focus{border-color:var(--accent)}
     return m;
   }
   function restoreProjectSnapshot(data) {
-    exitGrowMode();
+    exitAllInteractiveModes(); /* see loadAtoms()'s own comment -- a restored project replaces the whole structure just like a freshly loaded one does */
     state.undoStack = [];
     /* a restored .json project never carries the original CIF text (out of
        scope for that format), so "Save CIF" has to stay unavailable after
