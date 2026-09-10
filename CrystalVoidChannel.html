@@ -2652,7 +2652,7 @@ select.sel:focus{border-color:var(--accent)}
        comment for the mutual-exclusion contract shared with the other
        click-hijacking modes, and computeMolecularNeighborhood()'s for what
        molNeighborRadius actually controls. */
-    molNeighborMode: false, molNeighborRadius: 2.7,
+    molNeighborMode: false, molNeighborRadius: 2.7, molNeighborBlackNodes: true,
     unitCellColor: 0x8a7a5c, unitCellThickness: 0.04, unitCellAxisColors: true, showUnitCellLabels: true, showOnlyAsu: false, symmetryForgotten: false,
     /* Coordination polyhedra (Style > Coordination Polyhedra) -- see
        computeCoordinationPolyhedra()'s own comment for the ligand-finding
@@ -12309,26 +12309,48 @@ select.sel:focus{border-color:var(--accent)}
     clearGroup(molNeighborGroup);
     if (!state.molNeighborMode || !molNeighborAtoms.length) return;
     if (!sphereGeo) sphereGeo = new THREE.SphereGeometry(1, state.highDetail ? 48 : 20, state.highDetail ? 36 : 16);
-    var n = molNeighborAtoms.length;
-    var mat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.7, metalness: 0.0 });
-    var inst = new THREE.InstancedMesh(sphereGeo, mat, n);
-    inst.userData.atoms = molNeighborAtoms.map(function (e) { return e.atom; });
-    inst.userData.isMolNeighbor = true; /* tags this mesh for molecularNeighborhoodResolveClick's own dedicated raycast -- these are never selectable/bondable atoms, so resolveClickTarget itself never looks at this group */
+    /* "Black nodes" (default on) -- flat matte black, so a candidate never
+       reads as an atom already part of the model. Unchecked instead colours
+       each node like the atom it represents (a.color, the same CPK/custom
+       colour generateSymmetryPosition already set on it), which makes it
+       far easier to tell e.g. a chloride candidate from a hydrogen one at a
+       glance -- at the cost of that "obviously still just a preview"
+       distinctness black gives. A single InstancedMesh can't vary its
+       material per instance, so -- exactly like renderMoleculeInto's own
+       atom rendering -- entries are grouped by colour first, one
+       InstancedMesh per distinct colour (one group, still, in the default
+       all-black case). Contact lines stay black either way; only the nodes
+       themselves are ever colour-coded. */
+    var blackNodes = state.molNeighborBlackNodes;
+    var groups = {}, order = [];
+    for (var gi = 0; gi < molNeighborAtoms.length; gi++) {
+      var e = molNeighborAtoms[gi];
+      var c = blackNodes ? 0 : e.atom.color;
+      if (!groups[c]) { groups[c] = []; order.push(c); }
+      groups[c].push(e);
+    }
     var m4 = new THREE.Matrix4();
     var linePositions = [];
-    for (var i = 0; i < n; i++) {
-      var entry = molNeighborAtoms[i], a = entry.atom;
-      var sc = atomDisplayRadius("ballstick", a.r, a.el, state.hostBondRadius, state.atomScale, a);
-      var x = a.x + off[0], y = a.y + off[1], z = a.z + off[2];
-      m4.makeScale(sc, sc, sc); m4.setPosition(x, y, z);
-      inst.setMatrixAt(i, m4);
-      for (var c = 0; c < entry.contacts.length; c++) {
-        var ct = entry.contacts[c];
-        linePositions.push(x, y, z, ct.x + off[0], ct.y + off[1], ct.z + off[2]);
+    for (var gk = 0; gk < order.length; gk++) {
+      var colorInt = order[gk], entries = groups[colorInt];
+      var mat = new THREE.MeshStandardMaterial({ color: colorInt, roughness: 0.7, metalness: 0.0 });
+      var inst = new THREE.InstancedMesh(sphereGeo, mat, entries.length);
+      inst.userData.atoms = entries.map(function (e2) { return e2.atom; });
+      inst.userData.isMolNeighbor = true; /* tags this mesh for molecularNeighborhoodResolveClick's own dedicated raycast -- these are never selectable/bondable atoms, so resolveClickTarget itself never looks at this group */
+      for (var i = 0; i < entries.length; i++) {
+        var entry = entries[i], a = entry.atom;
+        var sc = atomDisplayRadius("ballstick", a.r, a.el, state.hostBondRadius, state.atomScale, a);
+        var x = a.x + off[0], y = a.y + off[1], z = a.z + off[2];
+        m4.makeScale(sc, sc, sc); m4.setPosition(x, y, z);
+        inst.setMatrixAt(i, m4);
+        for (var c2 = 0; c2 < entry.contacts.length; c2++) {
+          var ct = entry.contacts[c2];
+          linePositions.push(x, y, z, ct.x + off[0], ct.y + off[1], ct.z + off[2]);
+        }
       }
+      inst.instanceMatrix.needsUpdate = true;
+      molNeighborGroup.add(inst);
     }
-    inst.instanceMatrix.needsUpdate = true;
-    molNeighborGroup.add(inst);
     if (linePositions.length) {
       var lineGeo = new THREE.BufferGeometry();
       lineGeo.setAttribute("position", new THREE.Float32BufferAttribute(linePositions, 3));
@@ -15598,6 +15620,15 @@ select.sel:focus{border-color:var(--accent)}
     });
     molNeighborRadiusRow.appendChild(molNeighborRadiusInp); molNeighborRadiusRow.appendChild(el("span", "unit", U.ang));
     molNeighborTab.appendChild(molNeighborRadiusRow);
+    var molNeighborBlackLbl = el("label", "toggle");
+    var molNeighborBlackChk = document.createElement("input"); molNeighborBlackChk.type = "checkbox";
+    molNeighborBlackChk.checked = state.molNeighborBlackNodes;
+    molNeighborBlackChk.addEventListener("change", function () {
+      state.molNeighborBlackNodes = molNeighborBlackChk.checked;
+      if (state.molNeighborMode) renderStructure();
+    });
+    molNeighborBlackLbl.appendChild(molNeighborBlackChk); molNeighborBlackLbl.appendChild(el("span", null, "Black nodes"));
+    molNeighborTab.appendChild(molNeighborBlackLbl);
     var molNeighborBtn = button(molNeighborTab, "", "prominent", function () { setMolNeighborMode(); });
     molNeighborBtn.id = "molNeighborBtn";
     updateMolNeighborBtnLabel();
@@ -16351,7 +16382,7 @@ select.sel:focus{border-color:var(--accent)}
       "<p>If part of the asymmetric unit has been moved to a guest (e.g. an included CO<sub>2</sub>, moved there via \"Move selection to\" in Structure &gt; Edit atoms, the same way as in Mode 1), growth remembers that: every future symmetry-generated copy of that same asymmetric unit atom is added as a guest too, not host, from then on -- joining the same guest component it was already part of, rather than starting a new one each time. Clicking a guest atom in grow mode works exactly like clicking a host atom; there's no distinction between them for growth purposes.</p>" +
       "<p>The unit cell's colour and line thickness are both adjustable; edges are drawn the same way bonds are (as shaded cylinders, not flat lines), so they respond to lighting rather than looking flat. Its three edges from the origin can optionally be coloured in the deepest possible red/green/blue for a, b, c respectively, following the usual crystallographic convention, instead of the single default colour. The a, b, c edges are always labelled in italic, in whichever of black or white contrasts better with the current background (the same approach the lasso outline uses), so the labels stay readable regardless of colour scheme. All of this is purely visual and has no effect on growth.</p>" +
       "<h3>Molecular neighbourhood</h3>" +
-      "<p>A different way of growing: rather than adding atoms outright, it previews what's nearby first, so a direction can be chosen before committing to it -- useful for a framework or polymer that could otherwise be extended in several different directions at once. Enter a <b>Sphere of inclusion</b> radius, then press the button below it (solid red while active, exactly like Mouse's own grow-mode button). Every symmetry-generated atom not currently displayed, but within that radius of at least one atom that already is (host or guest, whichever layer it would belong to), is shown as a plain black sphere, unbonded to anything, joined by a dotted line to each real atom it's close enough to -- these are a preview only, never added to the model, and cost nothing to leave on screen since they're recomputed only when the mode is turned on, the radius changes, or a fragment is added, not on every frame.</p>" +
+      "<p>A different way of growing: rather than adding atoms outright, it previews what's nearby first, so a direction can be chosen before committing to it -- useful for a framework or polymer that could otherwise be extended in several different directions at once. Enter a <b>Sphere of inclusion</b> radius, then press the button below it (solid red while active, exactly like Mouse's own grow-mode button). Every symmetry-generated atom not currently displayed, but within that radius of at least one atom that already is (host or guest, whichever layer it would belong to), is shown as a small unbonded sphere, joined by a dotted line to each real atom it's close enough to -- these are a preview only, never added to the model, and cost nothing to leave on screen since they're recomputed only when the mode is turned on, the radius changes, or a fragment is added, not on every frame. <b>Black nodes</b> (ticked by default) shows every one of these preview spheres in plain black, keeping them visually distinct from anything already in the model; unticking it instead colours each one the same as the real atom it represents (its usual CPK or custom colour), which makes it far easier to judge what a given preview position actually is -- e.g. picking out a lone counter-ion's own colour among a crowd of hydrogens -- at the cost of that “obviously still just a preview” distinctness black gives. Either way, the dotted contact lines themselves stay black, and the preview spheres' own radii still scale with each atom's own display radius, exactly like a real atom would.</p>" +
       "<p>Clicking one of these black spheres adds the whole connected fragment it belongs to -- the same Fragment-unit growth Mouse's own grow mode uses -- and the preview then refreshes around the newly-larger structure: any black sphere the new fragment happened to reach simply stops being previewed (it's a real atom now), and a fresh ring of black spheres appears around whatever's now the edge of the structure. Repeating this lets a structure be built out one fragment at a time, following whichever direction actually looks interesting, rather than growing everything within reach at once. Leaving Molecular neighbourhood -- pressing its button again, closing its own tab, switching to Mouse/Pack/Symmetry, or opening a different section entirely -- discards whatever black spheres are still on screen; nothing about them is ever kept. Like grow mode, it needs a CIF that still has its symmetry information.</p>" +
       "<p>The <b>Display</b> section, just below Grow, is always available. Its own general settings hold <b>Show hydrogen atoms</b> and <b>ASU only</b> as one paired row, then <b>Show unit cell</b> paired with <b>Show H bonds</b>; a <b>Background colour</b> swatch; <b>Centering</b> (All/Visible/Selected atoms, with an Apply button that only appears for \"Selected atoms\", since that mode is otherwise frozen at whatever it was last applied to); <b>Set scale</b>, an arbitrary whole-number reference for the current zoom level -- bigger means more zoomed in, updates live as you zoom, and can be typed into directly (it carries no physical unit; its purpose is matching the same apparent zoom between different structures rather than measuring anything); and duplicate <b>Select all</b> / <b>Clear selection</b> / <b>Hide selection</b> / <b>Unhide all</b> buttons for convenience, identical to the ones in Structure &gt; Edit atoms. Nested inside Display: <b>Direction</b>, a <b>View direction</b> set of crystallographic view shortcuts -- buttons for looking straight down each cell axis (a, b, c) and perpendicular to each pair-wise plane (bc, ac, ab), a general <b>[hkl]</b> field for viewing along any specific direction entered as its own three numbers, and <b>View along vector</b> / <b>View perpendicular to plane</b> (see \"Viewing along a vector or a plane\" below), which orient the camera from a selection of atoms instead. <b>Unit cell</b> holds a <b>Label axes</b> toggle for the a/b/c corner labels, a <b>RGB axes</b> option to colour the a/b/c edges red/green/blue, the cell's own <b>Cell colour</b>, and <b>line thickness</b> -- the show/hide toggle itself lives in Display's general settings above, not here.</p>" +
       "<p>Growing by clicking (atom or fragment), by sphere of inclusion, by an explicit packing range (Pack), and by a specific chosen symmetry operation or translation (Symmetry) are all implemented, as described above. Only CIFs with an explicit list of symmetry operators are supported -- one that gives only a space group name or number, with no operator list, is read as P1 (no symmetry) since looking up operators from thousands of possible space group settings isn't implemented.</p>" +
