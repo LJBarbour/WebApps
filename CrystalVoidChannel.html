@@ -2444,6 +2444,18 @@ select.sel:focus{border-color:var(--accent)}
   var autoRotateLastT = null; /* last requestAnimationFrame timestamp seen while autorotating, for frame-rate-independent speed; not part of state, purely transient */
   var nextVoidCopyId = 1;
   var VOID_SELECT_COLOR_ACTIVE = 0xFACC15, VOID_SELECT_COLOR_INACTIVE = 0x3B82F6;
+  /* Recolour mode's own selection tint, distinct from Move/Copy's -- every
+     UNselected surface goes this washed-out yellow, while every SELECTED
+     surface keeps showing its own real (or, mid-drag, pending -- see
+     voidRecolourPending) colour, so a colour edit is always judged directly
+     on the actual object rather than a side panel. Deliberately much paler
+     than VOID_SELECT_COLOR_ACTIVE above so it doesn't read as "this IS a
+     real assigned colour" -- an earlier version tried making the selected
+     (not unselected) surfaces plain yellow and a rim outline for selection
+     instead; both were confirmed, in practice, to make selection state hard
+     to judge (especially for channels) and to fight with genuinely yellow
+     assigned colours, so this inverted, paler scheme replaced them. */
+  var VOID_RECOLOUR_UNSELECTED_COLOR = 0xE6D9A0;
   var lightRig, keyLight, fillLight, rimLight;
   var sphereGeo = null, selSphereGeo = null, highlightCylGeo = null, matCache = {}, npdCubeGeo = null, coordPolyEdgeGeo = null;
   var ELLIPSOID_PROB_SCALE = { "10": 0.7679, "30": 1.1953, "50": 1.5382, "75": 2.0275, "90": 2.5003, "95": 2.7955, "99": 3.3682 };
@@ -2596,7 +2608,34 @@ select.sel:focus{border-color:var(--accent)}
     voidNetwork: null, voidComponents: [], voidVisible: {}, _voidRestoredMeshById: {},
     voidFragments: {}, voidFragmentVisible: {}, voidFragmentMove: {}, voidChannelCopies: [],
     voidUiMode: null, voidSelectedFragments: {}, voidSelectedChannels: {}, voidUiVector: [0, 0, 0],
-    voidFragGroupOpen: {}, voidComponentColors: {}, voidColorLinkAll: false, voidLinkedColor: { outer: null, inner: null },
+    /* Recolour mode only -- the pending (not-yet-applied) outer/inner colour
+       currently shown on every SELECTED surface while a "Set colours" swatch
+       is being dragged (see instanceColors/voidBuildRecolourControls); null
+       whenever nothing's being actively edited, in which case a selected
+       surface just shows its own already-committed colour instead. Purely
+       transient UI state, not part of a saved project. voidRecolourClearOnApply
+       is the "Clear selection" checkbox's own value, remembered across
+       panel rebuilds (selecting/deselecting rebuilds the panel constantly)
+       but reset to its unchecked default on every fresh page load, same as
+       voidRecolourPending. */
+    voidRecolourPending: null, voidRecolourClearOnApply: false,
+    /* voidComponentColors is now only ever a SEED -- read once, when a new
+       instance (the original, or a copy made via Move/Copy/Recolour) is
+       created, to give it a starting colour; it's no longer directly
+       user-editable (Voids/Channels no longer has a colour column). The
+       colour actually shown for a given instance lives in
+       voidInstanceColors, keyed exactly like state.voidSelectedChannels'
+       own keys (compId+":orig" for the original, compId+":"+copyId for a
+       copy) -- see voidColorSettingFor()'s own comment for the full
+       priority order. voidColorLinkAllVoids/Channels are the "Same colours
+       for all" quick-fix, split into two independent ones (one per type)
+       instead of the one that used to cover both at once, each with its
+       own linked outer/inner pair -- when the relevant one is on, it wins
+       over any individual instance colour, exactly like the single
+       combined checkbox already did. */
+    voidFragGroupOpen: {}, voidComponentColors: {}, voidInstanceColors: {},
+    voidColorLinkAllVoids: false, voidLinkedColorVoids: { outer: null, inner: null },
+    voidColorLinkAllChannels: false, voidLinkedColorChannels: { outer: null, inner: null },
     voidConsolidated: {}, voidMergedGeometry: {},
     /* ---- molecular surface: a plain solvent-accessible "blob" over
        whatever atoms are currently selected, no topology/volume/enclosure
@@ -7555,58 +7594,104 @@ select.sel:focus{border-color:var(--accent)}
    * open, so live preview during drag carries over for free. */
   var VOID_COMPONENT_PALETTE = [0x4A6FA5, 0xC0392B, 0x4E8367, 0xB8860B, 0x8E44AD, 0x16A085, 0xD35400, 0x2C3E50, 0xC2185B, 0x00838F];
   function colorForVoidComponent(id) { return VOID_COMPONENT_PALETTE[id % VOID_COMPONENT_PALETTE.length]; }
-  function voidColorSettingFor(compId) { return state.voidColorLinkAll ? state.voidLinkedColor : (state.voidComponentColors[compId] || {}); }
-  function outerColorForVoid(compId) { var s = voidColorSettingFor(compId); return s.outer != null ? cssToHex(s.outer) : colorForVoidComponent(compId); }
-  function innerColorForVoid(compId) { var s = voidColorSettingFor(compId); return s.inner != null ? cssToHex(s.inner) : outerColorForVoid(compId); }
+  function voidInstanceKey(compId, copyId) { return compId + ":" + (copyId || "orig"); }
+  function voidCompIsChannel(compId) {
+    var c = state.voidComponents.filter(function (x) { return x.id === compId; })[0];
+    return !!(c && c.type === "channel");
+  }
+  /* Colour priority for a given instance (the original, or one particular
+     copy -- see voidInstanceKey): the relevant "Same colours for all
+     voids/channels" link, if that type is linked; else this exact
+     instance's own colour, if one has been set (Move/Copy/Recolour's "Set
+     colours" button, or dragging its own swatch directly in Fragments);
+     else the component-level colour it was seeded with when it (or its
+     original instance) was first created; else the plain palette default.
+     instanceKey is optional -- omitting it (or passing one with no colour
+     of its own yet) just skips straight to the component-level fallback,
+     which is what a brand-new instance that hasn't been assigned anything
+     of its own yet should show. */
+  function voidColorSettingFor(compId, instanceKey) {
+    var isChannel = voidCompIsChannel(compId);
+    if (isChannel ? state.voidColorLinkAllChannels : state.voidColorLinkAllVoids) {
+      return isChannel ? state.voidLinkedColorChannels : state.voidLinkedColorVoids;
+    }
+    if (instanceKey && state.voidInstanceColors[instanceKey]) return state.voidInstanceColors[instanceKey];
+    return state.voidComponentColors[compId] || {};
+  }
+  function outerColorForVoid(compId, instanceKey) {
+    var s = voidColorSettingFor(compId, instanceKey);
+    return s.outer != null ? cssToHex(s.outer) : colorForVoidComponent(compId);
+  }
+  function innerColorForVoid(compId, instanceKey) {
+    var s = voidColorSettingFor(compId, instanceKey);
+    return s.inner != null ? cssToHex(s.inner) : outerColorForVoid(compId, instanceKey);
+  }
   function voidCompLabel(compId) {
     var c = state.voidComponents.filter(function (x) { return x.id === compId; })[0];
     return (c && c.type === "void" ? "Void #" : "Channel #") + compId;
   }
-  function setVoidComponentColorLive(compId, which, hexStr) {
-    if (state.voidColorLinkAll) { state.voidLinkedColor[which] = hexStr; }
-    else { if (!state.voidComponentColors[compId]) state.voidComponentColors[compId] = {}; state.voidComponentColors[compId][which] = hexStr; }
-    /* live update the 3D view only -- NOT a table rebuild, on every drag
-       tick, now that the colour swatch pair lives inside the results table
-       itself (voidColorSwatchPair, in buildVoidResultsTable): rebuilding the
-       very table a native <input type=color> is dragging inside of would
-       replace that input out from under the drag gesture and cut the live
-       preview short. The table's own initial swatch values are read fresh
-       the next time something DOES rebuild it (toggling link mode, adding/
-       removing a component, ...), which is plenty -- the dragged input
-       already shows its own live value with no rebuild needed. */
+  function setVoidInstanceColorLive(compId, instanceKey, which, hexStr) {
+    var isChannel = voidCompIsChannel(compId);
+    if (isChannel ? state.voidColorLinkAllChannels : state.voidColorLinkAllVoids) {
+      (isChannel ? state.voidLinkedColorChannels : state.voidLinkedColorVoids)[which] = hexStr;
+    } else {
+      if (!state.voidInstanceColors[instanceKey]) state.voidInstanceColors[instanceKey] = {};
+      state.voidInstanceColors[instanceKey][which] = hexStr;
+    }
+    /* live update the 3D view only -- NOT a panel rebuild, on every drag
+       tick: rebuilding the very panel a native <input type=color> is
+       dragging inside of would replace that input out from under the drag
+       gesture and cut the live preview short. The panel's own initial
+       swatch values are read fresh the next time something DOES rebuild it
+       (toggling link mode, adding/removing/copying an instance, ...),
+       which is plenty -- the dragged input already shows its own live
+       value with no rebuild needed. */
     renderVoidMeshes();
   }
-  function setVoidColorLinkAll(v) {
+  function setVoidColorLinkAllForType(isChannel, v) {
     /* Checking the box alone used to have no visible effect until the user
-       actually dragged one of the linked swatches, because voidLinkedColor
-       starts out {outer:null, inner:null} -- with nothing set yet,
-       outerColorForVoid/innerColorForVoid fell through to each component's
-       own DIFFERENT default colour, so every component kept looking
-       exactly as distinct as before. Seed a real starting colour (read
-       BEFORE flipping the flag, so this reads each component's own
-       current pre-link colour -- its own custom override if it has one,
-       otherwise the palette default -- not the not-yet-set link colour)
-       the moment linking turns on, so every component visibly unifies
-       immediately; a later swatch drag still overwrites this as always. */
-    if (v && state.voidComponents.length && state.voidLinkedColor.outer == null) {
-      var firstId = state.voidComponents[0].id;
-      state.voidLinkedColor.outer = hexToCss(outerColorForVoid(firstId));
-      state.voidLinkedColor.inner = hexToCss(innerColorForVoid(firstId));
+       actually dragged one of the linked swatches, because the linked
+       colour starts out {outer:null, inner:null} -- with nothing set yet,
+       outerColorForVoid/innerColorForVoid fell through to each instance's
+       own DIFFERENT colour, so every one of them kept looking exactly as
+       distinct as before. Seed a real starting colour (read BEFORE
+       flipping the flag, so this reads the first matching component's own
+       current pre-link colour) the moment linking turns on, so every
+       instance of that type visibly unifies immediately; a later swatch
+       drag still overwrites this as always. */
+    var linked = isChannel ? state.voidLinkedColorChannels : state.voidLinkedColorVoids;
+    if (v && linked.outer == null) {
+      var firstComp = state.voidComponents.filter(function (c) { return (c.type === "channel") === isChannel; })[0];
+      if (firstComp) {
+        var seedKey = voidInstanceKey(firstComp.id, null);
+        linked.outer = hexToCss(outerColorForVoid(firstComp.id, seedKey));
+        linked.inner = hexToCss(innerColorForVoid(firstComp.id, seedKey));
+      }
     }
-    state.voidColorLinkAll = v;
+    if (isChannel) state.voidColorLinkAllChannels = v; else state.voidColorLinkAllVoids = v;
     renderVoidMeshes();
     buildVoidColorLinkRow();
-    buildVoidResultsTable();
     buildVoidFragmentsPanel();
   }
-  function voidColorSwatchPair(compId) {
+  function voidLinkedColorSwatchPair(isChannel) {
     var wrap = el("span", "color-pair");
     wrap.addEventListener("click", function (e) { e.stopPropagation(); });
-    var setting = voidColorSettingFor(compId);
+    var linked = isChannel ? state.voidLinkedColorChannels : state.voidLinkedColorVoids;
+    var outerDefault = linked.outer != null ? cssToHex(linked.outer) : colorForVoidComponent(0);
+    var outerSw = colorSwatch(outerDefault, function (hex) { linked.outer = hexToCss(hex); renderVoidMeshes(); });
+    var innerDefault = linked.inner != null ? cssToHex(linked.inner) : outerDefault;
+    var innerSw = colorSwatch(innerDefault, function (hex) { linked.inner = hexToCss(hex); renderVoidMeshes(); });
+    wrap.appendChild(outerSw); wrap.appendChild(innerSw);
+    return wrap;
+  }
+  function voidInstanceColorSwatchPair(compId, instanceKey) {
+    var wrap = el("span", "color-pair");
+    wrap.addEventListener("click", function (e) { e.stopPropagation(); });
+    var setting = voidColorSettingFor(compId, instanceKey);
     var outerDefault = setting.outer != null ? cssToHex(setting.outer) : colorForVoidComponent(compId);
-    var outerSw = colorSwatch(outerDefault, function (hex) { setVoidComponentColorLive(compId, "outer", hexToCss(hex)); });
+    var outerSw = colorSwatch(outerDefault, function (hex) { setVoidInstanceColorLive(compId, instanceKey, "outer", hexToCss(hex)); });
     var innerDefault = setting.inner != null ? cssToHex(setting.inner) : outerDefault;
-    var innerSw = colorSwatch(innerDefault, function (hex) { setVoidComponentColorLive(compId, "inner", hexToCss(hex)); });
+    var innerSw = colorSwatch(innerDefault, function (hex) { setVoidInstanceColorLive(compId, instanceKey, "inner", hexToCss(hex)); });
     wrap.appendChild(outerSw); wrap.appendChild(innerSw);
     return wrap;
   }
@@ -7734,12 +7819,29 @@ select.sel:focus{border-color:var(--accent)}
       }
       var isTransparent = state.voidSurfaceOpacity < 0.99;
       function instanceColors(fragKey, copyId) {
-        if (state.voidUiMode) {
-          var isSel = state.voidUiMode === "move" ? !!state.voidSelectedFragments[fragKey] : !!state.voidSelectedChannels[comp.id + ":" + (copyId || "orig")];
+        /* Move/Copy tints every surface blue/selected-yellow -- there's no
+           live colour to preserve there, just a position to move/copy, so a
+           flat selection tint is the clearest way to show what's picked.
+           Recolour mode inverts this: every UNselected surface goes the
+           washed-out VOID_RECOLOUR_UNSELECTED_COLOR, while every selected
+           one keeps showing a real colour -- its own pending edit
+           (voidRecolourPending, live while a swatch is being dragged in
+           voidBuildRecolourControls) if there is one, else just its own
+           current colour -- so a colour change is always judged directly on
+           the real surface, and selection stays legible for both voids and
+           channels precisely because it's the ONLY thing that still looks
+           like a real colour at all. */
+        if (state.voidUiMode === "move" || state.voidUiMode === "copy") {
+          var isSel = state.voidUiMode === "move" ? !!state.voidSelectedFragments[fragKey] : !!state.voidSelectedChannels[voidInstanceKey(comp.id, copyId)];
           var c = isSel ? VOID_SELECT_COLOR_ACTIVE : VOID_SELECT_COLOR_INACTIVE;
           return { outer: c, inner: c };
         }
-        return { outer: outerColorForVoid(comp.id), inner: innerColorForVoid(comp.id) };
+        var instanceKey = voidInstanceKey(comp.id, copyId);
+        if (state.voidUiMode === "recolour") {
+          if (!state.voidSelectedChannels[instanceKey]) return { outer: VOID_RECOLOUR_UNSELECTED_COLOR, inner: VOID_RECOLOUR_UNSELECTED_COLOR };
+          if (state.voidRecolourPending) return { outer: cssToHex(state.voidRecolourPending.outer), inner: cssToHex(state.voidRecolourPending.inner) };
+        }
+        return { outer: outerColorForVoid(comp.id, instanceKey), inner: innerColorForVoid(comp.id, instanceKey) };
       }
       function makeMat(side, color) {
         var applyMat = state.materialApplyVoid;
@@ -7867,7 +7969,7 @@ select.sel:focus{border-color:var(--accent)}
     body.innerHTML = "";
     if (!state.voidComponents.length) {
       var tr0 = document.createElement("tr");
-      var td0 = document.createElement("td"); td0.colSpan = 7; td0.textContent = (state.voidMode === "cell" ? state.isCif : (state.atoms && state.atoms.length)) ? "Click Calculate to analyze." : (state.voidMode === "cell" ? "Load a CIF file first." : "Grow some atoms first.");
+      var td0 = document.createElement("td"); td0.colSpan = 6; td0.textContent = (state.voidMode === "cell" ? state.isCif : (state.atoms && state.atoms.length)) ? "Click Calculate to analyze." : (state.voidMode === "cell" ? "Load a CIF file first." : "Grow some atoms first.");
       tr0.appendChild(td0); body.appendChild(tr0);
       return;
     }
@@ -7895,9 +7997,6 @@ select.sel:focus{border-color:var(--accent)}
       if (c.volumeSE != null) volText += " ±" + c.volumeSE.toFixed(1);
       tdVol.textContent = volText + (c.type === "channel" ? "/cell" : "");
       tr.appendChild(tdVol);
-      var tdColor = document.createElement("td");
-      if (!state.voidColorLinkAll) tdColor.appendChild(voidColorSwatchPair(c.id));
-      tr.appendChild(tdColor);
       var tdDel = document.createElement("td");
       var delBtn = el("button", "btn mini", "×");
       delBtn.addEventListener("click", function (e) { e.stopPropagation(); deleteVoidComponent(c.id); });
@@ -7915,14 +8014,19 @@ select.sel:focus{border-color:var(--accent)}
     var row = document.getElementById("voidColorLinkRow");
     if (!row) return;
     row.innerHTML = "";
-    var linkRow = el("div", "ctl-inline"); linkRow.style.margin = "4px 0";
-    var linkLbl = el("label", "toggle");
-    var linkChk = document.createElement("input"); linkChk.type = "checkbox"; linkChk.checked = state.voidColorLinkAll;
-    linkChk.addEventListener("change", function () { setVoidColorLinkAll(linkChk.checked); });
-    linkLbl.appendChild(linkChk); linkLbl.appendChild(el("span", null, "Same colours for all"));
-    linkRow.appendChild(linkLbl);
-    if (state.voidColorLinkAll) linkRow.appendChild(voidColorSwatchPair(0));
-    row.appendChild(linkRow);
+    function oneRow(isChannel, label) {
+      var linkRow = el("div", "ctl-inline"); linkRow.style.margin = "4px 0";
+      var linkLbl = el("label", "toggle");
+      var linkChk = document.createElement("input"); linkChk.type = "checkbox";
+      linkChk.checked = isChannel ? state.voidColorLinkAllChannels : state.voidColorLinkAllVoids;
+      linkChk.addEventListener("change", function () { setVoidColorLinkAllForType(isChannel, linkChk.checked); });
+      linkLbl.appendChild(linkChk); linkLbl.appendChild(el("span", null, label));
+      linkRow.appendChild(linkLbl);
+      if (isChannel ? state.voidColorLinkAllChannels : state.voidColorLinkAllVoids) linkRow.appendChild(voidLinkedColorSwatchPair(isChannel));
+      row.appendChild(linkRow);
+    }
+    oneRow(false, "Same colours for all voids");
+    oneRow(true, "Same colours for all channels");
   }
   function deleteVoidComponent(compId) {
     state.voidComponents = state.voidComponents.filter(function (c) { return c.id !== compId; });
@@ -7933,6 +8037,8 @@ select.sel:focus{border-color:var(--accent)}
     Object.keys(state.voidSelectedChannels).forEach(function (k) { if (state.voidSelectedChannels[k].compId === compId) delete state.voidSelectedChannels[k]; });
     delete state.voidConsolidated[compId]; delete state.voidMergedGeometry[compId];
     delete state.voidComponentColors[compId]; delete state.voidFragGroupOpen[compId];
+    var instPrefix = compId + ":";
+    Object.keys(state.voidInstanceColors).forEach(function (k) { if (k.indexOf(instPrefix) === 0) delete state.voidInstanceColors[k]; });
     renderVoidMeshes();
     buildVoidResultsTable();
     buildVoidFragmentsPanel();
@@ -7956,8 +8062,10 @@ select.sel:focus{border-color:var(--accent)}
     buildVoidFragmentsPanel();
   }
   function removeVoidChannelCopy(copyId) {
+    var removed = state.voidChannelCopies.filter(function (c) { return c.id === copyId; })[0];
     state.voidChannelCopies = state.voidChannelCopies.filter(function (c) { return c.id !== copyId; });
     Object.keys(state.voidSelectedChannels).forEach(function (k) { if (state.voidSelectedChannels[k].copyId === copyId) delete state.voidSelectedChannels[k]; });
+    if (removed) delete state.voidInstanceColors[voidInstanceKey(removed.compId, copyId)];
     renderVoidMeshes();
     buildVoidFragmentsPanel();
   }
@@ -7973,6 +8081,7 @@ select.sel:focus{border-color:var(--accent)}
     if (state.voidUiMode) { exitGuestDragMode(); exitMolNeighborMode(); } /* the click-hijacking modes are mutually exclusive */
     state.voidSelectedFragments = {};
     state.voidSelectedChannels = {};
+    state.voidRecolourPending = null;
     renderVoidMeshes();
     buildVoidFragmentsPanel();
   }
@@ -8008,6 +8117,17 @@ select.sel:focus{border-color:var(--accent)}
           var newCopy = { id: nextVoidCopyId++, compId: sel.compId, shift: newShift, visible: true };
           state.voidChannelCopies.push(newCopy);
           resultCopyId = newCopy.id;
+          /* the new copy starts out looking exactly like whichever instance
+             it was copied FROM (the "parent" in this one gesture -- not
+             necessarily the original; copying a copy copies ITS current
+             look), snapshotted now rather than linked, so recolouring the
+             source afterwards never retroactively changes a copy already
+             made from it. */
+          var srcKey = voidInstanceKey(sel.compId, sel.copyId);
+          state.voidInstanceColors[voidInstanceKey(sel.compId, resultCopyId)] = {
+            outer: hexToCss(outerColorForVoid(sel.compId, srcKey)),
+            inner: hexToCss(innerColorForVoid(sel.compId, srcKey))
+          };
         }
       }
       var newKey = sel.compId + ":" + (resultCopyId || "orig");
@@ -8597,12 +8717,12 @@ select.sel:focus{border-color:var(--accent)}
          used directly as a Cartesian offset -- a barely-visible ~1 unit
          (not one full cell's worth of Å) displacement that reads exactly
          like "translating by a full unit cell only moves it a little". */
-      body.appendChild(el("div", "hint", "Move/Copy only applies in “Fill unit cell” mode — there is no unit cell to translate by in “Use visible atoms only” mode."));
+      body.appendChild(el("div", "hint", "Move/Copy/Recolour only applies in “Fill unit cell” mode — there is no unit cell to translate by in “Use visible atoms only” mode."));
       if (state.voidUiMode) { state.voidUiMode = null; state.voidSelectedFragments = {}; state.voidSelectedChannels = {}; renderVoidMeshes(); }
       return;
     }
     /* Full-size .btn, not the tiny mono/uppercase .btn.mini used for
-       compact nudge buttons elsewhere -- these two are the primary mode
+       compact nudge buttons elsewhere -- these three are the primary mode
        switches for this whole panel, not an incidental detail, so they
        should read at the same size/weight as other prominent controls. */
     var modeRow = el("div", "btnrow"); modeRow.style.gap = "8px"; modeRow.style.marginBottom = "4px";
@@ -8610,7 +8730,9 @@ select.sel:focus{border-color:var(--accent)}
     moveBtn.addEventListener("click", function () { setVoidUiMode("move"); });
     var copyBtn = el("button", "btn" + (state.voidUiMode === "copy" ? " grow-active" : " ghost"), "Copy mode");
     copyBtn.addEventListener("click", function () { setVoidUiMode("copy"); });
-    modeRow.appendChild(moveBtn); modeRow.appendChild(copyBtn);
+    var recolourBtn = el("button", "btn" + (state.voidUiMode === "recolour" ? " grow-active" : " ghost"), "Recolour mode");
+    recolourBtn.addEventListener("click", function () { setVoidUiMode("recolour"); });
+    modeRow.appendChild(moveBtn); modeRow.appendChild(copyBtn); modeRow.appendChild(recolourBtn);
     body.appendChild(modeRow);
 
     if (!state.voidUiMode) return;
@@ -8619,6 +8741,8 @@ select.sel:focus{border-color:var(--accent)}
       var n = Object.keys(state.voidSelectedFragments).length;
       statusText = n ? (n + " fragment(s) selected") : "Nothing selected yet.";
     } else {
+      /* Copy and Recolour share one selection scheme (state.voidSelectedChannels,
+         keyed exactly like voidInstanceKey) -- see handleVoidSelectClick. */
       var selKeys = Object.keys(state.voidSelectedChannels);
       if (!selKeys.length) statusText = "Nothing selected yet.";
       else {
@@ -8631,6 +8755,11 @@ select.sel:focus{border-color:var(--accent)}
       }
     }
     body.appendChild(el("div", "hint", statusText));
+
+    if (state.voidUiMode === "recolour") {
+      voidBuildRecolourControls(body);
+      return;
+    }
 
     /* Grid/Apply/nudge-button layout deliberately mirrors Grow > Symmetry's
        own matrix grid (symop-grid/symop-t/symop-shift-btn) minus its 3x3
@@ -8688,10 +8817,73 @@ select.sel:focus{border-color:var(--accent)}
     });
     body.appendChild(grid);
   }
-  /* What's left of the Fragments panel once Move/Copy's own controls and
-     every colour swatch have moved out to their own places (Move/Copy and
-     Voids/Channels respectively): just Assemble/Consolidate per component,
-     and the visibility list of that component's individual pieces. */
+  /* Recolour mode's own controls -- "Set colours" plus its outer/inner
+     swatches, and a "Clear selection" checkbox underneath. Applies to
+     whatever is currently selected via Copy mode's own click/Ctrl-click/
+     Shift-click scheme (state.voidSelectedChannels is already keyed exactly
+     like voidInstanceKey produces -- see toggleVoidChannelGroup) -- this is
+     the one mechanism that can set a colour on a single physical instance
+     rather than a whole component or a whole "same colours for all" type.
+     No separate live-preview widget is needed: every SELECTED surface
+     already shows this same pending colour directly, live, the moment a
+     swatch is dragged (state.voidRecolourPending, read by instanceColors in
+     renderVoidMeshes) -- an earlier version tried a small preview ring
+     pinned to the corner of the 3D view instead, but seeing the edit on the
+     real surface(s) being edited is both simpler and more direct. Whether
+     applying also clears the selection is the user's own call, remembered in
+     state.voidRecolourClearOnApply (the "Clear selection" checkbox) rather
+     than forced either way -- unchecked by default so repeated tweaks to the
+     same selection are the common case. */
+  function voidBuildRecolourControls(body) {
+    var recolourKeys = Object.keys(state.voidSelectedChannels);
+    state.voidRecolourPending = null;
+    var setColoursRow = el("div", "btnrow"); setColoursRow.style.gap = "8px"; setColoursRow.style.marginTop = "8px"; setColoursRow.style.alignItems = "center";
+    var setColoursBtn = el("button", "btn ghost", "Set colours");
+    setColoursBtn.disabled = !recolourKeys.length;
+    var firstKey = recolourKeys[0];
+    var firstCompId = firstKey ? parseInt(firstKey.split(":")[0], 10) : null;
+    var initOuter = firstCompId != null ? outerColorForVoid(firstCompId, firstKey) : colorForVoidComponent(0);
+    var initInner = firstCompId != null ? innerColorForVoid(firstCompId, firstKey) : initOuter;
+    var pendingOuter = hexToCss(initOuter), pendingInner = hexToCss(initInner);
+    function updatePending() {
+      state.voidRecolourPending = { outer: pendingOuter, inner: pendingInner };
+      renderVoidMeshes();
+    }
+    var outerSw = colorSwatch(initOuter, function (hex) { pendingOuter = hexToCss(hex); updatePending(); });
+    var innerSw = colorSwatch(initInner, function (hex) { pendingInner = hexToCss(hex); updatePending(); });
+    setColoursBtn.addEventListener("click", function () {
+      recolourKeys.forEach(function (key) {
+        var compId = parseInt(key.split(":")[0], 10);
+        setVoidInstanceColorLive(compId, key, "outer", pendingOuter);
+        setVoidInstanceColorLive(compId, key, "inner", pendingInner);
+      });
+      state.voidRecolourPending = null;
+      if (state.voidRecolourClearOnApply) state.voidSelectedChannels = {};
+      renderVoidMeshes();
+      buildVoidFragmentsPanel();
+    });
+    setColoursRow.appendChild(setColoursBtn);
+    setColoursRow.appendChild(outerSw);
+    setColoursRow.appendChild(innerSw);
+    body.appendChild(setColoursRow);
+
+    var clearLbl = el("label", "toggle"); clearLbl.style.marginTop = "4px";
+    var clearChk = document.createElement("input"); clearChk.type = "checkbox";
+    clearChk.checked = state.voidRecolourClearOnApply;
+    clearChk.addEventListener("change", function () { state.voidRecolourClearOnApply = clearChk.checked; });
+    clearLbl.appendChild(clearChk); clearLbl.appendChild(el("span", null, "Clear selection after applying"));
+    body.appendChild(clearLbl);
+  }
+  /* What's left of the Fragments panel once Move/Copy/Recolour's own vector
+     controls have moved out to their own place: Assemble/Consolidate per
+     component, the visibility list of that component's individual pieces,
+     and -- per this panel's own per-instance colour swatches -- one swatch
+     pair per physical instance (the "orig" piece, or one particular copy),
+     hidden when that component's type is under "Same colours for all
+     voids/channels" (see voidColorSettingFor). Every fragment ROW of one
+     component's "orig" instance shares the exact same instanceKey and so
+     always shows the same colour -- by design, since they're pieces of one
+     physical thing, not independent instances (see voidInstanceKey). */
   function buildVoidFragmentsPanel() {
     /* every one of this function's many call sites (mode switches, moves,
        copies, consolidate, delete, ...) needs Move/Copy's own panel kept in
@@ -8721,12 +8913,15 @@ select.sel:focus{border-color:var(--accent)}
         consolidateBtn.addEventListener("click", function () { consolidateVoidComponent(compId); });
         grp.body.appendChild(consolidateBtn);
       }
+      var linkedForType = voidCompIsChannel(compId) ? state.voidColorLinkAllChannels : state.voidColorLinkAllVoids;
+      var origKey = voidInstanceKey(compId, null);
       frags.forEach(function (frag) {
         var row = el("div", "ctl-inline" + (state.voidSelectedFragments[frag.key] ? " selected" : ""));
         var chk = document.createElement("input"); chk.type = "checkbox"; chk.checked = state.voidFragmentVisible[frag.key] !== false;
         chk.addEventListener("change", function () { setVoidFragmentVisible(frag.key, chk.checked); });
         row.appendChild(chk);
         row.appendChild(el("span", "hint", "frac " + fmtVoidCentroid(frag.centroid)));
+        if (!linkedForType) row.appendChild(voidInstanceColorSwatchPair(compId, origKey));
         grp.body.appendChild(row);
       });
       state.voidChannelCopies.filter(function (cp) { return cp.compId === compId; }).forEach(function (cp) {
@@ -8736,6 +8931,7 @@ select.sel:focus{border-color:var(--accent)}
         chk.addEventListener("change", function () { setVoidChannelCopyVisible(cp.id, chk.checked); });
         row.appendChild(chk);
         row.appendChild(el("span", "hint", "shift " + fmtVoidVec(cp.shift)));
+        if (!linkedForType) row.appendChild(voidInstanceColorSwatchPair(compId, voidInstanceKey(compId, cp.id)));
         var rm = el("button", "btn mini", "×");
         rm.addEventListener("click", function () { removeVoidChannelCopy(cp.id); });
         row.appendChild(rm);
@@ -8853,7 +9049,13 @@ select.sel:focus{border-color:var(--accent)}
         : mods.shift ? voidFragmentGroupSameType(ud.compId)
         : [ud.fragKey];
       toggleVoidFragmentGroup(keys, already);
-    } else if (state.voidUiMode === "copy") {
+    } else if (state.voidUiMode === "copy" || state.voidUiMode === "recolour") {
+      /* Recolour mode reuses Copy mode's own selection scheme verbatim
+         (same keys, same modifier semantics) -- it just means something
+         different once selected (a colour target instead of a copy
+         source), and is rendered differently (real/pending colour on a
+         washed-out-yellow field, not a flat yellow/blue tint -- see
+         instanceColors in renderVoidMeshes). */
       var key = ud.compId + ":" + (ud.copyId || "orig");
       var already2 = !!state.voidSelectedChannels[key];
       var keys2 = mods.ctrl ? voidChannelGroupContiguous(key)
@@ -8871,7 +9073,7 @@ select.sel:focus{border-color:var(--accent)}
     state.voidFragments = {};
     state.voidFragmentMove = {}; state.voidChannelCopies = []; state.voidFragmentVisible = {};
     state.voidUiMode = null; state.voidSelectedFragments = {}; state.voidSelectedChannels = {}; state.voidUiVector = [0, 0, 0];
-    state.voidFragGroupOpen = {}; state.voidComponentColors = {};
+    state.voidFragGroupOpen = {}; state.voidComponentColors = {}; state.voidInstanceColors = {};
     state.voidConsolidated = {}; state.voidMergedGeometry = {};
   }
   function runVoidCalculate() {
@@ -13965,7 +14167,9 @@ select.sel:focus{border-color:var(--accent)}
       voidMode: state.voidMode, probeRadius: state.probeRadius, voidQuality: state.voidQuality,
       voidSurfaceOpacity: state.voidSurfaceOpacity, voidAutoAssemble: state.voidAutoAssemble, voidAccurateVolumes: state.voidAccurateVolumes,
       voidComponents: state.voidComponents, voidVisible: state.voidVisible,
-      voidComponentColors: state.voidComponentColors, voidColorLinkAll: state.voidColorLinkAll, voidLinkedColor: state.voidLinkedColor,
+      voidComponentColors: state.voidComponentColors, voidInstanceColors: state.voidInstanceColors,
+      voidColorLinkAllVoids: state.voidColorLinkAllVoids, voidLinkedColorVoids: state.voidLinkedColorVoids,
+      voidColorLinkAllChannels: state.voidColorLinkAllChannels, voidLinkedColorChannels: state.voidLinkedColorChannels,
       voidConsolidated: state.voidConsolidated, voidMergedGeometry: state.voidMergedGeometry,
       voidFragmentMove: state.voidFragmentMove, voidFragmentVisible: state.voidFragmentVisible,
       voidChannelCopies: state.voidChannelCopies, voidFragGroupOpen: state.voidFragGroupOpen,
@@ -14242,8 +14446,25 @@ select.sel:focus{border-color:var(--accent)}
     state.voidComponents = data.voidComponents || [];
     state.voidVisible = data.voidVisible || {};
     state.voidComponentColors = data.voidComponentColors || {};
-    state.voidColorLinkAll = !!data.voidColorLinkAll;
-    state.voidLinkedColor = data.voidLinkedColor || { outer: null, inner: null };
+    state.voidInstanceColors = data.voidInstanceColors || {};
+    /* Back-compat: a project saved before voids/channels got independent
+       "same colours for all" checkboxes only had one combined
+       voidColorLinkAll/voidLinkedColor pair, covering both types at once --
+       migrate it into both new per-type fields so an old save keeps looking
+       exactly as it did when new fields are otherwise absent. A project
+       saved by the current code always carries the new fields directly, so
+       this branch only ever fires for an old file. */
+    if (data.voidColorLinkAllVoids !== undefined || data.voidColorLinkAllChannels !== undefined) {
+      state.voidColorLinkAllVoids = !!data.voidColorLinkAllVoids;
+      state.voidLinkedColorVoids = data.voidLinkedColorVoids || { outer: null, inner: null };
+      state.voidColorLinkAllChannels = !!data.voidColorLinkAllChannels;
+      state.voidLinkedColorChannels = data.voidLinkedColorChannels || { outer: null, inner: null };
+    } else {
+      state.voidColorLinkAllVoids = !!data.voidColorLinkAll;
+      state.voidLinkedColorVoids = data.voidLinkedColor || { outer: null, inner: null };
+      state.voidColorLinkAllChannels = !!data.voidColorLinkAll;
+      state.voidLinkedColorChannels = data.voidLinkedColor ? { outer: data.voidLinkedColor.outer, inner: data.voidLinkedColor.inner } : { outer: null, inner: null };
+    }
     state.voidConsolidated = data.voidConsolidated || {};
     state.voidMergedGeometry = data.voidMergedGeometry || {};
     state.voidFragmentMove = data.voidFragmentMove || {};
@@ -15513,9 +15734,17 @@ select.sel:focus{border-color:var(--accent)}
     voidOpacitySlider.id = "voidOpacitySlider";
     var voidColorLinkRow = el("div"); voidColorLinkRow.id = "voidColorLinkRow"; voidChannelsC.appendChild(voidColorLinkRow);
     var voidTable = document.createElement("table"); voidTable.id = "voidResultsTable";
-    voidTable.innerHTML = "<thead><tr><th></th><th>ID</th><th>Type</th><th title=\"For a channel: the largest probe radius it would still be recognized as a channel at. For a void: the probe radius below which it would connect to a periodic image of itself and become a channel.\">Limit (" + U.ang + ")</th><th>Vol. (" + U.ang + U.cube + ")</th><th>Colour</th><th></th></tr></thead><tbody id=\"voidResultsBody\"></tbody>";
+    voidTable.innerHTML = "<thead><tr><th></th><th>ID</th><th>Type</th><th title=\"For a channel: the largest probe radius it would still be recognized as a channel at. For a void: the probe radius below which it would connect to a periodic image of itself and become a channel.\">Limit (" + U.ang + ")</th><th>Vol. (" + U.ang + U.cube + ")</th><th></th></tr></thead><tbody id=\"voidResultsBody\"></tbody>";
     voidChannelsC.appendChild(voidTable);
-    var voidMoveCopyC = subsection(vcC, "Move/Copy", false);
+    /* Closing this submenu must cancel Move/Copy/Recolour exactly like
+       collapsing the whole Void/Channel Analysis section already does (see
+       that section's own onToggle below) -- otherwise a mode stays active,
+       its button stays highlighted red, and clicks in the 3D view keep
+       hijacking atom selection, with no visible control left open to turn
+       it back off. setVoidUiMode(null) always forces the mode off
+       regardless of what it currently is (its own toggle-if-same-else-set
+       logic reduces to plain null either way when null is what's passed). */
+    var voidMoveCopyC = subsection(vcC, "Move/Copy/Recolour", false, function (isOpen) { if (!isOpen && state.voidUiMode) setVoidUiMode(null); });
     voidMoveCopyC.parentElement.id = "voidMoveCopySubsec";
     var voidMoveCopyBody = el("div"); voidMoveCopyBody.id = "voidMoveCopyBody"; voidMoveCopyC.appendChild(voidMoveCopyBody);
     var voidFragC = subsection(vcC, "Fragments", false);
@@ -16122,7 +16351,9 @@ select.sel:focus{border-color:var(--accent)}
       "<p>The reported volume always has some grid-discretization error baked in -- a swept volume is measured by counting grid cells, so a coarser <b>grid resolution</b> systematically undercounts, more so for a small cavity than a large one. <b>Accurate volumes (extrapolated, slower)</b> corrects for this: instead of measuring once at the chosen grid resolution, it measures each component at six progressively finer spacings and extrapolates to what the volume would be at an (unreachable) zero spacing -- the same value a rolling-probe program like MSRoll reports directly, without needing a grid at all. The Vol. column then shows that extrapolated value with its own uncertainty (e.g. \"110.7 &plusmn;1.6\"), and the calculation takes noticeably longer -- six grid builds per component instead of one. Leave it unchecked for a quick look; turn it on when the number itself is what matters.</p>" +
       "<p><b>Assemble &amp; Consolidate</b> (checked by default) does automatically, for every component Calculate finds, what the Fragments panel's own Assemble and Consolidate buttons do by hand: bring a void/channel's scattered edge/corner fragments back together nearest the origin, then bake that arrangement into one permanent piece. Uncheck it to leave every component as its individual, still-movable fragments instead.</p>" +
       "<p><b>Two known limitations</b>, not yet resolved: a very small void (just a handful of nodes) can show a noticeably different reported volume between otherwise symmetry-equivalent copies of itself -- this is grid-discretization noise, not a real difference, and disproportionately affects tiny voids; switch on <b>Accurate volumes</b> to get numbers that agree with each other as they should. Separately, a channel periodic along more than one non-Cartesian-pure axis at once (i.e. a genuinely oblique/triclinic cell where more than one cell angle is far from 90&deg;) can show a real, visible seam where two Fragments-panel pieces are joined end-on along the channel's own length, and may also need the Fragments panel used manually rather than relying on Assemble &amp; Consolidate -- a harder grid-periodicity limitation, not something adjusting settings will fix.</p>" +
-      "<p>A void or channel sitting at a cell edge or corner is shown as several separate <b>fragments</b> -- each one a clipped view of the same underlying shape, positioned so the pieces are exactly complementary. The <b>Fragments</b> panel lists them grouped by which void/channel they belong to, with a colour swatch pair (outside/inside) per group and a \"Same colours for all\" option. <b>Move mode</b> and <b>Copy mode</b> (highlighted red while active) let you click fragments or channel copies directly in the 3D view to select them, then reposition (Move) or duplicate by a further lattice translation (Copy) using the vector boxes or the <b>+a/-a/+b/-b/+c/-c</b> nudge buttons; while either mode is active, spacebar and Delete act on that fragment/channel selection instead of the atom selection, and both modes turn off automatically if the Void/Channel Analysis section is collapsed. <b>Assemble</b> does this automatically for a whole void/channel: it moves every one of that component's fragments back onto each other, reconstructing one complete piece at whichever whole-unit-cell position sits closest to the origin (ties broken toward the higher-numbered cell). <b>Consolidate</b> then bakes the currently-visible fragments into one permanent piece, free of the others' movement.</p>" +
+      "<p>Colour can be set at three levels, in order of precedence. The <b>Same colours for all voids</b> and <b>Same colours for all channels</b> checkboxes (top of the <b>Voids/Channels</b> list, each with its own outside/inside swatch pair) are independent of each other -- ticking one unifies every void, or every channel, immediately. Below that, each individual void/channel <b>instance</b> -- the original, or any copy made via Move/Copy/Recolour -- can carry its own colour, shown as a swatch pair next to that instance's own row in the <b>Fragments</b> panel below (hidden while that instance's type is under one of the \"Same colours\" checkboxes above); a new copy starts out with whatever colour its source had at the moment it was made. Anything with no colour of its own falls back to a fixed palette default. The <b>Voids/Channels</b> results table itself carries no colour column -- colour is only ever set via the two checkboxes above it or per-instance below.</p>" +
+      "<p>A void or channel sitting at a cell edge or corner is shown as several separate <b>fragments</b> -- each one a clipped view of the same underlying shape, positioned so the pieces are exactly complementary. The <b>Fragments</b> panel lists them grouped by which void/channel they belong to, each fragment-piece or copy row carrying its own visibility checkbox and (per the colour paragraph above) its own colour swatch pair. <b>Assemble</b> reconstructs a whole void/channel automatically: it moves every one of that component's fragments back onto each other, forming one complete piece at whichever whole-unit-cell position sits closest to the origin (ties broken toward the higher-numbered cell). <b>Consolidate</b> then bakes the currently-visible fragments into one permanent piece, free of the others' movement.</p>" +
+      "<p><b>Move/Copy/Recolour</b> offers three mutually-exclusive modes -- <b>Move mode</b>, <b>Copy mode</b>, <b>Recolour mode</b> -- each highlighted red while active, and turned off automatically the moment either this submenu or the whole Void/Channel Analysis section is collapsed. All three select fragments or channel copies by clicking them directly in the 3D view; while any is active, spacebar and Delete act on that selection instead of the atom selection. <b>Move mode</b> selects whole fragments (Shift-click extends to every fragment of whichever type -- void or channel -- was clicked, Alt-click to every fragment of that same component); <b>Copy mode</b> and <b>Recolour mode</b> share one selection scheme instead, over individual instances -- the original or a specific copy (Shift-click: every instance of that type; Alt-click: every instance of that same component, however far apart; Ctrl-click: only the instances of that component reachable from the clicked one by unit-cell-sized steps). <b>Move</b> and <b>Copy</b> reposition or duplicate-by-translation the selection using the vector boxes or the <b>+a/-a/+b/-b/+c/-c</b> nudge buttons, tinting every surface blue (unselected) or yellow (selected) so the selection itself stays legible regardless of a component's own assigned colour. <b>Recolour mode</b> renders the opposite way round: every unselected surface is tinted a flat, washed-out yellow, while every selected one keeps showing a real colour -- its own current one, or, live while a swatch below is actually being dragged, the pending edit -- so a colour change is always judged directly on the real surface rather than a preview elsewhere. <b>Set colours</b> then applies the two swatches' current colour to the whole selection; <b>Clear selection after applying</b> (unticked by default) decides whether that selection is cleared once applied or left in place for further tweaks.</p>" +
       "<h3>Macro</h3>" +
       "<p>A macro is a plain-text sequence of commands, one per line, that can be replayed later to reproduce a sequence of actions -- recorded live from your own clicks and button presses, typed or pasted in by hand, or a mix of both (the memo box is an ordinary text area throughout, editable at any time). It's designed to work not just on the structure it was recorded against but on a whole series of similar ones (e.g. a variable-temperature data set for the same crystal) -- provided each structure's asymmetric unit is labelled the same way and sits in the same place, which is the user's own responsibility to ensure; nothing here can verify that automatically.</p>" +
       "<p><b>Record</b> and <b>Pause</b> are mutually exclusive (pressing one always pops the other back up). While Record is down, every action below that has a defined macro command gets appended to the memo the instant it happens -- not batched or reordered, in the exact sequence performed. Not every possible action has one: a not-yet-implemented combination is simply never recorded, silently, the same as pressing a key with no shortcut bound to it. <b>Clear</b> empties the memo (confirming first if there's anything in it to lose). <b>Save</b> and <b>Load</b> read and write a plain-text <b>.MAC</b> file -- Save suggests the current structure's own name with a .MAC extension and, in Chrome or Edge, starts its folder picker in whichever folder the structure itself was last dropped from; Load offers the same picker (also starting there), falling back to a plain file-browse button in other browsers, and confirms before replacing a non-empty memo. A .MAC file can also be dropped directly onto the 3D view to load it the same way, without going through the Load button at all. <b>Play</b>, <b>Save</b>, and <b>Load</b> are all disabled while Record is down -- pause first.</p>" +
