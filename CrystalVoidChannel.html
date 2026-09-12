@@ -1350,28 +1350,15 @@ select.sel:focus{border-color:var(--accent)}
   "use strict";
 
   /* ---------------- element data ---------------- */
-  /* User-supplied default van der Waals radii (elements 1-98, from last.elt) */
-  var VDW = {
-    H: 1.20, He: 1.40, Li: 0.76, Be: 0.45, B: 0.27, C: 1.70,
-    N: 1.55, O: 1.52, F: 1.40, Ne: 1.54, Na: 1.02, Mg: 0.72,
-    Al: 0.54, Si: 2.10, P: 1.80, S: 1.80, Cl: 1.80, Ar: 1.88,
-    K: 1.38, Ca: 1.00, Sc: 0.75, Ti: 0.75, V: 0.70, Cr: 0.70,
-    Mn: 0.63, Fe: 0.65, Co: 0.65, Ni: 0.65, Cu: 0.68, Zn: 0.74,
-    Ga: 0.62, Ge: 1.22, As: 1.85, Se: 1.90, Br: 1.93, Kr: 2.02,
-    Rb: 1.52, Sr: 1.18, Y: 1.00, Zr: 1.00, Nb: 1.00, Mo: 1.00,
-    Tc: 2.06, Ru: 1.00, Rh: 1.35, Pd: 0.70, Ag: 1.44, Cd: 0.95,
-    In: 1.00, Sn: 1.18, Sb: 2.20, Te: 2.20, I: 1.98, Xe: 2.16,
-    Cs: 2.65, Ba: 1.35, La: 1.87, Ce: 1.00, Pr: 1.82, Nd: 1.29,
-    Pm: 1.00, Sm: 1.10, Eu: 1.17, Gd: 1.00, Tb: 1.76, Dy: 1.07,
-    Ho: 1.74, Er: 1.00, Tm: 1.72, Yb: 1.02, Lu: 1.00, Hf: 1.00,
-    Ta: 1.43, W: 1.00, Re: 1.00, Os: 1.00, Ir: 1.00, Pt: 1.00,
-    Au: 1.44, Hg: 1.10, Tl: 1.50, Pb: 1.19, Bi: 1.60, Po: 1.00,
-    At: 1.00, Rn: 1.00, Fr: 1.80, Ra: 2.20, Ac: 1.90, Th: 1.85,
-    Pa: 1.80, U: 1.80, Np: 1.10, Pu: 1.00, Am: 1.70, Cm: 0.50,
-    Bk: 0.50, Cf: 0.50
-  };
-  var VDW_DEFAULT = 2.00;
-  /* Atomic-number-ordered element list, Z=1 (H) to Z=98 (Cf) -- index 0 unused. */
+  /* Atomic-number-ordered element list, Z=1 (H) to Z=98 (Cf) -- index 0 unused.
+     Deliberately does NOT include D/T (deuterium/tritium): they're isotopes of
+     H, not separate elements, so giving them their own slot here would shift
+     every real element after them out of its actual atomic number -- the
+     periodic-table page's own "Z" badge, and CSV element-settings export
+     (keyed on atomic number), both rely on this array being the true Z-1..98
+     sequence with no gaps or insertions. D/T instead get their own
+     PTABLE_LAYOUT entries (see below) plus BONDI/COV/CPK table rows, handled
+     by symbol everywhere else -- see vdw()/cov()/cpk() and buildElementsPage(). */
   var ELEMENTS = [null,
     "H", "He", "Li", "Be", "B", "C", "N", "O", "F", "Ne",
     "Na", "Mg", "Al", "Si", "P", "S", "Cl", "Ar", "K", "Ca",
@@ -1383,18 +1370,36 @@ select.sel:focus{border-color:var(--accent)}
     "Lu", "Hf", "Ta", "W", "Re", "Os", "Ir", "Pt", "Au", "Hg",
     "Tl", "Pb", "Bi", "Po", "At", "Rn", "Fr", "Ra", "Ac", "Th",
     "Pa", "U", "Np", "Pu", "Am", "Cm", "Bk", "Cf"];
-  /* van der Waals radii, A. Bondi, J. Phys. Chem. 1964, 68, 441-451. Bondi's
-     original study covered only a subset of elements (mainly main-group, plus a
-     handful of common metals); elements outside that set are intentionally
-     absent here rather than guessed, so "use Bondi radii" only touches elements
-     Bondi actually reported and leaves everything else as it was. */
+  /* van der Waals radii, A. Bondi, J. Phys. Chem. 1964, 68, 441-451 (Cd/Hg
+     corrected and Mg/Na added against a more recent tabulation, 2026-09).
+     This is now the app's ONLY built-in radius default -- there is no more
+     separate generic "VDW" fallback table -- so unlike the historical set
+     this replaces, "use Bondi radii" now also functions as the de facto
+     "restore default radii" action (see restoreDefaultRadii's own removal).
+     D and T (deuterium/tritium) are included here at H's own value, per the
+     user's request: a neutron structure that explicitly labels them as their
+     own species should still see a sensible radius without extra setup,
+     without requiring a full extra vdW-radius citation for two isotopes of
+     the same element. Elements Bondi didn't report at all are intentionally
+     absent rather than guessed -- see RADIUS_DEFAULT below for what covers
+     them, and vdw()'s own comment for why it's still one flat number rather
+     than trying to interpolate a "reasonable" per-element guess. */
   var BONDI = {
     H: 1.20, He: 1.40, Li: 1.82, C: 1.70, N: 1.55, O: 1.52, F: 1.47, Ne: 1.54,
-    Si: 2.10, P: 1.80, S: 1.80, Cl: 1.75, Ar: 1.88, K: 2.75, Ni: 1.63, Cu: 1.40,
-    Zn: 1.39, Ga: 1.87, As: 1.85, Se: 1.90, Br: 1.85, Kr: 2.02, Pd: 1.63, Ag: 1.72,
-    Cd: 1.62, In: 1.93, Sn: 2.17, Te: 2.06, I: 1.98, Xe: 2.16, Pt: 1.72, Au: 1.66,
-    Hg: 1.70, Tl: 1.96, Pb: 2.02, U: 1.86
+    Mg: 1.73, Na: 2.27, Si: 2.10, P: 1.80, S: 1.80, Cl: 1.75, Ar: 1.88, K: 2.75,
+    Ni: 1.63, Cu: 1.40, Zn: 1.39, Ga: 1.87, As: 1.85, Se: 1.90, Br: 1.85, Kr: 2.02,
+    Pd: 1.63, Ag: 1.72, Cd: 1.58, In: 1.93, Sn: 2.17, Te: 2.06, I: 1.98, Xe: 2.16,
+    Pt: 1.72, Au: 1.66, Hg: 1.55, Tl: 1.96, Pb: 2.02, U: 1.86,
+    D: 1.20, T: 1.20
   };
+  /* Every element Bondi (above) didn't report gets this flat radius instead
+     of a guessed value -- deliberately not attempting to interpolate or
+     borrow from another radius set (see BONDI's own comment: mixing sources
+     silently is how the old, removed "VDW" table ended up half Bondi-like
+     values and half covalent-radius-sized placeholders for whatever wasn't
+     covered, which is exactly the inconsistency this whole reworking was
+     meant to get rid of). */
+  var RADIUS_DEFAULT = 2.00;
   /* van der Waals radii, S. Alvarez, "A cartography of the van der Waals
      territories", Dalton Trans. 2013, 42, 8617-8636. Covers most naturally
      occurring elements including the transition metals; as with Bondi, elements
@@ -1417,7 +1422,10 @@ select.sel:focus{border-color:var(--accent)}
     Mg: 1.41, Al: 1.21, Si: 1.11, P: 1.07, S: 1.05, Cl: 1.02, K: 2.03, Ca: 1.76,
     Ti: 1.60, V: 1.53, Cr: 1.39, Mn: 1.50, Fe: 1.42, Co: 1.38, Ni: 1.24, Cu: 1.32,
     Zn: 1.22, Br: 1.20, Zr: 1.75, Mo: 1.54, Ru: 1.46, Ag: 1.45, Cd: 1.44, Sn: 1.39,
-    Sb: 1.39, I: 1.39, W: 1.62, Pt: 1.36, Au: 1.36, Hg: 1.32, Pb: 1.46, U: 1.96
+    Sb: 1.39, I: 1.39, W: 1.62, Pt: 1.36, Au: 1.36, Hg: 1.32, Pb: 1.46, U: 1.96,
+    D: 0.31, T: 0.31 /* same covalent radius as H -- otherwise a D/T atom would
+      fall through to COV_DEFAULT (1.50, almost 5x too large) and bond
+      perception to/from it would badly overreach */
   };
   var COV_DEFAULT = 1.50;
   var CPK = {
@@ -1426,10 +1434,11 @@ select.sel:focus{border-color:var(--accent)}
     Mg: 0x8aff00, Al: 0xbfa6a6, Si: 0xf0c8a0, K: 0x8f40d4, Ca: 0x3dff00, Ti: 0xbfc2c7,
     Cr: 0x8a99c7, Mn: 0x9c7ac7, Fe: 0xe06633, Co: 0xf090a0, Ni: 0x50d050, Cu: 0xc88033,
     Zn: 0x7d80b0, Zr: 0x94e0e0, Mo: 0x54b5b5, Ag: 0xc0c0c0, Cd: 0xffd98f, Sn: 0x668080,
-    I2: 0x940094, W: 0x2194d6, Pt: 0xd0d0e0, Au: 0xffd123, Hg: 0xb8b8d0, Pb: 0x575961, U: 0x008fff
+    I2: 0x940094, W: 0x2194d6, Pt: 0xd0d0e0, Au: 0xffd123, Hg: 0xb8b8d0, Pb: 0x575961, U: 0x008fff,
+    D: 0x8fd9e8, T: 0xc9a0dc /* deuterium/tritium -- distinct from H's white and from each other, freely re-editable like any other element's colour */
   };
   var CPK_DEFAULT = 0xff69b4;
-  function vdw(e) { return VDW.hasOwnProperty(e) ? VDW[e] : VDW_DEFAULT; }
+  function vdw(e) { return BONDI.hasOwnProperty(e) ? BONDI[e] : RADIUS_DEFAULT; }
   function cov(e) { return COV.hasOwnProperty(e) ? COV[e] : COV_DEFAULT; }
   function cpk(e) { return CPK.hasOwnProperty(e) ? CPK[e] : CPK_DEFAULT; }
 
@@ -2373,8 +2382,8 @@ select.sel:focus{border-color:var(--accent)}
     }
 
   var API = {
-    VDW: VDW, COV: COV, CPK: CPK, vdw: vdw, cov: cov, cpk: cpk, cleanElement: cleanElement,
-    ELEMENTS: ELEMENTS, BONDI: BONDI, ALVAREZ: ALVAREZ,
+    COV: COV, CPK: CPK, vdw: vdw, cov: cov, cpk: cpk, cleanElement: cleanElement,
+    ELEMENTS: ELEMENTS, BONDI: BONDI, ALVAREZ: ALVAREZ, RADIUS_DEFAULT: RADIUS_DEFAULT,
     bonds: bonds, unionSphereVolume: unionSphereVolume,
     parseCIF: parseCIF, parseSHELX: parseSHELX, parseSymop: parseSymop, applySymop: applySymop, fracEsdToCartesian: fracEsdToCartesian,
     mat3Mul: mat3Mul, mat3VecMul: mat3VecMul, mat3Inverse: mat3Inverse,
@@ -2683,7 +2692,7 @@ select.sel:focus{border-color:var(--accent)}
     hostColors: {}, guestColors: {}, defaultColors: {}, page: "model",
     hostColorMode: "element", hostSingleColor: 0x4A6FA5,
     hostBondColorMode: "split", hostBondColor: 0xFFFFFF, guestBondColorMode: "split", guestBondColor: 0xFFFFFF, showHBonds: false,
-    radii: {},
+    radii: {}, _radiiBondiMigrated: false,
     hostGrowStyle: "default", guestGrowStyle: "default", showHydrogens: true, centeringMode: "all",
     autoCompleteMolecules: false, _autoCompleting: false,
     videoAxis: "y", videoSteps: 120, videoScale: 100, videoExporting: false, videoDirection: 1, videoFormat: "avi", dontWarnAviSize: false,
@@ -12265,6 +12274,25 @@ select.sel:focus{border-color:var(--accent)}
       if (existing[key] || foundByKey.hasOwnProperty(key)) return;
       foundByKey[key] = generateSymmetryPosition(base.auIndex, base.opIndex, ci, cj, ck);
     }
+    /* existing[key] above only catches a candidate whose OWN (auIndex, op,
+       cell) triple is already displayed -- it says nothing about a
+       DIFFERENT triple that happens to generate the exact same physical
+       position, which is exactly what a special position (an atom sitting
+       on a symmetry axis/plane/centre) produces: another symmetry operator
+       maps that same already-displayed atom onto itself, or onto another
+       already-displayed atom, under a triple no atom on screen actually
+       uses. Ordinary growth already guards against this with
+       positionOccupied() (see findGrowthCandidates/expandToFragments/
+       expandToConnectedFragment); the preview here needs the identical
+       check, just applied after the fact to the (small) candidate set
+       rather than on every attempted shift, since positionOccupied() scans
+       the whole displayed structure and this loop can attempt tens of
+       thousands of shifts for one seed set. */
+    for (var dupKey in foundByKey) {
+      if (!foundByKey.hasOwnProperty(dupKey)) continue;
+      var dupCand = foundByKey[dupKey];
+      if (positionOccupied(dupCand.x, dupCand.y, dupCand.z)) delete foundByKey[dupKey];
+    }
     /* Contacts (which currently-displayed atoms a given candidate is close
        enough to, for the dotted-line display): a second pass, now over a
        far smaller set (only genuine candidates, not every probed
@@ -13518,17 +13546,27 @@ select.sel:focus{border-color:var(--accent)}
     els.sort(); return els;
   }
   function buildRadiiEditor() {
-    /* the periodic table page (built once) always shows all 98 elements;
-       this just refreshes each input to the current effective radius/colour */
-    for (var z = 1; z < K.ELEMENTS.length; z++) {
-      var elem = K.ELEMENTS[z];
+    /* the periodic table page (built once) always shows every PTABLE_LAYOUT
+       entry -- the 98 real elements plus D/T -- this just refreshes each
+       input to the current effective radius/colour. Iterates PTABLE_LAYOUT
+       rather than K.ELEMENTS specifically so D/T's own rad_D/col_D and
+       rad_T/col_T inputs get refreshed too; K.ELEMENTS itself deliberately
+       excludes them (see its own comment). */
+    for (var pi = 0; pi < PTABLE_LAYOUT.length; pi++) {
+      var elem = PTABLE_LAYOUT[pi][0];
       var inp = document.getElementById("rad_" + elem);
       if (inp) inp.value = (state.radii.hasOwnProperty(elem) ? state.radii[elem] : K.vdw(elem)).toFixed(2);
       var sw = document.getElementById("col_" + elem);
       if (sw) sw.value = hexToCss(defaultColorFor(elem));
     }
   }
-  var PTABLE_LAYOUT = [["H",1,1],["He",1,18],["Li",2,1],["Be",2,2],["B",2,13],["C",2,14],["N",2,15],["O",2,16],["F",2,17],["Ne",2,18],["Na",3,1],["Mg",3,2],["Al",3,13],["Si",3,14],["P",3,15],["S",3,16],["Cl",3,17],["Ar",3,18],["K",4,1],["Ca",4,2],["Sc",4,3],["Ti",4,4],["V",4,5],["Cr",4,6],["Mn",4,7],["Fe",4,8],["Co",4,9],["Ni",4,10],["Cu",4,11],["Zn",4,12],["Ga",4,13],["Ge",4,14],["As",4,15],["Se",4,16],["Br",4,17],["Kr",4,18],["Rb",5,1],["Sr",5,2],["Y",5,3],["Zr",5,4],["Nb",5,5],["Mo",5,6],["Tc",5,7],["Ru",5,8],["Rh",5,9],["Pd",5,10],["Ag",5,11],["Cd",5,12],["In",5,13],["Sn",5,14],["Sb",5,15],["Te",5,16],["I",5,17],["Xe",5,18],["Cs",6,1],["Ba",6,2],["La",6,3],["Hf",6,4],["Ta",6,5],["W",6,6],["Re",6,7],["Os",6,8],["Ir",6,9],["Pt",6,10],["Au",6,11],["Hg",6,12],["Tl",6,13],["Pb",6,14],["Bi",6,15],["Po",6,16],["At",6,17],["Rn",6,18],["Fr",7,1],["Ra",7,2],["Ac",7,3],["Ce",9,3],["Pr",9,4],["Nd",9,5],["Pm",9,6],["Sm",9,7],["Eu",9,8],["Gd",9,9],["Tb",9,10],["Dy",9,11],["Ho",9,12],["Er",9,13],["Tm",9,14],["Yb",9,15],["Lu",9,16],["Th",10,3],["Pa",10,4],["U",10,5],["Np",10,6],["Pu",10,7],["Am",10,8],["Cm",10,9],["Bk",10,10],["Cf",10,11]];
+  /* D and T (deuterium/tritium) sit in period 1 itself -- the same row as H
+     and He, since they're H's own isotopes -- at columns 3/4, directly above
+     Sc/Ti (period 1 has neither group 2 nor groups 3-17 at all, so this spot
+     is free). They are NOT in the ELEMENTS array (see its own comment) -- z
+     below resolves to 1 for both, same atomic number as H, rather than
+     K.ELEMENTS.indexOf() returning -1. */
+  var PTABLE_LAYOUT = [["H",1,1],["D",1,3],["T",1,4],["He",1,18],["Li",2,1],["Be",2,2],["B",2,13],["C",2,14],["N",2,15],["O",2,16],["F",2,17],["Ne",2,18],["Na",3,1],["Mg",3,2],["Al",3,13],["Si",3,14],["P",3,15],["S",3,16],["Cl",3,17],["Ar",3,18],["K",4,1],["Ca",4,2],["Sc",4,3],["Ti",4,4],["V",4,5],["Cr",4,6],["Mn",4,7],["Fe",4,8],["Co",4,9],["Ni",4,10],["Cu",4,11],["Zn",4,12],["Ga",4,13],["Ge",4,14],["As",4,15],["Se",4,16],["Br",4,17],["Kr",4,18],["Rb",5,1],["Sr",5,2],["Y",5,3],["Zr",5,4],["Nb",5,5],["Mo",5,6],["Tc",5,7],["Ru",5,8],["Rh",5,9],["Pd",5,10],["Ag",5,11],["Cd",5,12],["In",5,13],["Sn",5,14],["Sb",5,15],["Te",5,16],["I",5,17],["Xe",5,18],["Cs",6,1],["Ba",6,2],["La",6,3],["Hf",6,4],["Ta",6,5],["W",6,6],["Re",6,7],["Os",6,8],["Ir",6,9],["Pt",6,10],["Au",6,11],["Hg",6,12],["Tl",6,13],["Pb",6,14],["Bi",6,15],["Po",6,16],["At",6,17],["Rn",6,18],["Fr",7,1],["Ra",7,2],["Ac",7,3],["Ce",9,3],["Pr",9,4],["Nd",9,5],["Pm",9,6],["Sm",9,7],["Eu",9,8],["Gd",9,9],["Tb",9,10],["Dy",9,11],["Ho",9,12],["Er",9,13],["Tm",9,14],["Yb",9,15],["Lu",9,16],["Th",10,3],["Pa",10,4],["U",10,5],["Np",10,6],["Pu",10,7],["Am",10,8],["Cm",10,9],["Bk",10,10],["Cf",10,11]];
   var SETTINGS_KEY = "CrystalVoid_settings";
   function persistPreferences() {
     /* saved on every change, not just on exit -- unload events aren't
@@ -13558,7 +13596,8 @@ select.sel:focus{border-color:var(--accent)}
         clipPlaneMode: state.clipPlaneMode, clipPlaneH: state.clipPlaneH, clipPlaneK: state.clipPlaneK, clipPlaneL: state.clipPlaneL,
         clipPlaneApplyHost: state.clipPlaneApplyHost, clipPlaneApplyGuest: state.clipPlaneApplyGuest,
         clipPlaneApplyVoid: state.clipPlaneApplyVoid, clipPlaneApplyChannel: state.clipPlaneApplyChannel, clipPlaneApplyMolSurface: state.clipPlaneApplyMolSurface,
-        clipPlaneApplyUnitCell: state.clipPlaneApplyUnitCell, clipPlaneHklConvention: state.clipPlaneHklConvention
+        clipPlaneApplyUnitCell: state.clipPlaneApplyUnitCell, clipPlaneHklConvention: state.clipPlaneHklConvention,
+        radiiBondiMigrated: state._radiiBondiMigrated
         /* clipPlaneEnabled deliberately NOT persisted -- starting a fresh
            session with part of the structure invisible for no visible
            reason (until the user finds the toggle) is worse than just
@@ -13614,6 +13653,7 @@ select.sel:focus{border-color:var(--accent)}
       if (typeof data.clipPlaneApplyMolSurface === "boolean") state.clipPlaneApplyMolSurface = data.clipPlaneApplyMolSurface;
       if (typeof data.clipPlaneApplyUnitCell === "boolean") state.clipPlaneApplyUnitCell = data.clipPlaneApplyUnitCell;
       if (data.clipPlaneHklConvention === "reciprocal" || data.clipPlaneHklConvention === "direct") state.clipPlaneHklConvention = data.clipPlaneHklConvention;
+      if (typeof data.radiiBondiMigrated === "boolean") state._radiiBondiMigrated = data.radiiBondiMigrated;
       /* every light effectively off would leave only the fixed 0.6-intensity
          hemisphere light -- not literally invisible, but dim enough on some
          monitors to look like nothing loaded. Force at least one real light
@@ -13622,6 +13662,27 @@ select.sel:focus{border-color:var(--accent)}
       if (!anyLight) { state.keyEnabled = true; state.keyIntensity = Math.max(state.keyIntensity, 0.9); }
       return true;
     } catch (e) { return false; /* corrupted entry -- fall back to built-in defaults */ }
+  }
+  /* One-time correction for a returning user's saved radii (2026-09): Bondi's
+     Cd/Hg values were corrected (1.62->1.58, 1.70->1.55) against a more
+     recent tabulation, and Mg/Na were added to the table for the first time.
+     A saved state.radii.Cd/Hg exactly equal to the OLD Bondi value almost
+     certainly got there via a prior "Use Bondi radii" click (see
+     setAllRadii), not a hand-typed coincidence -- correct just those two
+     specific values so a returning user's "Bondi" selection actually tracks
+     the corrected table, rather than silently freezing on the old one
+     forever. Nothing else in state.radii is touched: every other entry only
+     ever gets there via a deliberate action (typing a radius, a CSV import,
+     or Use Bondi/Alvarez radii for an element whose value hasn't changed),
+     and anything with NO entry at all was always "using the default" and
+     just automatically picks up the new Bondi-or-2.0 default the moment
+     vdw()'s own backing table changed -- no migration needed for that case.
+     Runs once ever, gated by state._radiiBondiMigrated (persisted). */
+  function migrateLegacyBondiRadii() {
+    if (state._radiiBondiMigrated) return;
+    if (state.radii.Cd === 1.62) state.radii.Cd = 1.58;
+    if (state.radii.Hg === 1.70) state.radii.Hg = 1.55;
+    state._radiiBondiMigrated = true;
   }
   function setAllRadii(table, label) {
     for (var e in table) if (table.hasOwnProperty(e)) state.radii[e] = table[e];
@@ -13633,14 +13694,19 @@ select.sel:focus{border-color:var(--accent)}
   }
   function restoreDefaultRadii() {
     /* radii only -- deliberately leaves state.defaultColors/hostColors/
-       guestColors untouched, so a user who's customized colours can reset
-       just the radii without losing that work (the combined "Restore
-       defaults" button this replaced always reset both together). */
+       guestColors untouched, so resetAllVisualSettings (the only remaining
+       caller) still resets radii and colours as two independent steps.
+       No longer has its own toolbar button: with Bondi radii now the app's
+       one built-in default (see BONDI's own comment), clearing state.radii
+       entirely is exactly what "Use Bondi radii" already does for every
+       element Bondi covers -- so that button doubles as this action for
+       anyone who wants it on demand, without a second, differently-worded
+       button doing the same thing. */
     state.radii = {};
     if (state.atoms) applyRadii(state.atoms);
     if (state.guestAtoms) applyRadii(state.guestAtoms);
     renderStructure(); buildRadiiEditor(); persistPreferences();
-    setStatus("Element radii restored to built-in van der Waals defaults, applied immediately. Colours unchanged.", false);
+    setStatus("Element radii restored to Bondi (or " + K.RADIUS_DEFAULT.toFixed(1) + " " + U.ang + " for anything Bondi doesn't cover), applied immediately. Colours unchanged.", false);
   }
   function restoreDefaultColours() {
     /* colours only -- mirrors restoreDefaultRadii, leaving state.radii
@@ -13696,7 +13762,6 @@ select.sel:focus{border-color:var(--accent)}
     page.innerHTML = "";
     var toolbar = el("div", "ptable-toolbar");
     var row1 = el("div", "btnrow");
-    button(row1, "Restore default radii", "ghost", restoreDefaultRadii);
     button(row1, "Restore default colours", "ghost", restoreDefaultColours);
     button(row1, "Use Bondi radii", "ghost", function () { setAllRadii(K.BONDI, "Bondi (1964)"); });
     button(row1, "Use Alvarez radii", "ghost", function () { setAllRadii(K.ALVAREZ, "Alvarez (2013)"); });
@@ -13714,7 +13779,11 @@ select.sel:focus{border-color:var(--accent)}
     if (state.guestAtoms) for (var pj = 0; pj < state.guestAtoms.length; pj++) present[state.guestAtoms[pj].el] = true;
     var grid = el("div", "ptable");
     for (var i = 0; i < PTABLE_LAYOUT.length; i++) (function (entry) {
-      var sym = entry[0], row = entry[1], col = entry[2], z = K.ELEMENTS.indexOf(sym);
+      var sym = entry[0], row = entry[1], col = entry[2];
+      /* D/T aren't in K.ELEMENTS (see its own comment) -- indexOf would give
+         -1, so show their real atomic number (1, same as H -- they're H's
+         own isotopes, not separate elements) instead. */
+      var z = (sym === "D" || sym === "T") ? 1 : K.ELEMENTS.indexOf(sym);
       var cell = el("div", "pcell" + (present[sym] ? " used" : ""));
       cell.style.gridRow = row; cell.style.gridColumn = col;
       cell.appendChild(el("div", "sym", sym));
@@ -16389,7 +16458,7 @@ select.sel:focus{border-color:var(--accent)}
       "<h3>Host and guest are independent layers</h3>" +
       "<p>Loading a new host CIF starts fresh, clearing any guest along with the old host. Within one loaded structure, though, host and guest stay independent: deleting or hiding atoms in one layer (Structure &gt; Edit atoms) never affects the other. \"Remove host\" and \"Remove all guests\" each ask for confirmation first, since for a CIF-based structure they permanently delete the relevant asymmetric unit atoms along with everything grown from them by symmetry, not just what happens to be currently displayed. Each only ever clears its own layer.</p>" +
       "<h3>Elements: radii and default colours</h3>" +
-      "<p>The <b>Elements</b> page (top right) is a periodic table showing every element's van der Waals radius and default colour together. Radius is shared between host and guest, since there's rarely a reason to want two different radii for the same element, and is used for both the atom display and the molecular volume calculation. \"Use Bondi radii\" and \"Use Alvarez radii\" apply published literature values (Bondi, J. Phys. Chem. 1964, 68, 441; Alvarez, Dalton Trans. 2013, 42, 8617) to whichever elements each study actually covered, leaving everything else -- including all colours -- untouched rather than guessing; Bondi covers mainly main-group elements and a handful of common metals, Alvarez covers most naturally occurring elements including transition metals. \"Restore default radii\" and \"Restore default colours\" each reset just their own half to the built-in values, independently -- resetting one never disturbs whatever's been customized on the other. \"Save element settings\" and \"Load element settings\" read and write a CSV file (atomic number, radius in " + U.ang + ", colour) so a preferred set of radii and colours can be kept and reloaded later.</p>" +
+      "<p>The <b>Elements</b> page (top right) is a periodic table showing every element's van der Waals radius and default colour together, plus <b>D</b> and <b>T</b> (deuterium/tritium) in the otherwise-empty gap next to Be/Mg, for a neutron structure that labels them as their own species -- both start out at hydrogen's own radius and get their own distinct colours, editable the same as any other element. Radius is shared between host and guest, since there's rarely a reason to want two different radii for the same element, and is used for both the atom display and the molecular volume calculation. The app's own built-in default is Bondi (A. Bondi, J. Phys. Chem. 1964, 68, 441) -- every element it covers starts out at Bondi's own value, and anything it doesn't report at all (Bondi covers mainly main-group elements and a handful of common metals) instead gets a flat 2.0 " + U.ang + ". \"Use Bondi radii\" re-applies that same built-in set on demand (handy after other changes), and \"Use Alvarez radii\" (S. Alvarez, Dalton Trans. 2013, 42, 8617, covering most naturally occurring elements including transition metals) offers a published alternative instead -- both leave every element outside their own published set, and all colours, untouched rather than guessing. \"Restore default colours\" resets colours back to the built-in set without touching radii. \"Save element settings\" and \"Load element settings\" read and write a CSV file (atomic number, radius in " + U.ang + ", colour) so a preferred set of radii and colours can be kept and reloaded later -- D/T aren't part of this CSV round-trip, since the format is keyed by atomic number and they don't have one of their own.</p>" +
       "<p>Radii and default colours set on the Elements page are also remembered automatically in the browser, and restored the next time this file is opened, without needing to load a CSV -- no separate action required. This is tied to the browser you're using, not to the file itself, so it won't follow the file to a different computer or survive clearing browser data; the CSV export is the portable, permanent copy to keep.</p>" +
       "<p>Every atom is coloured CPK (its element's default colour from the Elements page) unless you have given it a Custom colour of its own from <b>Style &gt; Atoms</b> (select the atoms first, then Apply). Host and Guest no longer have their own separate colour-by-element editors or \"Reset atom colours\" buttons -- select whichever atoms you want to change (a whole guest component can be selected in one click from its row on the <b>Guest</b> tab) and set their colour there instead. Radius works the same way: Fixed or vdW x overrides on the same tab replace the old per-layer Style dropdown.</p>" +
       "<p><b>Style &gt; Atoms</b> holds a <b>Colour:</b> row (CPK / Custom checkboxes plus a swatch), then radius. <b>Colour</b> is a tri-state choice, not a plain radio button: CPK and Custom can't both be on, but both can be off (meaning \"leave whatever colour these atoms already have alone\") -- ticking one automatically unticks the other, and clicking an already-ticked box turns it off again with neither selected. <b>Radius</b> is two independent mutually-exclusive checkboxes: <b>Radii (&times; vdW)</b>, with its own <b>Non-H</b> and <b>H</b> multiplier boxes (an atom's own displayed radius is whichever of the two matches its element), and <b>Fixed radius (" + U.ang + ")</b>, a single value applied regardless of element -- ticking one unticks the other, and either can be off entirely (leave radius alone). Only a property that's actually ticked is touched by Apply: leaving both Colour and Radius unticked and pressing Apply does nothing at all, and leaving just one unticked leaves whatever those atoms already had for it alone -- so a colour override can be applied to a selection without disturbing its existing radius, or the other way round. The custom colour swatch and the Non-H/H/Fixed boxes can all be set at any time, whether or not their checkbox is currently ticked, ready for whenever it's turned on. The three square icon buttons (stick / ball & stick / spacefill) are shortcuts, not a separate mode of their own: <b>Stick</b> ticks Fixed radius and sets it to 0 (leaving the Radii boxes untouched); <b>Ball &amp; stick</b> ticks Radii (&times; vdW) and sets Non-H/H to 0.2/0.15; <b>Spacefill</b> ticks Radii (&times; vdW) and sets both to 1 -- Apply is still required afterwards, exactly as if those numbers had been typed in by hand. Below that sit <b>Apply</b> and a <b>Clear selection</b> checkbox (empties the selection once Apply has run, useful for working through several groups one after another). <b>Copy settings</b>, next to the preset icons, loads the single selected atom's own current colour and radius settings into the checkboxes and boxes above -- only enabled when exactly one atom is selected, and works even for an atom with no override at all (since it still renders with a definite look -- CPK colour, 0.2x/0.15x van der Waals radius -- Copy settings loads exactly that rather than leaving everything unticked). For Radii, only the Non-H or H box matching the copied atom's own element is updated; the other keeps whatever value it already had.</p>" +
@@ -16496,6 +16565,8 @@ select.sel:focus{border-color:var(--accent)}
   }
   async function boot() {
     var restored = loadPersistedPreferences();
+    migrateLegacyBondiRadii();
+    if (restored) persistPreferences(); /* write back the migration (and its flag) immediately, rather than waiting for some unrelated setting to change first */
     /* Default the video export format to whichever one needs nothing further
        from the user: MP4 if its encoder is already cached from a previous
        session (instant, much smaller file), AVI otherwise (always available,
