@@ -1,0 +1,903 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Complex Wave Lab</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #f4f7fb;
+      --muted: #8e9aab;
+      --panel: rgba(17, 23, 34, .74);
+      --line: rgba(255, 255, 255, .095);
+      --cyan: #6cf5ee;
+      --pink: #ff6db1;
+      --violet: #a78bfa;
+      --lime: #b7f36b;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { min-height: 100%; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at 15% 5%, rgba(72, 214, 206, .12), transparent 30rem),
+        radial-gradient(circle at 88% 12%, rgba(167, 139, 250, .13), transparent 28rem),
+        #080b11;
+    }
+
+    button, input { font: inherit; }
+    button { color: inherit; }
+
+    .shell {
+      width: min(1480px, 100%);
+      margin: 0 auto;
+      padding: 28px;
+    }
+
+    header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 18px;
+    }
+
+    .eyebrow {
+      margin: 0 0 7px;
+      color: var(--cyan);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(28px, 4vw, 54px);
+      line-height: .94;
+      letter-spacing: -.055em;
+      font-weight: 650;
+    }
+
+    .subtitle {
+      max-width: 510px;
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    .equation {
+      white-space: nowrap;
+      color: #dbe5f2;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(18px, 2.2vw, 28px);
+      letter-spacing: .02em;
+    }
+
+    .equation i { color: var(--pink); }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 300px;
+      gap: 14px;
+      align-items: stretch;
+    }
+
+    .stage, .panel {
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--panel);
+      box-shadow: 0 28px 90px rgba(0, 0, 0, .28);
+      backdrop-filter: blur(14px);
+    }
+
+    .stage {
+      position: relative;
+      min-height: 610px;
+      overflow: hidden;
+      isolation: isolate;
+    }
+
+    .stage::before {
+      content: "";
+      position: absolute;
+      inset: -30%;
+      z-index: -1;
+      background:
+        radial-gradient(circle at 18% 40%, rgba(108, 245, 238, .09), transparent 24%),
+        radial-gradient(circle at 72% 35%, rgba(255, 109, 177, .07), transparent 28%);
+      pointer-events: none;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 610px;
+      cursor: grab;
+      touch-action: none;
+    }
+
+    canvas:active { cursor: grabbing; }
+
+    .legend {
+      position: absolute;
+      left: 20px;
+      top: 18px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 16px;
+      pointer-events: none;
+    }
+
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: #b7c1cf;
+      font-size: 11px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .swatch { width: 18px; height: 2px; border-radius: 99px; }
+
+    .drag-hint {
+      position: absolute;
+      right: 18px;
+      top: 17px;
+      color: #7f8a99;
+      font-size: 11px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      pointer-events: none;
+    }
+
+    .readout {
+      position: absolute;
+      inset: auto 18px 16px 18px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      pointer-events: none;
+    }
+
+    .metric {
+      min-width: 0;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(7, 10, 16, .65);
+      backdrop-filter: blur(10px);
+    }
+
+    .metric-label {
+      color: var(--muted);
+      font-size: 10px;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .metric-value {
+      margin-top: 3px;
+      overflow: hidden;
+      color: var(--ink);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: clamp(13px, 1.6vw, 18px);
+      font-variant-numeric: tabular-nums;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .metric.cos .metric-value { color: var(--cyan); }
+    .metric.sin .metric-value { color: var(--pink); }
+
+    .panel {
+      display: flex;
+      flex-direction: column;
+      padding: 18px;
+    }
+
+    .transport {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+
+    .primary, .secondary, .phase-button, .view-button {
+      min-height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, .045);
+      cursor: pointer;
+      transition: transform .16s ease, background .16s ease, border-color .16s ease;
+    }
+
+    .primary:hover, .secondary:hover, .phase-button:hover, .view-button:hover {
+      border-color: rgba(255, 255, 255, .2);
+      background: rgba(255, 255, 255, .08);
+      transform: translateY(-1px);
+    }
+
+    .primary:focus-visible, .secondary:focus-visible, .phase-button:focus-visible, .view-button:focus-visible,
+    input:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+
+    .primary {
+      border-color: rgba(108, 245, 238, .25);
+      background: linear-gradient(135deg, rgba(108, 245, 238, .18), rgba(167, 139, 250, .12));
+      color: #eafffd;
+      font-weight: 650;
+    }
+
+    .secondary { padding: 0 13px; color: var(--muted); }
+
+    .control {
+      margin-bottom: 18px;
+    }
+
+    .control-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .control-head label, .section-label {
+      color: #b8c2d0;
+      font-size: 11px;
+      font-weight: 650;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+
+    .value {
+      color: var(--ink);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      height: 18px;
+      margin: 0;
+      accent-color: var(--cyan);
+      cursor: pointer;
+    }
+
+    .phases {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+      margin: 0 0 20px;
+    }
+
+    .phase-button {
+      min-height: 36px;
+      color: #aeb8c7;
+      font-family: Georgia, "Times New Roman", serif;
+    }
+
+    .camera-control { margin-bottom: 20px; }
+
+    .views {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+      margin: 8px 0 7px;
+    }
+
+    .view-button {
+      min-height: 36px;
+      padding: 0 8px;
+      color: #aeb8c7;
+      font-size: 12px;
+    }
+
+    .view-button[aria-pressed="true"] {
+      border-color: rgba(108, 245, 238, .35);
+      background: rgba(108, 245, 238, .12);
+      color: #eafffd;
+    }
+
+    .axis-mode { grid-column: 1 / -1; }
+
+    .toggles {
+      display: grid;
+      gap: 7px;
+      margin: 8px 0 20px;
+    }
+
+    .toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 38px;
+      padding: 0 2px;
+      color: #bdc7d4;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .toggle input { width: 18px; height: 18px; accent-color: var(--cyan); }
+
+    .note {
+      margin-top: auto;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .note strong { color: #d8e1ed; font-weight: 600; }
+
+    @media (max-width: 900px) {
+      .shell { padding: 18px; }
+      header { align-items: flex-start; flex-direction: column; }
+      .layout { grid-template-columns: 1fr; }
+      .stage { min-height: 540px; }
+      canvas { height: 540px; }
+      .panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 20px; }
+      .transport, .phases, .toggles, .note { grid-column: 1 / -1; }
+      .note { margin-top: 0; }
+    }
+
+    @media (max-width: 560px) {
+      .shell { padding: 12px; }
+      .equation { align-self: flex-start; }
+      .stage { min-height: 500px; border-radius: 18px; }
+      canvas { height: 500px; }
+      .panel { display: block; }
+      .readout { grid-template-columns: 1fr 1fr; }
+      .metric:first-child { grid-column: 1 / -1; }
+      .drag-hint { display: none; }
+      .legend { right: 14px; left: 14px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { scroll-behavior: auto !important; }
+      .primary, .secondary, .phase-button { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <p class="eyebrow">Interactive complex motion</p>
+        <h1>Complex Wave Lab</h1>
+        <p class="subtitle">Drag with the left mouse button to tumble the complete 3D plot freely around its centre.</p>
+      </div>
+      <div class="equation" aria-label="z equals e to the i theta equals cosine theta plus i sine theta">z = e<sup><i>iθ</i></sup> = cos(θ) + <i>i</i> sin(θ)</div>
+    </header>
+
+    <section class="layout" aria-label="Complex wave simulator">
+      <div class="stage">
+        <canvas id="scene" role="img" aria-label="Three-dimensional animation of a rotating point generating a helix, cosine wave, and sine wave"></canvas>
+        <div class="legend" aria-hidden="true">
+          <span class="legend-item"><span class="swatch" style="background:var(--ink)"></span>Complex helix</span>
+          <span class="legend-item"><span class="swatch" style="background:var(--cyan)"></span>Real / cosine</span>
+          <span class="legend-item"><span class="swatch" style="background:var(--pink)"></span>Imaginary / sine</span>
+        </div>
+        <div class="drag-hint" id="drag-hint" aria-hidden="true">Left-drag: tumble plot · wheel: zoom</div>
+        <div class="readout" aria-live="polite">
+          <div class="metric">
+            <div class="metric-label">Phase</div>
+            <div class="metric-value" id="phase-readout">0.00 rad</div>
+          </div>
+          <div class="metric cos">
+            <div class="metric-label">cos(θ) · real</div>
+            <div class="metric-value" id="cos-readout">1.000</div>
+          </div>
+          <div class="metric sin">
+            <div class="metric-label">sin(θ) · imaginary</div>
+            <div class="metric-value" id="sin-readout">0.000 i</div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="panel" aria-label="Simulation controls">
+        <div class="transport">
+          <button class="primary" id="play" type="button">Pause motion</button>
+          <button class="secondary" id="reset" type="button" aria-label="Reset phase and camera">Reset</button>
+        </div>
+
+        <div class="camera-control">
+          <div class="section-label">Projection views</div>
+          <div class="views" aria-label="Exact projection views">
+            <button class="view-button" type="button" data-view="three-d">3D view</button>
+            <button class="view-button" type="button" data-view="cosine">Cosine overlay</button>
+            <button class="view-button" type="button" data-view="sine">Sine overlay</button>
+            <button class="view-button" type="button" data-view="end">End view</button>
+          </div>
+        </div>
+
+        <div class="control">
+          <div class="control-head">
+            <label for="phase">Phase angle</label>
+            <span class="value" id="phase-value">0°</span>
+          </div>
+          <input id="phase" type="range" min="0" max="360" value="0" step="1">
+        </div>
+
+        <div class="phases" aria-label="Jump to phase">
+          <button class="phase-button" type="button" data-phase="0">0</button>
+          <button class="phase-button" type="button" data-phase="90">π/2</button>
+          <button class="phase-button" type="button" data-phase="180">π</button>
+          <button class="phase-button" type="button" data-phase="270">3π/2</button>
+        </div>
+
+        <div class="control">
+          <div class="control-head">
+            <label for="speed">Angular speed</label>
+            <span class="value" id="speed-value">0.70×</span>
+          </div>
+          <input id="speed" type="range" min="0.1" max="2.5" value="0.7" step="0.1">
+        </div>
+
+        <div class="control">
+          <div class="control-head">
+            <label for="amplitude">Amplitude</label>
+            <span class="value" id="amplitude-value">1.00</span>
+          </div>
+          <input id="amplitude" type="range" min="0.45" max="1.45" value="1" step="0.05">
+        </div>
+
+        <div class="control">
+          <div class="control-head">
+            <label for="cycles">Visible cycles</label>
+            <span class="value" id="cycles-value">3</span>
+          </div>
+          <input id="cycles" type="range" min="1" max="5" value="3" step="1">
+        </div>
+
+        <div>
+          <div class="section-label">Layers</div>
+          <div class="toggles">
+            <label class="toggle">Cosine projection <input id="show-cos" type="checkbox" checked></label>
+            <label class="toggle">Sine projection <input id="show-sin" type="checkbox" checked></label>
+            <label class="toggle">Projection rays <input id="show-rays" type="checkbox" checked></label>
+          </div>
+        </div>
+
+        <div class="note"><strong>What you’re seeing:</strong> the point’s horizontal coordinate is cos(θ), its vertical coordinate is sin(θ), and continuous rotation becomes a corkscrew through time.</div>
+      </aside>
+    </section>
+  </main>
+
+  <script>
+    (() => {
+      const canvas = document.getElementById('scene');
+      const ctx = canvas.getContext('2d');
+      const phaseInput = document.getElementById('phase');
+      const speedInput = document.getElementById('speed');
+      const amplitudeInput = document.getElementById('amplitude');
+      const cyclesInput = document.getElementById('cycles');
+      const playButton = document.getElementById('play');
+      const resetButton = document.getElementById('reset');
+      const cosToggle = document.getElementById('show-cos');
+      const sinToggle = document.getElementById('show-sin');
+      const raysToggle = document.getElementById('show-rays');
+      const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      function quaternionMultiply(a, b) {
+        return {
+          w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+          x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+          y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+          z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w
+        };
+      }
+
+      function quaternionNormalize(q) {
+        const length = Math.hypot(q.w, q.x, q.y, q.z) || 1;
+        return { w: q.w / length, x: q.x / length, y: q.y / length, z: q.z / length };
+      }
+
+      function quaternionConjugate(q) {
+        return { w: q.w, x: -q.x, y: -q.y, z: -q.z };
+      }
+
+      function rotateVectorByQuaternion(p, q) {
+        const ux = q.x, uy = q.y, uz = q.z, s = q.w;
+        const dot = ux * p.x + uy * p.y + uz * p.z;
+        const uu = ux * ux + uy * uy + uz * uz;
+        return {
+          x: 2 * dot * ux + (s * s - uu) * p.x + 2 * s * (uy * p.z - uz * p.y),
+          y: 2 * dot * uy + (s * s - uu) * p.y + 2 * s * (uz * p.x - ux * p.z),
+          z: 2 * dot * uz + (s * s - uu) * p.z + 2 * s * (ux * p.y - uy * p.x)
+        };
+      }
+
+      function quaternionFromAxisAngle(axis, angle) {
+        const half = angle * .5;
+        const sine = Math.sin(half);
+        return quaternionNormalize({ w: Math.cos(half), x: axis.x * sine, y: axis.y * sine, z: axis.z * sine });
+      }
+
+      function initialOrientation() {
+        const yaw = quaternionFromAxisAngle({ x: 0, y: 1, z: 0 }, -.58);
+        const pitch = quaternionFromAxisAngle({ x: 1, y: 0, z: 0 }, .30);
+        return quaternionNormalize(quaternionMultiply(pitch, yaw));
+      }
+
+      const state = {
+        phase: 0,
+        speed: .7,
+        amplitude: 1,
+        cycles: 3,
+        playing: !reducedMotion,
+        orientation: initialOrientation(),
+        plotOrientation: { w: 1, x: 0, y: 0, z: 0 },
+        perspective: true,
+        zoom: 1,
+        dragging: false,
+        rollDrag: false,
+        lastX: 0,
+        lastY: 0,
+        lastTime: performance.now()
+      };
+
+      const colors = {
+        ink: '#f4f7fb',
+        muted: '#7f8b9d',
+        grid: 'rgba(164, 181, 202, .13)',
+        gridStrong: 'rgba(183, 203, 226, .25)',
+        cyan: '#6cf5ee',
+        cyanSoft: 'rgba(108, 245, 238, .24)',
+        pink: '#ff6db1',
+        pinkSoft: 'rgba(255, 109, 177, .22)',
+        violet: '#a78bfa'
+      };
+
+      let cssWidth = 0;
+      let cssHeight = 0;
+      let centerX = 0;
+      let centerY = 0;
+      let scale = 1;
+
+      function resize() {
+        const rect = canvas.getBoundingClientRect();
+        const dpr = Math.min(devicePixelRatio || 1, 2);
+        cssWidth = rect.width;
+        cssHeight = rect.height;
+        canvas.width = Math.round(cssWidth * dpr);
+        canvas.height = Math.round(cssHeight * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        centerX = cssWidth * .5;
+        centerY = cssHeight * .46;
+        const horizontalSpan = state.cycles * 3.25 + 5.8;
+        const verticalSpan = state.amplitude * 5.4 + 2.8;
+        scale = Math.min(cssWidth / horizontalSpan, cssHeight / verticalSpan) * state.zoom;
+      }
+
+      const rotate = (p) => {
+        const pivot = { x: state.cycles * 3.25 * .5, y: 0, z: 0 };
+        const local = { x: p.x - pivot.x, y: p.y, z: p.z };
+        const plotRotated = rotateVectorByQuaternion(local, state.plotOrientation);
+        return rotateVectorByQuaternion(plotRotated, state.orientation);
+      };
+
+      const project = (p) => {
+        const r = rotate(p);
+        const perspective = state.perspective ? 1 / (1 + r.z * .018) : 1;
+        return { x: centerX + r.x * scale * perspective, y: centerY - r.y * scale * perspective, z: r.z };
+      };
+
+      function path3D(points, stroke, width = 1, alpha = 1) {
+        if (!points.length) return;
+        ctx.save();
+        ctx.beginPath();
+        points.forEach((p, index) => {
+          const q = project(p);
+          if (index === 0) ctx.moveTo(q.x, q.y); else ctx.lineTo(q.x, q.y);
+        });
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = width;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      function line3D(a, b, stroke, width = 1, dash = []) {
+        const p = project(a), q = project(b);
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(q.x, q.y);
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = width;
+        ctx.setLineDash(dash);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      function glowPath(points, color, width) {
+        ctx.save();
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 11;
+        path3D(points, color, width, .95);
+        ctx.restore();
+      }
+
+      function label3D(text, p, color, align = 'left') {
+        const q = project(p);
+        ctx.save();
+        ctx.fillStyle = color;
+        ctx.font = '600 11px Inter, system-ui, sans-serif';
+        ctx.textAlign = align;
+        ctx.fillText(text, q.x, q.y);
+        ctx.restore();
+      }
+
+      function circlePoints(x, radius, steps = 96) {
+        const points = [];
+        for (let i = 0; i <= steps; i++) {
+          const a = i / steps * Math.PI * 2;
+          points.push({ x, y: radius * Math.cos(a), z: radius * Math.sin(a) });
+        }
+        return points;
+      }
+
+      function drawGrid(span, amp) {
+        const floor = -amp * 1.72;
+        const back = -amp * 1.72;
+        const segments = state.cycles * 4;
+        for (let i = 0; i <= segments; i++) {
+          const x = span * i / segments;
+          line3D({ x, y: floor, z: -amp * 1.72 }, { x, y: floor, z: amp * 1.72 }, colors.grid, 1);
+          line3D({ x, y: -amp * 1.72, z: back }, { x, y: amp * 1.72, z: back }, colors.grid, 1);
+        }
+        for (let j = -2; j <= 2; j++) {
+          const v = j * amp * .86;
+          line3D({ x: 0, y: floor, z: v }, { x: span, y: floor, z: v }, j === 0 ? colors.gridStrong : colors.grid, 1);
+          line3D({ x: 0, y: v, z: back }, { x: span, y: v, z: back }, j === 0 ? colors.gridStrong : colors.grid, 1);
+        }
+        line3D({ x: 0, y: 0, z: 0 }, { x: span + .35, y: 0, z: 0 }, colors.gridStrong, 1.2);
+      }
+
+      function drawScene() {
+        ctx.clearRect(0, 0, cssWidth, cssHeight);
+        const amp = state.amplitude;
+        const turns = state.cycles;
+        const span = turns * 3.25;
+        const samples = Math.max(170, Math.round(turns * 75));
+        const helix = [];
+        const cosine = [];
+        const sine = [];
+        const floor = -amp * 1.72;
+        const back = -amp * 1.72;
+
+        drawGrid(span, amp);
+        path3D(circlePoints(0, amp), colors.gridStrong, 1.25);
+        path3D(circlePoints(0, amp * .04, 28), colors.ink, 1.2);
+
+        for (let i = 0; i <= samples; i++) {
+          const t = i / samples;
+          const a = state.phase - t * turns * Math.PI * 2;
+          const x = t * span;
+          const y = amp * Math.cos(a);
+          const z = amp * Math.sin(a);
+          helix.push({ x, y, z });
+          cosine.push({ x, y, z: back });
+          sine.push({ x, y: floor, z });
+        }
+
+        if (raysToggle.checked) {
+          const stride = Math.max(10, Math.round(samples / (turns * 12)));
+          for (let i = 0; i <= samples; i += stride) {
+            const p = helix[i];
+            if (cosToggle.checked) line3D(p, { x: p.x, y: p.y, z: back }, colors.cyanSoft, .8);
+            if (sinToggle.checked) line3D(p, { x: p.x, y: floor, z: p.z }, colors.pinkSoft, .8);
+          }
+        }
+
+        if (cosToggle.checked) glowPath(cosine, colors.cyan, 2.2);
+        if (sinToggle.checked) glowPath(sine, colors.pink, 2.2);
+        glowPath(helix, colors.ink, 2.4);
+
+        const point = { x: 0, y: amp * Math.cos(state.phase), z: amp * Math.sin(state.phase) };
+        line3D({ x: 0, y: 0, z: 0 }, point, colors.violet, 2.2);
+        if (cosToggle.checked) line3D(point, { x: 0, y: point.y, z: back }, colors.cyan, 1.25, [4, 4]);
+        if (sinToggle.checked) line3D(point, { x: 0, y: floor, z: point.z }, colors.pink, 1.25, [4, 4]);
+
+        const q = project(point);
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(q.x, q.y, 7, 0, Math.PI * 2);
+        ctx.fillStyle = colors.ink;
+        ctx.shadowColor = colors.ink;
+        ctx.shadowBlur = 18;
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(q.x, q.y, 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = colors.violet;
+        ctx.shadowBlur = 0;
+        ctx.fill();
+        ctx.restore();
+
+        label3D('rotation', { x: -.05, y: amp * 1.25, z: 0 }, colors.muted, 'center');
+        if (cosToggle.checked) label3D('REAL · cos θ', { x: span * .86, y: amp * 1.18, z: back }, colors.cyan, 'right');
+        if (sinToggle.checked) label3D('IMAGINARY · sin θ', { x: span * .86, y: floor, z: amp * 1.30 }, colors.pink, 'right');
+        label3D('time →', { x: span * .94, y: .08, z: 0 }, colors.muted, 'right');
+      }
+
+      function updateReadout() {
+        const deg = ((state.phase * 180 / Math.PI) % 360 + 360) % 360;
+        const c = state.amplitude * Math.cos(state.phase);
+        const s = state.amplitude * Math.sin(state.phase);
+        document.getElementById('phase-readout').textContent = `${state.phase.toFixed(2)} rad`;
+        document.getElementById('cos-readout').textContent = c.toFixed(3);
+        document.getElementById('sin-readout').textContent = `${s.toFixed(3)} i`;
+        document.getElementById('phase-value').textContent = `${Math.round(deg)}°`;
+        phaseInput.value = Math.round(deg);
+      }
+
+      function frame(now) {
+        const dt = Math.min((now - state.lastTime) / 1000, .05);
+        state.lastTime = now;
+        if (state.playing && !state.dragging) {
+          state.phase = (state.phase + dt * state.speed) % (Math.PI * 2);
+        }
+        drawScene();
+        updateReadout();
+        requestAnimationFrame(frame);
+      }
+
+      playButton.addEventListener('click', () => {
+        state.playing = !state.playing;
+        playButton.textContent = state.playing ? 'Pause motion' : 'Play motion';
+      });
+
+      resetButton.addEventListener('click', () => {
+        state.phase = 0;
+        state.orientation = initialOrientation();
+        state.plotOrientation = { w: 1, x: 0, y: 0, z: 0 };
+        state.perspective = true;
+        state.zoom = 1;
+        resize();
+      });
+
+      phaseInput.addEventListener('input', () => {
+        state.phase = Number(phaseInput.value) * Math.PI / 180;
+        state.playing = false;
+        playButton.textContent = 'Play motion';
+      });
+
+      speedInput.addEventListener('input', () => {
+        state.speed = Number(speedInput.value);
+        document.getElementById('speed-value').textContent = `${state.speed.toFixed(2)}×`;
+      });
+
+      amplitudeInput.addEventListener('input', () => {
+        state.amplitude = Number(amplitudeInput.value);
+        document.getElementById('amplitude-value').textContent = state.amplitude.toFixed(2);
+        resize();
+      });
+
+      cyclesInput.addEventListener('input', () => {
+        state.cycles = Number(cyclesInput.value);
+        document.getElementById('cycles-value').textContent = String(state.cycles);
+        resize();
+      });
+
+      document.querySelectorAll('[data-phase]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const degrees = Number(button.dataset.phase);
+          state.phase = degrees * Math.PI / 180;
+          state.playing = false;
+          playButton.textContent = 'Play motion';
+        });
+      });
+
+      document.querySelectorAll('[data-view]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const view = button.dataset.view;
+          state.plotOrientation = { w: 1, x: 0, y: 0, z: 0 };
+          if (view === 'cosine') {
+            state.orientation = { w: 1, x: 0, y: 0, z: 0 };
+            state.perspective = false;
+          } else if (view === 'sine') {
+            state.orientation = quaternionFromAxisAngle({ x: 1, y: 0, z: 0 }, -Math.PI / 2);
+            state.perspective = false;
+          } else if (view === 'end') {
+            state.orientation = quaternionFromAxisAngle({ x: 0, y: 1, z: 0 }, -Math.PI / 2);
+            state.perspective = false;
+          } else {
+            state.orientation = initialOrientation();
+            state.perspective = true;
+          }
+        });
+      });
+
+      function applyDragRotation(dx, dy, rollMode) {
+        let delta;
+        if (rollMode) {
+          delta = quaternionFromAxisAngle({ x: 0, y: 0, z: 1 }, (dx - dy) * .009);
+        } else {
+          const pitchDelta = quaternionFromAxisAngle({ x: 1, y: 0, z: 0 }, -dy * .008);
+          const yawDelta = quaternionFromAxisAngle({ x: 0, y: 1, z: 0 }, -dx * .008);
+          delta = quaternionMultiply(pitchDelta, yawDelta);
+        }
+        const cameraInverse = quaternionConjugate(state.orientation);
+        const worldDelta = quaternionMultiply(cameraInverse, quaternionMultiply(delta, state.orientation));
+        state.plotOrientation = quaternionNormalize(quaternionMultiply(worldDelta, state.plotOrientation));
+      }
+
+      canvas.addEventListener('pointerdown', (event) => {
+        state.dragging = true;
+        state.rollDrag = event.shiftKey || event.button === 2;
+        state.lastX = event.clientX;
+        state.lastY = event.clientY;
+        canvas.setPointerCapture(event.pointerId);
+        if (canvas.requestPointerLock) {
+          const lockRequest = canvas.requestPointerLock();
+          if (lockRequest && typeof lockRequest.catch === 'function') lockRequest.catch(() => {});
+        }
+      });
+
+      canvas.addEventListener('pointermove', (event) => {
+        if (!state.dragging) return;
+        if (document.pointerLockElement === canvas) return;
+        const dx = event.clientX - state.lastX;
+        const dy = event.clientY - state.lastY;
+        applyDragRotation(dx, dy, state.rollDrag || event.shiftKey);
+        state.lastX = event.clientX;
+        state.lastY = event.clientY;
+      });
+
+      document.addEventListener('mousemove', (event) => {
+        if (!state.dragging || document.pointerLockElement !== canvas) return;
+        applyDragRotation(event.movementX, event.movementY, state.rollDrag || event.shiftKey);
+      });
+
+      const stopDrag = (event) => {
+        state.dragging = false;
+        state.rollDrag = false;
+        if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+        if (document.pointerLockElement === canvas && document.exitPointerLock) document.exitPointerLock();
+      };
+      canvas.addEventListener('pointerup', stopDrag);
+      canvas.addEventListener('pointercancel', stopDrag);
+      canvas.addEventListener('contextmenu', (event) => event.preventDefault());
+      document.addEventListener('pointerlockchange', () => {
+        if (document.pointerLockElement !== canvas) {
+          state.dragging = false;
+          state.rollDrag = false;
+        }
+      });
+
+      canvas.addEventListener('wheel', (event) => {
+        event.preventDefault();
+        state.zoom = Math.max(.68, Math.min(1.35, state.zoom * Math.exp(-event.deltaY * .001)));
+        resize();
+      }, { passive: false });
+
+      canvas.addEventListener('dblclick', () => {
+        state.orientation = initialOrientation();
+        state.plotOrientation = { w: 1, x: 0, y: 0, z: 0 };
+        state.perspective = true;
+        state.zoom = 1;
+        resize();
+      });
+
+      new ResizeObserver(resize).observe(canvas);
+      window.addEventListener('resize', resize);
+      resize();
+      playButton.textContent = state.playing ? 'Pause motion' : 'Play motion';
+      requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>
