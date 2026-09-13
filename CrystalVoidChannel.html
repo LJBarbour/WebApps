@@ -2433,7 +2433,7 @@ select.sel:focus{border-color:var(--accent)}
   var K = window.Connolly;
   var U = { ang: "\u00C5", cube: "\u00B3", sq: "\u00B2" };
 
-  var scene, camera, trueOrthoCam, pseudoOrthoCam, activeCam, renderer;
+  var scene, camera, trueOrthoCam, pseudoOrthoCam, walkCam, activeCam, renderer, walkHeadlamp;
   var clipPlane; /* single global cutaway plane (Display > Clipping Plane) -- its normal always tracks the current view direction, see updateClipPlane() */
   var atomsGroup, bondsGroup, surfaceGroup, guestAtomsGroup, guestBondsGroup, hbondsGroup, selectionGroup, unitCellGroup, bondEditGroup, voidGroup, ringGroup, molSurfaceGroup, labelGroup, coordPolyGroup, coordPolyGuestGroup, molNeighborGroup;
   /* Grow > Molecular neighbourhood's own preview shell -- NOT part of the
@@ -2579,7 +2579,7 @@ select.sel:focus{border-color:var(--accent)}
      and having state read from it directly (rather than duplicating the
      numbers) makes that drift structurally impossible going forward. */
   var DISPLAY_DEFAULTS = {
-    bgColor: 0xffffff, pseudoOrtho: false, highDetail: true,
+    bgColor: 0xffffff, cameraMode: "ortho", depthScalingAngle: 5, highDetail: true,
     fogOn: false, fogDensity: 0.3, lightHeadlight: true, lightAngle: 0,
     keyEnabled: true, keyIntensity: 0.95, fillEnabled: true, fillIntensity: 0, rimEnabled: true, rimIntensity: 0.35,
     atomRoughness: 0.35, atomMetalness: 0.55, atomReflectivity: 0
@@ -2588,24 +2588,64 @@ select.sel:focus{border-color:var(--accent)}
     atoms: null, name: "", everLoaded: false, viewOffset: [0, 0, 0],
     showHost: true,
     atomScale: 1.0,
-    /* pseudoOrtho off (default) = the original literal orthographic camera --
-       exact parallel projection, so unit cell edges viewed down an axis
-       overlay exactly, at the cost of the known close-up "z-clipping"
-       artifact (see ORTHO_DIST_MULT's own comment for the mechanism -- a
-       true orthographic camera has no eye point, so zooming its shared
-       reference plane through a solid atom is unavoidable). pseudoOrtho on =
-       the narrow-FOV/far-camera emulation that eliminates that clipping
-       entirely, at the cost of a very slight (usually imperceptible)
-       perspective non-overlap of near/far cell edges when viewing exactly
-       down an axis -- a real trade-off, not a strict improvement, which is
-       why this is a user choice rather than always-on. */
-    pseudoOrtho: DISPLAY_DEFAULTS.pseudoOrtho, bgColor: DISPLAY_DEFAULTS.bgColor,
+    /* cameraMode "ortho" (default) = the original literal orthographic
+       camera -- exact parallel projection, so unit cell edges viewed down an
+       axis overlay exactly, at the cost of the known close-up "z-clipping"
+       artifact (see trueOrthoCam's own comment for the mechanism -- a true
+       orthographic camera has no eye point, so zooming its shared reference
+       plane through a solid atom is unavoidable). "pseudo" and "depth" both
+       use the narrow-FOV/far-camera emulation that eliminates that clipping
+       entirely, at the cost of a perspective non-overlap of near/far cell
+       edges when viewing exactly down an axis -- a real trade-off, not a
+       strict improvement, which is why "ortho" stays the default rather than
+       either of the other two. "pseudo" pins the angle at ORTHO_MIN_FOV_DEG
+       (imperceptible in practice); "depth" uses depthScalingAngle instead,
+       user-adjustable from ORTHO_MIN_FOV_DEG up to ORTHO_MAX_FOV_DEG for a
+       visibly stronger, deliberately-chosen sense of perspective -- useful
+       on a large structure where true parallel projection reads as flat. */
+    cameraMode: DISPLAY_DEFAULTS.cameraMode, depthScalingAngle: DISPLAY_DEFAULTS.depthScalingAngle, bgColor: DISPLAY_DEFAULTS.bgColor,
     lightHeadlight: DISPLAY_DEFAULTS.lightHeadlight, lightAngle: DISPLAY_DEFAULTS.lightAngle,
     keyEnabled: DISPLAY_DEFAULTS.keyEnabled, keyIntensity: DISPLAY_DEFAULTS.keyIntensity,
     fillEnabled: DISPLAY_DEFAULTS.fillEnabled, fillIntensity: DISPLAY_DEFAULTS.fillIntensity,
     rimEnabled: DISPLAY_DEFAULTS.rimEnabled, rimIntensity: DISPLAY_DEFAULTS.rimIntensity,
     highDetail: DISPLAY_DEFAULTS.highDetail, fogOn: DISPLAY_DEFAULTS.fogOn, fogDensity: DISPLAY_DEFAULTS.fogDensity,
     exportScale: 2, rotateSensitivity: 1.0,
+    /* Walk mode -- see walkPos/walkQuat's own comment for the camera
+       side of this. walkMode itself is a click-hijacking mode like
+       growMode/bondEditMode/etc -- session-only, never persisted or saved
+       into a project. Everything else under the Walk mode subsection --
+       walkSpeed, walkPanScale, walkLookSensitivity, walkHeadlampOn/Intensity,
+       walkInvertDrag, walkCollision and its six walkCollideX sub-flags -- IS
+       persisted (see persistPreferences/loadPersistedPreferences), the
+       user's own explicit request: these are look-and-feel preferences the
+       same as any other Display/Lighting/Material setting, not a one-off
+       per-session choice. The six walkCollideX flags are sub-choices of
+       walkCollision -- "given that walls are solid, which categories of
+       them" -- mirroring Display > Clipping Plane's own "Apply to
+       Host/Guest/Voids/Channels/Molecular surface" checklist (see
+       clipPlaneApplyHost etc. below) but without an Unit cell entry, since a
+       wireframe cell edge was never a real wall to begin with. All default
+       true so turning walkCollision on with none of these touched still
+       behaves exactly like the single old on/off toggle (collide with
+       everything currently displayed).
+       Three independent per-action speed/sensitivity settings, each its own
+       slider, each affecting exactly one of the three walk-mode drag/scroll
+       actions -- NOT one shared "walk speed" for everything (an earlier
+       version of this session had walkSpeed also scale panning, which the
+       user pointed out was never actually intended once separate sliders
+       were on the table). walkSpeed: wheel-scroll forward/back only
+       (walkMove, via WALK_WHEEL_SCALE). walkPanScale: right-drag pan/strafe
+       only (walkPan) -- a direct Å-per-pixel value, not a multiplier on a
+       fixed constant, hence the user's own suggested 0.01-0.1 range (the
+       fixed WALK_PAN_SCALE constant this replaces was 0.03, so that's this
+       field's default too). walkLookSensitivity: left-drag look AND
+       shift-left-drag roll (walkLook/walkRoll) -- deliberately separate from
+       the orbit rig's own `rotateSensitivity` (Scene tab > Rotation
+       sensitivity), which stays exactly as it was and no longer has any
+       effect on walk mode at all. */
+    walkMode: false, walkSpeed: 1.0, walkPanScale: 0.03, walkLookSensitivity: 1.0, walkCollision: false,
+    walkCollideHost: true, walkCollideGuest: true, walkCollideVoid: true, walkCollideChannel: true,
+    walkCollideMolSurface: true, walkCollideCoordPoly: true, walkHeadlampOn: false, walkHeadlampIntensity: 3.5, walkInvertDrag: false,
     lastSourceHandle: null, exportTransparent: false,
     isCif: false, cifCell: null, cifSymops: null, cifAsymUnit: null, cifFracToCart: null, cifTags: null,
     cifBlocks: null, cifBlockIndex: 0, cifMultiSourceName: "",
@@ -2722,39 +2762,84 @@ select.sel:focus{border-color:var(--accent)}
   var camTarget = new THREE.Vector3(0, 0, 0);
   var camOrient = new THREE.Quaternion();
   var camDist = 1;
-  /* Two mutually-exclusive "orthographic-look" cameras, toggled by
-     state.pseudoOrtho (see setPseudoOrtho/DISPLAY_DEFAULTS):
+  /* Walk mode (Display > Walk mode) -- a FOURTH camera, independent of the
+     orbit rig above (camTarget/camOrient/camDist) and of the ortho-look pair
+     below: a free-fly first-person view for exploring the inside of a void
+     or channel, entered/exited without ever touching camOrient/camDist/
+     camTarget, so the orbit view is exactly as it was the instant walk mode
+     is left (see setWalkMode/exitWalkMode). walkPos is the walker's own
+     position; walkQuat is its look direction/orientation, composed straight
+     out of small local-axis rotations (see walkLook) with no yaw/pitch
+     decomposition and deliberately no clamp -- unlike a ground-based FPS
+     camera (which keeps yaw/pitch separate specifically so it CAN clamp
+     pitch just short of straight up/down, to stop "up" ever becoming
+     ambiguous relative to the ground), there is no ground here: this is a
+     free-fly explorer, so any orientation, including looking straight up/
+     down or all the way past it, is valid and shouldn't hit an artificial
+     end-stop. The trade-off (same one the orbit rig's own rotate-drag
+     already accepts, see its own comment) is that enough mixed yaw+pitch
+     dragging can accumulate a bit of roll over time -- considered a fair
+     price for genuinely unrestricted looking, and correctable any time via
+     the Recenter button (recenterWalkCamera). Deliberately plain module
+     vars, not part of `state`, same as camTarget/camOrient/camDist -- pure
+     view bookkeeping, not a saved setting, and reset fresh (see
+     setWalkMode/recenterWalkCamera) from wherever the orbit view currently
+     is, not persisted between visits to the mode. */
+  var walkPos = new THREE.Vector3(), walkQuat = new THREE.Quaternion();
+  var WALK_WHEEL_SCALE = 0.01; /* Å moved per unit of wheel deltaY, before state.walkSpeed's own multiplier -- deltaY is typically ~100 per notch on a plain mouse wheel, so this lands one notch around 1 A at the default speed: a small, deliberate step at atomic scale, not a lurch. */
+  /* Panning's own per-pixel scale used to be a fixed constant (WALK_PAN_SCALE)
+     multiplied by state.walkSpeed -- now it's directly state.walkPanScale, a
+     user-adjustable slider in its own right (Å per drag pixel, no separate
+     multiplier), so panning speed no longer moves at all when Walk speed
+     does. See state.walkPanScale's own comment (next to walkMode/walkSpeed
+     in the initial state object) for the full reasoning and the three-
+     independent-sliders decision this is part of. */
+  var WALK_COLLISION_MARGIN = 0; /* Å added to each atom's own van der Waals radius when state.walkCollision is on -- 0 means the collision boundary IS the true vdW surface, nothing padded on top; a nonzero margin was tried first and felt too restrictive (couldn't pass close by atoms that a real vdW-surface view clearly had room for) */
+  var WALK_SURFACE_MARGIN = 0.1; /* Å -- how close a displayed molecular surface (zero-thickness by nature, unlike an atom/bond) can be approached before it counts as blocked; this IS the "wall thickness" for a surface, there's no separate radius to add it to */
+  var WALK_FOG_REF_DIST = 8; /* fog/depth-cueing calibration reference while walking, in A -- see updateFog()'s own comment */
+  /* Three mutually-exclusive "camera modes", selected by state.cameraMode
+     (see setCameraMode/DISPLAY_DEFAULTS): "ortho", "pseudo", "depth".
 
-     trueOrthoCam -- a literal THREE.OrthographicCamera. Exact parallel
-     projection: viewed straight down a crystallographic axis, near and far
-     unit cell edges overlay exactly, which matters for crystallography.
-     But a true orthographic camera has no eye point -- every view ray
-     shares one common reference PLANE (at the camera's own position)
-     instead of converging on a point -- so zooming it in on a structure
-     inevitably drags that plane through the middle of some solid atom
-     sooner or later. Confirmed directly: the resulting flat, perfectly
-     circular "hole" persisted unchanged from near=0.05 down to near=1e-6,
-     and even with the frustum widened 20x -- neither near/far tuning nor
-     frustum width was ever the actual cause, so this is accepted as a known
-     trade-off in this mode rather than something currentNearPlane() below
-     can fix.
+     trueOrthoCam -- a literal THREE.OrthographicCamera, used only for
+     "ortho". Exact parallel projection: viewed straight down a
+     crystallographic axis, near and far unit cell edges overlay exactly,
+     which matters for crystallography. But a true orthographic camera has
+     no eye point -- every view ray shares one common reference PLANE (at
+     the camera's own position) instead of converging on a point -- so
+     zooming it in on a structure inevitably drags that plane through the
+     middle of some solid atom sooner or later. Confirmed directly: the
+     resulting flat, perfectly circular "hole" persisted unchanged from
+     near=0.05 down to near=1e-6, and even with the frustum widened 20x --
+     neither near/far tuning nor frustum width was ever the actual cause, so
+     this is accepted as a known trade-off in this mode rather than
+     something currentNearPlane() below can fix.
 
-     pseudoOrthoCam -- a genuine PerspectiveCamera at a very small FOV,
-     parked correspondingly far from the target instead. A real perspective
-     camera's rays diverge from one point, so there is no shared plane to
-     slice through anything -- eliminating the clipping above entirely -- at
-     the cost of a very slight (usually imperceptible) perspective
-     convergence, so cell edges down an axis no longer overlay EXACTLY the
-     way trueOrthoCam's do. "Zoom" here means narrowing the angle while the
-     actual distance scales up to match -- unlike a real zoom-in, this
-     camera never actually approaches the structure, which is what keeps it
-     out of solid geometry no matter how "zoomed in" the view appears.
-     camDist keeps its existing meaning (the semantic zoom level, matching
-     MG/the Scale readout) for BOTH cameras -- only pseudoOrthoCam's OWN
-     distance (see updateOrthoFrustum) is derived from it via
-     ORTHO_DIST_MULT, never used directly as its position. */
-  var ORTHO_EMULATION_FOV_DEG = 1.5;
-  var ORTHO_DIST_MULT = Math.tan(45 * Math.PI / 360) / Math.tan(ORTHO_EMULATION_FOV_DEG * Math.PI / 360);
+     pseudoOrthoCam -- a genuine PerspectiveCamera at a small FOV, parked
+     correspondingly far from the target instead, used for BOTH "pseudo" and
+     "depth" (see activeOrthoFovDeg() for which angle each one uses). A real
+     perspective camera's rays diverge from one point, so there is no shared
+     plane to slice through anything -- eliminating the clipping above
+     entirely -- at the cost of a perspective convergence (the smaller the
+     angle, the less noticeable), so cell edges down an axis no longer
+     overlay EXACTLY the way trueOrthoCam's do. "Zoom" here means narrowing
+     the angle while the actual distance scales up to match -- unlike a real
+     zoom-in, this camera never actually approaches the structure, which is
+     what keeps it out of solid geometry no matter how "zoomed in" the view
+     appears. camDist keeps its existing meaning (the semantic zoom level,
+     matching MG/the Scale readout) for BOTH cameras -- only pseudoOrthoCam's
+     OWN distance (see updateOrthoFrustum) is derived from it via
+     orthoDistMultFor(), never used directly as its position.
+
+     "pseudo" is deliberately just "depth" pinned to one fixed, very small
+     angle (ORTHO_MIN_FOV_DEG) rather than a genuinely different mechanism --
+     the user wants it kept as its own separate, always-available choice
+     (not merely "depth scaling turned down all the way"), since the near-
+     imperceptible convergence at 1.5 degrees is a qualitatively different,
+     safer default than a user-chosen angle that could be dragged much
+     wider. */
+  var ORTHO_MIN_FOV_DEG = 1.5, ORTHO_MAX_FOV_DEG = 25;
+  function activeOrthoFovDeg() { return state.cameraMode === "depth" ? state.depthScalingAngle : ORTHO_MIN_FOV_DEG; }
+  function orthoDistMultFor(fovDeg) { return Math.tan(45 * Math.PI / 360) / Math.tan(fovDeg * Math.PI / 360); }
   var sceneBoundRadius = 50; /* max distance from the view-space origin to any currently-loaded
      atom, +margin -- recomputed by renderStructure() below. Used to keep the far clip plane just
      past whatever's actually loaded instead of a fixed 6000, so shrinking near for close-up
@@ -2853,14 +2938,21 @@ select.sel:focus{border-color:var(--accent)}
     }
     if (pseudoOrthoCam) {
       pseudoOrthoCam.aspect = aspect;
-      /* pseudoOrthoCam sits at camDist * ORTHO_DIST_MULT, not camDist itself
-         -- see ORTHO_DIST_MULT's own comment. Its near/far only need to
-         bracket a narrow band around THAT distance (the loaded structure's
-         own extent, sceneBoundRadius, plus a small margin) -- nowhere near
-         the tiny-near/huge-far spread trueOrthoCam needs. This is also why
-         this camera never needs that spread in the first place: it's never
-         close to anything. */
-      var orthoDist = camDist * ORTHO_DIST_MULT;
+      /* pseudoOrthoCam's own fov tracks whichever of "pseudo"/"depth" is
+         active (see activeOrthoFovDeg()) -- set here, alongside everything
+         else this function already recomputes on every camera change,
+         rather than only when the mode/angle actually changes, so a stale
+         fov can never linger after some OTHER code path calls this without
+         knowing to refresh it too. It sits at camDist * orthoDistMultFor(fov),
+         not camDist itself -- see the mode-comment above trueOrthoCam's own
+         declaration. Its near/far only need to bracket a narrow band around
+         THAT distance (the loaded structure's own extent, sceneBoundRadius,
+         plus a small margin) -- nowhere near the tiny-near/huge-far spread
+         trueOrthoCam needs. This is also why this camera never needs that
+         spread in the first place: it's never close to anything. */
+      var fovDeg = activeOrthoFovDeg();
+      pseudoOrthoCam.fov = fovDeg;
+      var orthoDist = camDist * orthoDistMultFor(fovDeg);
       pseudoOrthoCam.near = Math.max(0.01, orthoDist - sceneBoundRadius - 5);
       pseudoOrthoCam.far = orthoDist + sceneBoundRadius + 5;
       pseudoOrthoCam.updateProjectionMatrix();
@@ -2872,7 +2964,7 @@ select.sel:focus{border-color:var(--accent)}
     camera.position.copy(pos); camera.quaternion.copy(camOrient);
     if (trueOrthoCam) { trueOrthoCam.position.copy(pos); trueOrthoCam.quaternion.copy(camOrient); }
     if (pseudoOrthoCam) {
-      var orthoPos = camTarget.clone().addScaledVector(dir, camDist * ORTHO_DIST_MULT);
+      var orthoPos = camTarget.clone().addScaledVector(dir, camDist * orthoDistMultFor(activeOrthoFovDeg()));
       pseudoOrthoCam.position.copy(orthoPos); pseudoOrthoCam.quaternion.copy(camOrient);
     }
     updateOrthoFrustum();
@@ -3218,6 +3310,23 @@ select.sel:focus{border-color:var(--accent)}
        without this, spacebar after rotating would reopen that dropdown
        instead of toggling select-all, since focus never actually moved */
     if (document.activeElement && document.activeElement !== document.body && document.activeElement.blur) document.activeElement.blur();
+    if (state.walkMode) {
+      /* walk mode hijacks the mouse completely, the same way the other
+         click-hijacking modes already do: left-drag is "look around",
+         shift-left-drag is "roll" (see walkRoll -- same steering-wheel-style
+         angle-around-the-viewport-centre technique as the orbit rig's own
+         shift-drag roll, just applied to walkQuat instead of camOrient),
+         right-drag is "pan/strafe" (see walkPan) -- none of this is the
+         orbit rig's own rotate/roll/zoom, which stay untouched underneath.
+         There's no camDist to zoom in walk mode anyway (forward/back
+         movement is the wheel's job, see the wheel listener). */
+      if (e.button === 0) {
+        dragMode = e.shiftKey ? "walkRoll" : "walkLook";
+        lastX = e.clientX; lastY = e.clientY; e.preventDefault();
+      } else if (e.button === 2) { dragMode = "walkPan"; lastX = e.clientX; lastY = e.clientY; e.preventDefault(); }
+      else dragMode = null;
+      return;
+    }
     if (e.button === 0) {
       clickMods.shift = e.shiftKey; clickMods.ctrl = e.ctrlKey; clickMods.alt = e.altKey;
       pickDownX = e.clientX; pickDownY = e.clientY; pickMoved = false;
@@ -3364,6 +3473,9 @@ select.sel:focus{border-color:var(--accent)}
     var dx = e.clientX - lastX, dy = e.clientY - lastY;
     var prevX = lastX, prevY = lastY;
     lastX = e.clientX; lastY = e.clientY;
+    if (dragMode === "walkLook") { walkLook(dx, dy); return; }
+    if (dragMode === "walkPan") { walkPan(dx, dy); return; }
+    if (dragMode === "walkRoll") { walkRoll(prevX, prevY, e.clientX, e.clientY); return; }
     if ((dragMode === "rotate" || dragMode === "roll") &&
       (Math.abs(e.clientX - pickDownX) > 4 || Math.abs(e.clientY - pickDownY) > 4)) pickMoved = true;
     if (dragMode === "rotate") {
@@ -3442,8 +3554,29 @@ select.sel:focus{border-color:var(--accent)}
     trueOrthoCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.05, 6000);
     /* near/far/aspect get set for real in updateOrthoFrustum() on the first
        applyController() call. */
-    pseudoOrthoCam = new THREE.PerspectiveCamera(ORTHO_EMULATION_FOV_DEG, 1, 0.05, 6000);
-    activeCam = state.pseudoOrtho ? pseudoOrthoCam : trueOrthoCam;
+    pseudoOrthoCam = new THREE.PerspectiveCamera(activeOrthoFovDeg(), 1, 0.05, 6000);
+    /* a wider, ordinary FOV (unlike pseudoOrthoCam's own tiny one) -- this is
+       a real, close-up first-person view, not an orthographic-look
+       emulation, so it wants a natural field of view. near is fixed very
+       small (walking can put the camera right up against, or inside, an
+       atom); far is recomputed per-move in applyWalkCamera(), same idea as
+       updateOrthoFrustum() does for the other two. */
+    walkCam = new THREE.PerspectiveCamera(70, 1, 0.02, 6000);
+    /* the walker's own light (Display > Walk mode > Headlamp) -- a plain
+       PointLight (falls off with distance, unlike the fixed key/fill/rim
+       DirectionalLights) parented directly to walkCam so it always sits
+       right at the walker's own eye and needs no per-move upkeep, the exact
+       same "light as a camera child" technique setLightMode's headlight
+       mode already uses for the orbit rig (see its own comment) -- and for
+       the same reason, walkCam has to actually be IN the scene graph for a
+       light parented to it to render (scene.add(camera) right below has the
+       identical comment for the orbit rig's own reference camera). Off by
+       default; intensity is the on/off switch (0 = off), same pattern
+       setKeyLight/setFillLight/setRimLight already use. */
+    walkHeadlamp = new THREE.PointLight(0xfff2d9, 0, 25, 1.6);
+    walkCam.add(walkHeadlamp);
+    scene.add(walkCam);
+    activeCam = state.cameraMode === "ortho" ? trueOrthoCam : pseudoOrthoCam;
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     renderer.localClippingEnabled = true; /* required for void/channel Option 1's per-axis cell-boundary clip planes (cellBoundaryPlanes) */
     clipPlane = new THREE.Plane();
@@ -3456,7 +3589,15 @@ select.sel:focus{border-color:var(--accent)}
     applyController();
     renderer.domElement.addEventListener("mousedown", onCanvasPointerDown);
     renderer.domElement.addEventListener("contextmenu", function (e) { e.preventDefault(); });
-    renderer.domElement.addEventListener("wheel", function (e) { e.preventDefault(); }, { passive: false });
+    renderer.domElement.addEventListener("wheel", function (e) {
+      e.preventDefault();
+      /* the wheel is otherwise entirely unused (disabled) -- ordinary zoom
+         is right-drag -- so walk mode borrows it for forward/back movement
+         with no conflict. Scrolling "up"/away (negative deltaY) means
+         forward, matching this app's own existing right-drag zoom
+         convention (dragging up also means "closer/forward" there). */
+      if (state.walkMode) walkMove(e.deltaY);
+    }, { passive: false });
     renderer.domElement.addEventListener("dblclick", function (e) {
       /* double-clicking a manually-placed label releases it back to
          automatic placement, worked out fresh on the spot rather than left
@@ -3517,6 +3658,7 @@ select.sel:focus{border-color:var(--accent)}
     var vp = document.getElementById("viewport"); if (!vp) return;
     camera.aspect = vp.clientWidth / vp.clientHeight; camera.updateProjectionMatrix();
     updateOrthoFrustum();
+    if (walkCam) { walkCam.aspect = vp.clientWidth / vp.clientHeight; walkCam.updateProjectionMatrix(); }
     renderer.setSize(vp.clientWidth, vp.clientHeight, false);
   }
   function setLightMode(headlight) {
@@ -3558,13 +3700,17 @@ select.sel:focus{border-color:var(--accent)}
        is. Recomputed on every camera move (see applyController) so zooming
        in or out doesn't suddenly intensify or relax the fog. Divides by the
        ACTIVE camera's own real distance from the target -- camDist itself
-       for trueOrthoCam, but camDist * ORTHO_DIST_MULT for pseudoOrthoCam,
-       which actually sits much farther away (see ORTHO_DIST_MULT's own
-       comment) even though camDist's semantic zoom level is unchanged.
-       Using camDist alone here would scale fog for a camera distance the
-       pseudo-orthographic view never actually has, making it look far
-       denser than the density slider says. */
-    var fogRefDist = state.pseudoOrtho ? camDist * ORTHO_DIST_MULT : camDist;
+       for trueOrthoCam, but camDist * orthoDistMultFor(fov) for
+       pseudoOrthoCam, which actually sits much farther away (see
+       trueOrthoCam's own mode-comment) even though camDist's semantic zoom
+       level is unchanged. Using camDist alone here would scale fog for a
+       camera distance the pseudo/depth-scaling view never actually has,
+       making it look far denser than the density slider says. Walk mode has
+       no camDist/orbit distance at all to scale from -- it's calibrated
+       instead to a fixed small reference (WALK_FOG_REF_DIST), the "a few
+       atoms' width" scale walking is actually meant to be viewed at. */
+    var fogRefDist = activeCam === walkCam ? WALK_FOG_REF_DIST
+      : state.cameraMode === "ortho" ? camDist : camDist * orthoDistMultFor(activeOrthoFovDeg());
     scene.fog = state.fogOn ? new THREE.FogExp2(state.bgColor, state.fogDensity / Math.max(fogRefDist, 1)) : null;
   }
   function renderExportBlob(callback) {
@@ -4277,20 +4423,616 @@ select.sel:focus{border-color:var(--accent)}
     sphereGeo = new THREE.SphereGeometry(1, on ? 48 : 20, on ? 36 : 16);
     renderStructure();
   }
-  function setPseudoOrtho(on) {
-    activeCam = on ? pseudoOrthoCam : trueOrthoCam;
-    onResize();
+  function setCameraMode(mode) {
+    state.cameraMode = mode;
+    /* Leave activeCam alone while walking -- walkCam stays active regardless
+       of which orbit look is selected underneath it, and this new choice
+       takes effect the moment walk mode is left (see exitWalkMode). */
+    if (!state.walkMode) activeCam = mode === "ortho" ? trueOrthoCam : pseudoOrthoCam;
+    /* applyController() -- not just onResize() -- because pseudoOrthoCam's
+       own POSITION (not just its fov/near/far) depends on the active angle
+       (see orthoDistMultFor()): only applyController() actually repositions
+       it to match, everything else here (fog, labels, scale readout, clip
+       plane) is applyController()'s own existing refresh list, all equally
+       stale the instant the effective angle changes underneath them.
+       Labels in particular: sizeAttenuation:false sprites read the ACTIVE
+       camera's own real distance, which just changed. Harmless to keep
+       recomputing this in the background even while walkCam is the one
+       actually being rendered -- trueOrthoCam/pseudoOrthoCam just sit there
+       correctly positioned, unseen, ready for the moment walk mode ends. */
+    applyController();
+  }
+  function setDepthScalingAngle(deg) {
+    state.depthScalingAngle = deg;
+    if (state.cameraMode !== "depth") return; /* nothing currently reads this angle -- avoid the same refresh for a slider drag that has no visible effect yet */
+    applyController();
+  }
+  /* Walk mode (Display > Walk mode) -- see walkPos/walkQuat's own
+     comment for the camera side of this. A free-fly first-person view for
+     exploring the inside of a void/channel: mouse wheel moves forward/back
+     along the current look direction (see the wheel listener in wireIO),
+     left-drag turns that look direction (see onWindowPointerMove's own
+     "walkLook" branch) -- both entirely separate from the orbit rig's own
+     drag-to-rotate/right-drag-to-zoom, which stay untouched underneath.
+     Click-to-select is suspended while walking, same as this app's other
+     click-hijacking modes (growMode/bondEditMode/atomEditUiMode/
+     guestDragMode/molNeighborMode/voidUiMode) -- see handleLeftClick's own
+     early-exit and setWalkMode's exit-everything-else call below. */
+  function setWalkMode(on) {
+    var next = (typeof on === "boolean") ? on : !state.walkMode;
+    if (next === state.walkMode) return;
+    state.walkMode = next;
+    if (state.walkMode) {
+      exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitGuestDragMode(); exitMolNeighborMode(); setVoidUiMode(null);
+      invalidateWalkStaticGeom(); /* structure may have changed since the last time walk mode was on -- see walkCollisionGeometry's own comment */
+      recenterWalkCamera();
+      activeCam = walkCam;
+      walkHeadlamp.intensity = state.walkHeadlampOn ? state.walkHeadlampIntensity : 0; /* restore whatever the Headlamp checkbox says -- see the "else" branch below for why this can't just be left alone */
+    } else {
+      activeCam = state.cameraMode === "ortho" ? trueOrthoCam : pseudoOrthoCam;
+      applyController();
+      /* walkCam (and this light, its child) stays in the scene graph even
+         once walk mode is off, so a PointLight left at nonzero intensity
+         here would go right on illuminating the ORBIT view too, from
+         wherever the walker last stood -- lights affect whatever camera
+         renders the scene, not just the one they're parented to for
+         positioning. Force it off on exit; state.walkHeadlampOn itself is
+         untouched so the checkbox still reflects the user's own choice and
+         the light comes back exactly as they left it next time they walk. */
+      walkHeadlamp.intensity = 0;
+    }
+    var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = state.walkMode ? "crosshair" : "";
+    updateWalkModeBtnLabel();
+  }
+  function exitWalkMode() {
+    if (!state.walkMode) return;
+    setWalkMode(false);
+  }
+  /* Steps into the scene from wherever the orbit view currently is, looking
+     the same way it was looking -- not some arbitrary starting point --
+     both when walk mode is first entered AND on demand from the "Recenter
+     view" button, so a walker who's drifted or turned themselves around can
+     always get back to a known-good view without leaving the mode. `camera`
+     (the never-rendered reference perspective camera) is kept in exact sync
+     with the orbit rig by applyController() on every camera change, so its
+     own position/orientation (camOrient) IS simply what walkPos/walkQuat
+     should copy -- no inverse-trig needed, since walkQuat is a plain
+     orientation quaternion now, the same kind of thing camOrient already is. */
+  function recenterWalkCamera() {
+    walkPos.copy(camera.position);
+    walkQuat.copy(camOrient);
+    applyWalkCamera();
+  }
+  function updateWalkModeBtnLabel() {
+    var btn = document.getElementById("walkModeBtn"); if (!btn) return;
+    btn.textContent = state.walkMode ? "Walk mode is ON — wheel to move, drag to look" : "Walk mode is OFF — click to turn on";
+    btn.className = "btn prominent" + (state.walkMode ? " grow-active" : " ghost");
+  }
+  /* Display > Walk mode > Headlamp: a light the walker carries, independent
+     of Visual Effects > Lighting's own key/fill/rim/headlight setup (which
+     stays exactly as it was, fixed relative to the orbit view, whether or
+     not you're currently walking). On/off and intensity are both persisted
+     (see persistPreferences/loadPersistedPreferences) -- a look-and-feel
+     preference like the rest of the Walk mode panel, not a one-off session
+     choice. Actually turning the light on/off in the scene still only
+     happens in setWalkMode's own entry/exit branches (see its comment on
+     why walkCam staying in the scene graph means this can't just be left
+     alone) -- the persisted flag/intensity is what setWalkMode reads from. */
+  function setWalkHeadlamp(on) {
+    state.walkHeadlampOn = (typeof on === "boolean") ? on : !state.walkHeadlampOn;
+    walkHeadlamp.intensity = state.walkHeadlampOn ? state.walkHeadlampIntensity : 0;
+  }
+  function setWalkHeadlampIntensity(v) {
+    state.walkHeadlampIntensity = v;
+    if (state.walkHeadlampOn) walkHeadlamp.intensity = v;
+  }
+  function applyWalkCamera() {
+    var vp = document.getElementById("viewport"); if (!vp) return;
+    walkCam.aspect = vp.clientWidth / vp.clientHeight;
+    walkCam.quaternion.copy(walkQuat);
+    walkCam.position.copy(walkPos);
+    /* far has to reach past whatever's loaded from WHEREVER the walker has
+       wandered to, not just from the orbit rig's own camTarget -- distance
+       to camTarget plus the structure's own bounding radius (sceneBoundRadius)
+       covers that regardless of how far in/out the walker has moved. */
+    walkCam.far = walkPos.distanceTo(camTarget) + sceneBoundRadius + 50;
+    walkCam.updateProjectionMatrix();
     if (state.fogOn) updateFog();
-    /* labels use sizeAttenuation:false -- for a PERSPECTIVE camera (both
-       pseudoOrthoCam and the old, now-removed "depth scaling" camera) the
-       sprite shader itself multiplies scale by the actual view-space depth,
-       which trueOrthoCam's own (depth-independent) scale formula never
-       accounts for. Without recomputing this immediately on toggle, a scale
-       value computed for trueOrthoCam gets rendered through pseudoOrthoCam
-       at its own, much larger, real distance -- multiplying it out into
-       enormous sprites until the next unrelated camera move happened to
-       refresh it. */
     updateLabelScales();
+    updateClipPlane();
+  }
+  function walkForward() { return new THREE.Vector3(0, 0, -1).applyQuaternion(walkQuat); }
+  /* Screen-space right/up, straight from the actual camera orientation --
+     NOT a yaw-only horizontal/world-vertical pair. Panning has to move
+     exactly in the plane of the screen regardless of which way you're
+     looking (see walkPan's own comment for why a world-up vertical
+     component was wrong), and since walkQuat carries no separate yaw/pitch
+     any more (see its own comment), "screen right/up" can only be read off
+     the quaternion itself, not reconstructed from an angle. */
+  function walkRight() { return new THREE.Vector3(1, 0, 0).applyQuaternion(walkQuat); }
+  function walkUp() { return new THREE.Vector3(0, 1, 0).applyQuaternion(walkQuat); }
+  var _walkStaticGeomCache = null; /* see walkCollisionGeometry's own comment */
+  function invalidateWalkStaticGeom() { _walkStaticGeomCache = null; }
+  /* Collision geometry, cached: a right-drag pan fires a mousemove (and
+     therefore a fresh walkCollisionGeometry() call) many times a second,
+     and rebuilding EVERYTHING -- atoms, bonds, molecular surface,
+     coordination polyhedra, void/channel surfaces -- on every single one of
+     those was pure repeated waste, since NONE of it is actually
+     position-dependent: nothing about the structure changes just because
+     the walker moved. walkStaticCollisionGeometry() does that work once and
+     is cached here (_walkStaticGeomCache, cleared by
+     invalidateWalkStaticGeom() -- see setWalkMode, every "Collide with"
+     checkbox's own onChange, and the top of renderStructure()/
+     renderVoidMeshes()/renderMolSurfaceMeshes()/renderCoordinationPolyhedra()
+     -- i.e. whenever the actual displayed geometry changes, not just when
+     the walker does). Void/channel surfaces used to be excluded from this
+     cache and rebuilt fresh per call, for a walker-position-dependent
+     reason (see walkVoidSurfaceGeometry's own comment on the periodic-
+     tiling idea that turned out not to work reliably enough to keep) --
+     now that that's gone, there's no more reason for them to be any
+     different from every other collision category, and they're folded
+     into this same cache too. */
+  function walkCollisionGeometry() {
+    return _walkStaticGeomCache || (_walkStaticGeomCache = walkStaticCollisionGeometry());
+  }
+  /* The CURRENTLY DISPLAYED balls and sticks, not a fixed van der Waals
+     sphere regardless of display style -- collides with what's actually
+     drawn, respecting "Set scale"/per-atom display-radius overrides/bond
+     radius/hidden atoms/the hydrogen-display and ASU-only toggles/host-guest
+     visibility, the same filter chain and `atomDisplayRadius("ballstick",
+     ...)` sizing renderMoleculeInto() itself uses (see that function and
+     atomDisplayRadius's own comment) -- so a small "Set scale" ball only
+     blocks you as far out as it's actually drawn, not out to the far larger,
+     invisible true van der Waals radius. Sticks (bond cylinders) count as
+     solid too, as thin capsules along each bond -- there's no visible-only
+     "spacefill" style in this app to special-case; every style renders
+     through the one "ballstick" path (bond radius folded into the ball-size
+     floor when sticks would otherwise poke out past a very small ball).
+     Also includes any currently-visible Molecular Surface (see
+     walkSurfaceGeometry's own comment), coordination polyhedra (see
+     walkCoordPolyGeometry's own comment), and void/channel surfaces (see
+     walkVoidSurfaceGeometry's own comment). */
+  function walkStaticCollisionGeometry() {
+    var off = centroid(), spheres = [], capsules = [];
+    function addAtoms(list, bondRadius, scaleMult) {
+      if (!list) return;
+      for (var i = 0; i < list.length; i++) {
+        var a = list[i];
+        if (a.isCentroid) continue;
+        var r = atomDisplayRadius("ballstick", a.r, a.el, bondRadius, scaleMult, a) + WALK_COLLISION_MARGIN;
+        spheres.push({ x: a.x + off[0], y: a.y + off[1], z: a.z + off[2], r: r });
+      }
+    }
+    function addBonds(list, bondRadius) {
+      if (!list || list.length < 2) return;
+      var bonds = computeBondsWithOverrides(list);
+      var r = bondRadius + WALK_COLLISION_MARGIN;
+      for (var b = 0; b < bonds.length; b++) {
+        var A = list[bonds[b][0]], B = list[bonds[b][1]];
+        capsules.push({
+          ax: A.x + off[0], ay: A.y + off[1], az: A.z + off[2],
+          bx: B.x + off[0], by: B.y + off[1], bz: B.z + off[2], r: r
+        });
+      }
+    }
+    if (state.showHost && state.walkCollideHost) {
+      var hostVisible = hydrogenFilter(hideFilter(asuFilter(state.atoms)));
+      addAtoms(hostVisible, state.hostBondRadius, state.atomScale);
+      addBonds(hostVisible, state.hostBondRadius);
+    }
+    if (state.showGuest && state.walkCollideGuest) {
+      var guestVisible = hydrogenFilter(hideFilter(asuFilter(visibleGuestAtoms())));
+      addAtoms(guestVisible, state.guestBondRadius, state.guestScale);
+      addBonds(guestVisible, state.guestBondRadius);
+    }
+    var surfaces = [];
+    if (state.walkCollideMolSurface) surfaces = surfaces.concat(walkSurfaceGeometry());
+    if (state.walkCollideCoordPoly) surfaces = surfaces.concat(walkCoordPolyGeometry());
+    if (state.walkCollideVoid || state.walkCollideChannel) surfaces = surfaces.concat(walkVoidSurfaceGeometry());
+    return { spheres: spheres, capsules: capsules, surfaces: surfaces };
+  }
+  /* Builds one walkPositionBlocked() "surfaces" entry (a flat triangle array
+     plus its own world-space bounding box, for the cheap per-surface
+     quick-reject) from a flat positions/indices pair and a world-space
+     offset -- the one bit of work walkSurfaceGeometry()/
+     walkVoidSurfaceGeometry()/walkCoordPolyGeometry() all need, whether the
+     positions come from a plain iso-surface object or straight from a live
+     THREE.BufferGeometry's typed arrays. `idx` may be null for a NON-indexed
+     geometry (the coordination-polyhedra face mesh has no index buffer --
+     every consecutive triple of vertices already IS one triangle, built
+     that way in buildCoordinationPolyhedraInto) -- treated as an implicit
+     0,1,2,3,4,5,... index in that case. Returns null if there's nothing to
+     add. */
+  function walkTrianglesFromArrays(pos, idx, offX, offY, offZ) {
+    if (!pos || !pos.length) return null;
+    var n = idx ? idx.length : pos.length / 3;
+    if (!n) return null;
+    /* preallocated Float32Array + direct index writes, NOT tris.push(...) in
+       a loop -- a large periodic component's single period can be hundreds
+       of thousands of triangles (a 3-periodic channel measured at 340k in
+       testing), and repeatedly growing a plain array via push (rather than
+       writing into a fixed-size typed array up front) was a measurable chunk
+       of a real, fixed-at-wheel-frequency performance problem here -- see
+       walkVoidSurfaceGeometry's own comment for the rest of that fix. */
+    var numTris = n / 3;
+    var tris = new Float32Array(numTris * 9);
+    var minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    for (var t = 0, w = 0; t < n; t += 3, w += 9) {
+      var i0 = (idx ? idx[t] : t) * 3, i1 = (idx ? idx[t + 1] : t + 1) * 3, i2 = (idx ? idx[t + 2] : t + 2) * 3;
+      var ax = pos[i0] + offX, ay = pos[i0 + 1] + offY, az = pos[i0 + 2] + offZ;
+      var bx = pos[i1] + offX, by = pos[i1 + 1] + offY, bz = pos[i1 + 2] + offZ;
+      var cx = pos[i2] + offX, cy = pos[i2 + 1] + offY, cz = pos[i2 + 2] + offZ;
+      tris[w] = ax; tris[w + 1] = ay; tris[w + 2] = az;
+      tris[w + 3] = bx; tris[w + 4] = by; tris[w + 5] = bz;
+      tris[w + 6] = cx; tris[w + 7] = cy; tris[w + 8] = cz;
+      if (ax < minX) minX = ax; if (bx < minX) minX = bx; if (cx < minX) minX = cx;
+      if (ax > maxX) maxX = ax; if (bx > maxX) maxX = bx; if (cx > maxX) maxX = cx;
+      if (ay < minY) minY = ay; if (by < minY) minY = by; if (cy < minY) minY = cy;
+      if (ay > maxY) maxY = ay; if (by > maxY) maxY = by; if (cy > maxY) maxY = cy;
+      if (az < minZ) minZ = az; if (bz < minZ) minZ = bz; if (cz < minZ) minZ = cz;
+      if (az > maxZ) maxZ = az; if (bz > maxZ) maxZ = bz; if (cz > maxZ) maxZ = cz;
+    }
+    if (!tris.length) return null;
+    return { tris: tris, minX: minX, minY: minY, minZ: minZ, maxX: maxX, maxY: maxY, maxZ: maxZ, grid: walkBuildTriGrid(tris, minX, minY, minZ, maxX, maxY, maxZ) };
+  }
+  /* A uniform spatial grid over one surface's own triangles, bucketed by
+     triangle CENTROID -- lets walkPositionBlocked() test only the handful
+     of triangles actually near a query point instead of every triangle in
+     the surface. Needed because caching the geometry BUILD (see
+     walkCollisionGeometry's own comment) doesn't help the separate cost of
+     actually TESTING it: even with a cached, already-built 340k-triangle
+     channel surface, a plain linear scan over all of them on every single
+     blocked-check (one per movement substep) was still the dominant real
+     cost behind panning feeling slow, confirmed by profiling a live drag.
+     Cell size aims for roughly WALK_GRID_TARGET_PER_CELL triangles per
+     cell on average, floored so a very sparse or tiny mesh doesn't end up
+     with a degenerate near-zero cell size. Checking the query point's own
+     cell plus its full 3x3x3 neighbourhood (not just its own cell) is what
+     keeps this correct despite bucketing by centroid alone: a triangle
+     whose CENTROID falls in one cell can still have its nearest point to a
+     query point sitting in an adjacent cell (near a shared edge), so the
+     neighbourhood has to be searched too, not just an exact-cell lookup. */
+  var WALK_GRID_TARGET_PER_CELL = 8;
+  function walkBuildTriGrid(tris, minX, minY, minZ, maxX, maxY, maxZ) {
+    var numTris = tris.length / 9;
+    var dx = Math.max(maxX - minX, 1e-6), dy = Math.max(maxY - minY, 1e-6), dz = Math.max(maxZ - minZ, 1e-6);
+    var targetCells = Math.max(1, numTris / WALK_GRID_TARGET_PER_CELL);
+    var cellSize = Math.max(0.1, Math.cbrt((dx * dy * dz) / targetCells));
+    var cells = {};
+    for (var w = 0; w < tris.length; w += 9) {
+      var cx = (tris[w] + tris[w + 3] + tris[w + 6]) / 3, cy = (tris[w + 1] + tris[w + 4] + tris[w + 7]) / 3, cz = (tris[w + 2] + tris[w + 5] + tris[w + 8]) / 3;
+      var key = Math.floor((cx - minX) / cellSize) + "," + Math.floor((cy - minY) / cellSize) + "," + Math.floor((cz - minZ) / cellSize);
+      (cells[key] || (cells[key] = [])).push(w);
+    }
+    return { cellSize: cellSize, cells: cells, originX: minX, originY: minY, originZ: minZ };
+  }
+  /* Currently-visible Molecular Surface meshes (Molecular Surface > Calculate),
+     one entry per surface, straight from the same triangle data
+     renderMolSurfaceMeshes() itself draws (state._molSurfaceIsoById), offset
+     by centroid() the same way -- so walking blocks against the surface
+     exactly where it's actually drawn, not a separately-recomputed
+     approximation of it. A world-space bounding box per surface (from
+     walkTrianglesFromArrays) lets walkPositionBlocked() skip the whole
+     triangle list with one cheap check when the walker is nowhere near it,
+     which is most of the time; treated as a thin shell (WALK_SURFACE_MARGIN),
+     not a solid interior fill -- see that constant's own comment for why a
+     thin-shell test is enough to stop the walker from ever crossing to the
+     other side of it. */
+  function walkSurfaceGeometry() {
+    var out = [];
+    if (!state.molSurfaces || !state.molSurfaces.length) return out;
+    var off = centroid();
+    state.molSurfaces.forEach(function (s) {
+      if (!s.visible) return;
+      var iso = state._molSurfaceIsoById[s.id];
+      if (!iso || !iso.positions || !iso.positions.length) return;
+      var entry = walkTrianglesFromArrays(iso.positions, iso.indices, off[0], off[1], off[2]);
+      if (entry) out.push(entry);
+    });
+    return out;
+  }
+  /* Currently-visible void/channel surfaces (Void / Channel Analysis).
+     Unlike the molecular surface, this geometry isn't one flat array per
+     component -- a component can be split into fragments, each placed at
+     one or more periodic-copy offsets, each with its own cell-boundary clip
+     planes (see renderVoidMeshes/placeInstance) -- reproducing that
+     placement logic independently here would be a large, easy-to-get-subtly-
+     wrong duplication of it. Instead, this reads the ALREADY-PLACED live
+     meshes straight out of voidGroup: each mesh's own `.position` is exactly
+     the world-space offset placeInstance() gave it (translation only, no
+     rotation/scale, so a plain offset add is exactly right, same as the
+     molecular surface case), and `.visible` is exactly the same fragment/
+     component-visibility flag the renderer itself checks. Each component
+     places TWO meshes sharing one geometry (BackSide + FrontSide, for
+     double-sided rendering) -- skip the duplicate via a same-geometry check
+     rather than scanning every triangle twice for nothing.
+     NOT accounted for: per-mesh clipping planes (a fragment truncated at a
+     unit cell face for display still collides across its full, untruncated
+     extent here) -- deliberately left this way rather than adding a per-
+     triangle clip-plane test, since the practical effect is only ever "a
+     little more solid than what's drawn right at a cell edge", never a
+     missing wall, and every genuine wall is still exactly where it's shown.
+     Voids and channels are gated separately (state.walkCollideVoid/Channel,
+     mirroring Display > Clipping Plane's own Voids/Channels split) -- each
+     mesh's userData.compId (set in placeInstance) looks up its own
+     component's `type` in state.voidComponents to tell which one it is.
+     A GENUINELY periodic channel (comp.periodicityAxes non-empty) is only
+     ever rendered as ONE period's worth of wall by default -- extra copies
+     only exist if the user manually adds them via the Fragments panel's own
+     Move/Copy -- so walking far enough along an un-copied periodic channel
+     can walk straight out through the open, un-walled end of that one
+     rendered period.
+     THIS WAS "FIXED" ONCE by generating extra, invisible, collision-only
+     lattice-shifted copies of a periodic component's own wall wherever the
+     walker currently is (a whole walkLatticeShiftsNear/distance-cap/
+     per-candidate-prefilter apparatus, since removed) -- but across three
+     rounds of user-reported failures on real projects (an oblique cell
+     defeating the shift maths outright; a distance cap still reaching much
+     further than intended; and finally, on a real saved project with SEVERAL
+     manually-placed copies of one channel, the walker still getting stuck in
+     plainly empty space with nothing rendered anywhere nearby) it never
+     became reliable, and each fix that closed one failure mode opened or
+     left another. Reverted to the simple, robust rule EVERY OTHER collision
+     category in this app already follows without needing any of this:
+     collide with exactly what's currently rendered, nothing invisible added
+     on top. The trade-off is real and explicit -- an un-copied periodic
+     channel's own open end is still walkable-through -- but it's also
+     exactly what "Collide with > Channels" already implied before any of
+     this was attempted, and it's what the user's own workaround (manually
+     copying a channel across the cells they actually want to explore, via
+     Move/Copy) already produces correct, solid walls for. */
+  function walkVoidSurfaceGeometry() {
+    var out = [];
+    if (typeof voidGroup === "undefined" || !voidGroup) return out;
+    var typeById = {};
+    (state.voidComponents || []).forEach(function (c) { typeById[c.id] = c.type; });
+    /* Dedup key MUST include the mesh's own position, not just its geometry
+       reference -- a Fragments-panel Copy places a new instance by giving a
+       new mesh the SAME shared BufferGeometry as the original and moving it
+       via mesh.position (see placeInstance), it doesn't clone the geometry.
+       Keying on geometry reference alone (an earlier version of this
+       function did exactly that) collapsed every copy sharing the base
+       shape down to just the FIRST one encountered -- silently dropping
+       collision for every other placed copy, while still correctly
+       deduping the same instance's own FrontSide/BackSide mesh pair (which
+       DO share both geometry and position). Confirmed via a real 10-copy
+       project (RAPMII_project_2.json): all 10 copies share one
+       BufferGeometry, only 2 of 20 meshes were surviving the old dedup. */
+    var seenKey = [];
+    for (var i = 0; i < voidGroup.children.length; i++) {
+      var m = voidGroup.children[i];
+      if (!m.visible || !m.geometry || !m.geometry.attributes || !m.geometry.attributes.position) continue;
+      var compType = typeById[m.userData && m.userData.compId];
+      if (compType === "channel" && !state.walkCollideChannel) continue;
+      if (compType === "void" && !state.walkCollideVoid) continue;
+      var key = m.geometry.uuid + "|" + m.position.x + "," + m.position.y + "," + m.position.z;
+      if (seenKey.indexOf(key) !== -1) continue;
+      seenKey.push(key);
+      var idx = m.geometry.index ? m.geometry.index.array : null;
+      var entry = walkTrianglesFromArrays(m.geometry.attributes.position.array, idx, m.position.x, m.position.y, m.position.z);
+      if (entry) out.push(entry);
+    }
+    return out;
+  }
+  /* Currently-visible coordination polyhedra (Style > Coordination Polyhedra),
+     host and guest together under one state.walkCollideCoordPoly toggle --
+     unlike Clipping Plane, which reuses its Host/Guest toggles for these
+     (since they live in coordPolyGroup/coordPolyGuestGroup, the same split
+     as atomsGroup/guestAtomsGroup), collision treats "coordination
+     polyhedra" as its own single category, since the user asked for it as
+     one. Reads the live faces straight out of coordPolyGroup/
+     coordPolyGuestGroup, same technique as walkVoidSurfaceGeometry -- each
+     face mesh already has its centroid() offset baked directly into its own
+     position attribute at build time (see buildCoordinationPolyhedraInto),
+     so its `.position` is left at the THREE.js default (0,0,0) and needs no
+     extra offset here. Explicitly SKIPS the thin decorative edge-spine
+     cylinders sharing coordPolyEdgeGeo (identified by that exact shared
+     geometry reference) -- those aren't a real wall, just a rendered outline
+     along each face's edges, and reading them as if they were a flat
+     triangle list (ignoring their own rotation/scale) would be wrong. */
+  function walkCoordPolyGeometry() {
+    var out = [];
+    function scan(group) {
+      if (typeof group === "undefined" || !group) return;
+      for (var i = 0; i < group.children.length; i++) {
+        var m = group.children[i];
+        if (!m.visible || m.geometry === coordPolyEdgeGeo) continue;
+        if (!m.geometry || !m.geometry.attributes || !m.geometry.attributes.position) continue;
+        var idx = m.geometry.index ? m.geometry.index.array : null;
+        var entry = walkTrianglesFromArrays(m.geometry.attributes.position.array, idx, m.position.x, m.position.y, m.position.z);
+        if (entry) out.push(entry);
+      }
+    }
+    scan(coordPolyGroup);
+    scan(coordPolyGuestGroup);
+    return out;
+  }
+  /* Squared distance from point p to triangle abc -- the standard
+     Voronoi-region algorithm (Ericson, "Real-Time Collision Detection"),
+     handling the vertex/edge/face regions explicitly rather than clamping
+     barycentric coordinates naively (which gets the edge regions wrong). */
+  function pointTriDistSq(px, py, pz, ax, ay, az, bx, by, bz, cx, cy, cz) {
+    var abx = bx - ax, aby = by - ay, abz = bz - az;
+    var acx = cx - ax, acy = cy - ay, acz = cz - az;
+    var apx = px - ax, apy = py - ay, apz = pz - az;
+    var d1 = abx * apx + aby * apy + abz * apz, d2 = acx * apx + acy * apy + acz * apz;
+    if (d1 <= 0 && d2 <= 0) return apx * apx + apy * apy + apz * apz;
+    var bpx = px - bx, bpy = py - by, bpz = pz - bz;
+    var d3 = abx * bpx + aby * bpy + abz * bpz, d4 = acx * bpx + acy * bpy + acz * bpz;
+    if (d3 >= 0 && d4 <= d3) return bpx * bpx + bpy * bpy + bpz * bpz;
+    var vc = d1 * d4 - d3 * d2;
+    if (vc <= 0 && d1 >= 0 && d3 <= 0) {
+      var v = d1 / (d1 - d3), qx = ax + v * abx, qy = ay + v * aby, qz = az + v * abz;
+      return (px - qx) * (px - qx) + (py - qy) * (py - qy) + (pz - qz) * (pz - qz);
+    }
+    var cpx = px - cx, cpy = py - cy, cpz = pz - cz;
+    var d5 = abx * cpx + aby * cpy + abz * cpz, d6 = acx * cpx + acy * cpy + acz * cpz;
+    if (d6 >= 0 && d5 <= d6) return cpx * cpx + cpy * cpy + cpz * cpz;
+    var vb = d5 * d2 - d1 * d6;
+    if (vb <= 0 && d2 >= 0 && d6 <= 0) {
+      var w = d2 / (d2 - d6), qx2 = ax + w * acx, qy2 = ay + w * acy, qz2 = az + w * acz;
+      return (px - qx2) * (px - qx2) + (py - qy2) * (py - qy2) + (pz - qz2) * (pz - qz2);
+    }
+    var va = d3 * d6 - d5 * d4;
+    if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) {
+      var w2 = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+      var qx3 = bx + w2 * (cx - bx), qy3 = by + w2 * (cy - by), qz3 = bz + w2 * (cz - bz);
+      return (px - qx3) * (px - qx3) + (py - qy3) * (py - qy3) + (pz - qz3) * (pz - qz3);
+    }
+    var denom = 1 / (va + vb + vc), v2 = vb * denom, w3 = vc * denom;
+    var qx4 = ax + abx * v2 + acx * w3, qy4 = ay + aby * v2 + acy * w3, qz4 = az + abz * v2 + acz * w3;
+    return (px - qx4) * (px - qx4) + (py - qy4) * (py - qy4) + (pz - qz4) * (pz - qz4);
+  }
+  function walkPositionBlocked(pos, geom) {
+    var i, s, dx, dy, dz;
+    for (i = 0; i < geom.spheres.length; i++) {
+      s = geom.spheres[i];
+      dx = pos.x - s.x; dy = pos.y - s.y; dz = pos.z - s.z;
+      if (dx * dx + dy * dy + dz * dz < s.r * s.r) return true;
+    }
+    for (i = 0; i < geom.capsules.length; i++) {
+      var c = geom.capsules[i];
+      var abx = c.bx - c.ax, aby = c.by - c.ay, abz = c.bz - c.az;
+      var abLenSq = abx * abx + aby * aby + abz * abz;
+      var t = abLenSq > 0 ? Math.max(0, Math.min(1, ((pos.x - c.ax) * abx + (pos.y - c.ay) * aby + (pos.z - c.az) * abz) / abLenSq)) : 0;
+      dx = pos.x - (c.ax + abx * t); dy = pos.y - (c.ay + aby * t); dz = pos.z - (c.az + abz * t);
+      if (dx * dx + dy * dy + dz * dz < c.r * c.r) return true;
+    }
+    for (i = 0; i < geom.surfaces.length; i++) {
+      var surf = geom.surfaces[i];
+      if (pos.x < surf.minX - WALK_SURFACE_MARGIN || pos.x > surf.maxX + WALK_SURFACE_MARGIN ||
+        pos.y < surf.minY - WALK_SURFACE_MARGIN || pos.y > surf.maxY + WALK_SURFACE_MARGIN ||
+        pos.z < surf.minZ - WALK_SURFACE_MARGIN || pos.z > surf.maxZ + WALK_SURFACE_MARGIN) continue;
+      var tris = surf.tris, marginSq = WALK_SURFACE_MARGIN * WALK_SURFACE_MARGIN;
+      var grid = surf.grid;
+      var ci = Math.floor((pos.x - grid.originX) / grid.cellSize);
+      var cj = Math.floor((pos.y - grid.originY) / grid.cellSize);
+      var ck = Math.floor((pos.z - grid.originZ) / grid.cellSize);
+      for (var di = -1; di <= 1; di++) {
+        for (var dj = -1; dj <= 1; dj++) {
+          for (var dk = -1; dk <= 1; dk++) {
+            var bucket = grid.cells[(ci + di) + "," + (cj + dj) + "," + (ck + dk)];
+            if (!bucket) continue;
+            for (var bi = 0; bi < bucket.length; bi++) {
+              var w = bucket[bi];
+              var dsq = pointTriDistSq(pos.x, pos.y, pos.z,
+                tris[w], tris[w + 1], tris[w + 2], tris[w + 3], tris[w + 4], tris[w + 5], tris[w + 6], tris[w + 7], tris[w + 8]);
+              if (dsq < marginSq) return true;
+            }
+          }
+        }
+      }
+    }
+    return false;
+  }
+  var WALK_COLLISION_SUBSTEP = 0.05; /* Å -- deliberately smaller than the thinnest bond stick or smallest ball this app can render (a default bond radius is already ~0.1 A). Checking only the FAR end of a whole wheel/pan step (which can easily be ~1 A) let the walker tunnel clean through a thin displayed ball or stick without any substep ever landing inside it -- confirmed happening in testing once collision switched from always-large van der Waals spheres (never thin enough to tunnel through at this step size) to the actual, often much smaller, displayed geometry. Marching in increments no bigger than this closes that gap. */
+  /* Tries to move walkPos by amount*dir; silently refuses to go past the
+     point collision detection first blocks (leaving walkPos there, not at
+     the far end of the whole requested step) if collision is on. Marches in
+     WALK_COLLISION_SUBSTEP-sized increments rather than checking once at the
+     far end, specifically so a big single-frame step can't skip clean over
+     a thin sliver of geometry without ever landing inside it (see
+     WALK_COLLISION_SUBSTEP's own comment). Called once per axis (see
+     walkPan) rather than for a single combined displacement, so brushing
+     past an atom at an angle slides along it instead of stopping dead the
+     instant either component alone would clip -- a cheap approximation of
+     wall-sliding, not real physics. */
+  function walkTryStep(dir, amount, geom) {
+    if (amount === 0) return;
+    if (!geom) { walkPos.addScaledVector(dir, amount); return; }
+    var n = Math.max(1, Math.ceil(Math.abs(amount) / WALK_COLLISION_SUBSTEP));
+    var step = amount / n;
+    for (var i = 0; i < n; i++) {
+      var candidate = walkPos.clone().addScaledVector(dir, step);
+      if (walkPositionBlocked(candidate, geom)) return;
+      walkPos.copy(candidate);
+    }
+  }
+  function walkMove(deltaY) {
+    var geom = state.walkCollision ? walkCollisionGeometry() : null;
+    walkTryStep(walkForward(), -deltaY * WALK_WHEEL_SCALE * state.walkSpeed, geom);
+    applyWalkCamera();
+  }
+  /* Right-drag pan/strafe: purely in the plane of the screen, via the
+     walker's own current right/up vectors (walkRight/walkUp, both read
+     straight off walkQuat) -- NOT world-up. An earlier version used world-Y
+     for the vertical component, which is only actually "screen up" when
+     looking roughly horizontally; look straight down at a planar structure
+     (forward close to world -Y) and world-Y panning becomes mostly a move
+     along the view axis instead of across it -- i.e. it looks like
+     zooming, not panning, exactly the symptom reported. Reading the up
+     vector off the camera's own orientation instead keeps panning in the
+     screen plane no matter which way you're looking. */
+  function walkPan(dx, dy) {
+    var geom = state.walkCollision ? walkCollisionGeometry() : null;
+    /* Content-follows-cursor, matching the same convention as walkLook
+       (see its own comment) -- dragging right pans the view as if you'd
+       grabbed the scene and dragged it right, which means YOU step left.
+       state.walkPanScale is a direct Å-per-pixel value (its own slider, Walk
+       mode > Pan sensitivity) -- NOT multiplied by state.walkSpeed, which
+       only ever affects forward/back wheel movement now (see walkMove). */
+    walkTryStep(walkRight(), -dx * state.walkPanScale, geom);
+    walkTryStep(walkUp(), dy * state.walkPanScale, geom);
+    applyWalkCamera();
+  }
+  function walkLook(dx, dy) {
+    /* Content-follows-cursor convention (like dragging a photo/panorama, or
+       this app's own orbit rotate-drag), not the "push mouse to turn your
+       head" FPS convention -- deliberately flipped from an earlier version
+       that used FPS-style signs and felt backwards to a user used to this
+       app's orbit control. If this ever feels backwards again, flip the sign
+       on the single axis (yaw and/or pitch) that's wrong, not both blindly.
+       state.walkInvertDrag (Walk mode's own "Reverse drag directions"
+       checkbox) flips BOTH axes together, on top of this base convention --
+       direction preference here is genuinely personal (this app already
+       flipped its own default once for exactly this reason), so rather than
+       guess again, it's just a checkbox. Deliberately LOOK-only, not
+       walkPan -- panning wasn't the part reported as feeling backwards, and
+       there's no reason flipping one should force-flip the other.
+       Composed as two LOCAL-axis rotations straight onto walkQuat (post-
+       multiply, same technique the orbit rig's own "rotate" drag already
+       uses) rather than accumulated into separate yaw/pitch angles -- so
+       there is no pole to clamp and no end-stop: this is a free-fly
+       explorer with no "ground" to keep upright against, so looking
+       straight up/down (or past it) is exactly as valid as looking level.
+       The trade-off, same one the orbit rig accepts, is that enough mixed
+       dragging can accumulate a bit of roll -- fix that any time with the
+       Recenter view button rather than fighting it with a clamp.
+       Uses state.walkLookSensitivity (Walk mode > Swivel/roll sensitivity),
+       its own slider shared with walkRoll below -- NOT the orbit rig's
+       rotateSensitivity, which stays exactly as it was and no longer has any
+       effect in walk mode at all (an earlier version of this session reused
+       rotateSensitivity here; the user asked for a fully independent
+       walk-mode-only control instead). */
+    if (state.walkInvertDrag) { dx = -dx; dy = -dy; }
+    var qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), dx * ROTATE_SPEED * state.walkLookSensitivity);
+    var qPitch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), dy * ROTATE_SPEED * state.walkLookSensitivity);
+    walkQuat.multiply(qYaw);
+    walkQuat.multiply(qPitch);
+    walkQuat.normalize();
+    applyWalkCamera();
+  }
+  /* Shift-left-drag: roll, exactly the same "grab a steering wheel centred
+     on the viewport" technique as the orbit rig's own shift-drag roll
+     (dragMode === "roll" in onWindowPointerMove) -- the swept angle between
+     the previous and current cursor position, both measured from the
+     viewport's own centre, becomes a rotation about the camera's own local
+     forward axis (post-multiply, same as walkLook's local-axis technique).
+     Reuses that exact, already-familiar convention rather than inventing a
+     new one for walk mode. Scaled by state.walkLookSensitivity, the SAME
+     slider walkLook uses -- "swivel/roll" is one combined action/setting to
+     the user, not two separate sliders, since both are just "how far do I
+     turn per pixel of drag." At the default sensitivity (1.0) this is
+     unscaled, i.e. the swept angle applies directly, matching this
+     function's behaviour before walkLookSensitivity existed. */
+  function walkRoll(prevX, prevY, curX, curY) {
+    var rect = renderer.domElement.getBoundingClientRect();
+    var cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+    var a0 = Math.atan2(prevY - cy, prevX - cx), a1 = Math.atan2(curY - cy, curX - cx);
+    var qRoll = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), (a1 - a0) * state.walkLookSensitivity);
+    walkQuat.multiply(qRoll);
+    walkQuat.normalize();
+    applyWalkCamera();
   }
   function startAutoRotate() {
     if (state.videoExporting) { setStatus("A video export is in progress -- can't autorotate at the same time.", true); return; }
@@ -4483,7 +5225,10 @@ select.sel:focus{border-color:var(--accent)}
     function setChecked(id, v) { var e = document.getElementById(id); if (e) e.checked = v; }
     var s = state, d = DISPLAY_DEFAULTS;
     var sw = document.getElementById("dispBg"); if (sw) sw.value = hexToCss(s.bgColor);
-    setChecked("dispPseudoOrtho", s.pseudoOrtho);
+    var cmRadios = document.getElementsByName("cameraMode");
+    for (var cmI = 0; cmI < cmRadios.length; cmI++) cmRadios[cmI].checked = (cmRadios[cmI].value === s.cameraMode);
+    setVal("depthScalingRange", s.depthScalingAngle);
+    var depthRangeEl = document.getElementById("depthScalingRange"); if (depthRangeEl) depthRangeEl.disabled = (s.cameraMode !== "depth");
     setChecked("dispHighDetail", s.highDetail);
     setChecked("dispFogTg", s.fogOn); setVal("dispFogRange", s.fogDensity);
     setChecked("lightHeadlightTg", s.lightHeadlight);
@@ -4497,13 +5242,22 @@ select.sel:focus{border-color:var(--accent)}
     setChecked("materialApplyCoordPolyTg", s.materialApplyCoordPoly);
     setChecked("materialApplyMolSurfaceTg", s.materialApplyMolSurface);
     setChecked("materialApplyVoidTg", s.materialApplyVoid);
+    setChecked("walkCollisionTg", s.walkCollision);
+    setChecked("walkCollideHostTg", s.walkCollideHost); setChecked("walkCollideGuestTg", s.walkCollideGuest);
+    setChecked("walkCollideVoidTg", s.walkCollideVoid); setChecked("walkCollideChannelTg", s.walkCollideChannel);
+    setChecked("walkCollideMolSurfTg", s.walkCollideMolSurface); setChecked("walkCollideCoordPolyTg", s.walkCollideCoordPoly);
+    setChecked("walkInvertDragTg", s.walkInvertDrag);
   }
   function resetDisplaySettings() {
     var d = DISPLAY_DEFAULTS;
     state.bgColor = d.bgColor; scene.background = new THREE.Color(d.bgColor);
-    state.pseudoOrtho = d.pseudoOrtho; setPseudoOrtho(d.pseudoOrtho);
+    state.depthScalingAngle = d.depthScalingAngle; setCameraMode(d.cameraMode);
     setHighDetail(d.highDetail);
     state.fogOn = d.fogOn; state.fogDensity = d.fogDensity; updateFog();
+    state.walkCollision = false;
+    state.walkCollideHost = true; state.walkCollideGuest = true; state.walkCollideVoid = true;
+    state.walkCollideChannel = true; state.walkCollideMolSurface = true; state.walkCollideCoordPoly = true;
+    state.walkInvertDrag = false;
     renderStructure(); renderSurface();
     syncDisplayControlsUI();
     persistPreferences();
@@ -4679,6 +5433,7 @@ select.sel:focus{border-color:var(--accent)}
     sceneBoundRadius = Math.sqrt(maxD2) + 5;
   }
   function renderStructure() {
+    invalidateWalkStaticGeom(); /* atoms/bonds just being (re)drawn -- see walkCollisionGeometry's own comment on why this cache exists and needs invalidating whenever the actual geometry changes */
     clearGroup(atomsGroup); clearGroup(bondsGroup); clearGroup(guestAtomsGroup); clearGroup(guestBondsGroup); clearGroup(ringGroup);
     if (!sphereGeo) sphereGeo = new THREE.SphereGeometry(1, state.highDetail ? 48 : 20, state.highDetail ? 36 : 16);
     updateSceneBoundRadius(); applyController();
@@ -5257,17 +6012,19 @@ select.sel:focus{border-color:var(--accent)}
        orthographic path does not, so the frustum height has to be folded in
        by hand. Doing both here means a label keeps the same size on screen at
        any zoom, under either projection, and comes out the same in an
-       exported image. pseudoOrthoCam is a REAL PerspectiveCamera (see its
-       own comment) -- sizeAttenuation-off sprites need ITS OWN (tiny,
-       ORTHO_EMULATION_FOV_DEG) fov in the perspective-shaped formula, not
-       the reference camera's 45°, and NOT the camDist-scaled orthographic
-       formula (only trueOrthoCam, a real literal ortho projection, needs
-       that one). Using the wrong branch/fov here is what made labels come
-       out wildly wrong-sized in pseudo-ortho mode. */
+       exported image. pseudoOrthoCam and walkCam are both REAL
+       PerspectiveCameras -- sizeAttenuation-off sprites need the ACTIVE
+       camera's OWN fov in the perspective-shaped formula (whichever of the
+       three that currently is), not the reference camera's 45°, and NOT the
+       camDist-scaled orthographic formula (only trueOrthoCam, a real
+       literal ortho projection, needs that one -- and is the only camera
+       camDist actually describes; walkCam has no camDist-style distance at
+       all). Using the wrong branch/fov here is what made labels come out
+       wildly wrong-sized in pseudo-ortho mode originally. */
     if (!labelGroup) return;
     var f = state.labelSize / 100;
-    var factor = state.pseudoOrtho
-      ? (2 * Math.tan(ORTHO_EMULATION_FOV_DEG * Math.PI / 360))
+    var factor = activeCam !== trueOrthoCam
+      ? (2 * Math.tan(activeCam.fov * Math.PI / 360))
       : (2 * camDist * Math.tan(camera.fov * Math.PI / 360));
     for (var i = 0; i < labelGroup.children.length; i++) {
       var sp = labelGroup.children[i];
@@ -6636,6 +7393,7 @@ select.sel:focus{border-color:var(--accent)}
     buildMolSurfaceTable();
   }
   function renderMolSurfaceMeshes() {
+    invalidateWalkStaticGeom(); /* see renderStructure's own copy of this comment */
     clearGroup(molSurfaceGroup);
     if (!state.molSurfaces.length) return;
     var off = centroid();
@@ -7753,6 +8511,7 @@ select.sel:focus{border-color:var(--accent)}
     return { visible: count > 0, centroid: count ? [sum[0] / count, sum[1] / count, sum[2] / count] : null };
   }
   function renderVoidMeshes() {
+    invalidateWalkStaticGeom(); /* see walkCollisionGeometry's own comment on why this cache exists */
     clearVoidMeshes();
     state.voidFragments = {};
     var cellBundle = voidCellBundle();
@@ -8087,7 +8846,7 @@ select.sel:focus{border-color:var(--accent)}
   }
   function setVoidUiMode(mode) {
     state.voidUiMode = (state.voidUiMode === mode) ? null : mode;
-    if (state.voidUiMode) { exitGuestDragMode(); exitMolNeighborMode(); } /* the click-hijacking modes are mutually exclusive */
+    if (state.voidUiMode) { exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode(); } /* the click-hijacking modes are mutually exclusive */
     state.voidSelectedFragments = {};
     state.voidSelectedChannels = {};
     state.voidRecolourPending = null;
@@ -9741,7 +10500,7 @@ select.sel:focus{border-color:var(--accent)}
    * cancel it (see exitAtomEditMode() and its call sites). */
   function setAtomEditUiMode(mode) {
     state.atomEditUiMode = (state.atomEditUiMode === mode) ? null : mode;
-    if (state.atomEditUiMode) { exitGuestDragMode(); exitMolNeighborMode(); } /* the click-hijacking modes are mutually exclusive */
+    if (state.atomEditUiMode) { exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode(); } /* the click-hijacking modes are mutually exclusive */
     syncAtomEditButtons();
   }
   function syncAtomEditButtons() {
@@ -9762,7 +10521,7 @@ select.sel:focus{border-color:var(--accent)}
      their own call sites). */
   function setGuestDragMode(on) {
     state.guestDragMode = (typeof on === "boolean") ? on : !state.guestDragMode;
-    if (state.guestDragMode) { exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitMolNeighborMode(); }
+    if (state.guestDragMode) { exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitMolNeighborMode(); exitWalkMode(); }
     var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = state.guestDragMode ? "move" : "";
     syncGuestDragButton();
   }
@@ -9780,7 +10539,7 @@ select.sel:focus{border-color:var(--accent)}
     var next = (typeof on === "boolean") ? on : !state.molNeighborMode;
     if (next === state.molNeighborMode) return;
     state.molNeighborMode = next;
-    if (state.molNeighborMode) { exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitGuestDragMode(); setVoidUiMode(null); }
+    if (state.molNeighborMode) { exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitGuestDragMode(); setVoidUiMode(null); exitWalkMode(); }
     var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = state.molNeighborMode ? "crosshair" : "";
     updateMolNeighborBtnLabel();
     refreshMolecularNeighborhood(); /* computes+renders when turning on; renders nothing (see its own guard) when turning off, and clearGroup already ran inside renderMolecularNeighborhood either way */
@@ -9818,7 +10577,7 @@ select.sel:focus{border-color:var(--accent)}
      partway through, e.g. loading each file in a folder batch) would be a
      real, unwanted behaviour change of its own. */
   function exitAllInteractiveModes() {
-    exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitGuestDragMode(); exitMolNeighborMode();
+    exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode();
     setVoidUiMode(null);
   }
   function createAtomAtClick(clientX, clientY) {
@@ -10792,7 +11551,7 @@ select.sel:focus{border-color:var(--accent)}
     state.bondEditMode = on;
     state.bondEditPair = [];
     renderBondEditHighlight();
-    if (on) { exitGrowMode(); exitGuestDragMode(); exitMolNeighborMode(); } /* the interactive click-hijacking modes are mutually exclusive */
+    if (on) { exitGrowMode(); exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode(); } /* the interactive click-hijacking modes are mutually exclusive */
     var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = on ? "crosshair" : "";
     updateBondEditModeBtnLabel();
   }
@@ -11766,6 +12525,7 @@ select.sel:focus{border-color:var(--accent)}
     }
   }
   function renderCoordinationPolyhedra(off) {
+    invalidateWalkStaticGeom(); /* see renderStructure's own copy of this comment */
     clearGroup(coordPolyGroup); clearGroup(coordPolyGuestGroup);
     var triangles = computeCoordinationPolyhedra();
     if (!triangles.length) return;
@@ -13582,7 +14342,7 @@ select.sel:focus{border-color:var(--accent)}
       var payload = {
         radii: state.radii, colors: state.defaultColors,
         bondSelectionEnabled: state.bondSelectionEnabled,
-        bgColor: state.bgColor, pseudoOrtho: state.pseudoOrtho,
+        bgColor: state.bgColor, cameraMode: state.cameraMode, depthScalingAngle: state.depthScalingAngle,
         highDetail: state.highDetail, fogOn: state.fogOn, fogDensity: state.fogDensity,
         lightHeadlight: state.lightHeadlight, lightAngle: state.lightAngle,
         keyEnabled: state.keyEnabled, keyIntensity: state.keyIntensity,
@@ -13597,7 +14357,13 @@ select.sel:focus{border-color:var(--accent)}
         clipPlaneApplyHost: state.clipPlaneApplyHost, clipPlaneApplyGuest: state.clipPlaneApplyGuest,
         clipPlaneApplyVoid: state.clipPlaneApplyVoid, clipPlaneApplyChannel: state.clipPlaneApplyChannel, clipPlaneApplyMolSurface: state.clipPlaneApplyMolSurface,
         clipPlaneApplyUnitCell: state.clipPlaneApplyUnitCell, clipPlaneHklConvention: state.clipPlaneHklConvention,
-        radiiBondiMigrated: state._radiiBondiMigrated
+        radiiBondiMigrated: state._radiiBondiMigrated, walkCollision: state.walkCollision,
+        walkCollideHost: state.walkCollideHost, walkCollideGuest: state.walkCollideGuest,
+        walkCollideVoid: state.walkCollideVoid, walkCollideChannel: state.walkCollideChannel,
+        walkCollideMolSurface: state.walkCollideMolSurface, walkCollideCoordPoly: state.walkCollideCoordPoly,
+        walkInvertDrag: state.walkInvertDrag, walkSpeed: state.walkSpeed,
+        walkPanScale: state.walkPanScale, walkLookSensitivity: state.walkLookSensitivity,
+        walkHeadlampOn: state.walkHeadlampOn, walkHeadlampIntensity: state.walkHeadlampIntensity
         /* clipPlaneEnabled deliberately NOT persisted -- starting a fresh
            session with part of the structure invisible for no visible
            reason (until the user finds the toggle) is worse than just
@@ -13616,8 +14382,22 @@ select.sel:focus{border-color:var(--accent)}
       if (typeof data.colors === "object" && data.colors) state.defaultColors = data.colors;
       if (typeof data.bondSelectionEnabled === "boolean") state.bondSelectionEnabled = data.bondSelectionEnabled;
       if (typeof data.bgColor === "number") state.bgColor = data.bgColor;
-      if (typeof data.pseudoOrtho === "boolean") state.pseudoOrtho = data.pseudoOrtho;
-      else if (typeof data.depthScaling === "boolean") state.pseudoOrtho = false; /* migrating an older saved payload -- "Perspective (depth scaling)" no longer exists as a mode, so an old on/off value here doesn't map to anything meaningful; land on the new default rather than guess */
+      /* cameraMode replaces the old boolean pseudoOrtho (2026-09): a saved
+         payload from before this change has pseudoOrtho but no cameraMode at
+         all, and the boolean maps onto the new scheme perfectly losslessly
+         (it was always exactly "trueOrthoCam vs pseudoOrthoCam-at-1.5deg",
+         which are still exactly "ortho" and "pseudo") -- so a returning
+         user's view looks identical after this update, they just also now
+         see "Depth scaling" as a new third option they haven't touched yet.
+         The even-older boolean data.depthScaling (from when this app had a
+         genuine, since-removed, real-perspective third camera) is NOT
+         migrated -- that was a fundamentally different mechanism with no
+         angle recorded, so there's nothing to carry into depthScalingAngle;
+         it's simply ignored and falls through to the plain "ortho" default,
+         same as any other unrecognized/first-run case. */
+      if (typeof data.cameraMode === "string") state.cameraMode = data.cameraMode;
+      else if (typeof data.pseudoOrtho === "boolean") state.cameraMode = data.pseudoOrtho ? "pseudo" : "ortho";
+      if (data.hasOwnProperty("depthScalingAngle")) state.depthScalingAngle = clamp(data.depthScalingAngle, ORTHO_MIN_FOV_DEG, ORTHO_MAX_FOV_DEG, state.depthScalingAngle);
       if (typeof data.highDetail === "boolean") state.highDetail = data.highDetail;
       if (typeof data.fogOn === "boolean") state.fogOn = data.fogOn;
       if (data.hasOwnProperty("fogDensity")) state.fogDensity = clamp(data.fogDensity, 0, 1.0, state.fogDensity);
@@ -13654,6 +14434,19 @@ select.sel:focus{border-color:var(--accent)}
       if (typeof data.clipPlaneApplyUnitCell === "boolean") state.clipPlaneApplyUnitCell = data.clipPlaneApplyUnitCell;
       if (data.clipPlaneHklConvention === "reciprocal" || data.clipPlaneHklConvention === "direct") state.clipPlaneHklConvention = data.clipPlaneHklConvention;
       if (typeof data.radiiBondiMigrated === "boolean") state._radiiBondiMigrated = data.radiiBondiMigrated;
+      if (typeof data.walkCollision === "boolean") state.walkCollision = data.walkCollision;
+      if (typeof data.walkCollideHost === "boolean") state.walkCollideHost = data.walkCollideHost;
+      if (typeof data.walkCollideGuest === "boolean") state.walkCollideGuest = data.walkCollideGuest;
+      if (typeof data.walkCollideVoid === "boolean") state.walkCollideVoid = data.walkCollideVoid;
+      if (typeof data.walkCollideChannel === "boolean") state.walkCollideChannel = data.walkCollideChannel;
+      if (typeof data.walkCollideMolSurface === "boolean") state.walkCollideMolSurface = data.walkCollideMolSurface;
+      if (typeof data.walkCollideCoordPoly === "boolean") state.walkCollideCoordPoly = data.walkCollideCoordPoly;
+      if (typeof data.walkInvertDrag === "boolean") state.walkInvertDrag = data.walkInvertDrag;
+      if (data.hasOwnProperty("walkSpeed")) state.walkSpeed = clamp(data.walkSpeed, 0.2, 3, state.walkSpeed);
+      if (data.hasOwnProperty("walkPanScale")) state.walkPanScale = clamp(data.walkPanScale, 0.01, 0.1, state.walkPanScale);
+      if (data.hasOwnProperty("walkLookSensitivity")) state.walkLookSensitivity = clamp(data.walkLookSensitivity, 0.1, 1.5, state.walkLookSensitivity);
+      if (typeof data.walkHeadlampOn === "boolean") state.walkHeadlampOn = data.walkHeadlampOn;
+      if (data.hasOwnProperty("walkHeadlampIntensity")) state.walkHeadlampIntensity = clamp(data.walkHeadlampIntensity, 0.5, 10, state.walkHeadlampIntensity);
       /* every light effectively off would leave only the fixed 0.6-intensity
          hemisphere light -- not literally invisible, but dim enough on some
          monitors to look like nothing loaded. Force at least one real light
@@ -14316,7 +15109,7 @@ select.sel:focus{border-color:var(--accent)}
       molSurfaceIsoById: molSurfaceIsoForSave, nextMolSurfaceId: nextMolSurfaceId,
       voidComponentMeshes: voidComponentMeshesForSave,
       camera: { camDist: camDist, camOrient: [camOrient.x, camOrient.y, camOrient.z, camOrient.w], camTarget: [camTarget.x, camTarget.y, camTarget.z] },
-      bgColor: state.bgColor, pseudoOrtho: state.pseudoOrtho, highDetail: state.highDetail,
+      bgColor: state.bgColor, cameraMode: state.cameraMode, depthScalingAngle: state.depthScalingAngle, highDetail: state.highDetail,
       fogOn: state.fogOn, fogDensity: state.fogDensity,
       atomRoughness: state.atomRoughness, atomMetalness: state.atomMetalness, atomReflectivity: state.atomReflectivity,
       materialApplyCoordPoly: state.materialApplyCoordPoly, materialApplyMolSurface: state.materialApplyMolSurface, materialApplyVoid: state.materialApplyVoid,
@@ -14490,8 +15283,15 @@ select.sel:focus{border-color:var(--accent)}
     var showLabelsTgEl = document.getElementById("showLabelsTg"); if (showLabelsTgEl) showLabelsTgEl.checked = state.showLabels;
 
     if (typeof data.bgColor === "number") { state.bgColor = data.bgColor; scene.background = new THREE.Color(state.bgColor); }
-    if (typeof data.pseudoOrtho === "boolean") { state.pseudoOrtho = data.pseudoOrtho; setPseudoOrtho(state.pseudoOrtho); }
-    var pseudoOrthoTgRestore = document.getElementById("dispPseudoOrtho"); if (pseudoOrthoTgRestore) pseudoOrthoTgRestore.checked = state.pseudoOrtho;
+    /* cameraMode replaces the old boolean pseudoOrtho -- see
+       loadPersistedPreferences()'s own comment for why the migration is a
+       lossless 1:1 mapping, not a guess. A project file predating
+       depthScalingAngle just keeps whatever's already in state (the current
+       session's value, or DISPLAY_DEFAULTS' on a fresh load). */
+    if (typeof data.cameraMode === "string") setCameraMode(data.cameraMode);
+    else if (typeof data.pseudoOrtho === "boolean") setCameraMode(data.pseudoOrtho ? "pseudo" : "ortho");
+    if (typeof data.depthScalingAngle === "number") setDepthScalingAngle(Math.max(ORTHO_MIN_FOV_DEG, Math.min(ORTHO_MAX_FOV_DEG, data.depthScalingAngle)));
+    syncDisplayControlsUI();
     if (typeof data.highDetail === "boolean") setHighDetail(data.highDetail);
     if (typeof data.fogOn === "boolean") state.fogOn = data.fogOn;
     if (typeof data.fogDensity === "number") state.fogDensity = data.fogDensity;
@@ -15320,7 +16120,7 @@ select.sel:focus{border-color:var(--accent)}
     });
     bondsTab.appendChild(cbRow);
 
-    var cifDispC = section(left, "Display", false);
+    var cifDispC = section(left, "Display", false, function (isOpen) { if (!isOpen) exitWalkMode(); });
     cifDispC.parentElement.id = "cifDisplaySection";
 
     /* -- general settings -- */
@@ -15601,6 +16401,58 @@ select.sel:focus{border-color:var(--accent)}
     autorotateBody.appendChild(autoRotatePlayRow);
     syncAutoRotateButtons();
 
+    /* Walk mode -- see setWalkMode's own comment for the mechanics. Closing
+       this submenu (or the whole Display section, see cifDispC's own
+       onToggle above) exits it, same as Autorotate stopping on its own
+       subsection close right above. */
+    var walkBody = subsection(cifDispC, "Walk mode", false, function (isOpen) { if (!isOpen) exitWalkMode(); });
+    var walkSpeedSl = labelSlider(walkBody, "Walk speed (scroll)", 0.2, 3, 0.1, state.walkSpeed, function (v) { state.walkSpeed = v; persistPreferences(); });
+    walkSpeedSl.id = "walkSpeedRange";
+    var walkPanScaleSl = labelSlider(walkBody, "Pan sensitivity", 0.01, 0.1, 0.005, state.walkPanScale, function (v) { state.walkPanScale = v; persistPreferences(); });
+    walkPanScaleSl.id = "walkPanScaleRange";
+    var walkLookSensitivitySl = labelSlider(walkBody, "Swivel/roll sensitivity", 0.1, 1.5, 0.1, state.walkLookSensitivity, function (v) { state.walkLookSensitivity = v; persistPreferences(); });
+    walkLookSensitivitySl.id = "walkLookSensitivityRange";
+    var walkInvertDragCb = toggle(walkBody, "Reverse drag directions (look only)", state.walkInvertDrag,
+      function (v) { state.walkInvertDrag = v; persistPreferences(); });
+    walkInvertDragCb.id = "walkInvertDragTg";
+    var walkHeadlampCb = toggle(walkBody, "Headlamp (a light that follows you)", state.walkHeadlampOn,
+      function (v) { setWalkHeadlamp(v); persistPreferences(); });
+    walkHeadlampCb.id = "walkHeadlampTg";
+    var walkHeadlampIntensitySl = labelSlider(walkBody, "Headlamp intensity", 0.5, 10, 0.5, state.walkHeadlampIntensity, function (v) { setWalkHeadlampIntensity(v); persistPreferences(); });
+    walkHeadlampIntensitySl.id = "walkHeadlampIntensityRange";
+    var walkCollisionCb = toggle(walkBody, "Collision detection (stop at solid surfaces)", state.walkCollision,
+      function (v) { state.walkCollision = v; persistPreferences(); });
+    walkCollisionCb.id = "walkCollisionTg";
+    var walkCollideLbl = el("div", "hint"); walkCollideLbl.textContent = "Collide with:";
+    walkBody.appendChild(walkCollideLbl);
+    var walkCollideRow1 = el("div", "toggle-row2");
+    var walkCollideHostTg = toggle(walkCollideRow1, "Host", state.walkCollideHost, function (v) { state.walkCollideHost = v; invalidateWalkStaticGeom(); persistPreferences(); });
+    walkCollideHostTg.id = "walkCollideHostTg";
+    var walkCollideGuestTg = toggle(walkCollideRow1, "Guest", state.walkCollideGuest, function (v) { state.walkCollideGuest = v; invalidateWalkStaticGeom(); persistPreferences(); });
+    walkCollideGuestTg.id = "walkCollideGuestTg";
+    walkBody.appendChild(walkCollideRow1);
+    var walkCollideRow2 = el("div", "toggle-row2");
+    var walkCollideVoidTg = toggle(walkCollideRow2, "Voids", state.walkCollideVoid, function (v) { state.walkCollideVoid = v; invalidateWalkStaticGeom(); persistPreferences(); });
+    walkCollideVoidTg.id = "walkCollideVoidTg";
+    var walkCollideChannelTg = toggle(walkCollideRow2, "Channels", state.walkCollideChannel, function (v) { state.walkCollideChannel = v; invalidateWalkStaticGeom(); persistPreferences(); });
+    walkCollideChannelTg.id = "walkCollideChannelTg";
+    walkBody.appendChild(walkCollideRow2);
+    var walkCollideRow3 = el("div", "toggle-row2");
+    var walkCollideMolSurfTg = toggle(walkCollideRow3, "Molecular surface", state.walkCollideMolSurface, function (v) { state.walkCollideMolSurface = v; invalidateWalkStaticGeom(); persistPreferences(); });
+    walkCollideMolSurfTg.id = "walkCollideMolSurfTg";
+    var walkCollideCoordPolyTg = toggle(walkCollideRow3, "Coordination polyhedra", state.walkCollideCoordPoly, function (v) { state.walkCollideCoordPoly = v; invalidateWalkStaticGeom(); persistPreferences(); });
+    walkCollideCoordPolyTg.id = "walkCollideCoordPolyTg";
+    walkBody.appendChild(walkCollideRow3);
+    var walkRecenterBtn = button(walkBody, "Recenter view", "ghost", function () {
+      if (!state.walkMode) { setStatus("Turn walk mode on first.", true); return; }
+      recenterWalkCamera();
+      setStatus("Recentered on the view you entered walk mode from.", false);
+    });
+    walkRecenterBtn.id = "walkRecenterBtn";
+    var walkModeBtn = button(walkBody, "", "prominent", function () { setWalkMode(); });
+    walkModeBtn.id = "walkModeBtn";
+    updateWalkModeBtnLabel();
+
     var symC = section(left, "Grow", false, function (isOpen) {
       if (!isOpen) { exitGrowMode(); exitMolNeighborMode(); }
     });
@@ -15704,7 +16556,7 @@ select.sel:focus{border-color:var(--accent)}
 
     var growModeBtn = button(mouseTab, "", "prominent", function () {
       state.growMode = !state.growMode;
-      if (state.growMode) { exitBondEditMode(); exitGuestDragMode(); exitMolNeighborMode(); }
+      if (state.growMode) { exitBondEditMode(); exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode(); }
       var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = state.growMode ? "crosshair" : "";
       updateGrowModeBtnLabel();
     });
@@ -15996,9 +16848,21 @@ select.sel:focus{border-color:var(--accent)}
 
     var hdTg = toggle(sceneTab, "High detail spheres and tubes", state.highDetail, function (b) { setHighDetail(b); persistPreferences(); });
     hdTg.id = "dispHighDetail";
-    var pseudoOrthoTg = toggle(sceneTab, "Pseudo-orthographic (no z-clipping)", state.pseudoOrtho, function (b) { state.pseudoOrtho = b; setPseudoOrtho(b); persistPreferences(); });
-    pseudoOrthoTg.id = "dispPseudoOrtho";
-    pseudoOrthoTg.parentElement.title = "Off (default): a true orthographic camera -- exact parallel projection, so unit cell edges viewed down an axis overlay exactly, but zooming in close enough can clip through a solid atom (a property of orthographic projection itself, not a bug). On: a very-narrow-angle perspective camera parked far away instead -- eliminates that clipping entirely, at the cost of a very slight, usually imperceptible perspective non-overlap of near/far cell edges viewed down an axis.";
+    var camModeRow = radioRow(sceneTab, "cameraMode", [
+      ["ortho", "Orthographic"],
+      ["pseudo", "Pseudo-ortho."],
+      ["depth", "Depth scaling"]
+    ], state.cameraMode, function (mode) {
+      setCameraMode(mode);
+      var depthRangeEl = document.getElementById("depthScalingRange"); if (depthRangeEl) depthRangeEl.disabled = (mode !== "depth");
+      persistPreferences();
+    });
+    /* see the Guide's own Visual Effects entry for what these three modes
+       actually mean -- no tooltip here, it got long enough to be more
+       clutter than help. */
+    var depthScalingSl = labelSlider(sceneTab, "Depth scaling angle", ORTHO_MIN_FOV_DEG, ORTHO_MAX_FOV_DEG, 0.5, state.depthScalingAngle, function (v) { setDepthScalingAngle(v); persistPreferences(); });
+    depthScalingSl.id = "depthScalingRange";
+    depthScalingSl.disabled = (state.cameraMode !== "depth");
     var fogCtl = checkboxSlider(sceneTab, "Depth cueing", state.fogOn, function (b) { state.fogOn = b; updateFog(); persistPreferences(); },
       0, 1.0, 0.02, state.fogDensity, function (v) { state.fogDensity = v; updateFog(); persistPreferences(); });
     fogCtl.checkbox.id = "dispFogTg"; fogCtl.range.id = "dispFogRange";
@@ -16293,7 +17157,7 @@ select.sel:focus{border-color:var(--accent)}
       if (!e.ctrlKey && !e.altKey && !e.metaKey && e.code === "KeyC") { e.preventDefault(); toggleUnitCellDisplay(); return; }
       if (!e.ctrlKey && !e.altKey && !e.metaKey && e.code === "KeyH") { e.preventDefault(); toggleHydrogenDisplay(); return; }
       if (!e.ctrlKey && !e.altKey && !e.metaKey && e.code === "KeyL") { e.preventDefault(); toggleLabelDisplay(); return; }
-      if (!e.ctrlKey && !e.altKey && !e.metaKey && (e.key === "-" || e.key === "=" || e.key === "+")) {
+      if (!state.walkMode && !e.ctrlKey && !e.altKey && !e.metaKey && (e.key === "-" || e.key === "=" || e.key === "+")) {
         e.preventDefault();
         var curScale = Math.round(SCALE_REF / Math.max(camDist, 1e-6));
         var newScale = Math.max(1, Math.min(35000, curScale + (e.key === "-" ? -10 : 10)));
@@ -16309,7 +17173,8 @@ select.sel:focus{border-color:var(--accent)}
          next-tab shortcut and never reached this handler -- Shift has no
          such conflict. */
       var deg = (e.shiftKey ? 90 : 5) * Math.PI / 180, axis = null, angle = 0;
-      if (e.code === "ArrowLeft") { axis = new THREE.Vector3(0, 1, 0); angle = deg; }
+      if (state.walkMode) { /* orbit rotate/roll stays untouched while walking -- see setWalkMode's own comment */ }
+      else if (e.code === "ArrowLeft") { axis = new THREE.Vector3(0, 1, 0); angle = deg; }
       else if (e.code === "ArrowRight") { axis = new THREE.Vector3(0, 1, 0); angle = -deg; }
       else if (e.code === "ArrowUp") { axis = new THREE.Vector3(1, 0, 0); angle = deg; }
       else if (e.code === "ArrowDown") { axis = new THREE.Vector3(1, 0, 0); angle = -deg; }
@@ -16320,6 +17185,13 @@ select.sel:focus{border-color:var(--accent)}
         camOrient.multiply(new THREE.Quaternion().setFromAxisAngle(axis, angle));
         camOrient.normalize();
         applyController();
+        /* mirrors what the mouse rotate/roll drag handler does once a drag
+           actually moved the view (see its own "dragMode === rotate/roll"
+           check) -- a keyboard nudge is exactly the same kind of view
+           change and was missing both of these entirely, so "Current view
+           along" (Display > Direction) silently went stale the moment
+           someone rotated with the arrow/Page keys instead of the mouse. */
+        updateViewDirectionReadout(); repositionLabels();
       }
     });
     var input = document.getElementById("cifInput");
@@ -16423,7 +17295,7 @@ select.sel:focus{border-color:var(--accent)}
       "<li>Lasso selection works on screen position only, not true depth: an atom behind another one, as long as its projected position falls inside the outline, is selected too, even though it's obscured from view by whatever's in front of it. Rotating to a clearer angle before lassoing avoids surprises in a dense structure. This is separate from an atom that's actually hidden (individually hidden, a hydrogen with display switched off, or excluded by \"Show ASU only\") -- those are never selected by lasso, or by any other selection method, while they're not displayed.</li>" +
       "<li><b>Right drag, vertical</b> &mdash; zoom (up = in, down = out). The mouse wheel is disabled.</li>" +
       "<li><b>Arrow keys</b> &mdash; rotate in fixed 5&deg; steps: left/right about the vertical axis, up/down about the horizontal axis. <b>Page Up / Page Down</b> roll in 5&deg; steps. Holding <b>Shift</b> with any of the six turns that same 5&deg; nudge into an exact 90&deg; turn instead -- handy for snapping to a face-on view along whichever axis the key already rotates about (Ctrl was tried for this first, but Ctrl+Page Up/Page Down are already claimed by the browser's own previous/next-tab shortcut, so Shift is used instead throughout). <b>-</b> and <b>=</b>/<b>+</b> zoom out and in, one fixed step at a time, the same as dragging the Set scale number down or up (Display panel). <b>Delete</b> (or Backspace) deletes the selected atoms, or cuts the selected bond(s) if no atoms are selected. <b>Ctrl-C</b> generates a centroid from the selected atoms. <b>Escape</b> clears the whole selection; plain <b>spacebar</b> selects everything if nothing is selected, or clears it if anything is. <b>Shift+spacebar</b> inverts the atom selection; <b>Ctrl+spacebar</b> inverts the bond selection. <b>Ctrl-Z</b> hides the selected atoms (Structure &gt; Edit atoms' \"Hide selected\"); <b>Ctrl-U</b> unhides everything. For a CIF-based structure: <b>a</b> toggles between showing only the asymmetric unit and showing everything currently grown; <b>c</b> toggles the unit cell; <b>h</b> toggles hydrogen display; <b>l</b> toggles atom labels. These only respond while focus isn't in a text box, dropdown, or button.</li>" +
-      "<li><b>Pseudo-orthographic (no z-clipping)</b> (Visual Effects panel, Scene tab) &mdash; off by default, giving a true orthographic projection: exact parallel projection, so e.g. unit cell edges viewed straight down an axis overlay exactly, at the cost of a known artifact where zooming in close enough can clip through the middle of a solid atom (an inherent property of orthographic projection, not a bug -- a true orthographic camera has no single eye point for the near/far clipping planes to be tuned around). Switching it on trades that off the other way: a genuine but very-narrow-angle perspective camera, parked correspondingly far away, which eliminates the clipping entirely at the cost of a very slight (usually imperceptible) loss of that exact edge-on-edge overlap. There is no separate perspective-projection mode any more -- it offered no scientific advantage over these two for a crystallographic viewer.</li>" +
+      "<li><b>Orthographic / Pseudo-orthographic / Depth scaling</b> (Visual Effects panel, Scene tab) &mdash; three mutually exclusive camera modes. <b>Orthographic</b> (default) is a true orthographic projection: exact parallel projection, so e.g. unit cell edges viewed straight down an axis overlay exactly, at the cost of a known artifact where zooming in close enough can clip through the middle of a solid atom (an inherent property of orthographic projection, not a bug -- a true orthographic camera has no single eye point for the near/far clipping planes to be tuned around). <b>Pseudo-orthographic</b> and <b>Depth scaling</b> both trade that off the other way, using the exact same mechanism -- a genuine perspective camera at a narrow angle, parked correspondingly far away, which eliminates the clipping entirely at the cost of some perspective convergence (near/far cell edges no longer overlay exactly edge-on-edge) -- the only difference between them is the angle: Pseudo-orthographic fixes it at a very small, usually-imperceptible value, while Depth scaling exposes it as its own slider (from that same small value up to 25&deg;), for a deliberately stronger, adjustable sense of depth -- useful for judging a large structure's own 3D shape at a glance, where a true orthographic view can read as flat. The slider stays disabled, at whatever it was last set to, unless Depth scaling is the selected mode.</li>" +
       "</ul>" +
       "<h3>Visual Effects and Export</h3>" +
       "<p><b>Visual Effects</b> gathers everything about how the scene looks into one panel, split into three tabs: <b>Scene</b> (background, projection, detail level, fog, rotation sensitivity), <b>Material</b> (how atoms respond to light), and <b>Lighting</b> (the three light sources). <b>Export</b> covers producing an image and isn't a look-and-feel setting in the same sense as the other three, so it has no \"retain\" box of its own -- export resolution and transparent background are export-time choices, always starting fresh (current size, opaque) each time this file is reopened. Each of the three Visual Effects tabs has its own \"restore defaults\" button, scoped to just that tab, and its own \"retain these settings\" box. With that box checked (the default), the tab's settings are remembered and restored the next time this file is opened, the same way element radii and colours already are. Unchecked, that tab quietly goes back to using the built-in defaults every time the file is opened instead, and whatever was saved for it before is forgotten immediately -- there's no partial memory of it lying around to reappear if the box is checked again later. Several sliders here (fog, rotation sensitivity, material, light angle and intensity) show no number -- the slider position is the control, without a readout to fuss over.</p>" +
@@ -16490,6 +17362,10 @@ select.sel:focus{border-color:var(--accent)}
       "<p>\"Reassign element to\", just below \"Move selection to\", changes the element of the selected atom(s) to any element in the periodic table, whether or not that element was already present in the structure -- a new one is picked up automatically, with its own colour and radius, the moment it's assigned. Reassigning a centroid turns it into a real atom of that element from then on: it stops being a fixed white marker and starts looking and behaving like any other atom in whichever layer it belongs to.</p>" +
       "<h3>Viewing along a vector or a plane</h3>" +
       "<p>Select exactly two atoms and \"View along vector\" (Display &gt; Direction) becomes available, orienting the camera to look straight along the line through them. Select exactly three and \"View perpendicular to plane\" becomes available instead, orienting the camera face-on to the plane they define. Both only ever rotate the view -- they never move the zoom level or what the camera is centred on -- and each is disabled again the moment the selection count isn't exactly right for it.</p>" +
+      "<h3>Walk mode</h3>" +
+      "<p>Display &gt; Walk mode is a separate, free-fly first-person view for exploring the inside of a void or channel -- a completely different way of looking at the structure from the usual orbit view (Orthographic/Pseudo-orthographic/Depth scaling, Visual Effects &gt; Scene), rather than a variation on it. Turning it on drops the camera into the scene at exactly wherever the orbit view was last looking, facing the same direction; turning it off (the same button, closing the Walk mode submenu, or collapsing the whole Display section) returns instantly to that orbit view exactly as it was left -- nothing about the ordinary view is disturbed by walking around in here.</p>" +
+      "<p>Controls while walking: <b>mouse wheel</b> moves forward and backward along whichever way the camera is currently facing (scrolling up/away means forward, matching how right-drag zoom already treats \"up\" as closer everywhere else in the app); <b>left-drag</b> turns the look direction -- rotating purely on the spot around your own current position (nothing here orbits around the structure or any point within it, the way the ordinary view does), with no limit at all on how far up or down you can look, since there's no \"ground\" to keep upright against; <b>right-drag</b> pans/strafes purely in the plane of the screen -- sideways and up/down as the screen shows them, never forward/backward -- without turning, for sliding past something without having to look away from it first; <b>shift-left-drag</b> rolls -- tilts the horizon, rotating around the direction you're currently facing -- using the exact same \"grab a wheel centred on the viewport\" gesture as the ordinary orbit view's own shift-drag roll. Both plain drags use a \"grab and drag the scene\" convention -- drag right and the view moves as if you'd pushed the structure itself to the right -- matching the ordinary orbit view's own rotate-drag rather than a first-person-shooter's \"push the mouse to turn your head\" convention; <b>Reverse drag directions</b> flips that convention for looking around (not panning) for whoever finds it backwards the other way. Because looking around has no clamp, enough mixed dragging can accumulate a bit of roll (the horizon can end up tilted) -- <b>Recenter view</b> snaps straight back to the exact view you had when you turned walk mode on, undoing any drift or disorientation in one click. Three independent sliders control how fast each of the three actions above responds -- speeding up one never affects another: <b>Walk speed</b> scales one wheel-step's forward/backward distance; <b>Pan sensitivity</b> scales how far one pixel of right-drag slides you sideways/up/down; <b>Swivel/roll sensitivity</b> scales both how far one pixel of left-drag turns the view and how far a shift-left-drag rolls it (the same slider covers both, since they're really the same action -- turning). <b>Headlamp</b> is a light that travels with you, independent of Visual Effects &gt; Lighting's own setup -- handy for seeing what's actually nearby inside an otherwise dark or dim structure, and switches off the instant you leave Walk mode so it never lingers into the ordinary view; its own intensity slider sits right underneath. Every setting in this Walk mode panel -- the three sliders above, Headlamp on/off and intensity, Reverse drag directions, and Collision detection with its own checklist below -- is remembered the next time the file is opened, the same as any other Display/Lighting/Material preference.</p>" +
+      "<p><b>Collision detection</b> (off by default, a remembered preference like the other Display toggles) stops you right at whatever's currently drawn, instead of letting the camera pass straight through -- exactly which categories of \"currently drawn\" count is its own \"Collide with\" checklist, mirroring Display &gt; Clipping Plane's own Host/Guest/Voids/Channels/Molecular surface checklist: <b>Host</b>/<b>Guest</b> atoms (each atom's own displayed ball -- its \"Set scale\"/display-radius size, not a fixed van der Waals sphere regardless of how small the balls are drawn) and bonds (each one's own stick); <b>Voids</b>/<b>Channels</b>, any void/channel surface currently shown, exactly as shown -- a fragment truncated at a unit cell face for display can still block a little beyond that edge, since the cut itself isn't reproduced for collision (never a missing wall, just occasionally a slightly bigger one right at a cell boundary), and a genuinely periodic channel that's only rendered as ONE cell's worth of wall (its own repeats aren't automatically added just for collision) can be walked straight through past that one period's own open end -- use the Fragments panel's own Move/Copy to add real, solid copies whichever way you want to explore further, the same as you would to see them; <b>Molecular surface</b>, any currently shown; and <b>Coordination polyhedra</b>, any currently shown (host and guest together). All six are on by default, so turning Collision detection on with nothing else touched blocks against everything currently on screen -- untick whichever category shouldn't count as a wall for what you're exploring. Turn Collision detection on to feel your way along a structure's walls, leave it off to fly through freely regardless of what's in the way. Ordinary click-to-select, and every other click-hijacking mode (Grow, Edit bonds, Molecular neighbourhood, dragging a guest, Move/Copy/Recolour), is suspended while walking, the same way each of those already suspends the others.</p>" +
       "<h3>Metadata</h3>" +
       "<p>The <b>Metadata</b> tab, at the top of Structure, is a read-only summary of a loaded CIF's own crystallographic data: file name, chemical formula, space group symbol (typeset with italic letters and proper subscripts), unit cell parameters and volume, density, temperature (\"unknown\" if the CIF doesn't record one), and the number of atoms in the asymmetric unit -- followed by how many of those are anisotropic and how many of those are NPD (non-positive-definite -- a refinement warning, not a display error), each row shown only when its count is above zero. A cell angle exactly fixed at 90 or 120 degrees by the structure's own symmetry (not just numerically close) is shown as a plain \"90\"/\"120\", with no decimal places, rather than the two decimal places used for a genuinely free angle. Nothing here can be edited; it just reads back what the CIF itself contains.</p>" +
       "<h3>Void / channel analysis</h3>" +
@@ -16579,7 +17455,7 @@ select.sel:focus{border-color:var(--accent)}
     initThree(document.getElementById("viewport")); buildUI(); buildElementsPage(); buildGuide(); wireIO(); buildGuestGroupsUI(); refreshBondCleanupElements();
     window.__dbg = { state: state, voidCellBundle: voidCellBundle, voidLatticeVectors: voidLatticeVectors, K: K, VoidNet: VoidNet, buildCellModeAtoms: buildCellModeAtoms, mergeDuplicateComponents: mergeDuplicateComponents, runVoidCalculate: runVoidCalculate };
     syncNoAtomsOverlay(); /* nothing loaded yet -- show "No atoms to display" until a structure loads (renderStructure() keeps this in sync from here on) */
-    setPseudoOrtho(state.pseudoOrtho); updateFog();
+    setCameraMode(state.cameraMode); updateFog();
     if (restored) setStatus("Restored your saved element, display, lighting, and material settings. Load a host structure to begin.", false);
     window.addEventListener("beforeunload", persistPreferences); /* redundant safety net -- the real saves already happen on every change */
     var abortBtn = document.getElementById("calcAbortBtn");
