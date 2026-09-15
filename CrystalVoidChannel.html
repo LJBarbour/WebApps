@@ -179,6 +179,23 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border:none;border-ra
   background:var(--accent);cursor:pointer}
 input.swatch{width:28px;height:22px;padding:1px 2px;border:1px solid var(--border);border-radius:3px;
   background:none;cursor:pointer}
+.fav-popover{position:fixed;background:var(--paper);border:1px solid var(--line);border-radius:8px;
+  padding:8px;box-shadow:0 8px 28px rgba(0,0,0,.28);z-index:700;display:flex;flex-direction:column;gap:6px;
+  width:max-content}
+.fav-popover .fav-hint{font-size:10px;color:var(--ink-mid);line-height:1.3}
+.fav-swatches{display:grid;grid-template-columns:repeat(6, 20px);grid-auto-rows:20px;gap:8px 10px}
+.fav-swatch{position:relative;width:20px;height:20px;border:1px solid var(--border);border-radius:4px;
+  cursor:pointer;padding:0}
+.fav-swatch:hover{border-color:var(--accent)}
+.fav-swatch .fav-remove{position:absolute;top:-6px;right:-6px;width:13px;height:13px;border-radius:50%;
+  background:var(--paper);border:1px solid var(--border);color:var(--ink-mid);font-size:9px;line-height:11px;
+  text-align:center;cursor:pointer;padding:0}
+.fav-swatch .fav-remove:hover{background:var(--danger);border-color:var(--danger);color:#fff}
+.fav-add-row{display:flex}
+.fav-add{width:20px;height:20px;border:1px dashed var(--border);border-radius:4px;background:var(--bg);
+  color:var(--ink-mid);cursor:pointer;font-size:13px;line-height:1;padding:0}
+.fav-add:hover{border-color:var(--accent);color:var(--accent)}
+.fav-add:disabled{opacity:.4;cursor:default}
 select.sel{font-family:var(--sans);font-size:11.5px;border:1px solid var(--border);border-radius:3px;
   padding:4px 5px;background:var(--bg);color:var(--ink);outline:none;min-width:120px}
 select.sel.sel-narrow{min-width:50px}
@@ -277,7 +294,7 @@ select.sel:focus{border-color:var(--accent)}
 <div id="guideModal"><div class="guidebox"><button class="close" id="guideClose">&times;</button><div id="guideBody"></div></div></div>
 <input type="file" id="cifInput" accept=".cif,.txt,.res,.ins" style="display:none">
 <input type="file" id="elementCsvInput" accept=".csv,.txt" style="display:none">
-<input type="file" id="modelJsonInput" accept=".json" style="display:none">
+<input type="file" id="modelJsonInput" accept=".json,.zip" style="display:none">
 <input type="file" id="macroInput" accept=".mac,.MAC,.txt" style="display:none">
 <script>
 /**
@@ -2648,7 +2665,11 @@ select.sel:focus{border-color:var(--accent)}
     walkCollideMolSurface: true, walkCollideCoordPoly: true, walkHeadlampOn: false, walkHeadlampIntensity: 3.5, walkInvertDrag: false,
     lastSourceHandle: null, exportTransparent: false,
     isCif: false, cifCell: null, cifSymops: null, cifAsymUnit: null, cifFracToCart: null, cifTags: null,
-    cifBlocks: null, cifBlockIndex: 0, cifMultiSourceName: "",
+    /* Multi-entry navigator, shared by multi-block CIFs and multi-.json zip
+       archives -- see syncMultiBlockNavigatorUI/navigateMultiBlockTo.
+       multiBlockKind is "cif"/"json"/null (null = no multi-entry file
+       currently active, navigator hidden). */
+    multiBlocks: null, multiBlockIndex: 0, multiBlockSourceName: "", multiBlockKind: null,
     cifOriginalText: null, cifOriginalLabel: null,
     /* ---- void/channel analysis (ported from VoidChannelLab, see CLAUDE.md-
        style history in that project) ---- */
@@ -2730,6 +2751,24 @@ select.sel:focus{border-color:var(--accent)}
     undoStack: [], selectedBonds: {}, guestColorMode: "component",
     hostBondRadius: 0.12, guestBondRadius: 0.12,
     hostColors: {}, guestColors: {}, defaultColors: {}, page: "model",
+    /* Up to 18 favourite colours (3 rows of 6 in the popover), shared across
+       EVERY colour picker in the app (not per-picker) -- right-click any
+       colour swatch anywhere to open a small popover: click a favourite to
+       apply it instantly, "+" to save the swatch's own current colour as a
+       new favourite, "x" to remove one. One shared list because the whole
+       point is reusing a colour across DIFFERENT pickers (e.g. matching a
+       void's colour to a host atom's) without retyping R/G/B -- see
+       initFavoriteColorSwatches(). Plain array of hex ints, persisted like
+       any other look-and-feel setting. */
+    favoriteColors: [],
+    /* Structure > Export > Model > "Compress as zip": Save model writes a
+       single-entry zip (one JSON file, deflate-compressed) instead of a
+       plain .json when checked -- JSON text compresses very well, so this
+       can meaningfully shrink a large project file. Persisted like any
+       other standing preference. Loading a .zip works regardless of this
+       setting either way (see handleModelZipBlob) -- it only affects what
+       Save model itself produces. */
+    compressModelAsZip: false,
     hostColorMode: "element", hostSingleColor: 0x4A6FA5,
     hostBondColorMode: "split", hostBondColor: 0xFFFFFF, guestBondColorMode: "split", guestBondColor: 0xFFFFFF, showHBonds: false,
     radii: {}, _radiiBondiMigrated: false,
@@ -11397,11 +11436,11 @@ select.sel:focus{border-color:var(--accent)}
       handleStructureFileText(content, h.name);
       /* handleStructureFileText() never throws and never returns a value
          either way (see its own call chain) -- state.name (or, for a
-         multi-block CIF, state.cifMultiSourceName) actually landing on
+         multi-block CIF, state.multiBlockSourceName) actually landing on
          this file's own name is the only after-the-fact signal that it
          really loaded rather than silently failing a parse/cell check and
          leaving the PREVIOUS file's structure sitting there untouched. */
-      if (state.name !== h.name && state.cifMultiSourceName !== h.name) { filesFailed++; continue; }
+      if (state.name !== h.name && state.multiBlockSourceName !== h.name) { filesFailed++; continue; }
       filesOk++;
       var result = await runMacroLinesOnce(lines);
       totalDone += result.done; totalFailedLines += result.failed.length;
@@ -13799,8 +13838,7 @@ select.sel:focus{border-color:var(--accent)}
     else handleCifFileText(text, name);
   }
   function handleResFileText(text, name) {
-    state.cifBlocks = null; state.cifBlockIndex = 0; state.cifMultiSourceName = "";
-    syncCifNavigatorUI();
+    clearMultiBlockNavigator();
     state.cifOriginalText = null; state.cifOriginalLabel = null;
     loadResText(text, name);
   }
@@ -13844,8 +13882,7 @@ select.sel:focus{border-color:var(--accent)}
   function handleCifFileText(text, name) {
     var blocks = splitCifBlocks(text);
     if (!blocks) {
-      state.cifBlocks = null; state.cifBlockIndex = 0; state.cifMultiSourceName = "";
-      syncCifNavigatorUI();
+      clearMultiBlockNavigator();
       /* the exact raw text of THIS structure, retained so "Save CIF" can
          later splice just the _atom_site (and any aniso) loop back into
          it rather than generating a whole new file from nothing -- see
@@ -13856,41 +13893,74 @@ select.sel:focus{border-color:var(--accent)}
       loadCIFText(text, name);
       return;
     }
-    state.cifBlocks = blocks;
-    state.cifMultiSourceName = name || "";
+    state.multiBlocks = blocks;
+    state.multiBlockKind = "cif";
+    state.multiBlockSourceName = name || "";
     loadCifBlockAtIndex(0);
   }
   function loadCifBlockAtIndex(idx) {
-    if (!state.cifBlocks || idx < 0 || idx >= state.cifBlocks.length) return;
-    state.cifBlockIndex = idx;
-    var blk = state.cifBlocks[idx];
+    if (!state.multiBlocks || state.multiBlockKind !== "cif" || idx < 0 || idx >= state.multiBlocks.length) return;
+    state.multiBlockIndex = idx;
+    var blk = state.multiBlocks[idx];
     state.cifOriginalText = blk.text;
     state.cifOriginalLabel = blk.label;
     loadCIFText(blk.text, blk.label + ".cif");
-    syncCifNavigatorUI();
+    syncMultiBlockNavigatorUI();
   }
-  function syncCifNavigatorUI() {
+  /* A .json project loaded from inside a multi-entry zip works the same
+     way as a multi-block CIF -- one shared navigator (prev/next/select),
+     but the actual "load entry N" step is completely different per kind
+     (loadCIFText for a CIF block vs. the full project-restore path for a
+     JSON entry), which is exactly why state.multiBlockKind exists and the
+     UI dispatches through navigateMultiBlockTo() rather than calling
+     either loader directly. Unlike loadCifBlockAtIndex, this goes through
+     loadModelFromFile -- which calls restoreProjectSnapshot(), which would
+     normally clear the navigator itself (a plain project load isn't part
+     of a multi-entry archive) -- so _loadingMultiBlockEntry guards that one
+     reset while navigation is what's driving the load, not a fresh drop. */
+  var _loadingMultiBlockEntry = false;
+  function loadJsonBlockAtIndex(idx) {
+    if (!state.multiBlocks || state.multiBlockKind !== "json" || idx < 0 || idx >= state.multiBlocks.length) return;
+    state.multiBlockIndex = idx;
+    _loadingMultiBlockEntry = true;
+    try { loadModelFromFile(state.multiBlocks[idx].text); }
+    finally { _loadingMultiBlockEntry = false; }
+    syncMultiBlockNavigatorUI();
+  }
+  function navigateMultiBlockTo(idx) {
+    if (state.multiBlockKind === "cif") loadCifBlockAtIndex(idx);
+    else if (state.multiBlockKind === "json") loadJsonBlockAtIndex(idx);
+  }
+  function clearMultiBlockNavigator() {
+    state.multiBlocks = null; state.multiBlockIndex = 0; state.multiBlockSourceName = ""; state.multiBlockKind = null;
+    syncMultiBlockNavigatorUI();
+  }
+  var _lastSyncedMultiBlocks = null; /* tracks the actual array reference last rendered into the dropdown, so switching from a CIF's blocks to a JSON archive's entries (or vice versa) with the SAME count still rebuilds the option list -- a pure length check missed this, leaving stale labels from whichever kind was open before */
+  function syncMultiBlockNavigatorUI() {
     var wrap = document.getElementById("cifNavigatorSection");
     if (!wrap) return;
-    var blocks = state.cifBlocks;
+    var blocks = state.multiBlocks;
     wrap.style.display = (blocks && blocks.length > 1) ? "" : "none";
-    if (!blocks || blocks.length < 2) return;
+    if (!blocks || blocks.length < 2) { _lastSyncedMultiBlocks = null; return; }
+    var titleEl = document.getElementById("cifNavigatorTitle");
+    if (titleEl) titleEl.textContent = state.multiBlockKind === "json" ? "JSON Archive Navigator" : "CIF Navigator";
     var sel = document.getElementById("cifNavigatorSelect");
     if (sel) {
-      if (sel.options.length !== blocks.length) {
+      if (blocks !== _lastSyncedMultiBlocks) {
         sel.innerHTML = "";
         blocks.forEach(function (b, i) {
           var opt = document.createElement("option"); opt.value = String(i); opt.textContent = b.label;
           sel.appendChild(opt);
         });
+        _lastSyncedMultiBlocks = blocks;
       }
-      sel.value = String(state.cifBlockIndex);
+      sel.value = String(state.multiBlockIndex);
     }
     var prevBtn = document.getElementById("cifNavigatorPrevBtn"), nextBtn = document.getElementById("cifNavigatorNextBtn");
-    if (prevBtn) prevBtn.disabled = state.cifBlockIndex <= 0;
-    if (nextBtn) nextBtn.disabled = state.cifBlockIndex >= blocks.length - 1;
+    if (prevBtn) prevBtn.disabled = state.multiBlockIndex <= 0;
+    if (nextBtn) nextBtn.disabled = state.multiBlockIndex >= blocks.length - 1;
     var countEl = document.getElementById("cifNavigatorCount");
-    if (countEl) countEl.textContent = (state.cifBlockIndex + 1) + " of " + blocks.length;
+    if (countEl) countEl.textContent = (state.multiBlockIndex + 1) + " of " + blocks.length;
   }
 
   /* ---------------- Save CIF ----------------
@@ -14363,7 +14433,10 @@ select.sel:focus{border-color:var(--accent)}
         walkCollideMolSurface: state.walkCollideMolSurface, walkCollideCoordPoly: state.walkCollideCoordPoly,
         walkInvertDrag: state.walkInvertDrag, walkSpeed: state.walkSpeed,
         walkPanScale: state.walkPanScale, walkLookSensitivity: state.walkLookSensitivity,
-        walkHeadlampOn: state.walkHeadlampOn, walkHeadlampIntensity: state.walkHeadlampIntensity
+        walkHeadlampOn: state.walkHeadlampOn, walkHeadlampIntensity: state.walkHeadlampIntensity,
+        favoriteColors: state.favoriteColors,
+        voidSurfaceOpacity: state.voidSurfaceOpacity, molSurfaceOpacity: state.molSurfaceOpacity,
+        compressModelAsZip: state.compressModelAsZip
         /* clipPlaneEnabled deliberately NOT persisted -- starting a fresh
            session with part of the structure invisible for no visible
            reason (until the user finds the toggle) is worse than just
@@ -14447,6 +14520,10 @@ select.sel:focus{border-color:var(--accent)}
       if (data.hasOwnProperty("walkLookSensitivity")) state.walkLookSensitivity = clamp(data.walkLookSensitivity, 0.1, 1.5, state.walkLookSensitivity);
       if (typeof data.walkHeadlampOn === "boolean") state.walkHeadlampOn = data.walkHeadlampOn;
       if (data.hasOwnProperty("walkHeadlampIntensity")) state.walkHeadlampIntensity = clamp(data.walkHeadlampIntensity, 0.5, 10, state.walkHeadlampIntensity);
+      if (Array.isArray(data.favoriteColors)) state.favoriteColors = data.favoriteColors.filter(function (c) { return typeof c === "number" && isFinite(c); }).slice(0, FAV_COLOR_MAX);
+      if (data.hasOwnProperty("voidSurfaceOpacity")) state.voidSurfaceOpacity = clamp(data.voidSurfaceOpacity, 0.15, 1.0, state.voidSurfaceOpacity);
+      if (data.hasOwnProperty("molSurfaceOpacity")) state.molSurfaceOpacity = clamp(data.molSurfaceOpacity, 0.05, 1.0, state.molSurfaceOpacity);
+      if (typeof data.compressModelAsZip === "boolean") state.compressModelAsZip = data.compressModelAsZip;
       /* every light effectively off would leave only the fixed 0.6-intensity
          hemisphere light -- not literally invisible, but dim enough on some
          monitors to look like nothing loaded. Force at least one real light
@@ -14926,6 +15003,98 @@ select.sel:focus{border-color:var(--accent)}
     inp.addEventListener("input", function () { on(cssToHex(inp.value)); });
     return inp;
   }
+  /* Favourite colours: right-click ANY colour swatch anywhere in the app
+     (every one of them is an `input.swatch` from colorSwatch() above) to
+     open a small popover of up to FAV_COLOR_MAX saved favourites (3 rows of
+     6) -- click one to apply it to THAT swatch instantly, "+" to save that
+     swatch's own current colour as a new favourite, the small "x" on a
+     favourite to remove it. One shared list, not per-picker: the whole
+     point is reusing an exact colour across DIFFERENT pickers (e.g.
+     matching a void's colour to a host atom's) without writing down and
+     retyping R/G/B. Wired ONCE via a single delegated document-level
+     listener (initFavoriteColorSwatches(), called from boot()) rather than
+     touching any of the 20+ existing colorSwatch() call sites -- applying a
+     favourite just sets the target input's own .value and dispatches a
+     real "input" event on it, so whatever onChange callback that swatch
+     was already built with fires exactly as if the user had picked that
+     colour natively; nothing about colorSwatch() itself, or any of its
+     callers, needed to change. */
+  var FAV_COLOR_MAX = 18; /* 3 rows of 6 in the popover's grid, per the user's own request */
+  var _favPopoverEl = null;
+  function closeFavoritesPopover() {
+    if (_favPopoverEl) { _favPopoverEl.remove(); _favPopoverEl = null; }
+    document.removeEventListener("mousedown", _favPopoverOutsideClick, true);
+    document.removeEventListener("keydown", _favPopoverEscape, true);
+  }
+  function _favPopoverOutsideClick(e) { if (_favPopoverEl && !_favPopoverEl.contains(e.target)) closeFavoritesPopover(); }
+  function _favPopoverEscape(e) { if (e.key === "Escape") closeFavoritesPopover(); }
+  function openFavoritesPopover(targetInput, x, y) {
+    closeFavoritesPopover();
+    var pop = el("div", "fav-popover");
+    function rebuild() {
+      pop.innerHTML = "";
+      pop.appendChild(el("div", "fav-hint", "Favourite colours"));
+      /* Favourites live in their own strict 6-column grid (3 rows of 6 at
+         the 18-colour cap) -- the "+" add button is a SEPARATE row below,
+         not a 19th grid cell, so it never disturbs that row count. */
+      var row = el("div", "fav-swatches"); pop.appendChild(row);
+      state.favoriteColors.forEach(function (hex, i) {
+        var sw = document.createElement("button"); sw.type = "button"; sw.className = "fav-swatch";
+        sw.style.background = hexToCss(hex);
+        sw.title = hexToCss(hex);
+        sw.addEventListener("click", function () {
+          targetInput.value = hexToCss(hex);
+          targetInput.dispatchEvent(new Event("input", { bubbles: true }));
+          closeFavoritesPopover();
+        });
+        var rm = document.createElement("button"); rm.type = "button"; rm.className = "fav-remove"; rm.textContent = "×";
+        rm.title = "Remove this favourite";
+        rm.addEventListener("click", function (e) {
+          e.stopPropagation();
+          state.favoriteColors.splice(i, 1);
+          persistPreferences();
+          rebuild();
+        });
+        sw.appendChild(rm);
+        row.appendChild(sw);
+      });
+      var addRow = el("div", "fav-add-row"); pop.appendChild(addRow);
+      var addBtn = document.createElement("button"); addBtn.type = "button"; addBtn.className = "fav-add"; addBtn.textContent = "+";
+      var full = state.favoriteColors.length >= FAV_COLOR_MAX;
+      addBtn.disabled = full;
+      addBtn.title = full ? (FAV_COLOR_MAX + "/" + FAV_COLOR_MAX + " -- remove one first") : "Save this swatch's current colour as a favourite";
+      addBtn.addEventListener("click", function () {
+        var hex = cssToHex(targetInput.value);
+        if (state.favoriteColors.indexOf(hex) === -1 && state.favoriteColors.length < FAV_COLOR_MAX) {
+          state.favoriteColors.push(hex);
+          persistPreferences();
+          rebuild();
+        }
+      });
+      addRow.appendChild(addBtn);
+    }
+    rebuild();
+    document.body.appendChild(pop);
+    /* Clamp to the viewport so a right-click near the right/bottom edge
+       doesn't open a popover partly off-screen. */
+    var pw = pop.offsetWidth, ph = pop.offsetHeight;
+    var left = Math.min(x, window.innerWidth - pw - 8);
+    var top = Math.min(y, window.innerHeight - ph - 8);
+    pop.style.left = Math.max(4, left) + "px";
+    pop.style.top = Math.max(4, top) + "px";
+    _favPopoverEl = pop;
+    document.addEventListener("mousedown", _favPopoverOutsideClick, true);
+    document.addEventListener("keydown", _favPopoverEscape, true);
+  }
+  function initFavoriteColorSwatches() {
+    document.addEventListener("contextmenu", function (e) {
+      var t = e.target;
+      if (t && t.tagName === "INPUT" && t.type === "color" && t.classList.contains("swatch")) {
+        e.preventDefault();
+        openFavoritesPopover(t, e.clientX, e.clientY);
+      }
+    });
+  }
   function colorControl(p, label, hexInt, on) {
     var w = el("div", "ctl-color"); w.appendChild(el("label", null, label));
     var sw = colorSwatch(hexInt, on);
@@ -14999,6 +15168,164 @@ select.sel:focus{border-color:var(--accent)}
     }
     chunks.push("}");
     return chunks;
+  }
+  /* ---------------- Zip read/write, hand-rolled (no external library --
+     this app is a single file with no build step and no sibling deps, so a
+     CDN-loaded zip library isn't an option; this is small enough not to
+     need one). Compression itself comes from the browser's own built-in
+     CompressionStream/DecompressionStream ("deflate-raw"), not a hand-
+     rolled DEFLATE -- only the ZIP container format (local file header,
+     central directory, end-of-central-directory record) and CRC32 are
+     implemented here. Covers exactly what this app needs: writing one
+     compressed entry (Save model's own "Compress as zip" checkbox), and
+     reading however many .json entries a zip someone dropped in happens to
+     contain (a user's own manually-zipped batch, or a future multi-save).
+     ---------------- */
+  var CRC32_TABLE = (function () {
+    var t = new Uint32Array(256);
+    for (var n = 0; n < 256; n++) {
+      var c = n;
+      for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      t[n] = c >>> 0;
+    }
+    return t;
+  })();
+  function u8Concat(arrays) {
+    var total = 0; for (var i = 0; i < arrays.length; i++) total += arrays[i].length;
+    var out = new Uint8Array(total), off = 0;
+    for (var j = 0; j < arrays.length; j++) { out.set(arrays[j], off); off += arrays[j].length; }
+    return out;
+  }
+  function u16le(n) { return new Uint8Array([n & 0xFF, (n >>> 8) & 0xFF]); }
+  function u32le(n) { return new Uint8Array([n & 0xFF, (n >>> 8) & 0xFF, (n >>> 16) & 0xFF, (n >>> 24) & 0xFF]); }
+  function dosDateTime(date) {
+    var time = ((date.getHours() & 0x1F) << 11) | ((date.getMinutes() & 0x3F) << 5) | ((date.getSeconds() >> 1) & 0x1F);
+    var d = (((date.getFullYear() - 1980) & 0x7F) << 9) | (((date.getMonth() + 1) & 0xF) << 5) | (date.getDate() & 0x1F);
+    return { time: time & 0xFFFF, date: d & 0xFFFF };
+  }
+  /* Builds a single-entry zip from an array of already-chunked JSON text
+     pieces (see buildProjectJsonChunks) -- never joins them into one JS
+     string, matching that function's own "no ceiling tied to structure
+     size" design. Compression runs as a genuine stream: a concurrent
+     "pump" reads compressed output as it becomes available WHILE chunks
+     are still being fed in, which is required, not just an optimization --
+     CompressionStream has real internal backpressure (a bounded queue), so
+     writing much more than a chunk or two without reading in parallel
+     would stall the write() promises indefinitely for anything beyond a
+     tiny project. */
+  async function buildZipBlobFromChunks(chunks, entryName) {
+    var encoder = new TextEncoder();
+    var crc = 0xFFFFFFFF, uncompSize = 0;
+    var cs = new CompressionStream("deflate-raw");
+    var writer = cs.writable.getWriter();
+    var reader = cs.readable.getReader();
+    var compParts = [];
+    var pump = (async function () {
+      for (;;) { var r = await reader.read(); if (r.done) break; compParts.push(r.value); }
+    })();
+    for (var i = 0; i < chunks.length; i++) {
+      var bytes = encoder.encode(chunks[i]);
+      uncompSize += bytes.length;
+      for (var j = 0; j < bytes.length; j++) crc = CRC32_TABLE[(crc ^ bytes[j]) & 0xFF] ^ (crc >>> 8);
+      await writer.write(bytes);
+      if (i % 40 === 0) await yieldFrame();
+    }
+    await writer.close();
+    await pump;
+    crc = (crc ^ 0xFFFFFFFF) >>> 0;
+    var compBytes = u8Concat(compParts);
+    var nameBytes = encoder.encode(entryName);
+    var dt = dosDateTime(new Date());
+    var method = 8; /* always deflate -- JSON text is always compressible enough that store-vs-deflate isn't worth the extra branch */
+    var localHeader = u8Concat([
+      u32le(0x04034b50), u16le(20), u16le(0), u16le(method), u16le(dt.time), u16le(dt.date),
+      u32le(crc), u32le(compBytes.length), u32le(uncompSize),
+      u16le(nameBytes.length), u16le(0), nameBytes
+    ]);
+    var centralHeader = u8Concat([
+      u32le(0x02014b50), u16le(20), u16le(20), u16le(0), u16le(method), u16le(dt.time), u16le(dt.date),
+      u32le(crc), u32le(compBytes.length), u32le(uncompSize),
+      u16le(nameBytes.length), u16le(0), u16le(0), u16le(0), u16le(0), u32le(0),
+      u32le(0), nameBytes
+    ]);
+    var eocd = u8Concat([
+      u32le(0x06054b50), u16le(0), u16le(0), u16le(1), u16le(1),
+      u32le(centralHeader.length), u32le(localHeader.length + compBytes.length), u16le(0)
+    ]);
+    return new Blob([localHeader, compBytes, centralHeader, eocd], { type: "application/zip" });
+  }
+  async function inflateRawBytes(bytes) {
+    var ds = new DecompressionStream("deflate-raw");
+    var writer = ds.writable.getWriter();
+    var reader = ds.readable.getReader();
+    var parts = [];
+    var pump = (async function () {
+      for (;;) { var r = await reader.read(); if (r.done) break; parts.push(r.value); }
+    })();
+    await writer.write(bytes);
+    await writer.close();
+    await pump;
+    return u8Concat(parts);
+  }
+  /* Reads every .json entry out of a zip file, via the CENTRAL DIRECTORY
+     (found by scanning backward from the end-of-central-directory record)
+     rather than walking local headers in file order -- the standard robust
+     approach, since it works regardless of which streaming flags whatever
+     tool made the zip happened to use, and is what every real zip reader
+     does. Supports both deflate (method 8, what this app's own Save model
+     writes) and store (method 0, what some tools use for tiny/incompressible
+     files) -- an unrecognized method is skipped rather than failing the
+     whole archive. Directory entries, non-.json entries, and a macOS
+     "__MACOSX/" resource-fork folder (added automatically by macOS's own
+     Compress/Archive Utility, never something a user asks for) are all
+     silently skipped, matching the "for now just zip up some .json files
+     by hand" use case rather than expecting a curated archive. */
+  async function unzipJsonEntries(arrayBuffer) {
+    var bytes = new Uint8Array(arrayBuffer);
+    var dv = new DataView(arrayBuffer);
+    var eocdSig = 0x06054b50;
+    var minI = Math.max(0, bytes.length - 22 - 65535);
+    var found = -1;
+    for (var i = bytes.length - 22; i >= minI; i--) {
+      if (dv.getUint32(i, true) === eocdSig) { found = i; break; }
+    }
+    if (found === -1) throw new Error("Not a valid zip file (no end-of-central-directory record found)");
+    var cdEntryCount = dv.getUint16(found + 10, true);
+    var cdOffset = dv.getUint32(found + 16, true);
+    var decoder = new TextDecoder("utf-8");
+    var entries = [];
+    var p = cdOffset;
+    for (var e = 0; e < cdEntryCount; e++) {
+      if (p + 46 > bytes.length || dv.getUint32(p, true) !== 0x02014b50) break; /* malformed central directory -- stop gracefully with whatever was already found */
+      var method = dv.getUint16(p + 10, true);
+      var compSize = dv.getUint32(p + 20, true);
+      var nameLen = dv.getUint16(p + 28, true);
+      var extraLen = dv.getUint16(p + 30, true);
+      var commentLen = dv.getUint16(p + 32, true);
+      var localOffset = dv.getUint32(p + 42, true);
+      var name = decoder.decode(bytes.subarray(p + 46, p + 46 + nameLen));
+      entries.push({ name: name, method: method, compSize: compSize, localOffset: localOffset });
+      p += 46 + nameLen + extraLen + commentLen;
+    }
+    var results = [];
+    for (var k = 0; k < entries.length; k++) {
+      var ent = entries[k];
+      if (/\/$/.test(ent.name)) continue;
+      if (!/\.json$/i.test(ent.name)) continue;
+      if (/^__MACOSX\//.test(ent.name)) continue;
+      var lp = ent.localOffset;
+      var lNameLen = dv.getUint16(lp + 26, true);
+      var lExtraLen = dv.getUint16(lp + 28, true);
+      var dataStart = lp + 30 + lNameLen + lExtraLen;
+      var compData = bytes.subarray(dataStart, dataStart + ent.compSize);
+      var rawBytes;
+      if (ent.method === 0) rawBytes = compData;
+      else if (ent.method === 8) rawBytes = await inflateRawBytes(compData);
+      else continue;
+      var baseName = ent.name.replace(/^.*\//, "").replace(/\.json$/i, "");
+      results.push({ label: baseName, text: decoder.decode(rawBytes) });
+    }
+    return results;
   }
   /* JSON.stringify on a typed array (Float32Array/Float64Array) does NOT
      produce a JSON array -- it produces a plain OBJECT keyed "0","1","2"...
@@ -15122,8 +15449,16 @@ select.sel:focus{border-color:var(--accent)}
   function saveModelToFile() {
     if (!state.atoms && !state.guestAtoms) { setStatus("Nothing loaded yet -- load a host structure first.", true); return; }
     var base = state.name ? state.name.replace(/\.[^./\\]+$/, "") : "CrystalVoid";
-    var suggestedName = base + "_project.json";
-    var handlePromise = requestSaveHandle(suggestedName, { description: "JSON file", accept: { "application/json": [".json"] } });
+    var useZip = state.compressModelAsZip;
+    var jsonName = base + "_project.json";
+    var suggestedName = useZip ? (base + "_project.zip") : jsonName;
+    /* requestSaveHandle must be the very first thing called (see its own
+       comment on why) -- so the zip-vs-plain choice has to be decided here,
+       before buildProjectSnapshot/buildProjectJsonChunks run, not deferred
+       into whichever write function ends up handling it. */
+    var handlePromise = requestSaveHandle(suggestedName, useZip
+      ? { description: "ZIP file", accept: { "application/zip": [".zip"] } }
+      : { description: "JSON file", accept: { "application/json": [".json"] } });
     var data = buildProjectSnapshot();
     var chunks;
     try {
@@ -15142,7 +15477,47 @@ select.sel:focus{border-color:var(--accent)}
       });
       return;
     }
-    handlePromise.then(function (h) { writeChunksToSaveHandle(h, chunks, suggestedName); });
+    if (useZip) handlePromise.then(function (h) { writeZipChunksToSaveHandle(h, chunks, jsonName, suggestedName); });
+    else handlePromise.then(function (h) { writeChunksToSaveHandle(h, chunks, suggestedName); });
+  }
+  /* Mirrors writeChunksToSaveHandle below, but compresses the chunks into a
+     single-entry zip first (see buildZipBlobFromChunks) -- the zip itself
+     is written to the handle (or downloaded) as one Blob, since a zip's
+     central directory/EOCD have to be appended after the compressed data
+     and can't be known before compression finishes, unlike the plain-JSON
+     path which can stream chunk-by-chunk as it's produced. */
+  async function writeZipChunksToSaveHandle(handleResult, chunks, jsonEntryName, suggestedName) {
+    if (handleResult === "CANCELLED") { setStatus("Export cancelled.", false); return; }
+    var zipBlob;
+    try {
+      zipBlob = await buildZipBlobFromChunks(chunks, jsonEntryName);
+    } catch (e) {
+      var msg = "Could not compress this project: " + (e && e.message ? e.message : e) + ".";
+      setStatus(msg, true);
+      if (handleResult && handleResult.createWritable) {
+        try { var w = await handleResult.createWritable(); await w.write(msg + "\n"); await w.close(); } catch (e2) { /* nothing more useful to do */ }
+      }
+      return;
+    }
+    if (handleResult) {
+      try {
+        var writable = await handleResult.createWritable();
+        await writable.write(zipBlob);
+        await writable.close();
+        setStatus("Saved " + suggestedName + ".", false);
+      } catch (e) {
+        legacyDownloadZipBlob(zipBlob, suggestedName, "writing to the chosen location failed -- downloaded a fresh copy instead");
+      }
+    } else {
+      legacyDownloadZipBlob(zipBlob, suggestedName);
+    }
+  }
+  function legacyDownloadZipBlob(blob, suggestedName, reason) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a"); a.href = url; a.download = suggestedName;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+    setStatus("Downloaded " + suggestedName + " (" + (reason || "this browser can't offer a folder picker for saving") + ").", false);
   }
   async function writeChunksToSaveHandle(handleResult, chunks, suggestedName) {
     if (handleResult === "CANCELLED") { setStatus("Export cancelled.", false); return; }
@@ -15184,8 +15559,15 @@ select.sel:focus{border-color:var(--accent)}
        project has into some earlier, unrelated structure's leftover CIF
        text from before the project was loaded. */
     state.cifOriginalText = null; state.cifOriginalLabel = null;
-    state.cifBlocks = null; state.cifBlockIndex = 0; state.cifMultiSourceName = "";
-    syncCifNavigatorUI();
+    /* Skip this reset while a JSON zip-archive entry is being loaded BY the
+       navigator itself (_loadingMultiBlockEntry, set by loadJsonBlockAtIndex)
+       -- restoreProjectSnapshot runs for every entry, including navigation
+       between entries of the SAME already-open archive, so unconditionally
+       clearing the navigator here would wipe out its own state on every
+       single prev/next click, right after loadJsonBlockAtIndex just set it.
+       An ordinary standalone .json drop (the common case) still clears it
+       normally, since that guard is false then. */
+    if (!_loadingMultiBlockEntry) clearMultiBlockNavigator();
     state.name = data.name || ""; state.guestName = data.guestName || "";
     state.atoms = data.atoms || null; state.guestAtoms = data.guestAtoms || null;
     (function normalizeHidden(arr) { if (arr) for (var i = 0; i < arr.length; i++) if (arr[i].hidden === undefined) arr[i].hidden = false; })(state.atoms);
@@ -15342,10 +15724,12 @@ select.sel:focus{border-color:var(--accent)}
     var voidAccToggleRestore = document.getElementById("voidAccurateToggle"); if (voidAccToggleRestore) voidAccToggleRestore.checked = state.voidAccurateVolumes;
     var voidAutoToggleRestore = document.getElementById("voidAutoAssembleToggle"); if (voidAutoToggleRestore) voidAutoToggleRestore.checked = state.voidAutoAssemble;
     var voidOpacitySliderRestore = document.getElementById("voidOpacitySlider"); if (voidOpacitySliderRestore) voidOpacitySliderRestore.value = state.voidSurfaceOpacity;
+    var voidOpacityNumRestore = document.getElementById("voidOpacityNum"); if (voidOpacityNumRestore) voidOpacityNumRestore.value = state.voidSurfaceOpacity;
     if (typeof data.molSurfaceProbeRadius === "number") state.molSurfaceProbeRadius = data.molSurfaceProbeRadius;
     if (typeof data.molSurfaceOpacity === "number") state.molSurfaceOpacity = data.molSurfaceOpacity;
     var msProbeInpRestore = document.getElementById("molSurfProbeRadiusInput"); if (msProbeInpRestore) msProbeInpRestore.value = state.molSurfaceProbeRadius.toFixed(2);
     var msOpacitySliderRestore = document.getElementById("molSurfOpacitySlider"); if (msOpacitySliderRestore) msOpacitySliderRestore.value = state.molSurfaceOpacity;
+    var msOpacityNumRestore = document.getElementById("molSurfOpacityNum"); if (msOpacityNumRestore) msOpacityNumRestore.value = state.molSurfaceOpacity;
 
     if (data.voidComponents && data.voidComponents.length) restoreVoidResultsFromSnapshot(data);
     else clearVoidResultsSilent();
@@ -15556,26 +15940,84 @@ select.sel:focus{border-color:var(--accent)}
     }
     loadModelFromFile(text);
   }
+  /* Single entry point for a dropped/selected model file that might be a
+     plain .json project OR a .zip archive -- used by both the viewport
+     drop handler and the "Load model..." file input, so neither has to
+     duplicate the zip-vs-plain branch. A zip is read silently regardless
+     of the "Compress as zip" checkbox (that setting only affects what Save
+     model itself writes, never what Load model can read) -- extract its
+     .json entries, then either load the one entry directly (indistinguishable
+     from dropping a plain .json) or, for more than one, hand off to the
+     same multi-entry navigator a multi-block CIF already uses. */
+  function handleModelFileSelected(file) {
+    if (/\.zip$/i.test(file.name)) { handleModelZipBlob(file, file.name); return; }
+    var rd = new FileReader();
+    rd.onload = function () { confirmAndLoadModelFromFile(rd.result); };
+    rd.readAsText(file);
+  }
+  async function handleModelZipBlob(blob, name) {
+    var entries;
+    try {
+      entries = await unzipJsonEntries(await blob.arrayBuffer());
+    } catch (e) {
+      setStatus("Could not read this zip file: " + (e && e.message ? e.message : e) + ".", true);
+      return;
+    }
+    if (!entries.length) { setStatus("No .json files found inside this zip archive.", true); return; }
+    /* Navigator labels come from each entry's own FILENAME inside the zip
+       (already set by unzipJsonEntries, stripped of path and .json), not
+       from the project's internal saved name -- the whole point is that a
+       user names the .json files themselves before zipping (e.g. "Figure
+       1a.json", "Figure 1b.json") to pick out which embellished version of
+       a model is which, so that's what the navigator has to show. */
+    if (entries.length === 1) {
+      clearMultiBlockNavigator();
+      confirmAndLoadModelFromFile(entries[0].text);
+      return;
+    }
+    /* One confirm for the whole archive, not one per entry -- matches
+       confirmAndLoadModelFromFile's own single-file behaviour; navigating
+       between entries afterward (loadJsonBlockAtIndex) never re-prompts,
+       same as the CIF navigator's own prev/next never re-prompts either. */
+    if (state.atoms || state.guestAtoms) {
+      var ok = window.confirm("Loading this project file will replace the structure currently loaded, including any unsaved changes. Continue?");
+      if (!ok) { setStatus("Load cancelled -- current structure kept.", false); return; }
+    }
+    state.multiBlocks = entries;
+    state.multiBlockKind = "json";
+    state.multiBlockSourceName = name || "";
+    loadJsonBlockAtIndex(0);
+  }
 
   function buildUI() {
     var left = document.getElementById("leftPanel");
 
     var structC = section(left, "Structure", false);
+    /* Shared by two kinds of multi-entry file: a multi-block CIF (CSD/
+       Conquest-style, several "data_XXXX" blocks in one file) and a
+       multi-.json zip archive (see handleModelZipBlob/loadJsonBlockAtIndex)
+       -- same prev/next/select UI either way, dispatched through
+       navigateMultiBlockTo() by state.multiBlockKind. The CIF path's own
+       behaviour is completely unchanged from before this existed; only the
+       heading text swaps (via cifNavigatorTitleEl) so a JSON archive isn't
+       mislabelled "CIF Navigator". */
     var navigatorTab = subsection(structC, "CIF Navigator", false);
     navigatorTab.parentElement.id = "cifNavigatorSection";
-    navigatorTab.parentElement.style.display = "none"; /* hidden until a multi-structure CIF is actually loaded */
+    navigatorTab.parentElement.style.display = "none"; /* hidden until a multi-entry file is actually loaded */
+    var navigatorTitleEl = navigatorTab.parentElement.querySelector(".subhead2 span");
+    if (navigatorTitleEl) navigatorTitleEl.id = "cifNavigatorTitle";
     var navigatorCount = el("div", "hint"); navigatorCount.id = "cifNavigatorCount"; navigatorTab.appendChild(navigatorCount);
     var navigatorRow = el("div", "ctl-inline");
     var navigatorPrevBtn = document.createElement("button"); navigatorPrevBtn.type = "button"; navigatorPrevBtn.className = "icon-btn"; navigatorPrevBtn.id = "cifNavigatorPrevBtn"; navigatorPrevBtn.textContent = "←";
-    navigatorPrevBtn.title = "Previous structure";
-    navigatorPrevBtn.addEventListener("click", function () { loadCifBlockAtIndex(state.cifBlockIndex - 1); });
+    navigatorPrevBtn.title = "Previous entry";
+    navigatorPrevBtn.addEventListener("click", function () { navigateMultiBlockTo(state.multiBlockIndex - 1); });
     navigatorRow.appendChild(navigatorPrevBtn);
     var navigatorSel = document.createElement("select"); navigatorSel.className = "sel"; navigatorSel.id = "cifNavigatorSelect";
-    navigatorSel.addEventListener("change", function () { loadCifBlockAtIndex(parseInt(navigatorSel.value, 10)); });
+    navigatorSel.addEventListener("change", function () { navigateMultiBlockTo(parseInt(navigatorSel.value, 10)); });
     navigatorRow.appendChild(navigatorSel);
     var navigatorNextBtn = document.createElement("button"); navigatorNextBtn.type = "button"; navigatorNextBtn.className = "icon-btn"; navigatorNextBtn.id = "cifNavigatorNextBtn"; navigatorNextBtn.textContent = "→";
-    navigatorNextBtn.title = "Next structure";
-    navigatorNextBtn.addEventListener("click", function () { loadCifBlockAtIndex(state.cifBlockIndex + 1); });
+    navigatorNextBtn.title = "Next entry";
+    navigatorNextBtn.addEventListener("click", function () { navigateMultiBlockTo(state.multiBlockIndex + 1); });
     navigatorRow.appendChild(navigatorNextBtn);
     navigatorTab.appendChild(navigatorRow);
     var paramsTab = subsection(structC, "Metadata", false);
@@ -16727,11 +17169,17 @@ select.sel:focus{border-color:var(--accent)}
     button(vcRow, "Calculate", "ghost", runVoidCalculate);
     button(vcRow, "Clear all", "ghost", clearVoidResults);
     vcC.appendChild(vcRow);
+    /* Surface opacity and the two "Same colours for all..." links sit right
+       here, directly under Calculate/Clear all -- NOT inside the
+       Voids/Channels submenu below (they used to live there; the user asked
+       for them pulled out to top level since they're settings you reach for
+       before drilling into the results table, not part of it). */
+    var voidOpacitySlider = slider(vcC, "surface opacity", 0.15, 1.0, 0.05, state.voidSurfaceOpacity, "", function (v) { state.voidSurfaceOpacity = v; renderVoidMeshes(); });
+    voidOpacitySlider.range.id = "voidOpacitySlider";
+    voidOpacitySlider.num.id = "voidOpacityNum";
+    var voidColorLinkRow = el("div"); voidColorLinkRow.id = "voidColorLinkRow"; vcC.appendChild(voidColorLinkRow);
     var voidChannelsC = subsection(vcC, "Voids/Channels", false);
     voidChannelsC.parentElement.id = "voidChannelsSubsec";
-    var voidOpacitySlider = labelSlider(voidChannelsC, "surface opacity", 0.15, 1.0, 0.05, state.voidSurfaceOpacity, function (v) { state.voidSurfaceOpacity = v; renderVoidMeshes(); });
-    voidOpacitySlider.id = "voidOpacitySlider";
-    var voidColorLinkRow = el("div"); voidColorLinkRow.id = "voidColorLinkRow"; voidChannelsC.appendChild(voidColorLinkRow);
     var voidTable = document.createElement("table"); voidTable.id = "voidResultsTable";
     voidTable.innerHTML = "<thead><tr><th></th><th>ID</th><th>Type</th><th title=\"For a channel: the largest probe radius it would still be recognized as a channel at. For a void: the probe radius below which it would connect to a periodic image of itself and become a channel.\">Limit (" + U.ang + ")</th><th>Vol. (" + U.ang + U.cube + ")</th><th></th></tr></thead><tbody id=\"voidResultsBody\"></tbody>";
     voidChannelsC.appendChild(voidTable);
@@ -16761,8 +17209,9 @@ select.sel:focus{border-color:var(--accent)}
     var molSurfCalcBtn = button(molSurfRow, "Calculate", "ghost", runMolSurfaceCalculate); molSurfCalcBtn.id = "molSurfCalcBtn"; molSurfCalcBtn.disabled = true;
     var molSurfClearBtn = button(molSurfRow, "Clear all", "ghost", clearAllMolSurfaces); molSurfClearBtn.id = "molSurfClearBtn"; molSurfClearBtn.disabled = true;
     molSurfC.appendChild(molSurfRow);
-    var molSurfOpacitySlider = labelSlider(molSurfC, "surface opacity", 0.05, 1.0, 0.05, state.molSurfaceOpacity, function (v) { state.molSurfaceOpacity = v; renderMolSurfaceMeshes(); });
-    molSurfOpacitySlider.id = "molSurfOpacitySlider";
+    var molSurfOpacitySlider = slider(molSurfC, "surface opacity", 0.05, 1.0, 0.05, state.molSurfaceOpacity, "", function (v) { state.molSurfaceOpacity = v; renderMolSurfaceMeshes(); });
+    molSurfOpacitySlider.range.id = "molSurfOpacitySlider";
+    molSurfOpacitySlider.num.id = "molSurfOpacityNum";
     var molSurfColorLinkRow = el("div"); molSurfColorLinkRow.id = "molSurfaceColorLinkRow"; molSurfC.appendChild(molSurfColorLinkRow);
     var molSurfTable = document.createElement("table"); molSurfTable.id = "molSurfaceResultsTable";
     molSurfTable.innerHTML = "<thead><tr><th></th><th></th><th></th><th></th></tr></thead><tbody id=\"molSurfaceResultsBody\"></tbody>";
@@ -16984,6 +17433,8 @@ select.sel:focus{border-color:var(--accent)}
     cifSaveBody.appendChild(cifSaveRow);
 
     var modelBody = subsection(xc, "Model", false);
+    var compressZipCb = toggle(modelBody, "Compress as zip", state.compressModelAsZip, function (v) { state.compressModelAsZip = v; persistPreferences(); });
+    compressZipCb.id = "compressModelZipTg";
     var modelSaveRow = el("div", "btnrow"); button(modelSaveRow, "Save model...", "ghost", saveModelToFile); modelBody.appendChild(modelSaveRow);
     var modelLoadRow = el("div", "btnrow"); button(modelLoadRow, "Load model...", "ghost", function () { document.getElementById("modelJsonInput").click(); }); modelBody.appendChild(modelLoadRow);
   }
@@ -17201,8 +17652,10 @@ select.sel:focus{border-color:var(--accent)}
     ["dragleave", "drop"].forEach(function (ev) { vp.addEventListener(ev, function (e) { e.preventDefault(); vp.classList.remove("dragging"); }); });
     vp.addEventListener("drop", function (e) {
       /* the main view always means "host" -- clears and loads fresh, no guessing --
-         except for a dropped .json project file, which goes through the same
-         confirm-before-overwrite path as the "Load model..." button, and a
+         except for a dropped .json project file (or a .zip archive of one
+         or more .json project files, unzipped silently either way -- see
+         handleModelFileSelected), which goes through the same confirm-
+         before-overwrite path as the "Load model..." button, and a
          dropped .MAC file, which goes into the Macro memo (same confirm-
          before-overwrite path loadMacroFile()'s own picker uses) instead of
          replacing the structure. A guest-only CIF goes to its own drop zone
@@ -17212,14 +17665,16 @@ select.sel:focus{border-color:var(--accent)}
       var item = e.dataTransfer.items && e.dataTransfer.items[0];
       if (item && item.getAsFileSystemHandle) item.getAsFileSystemHandle().then(function (h) { state.lastSourceHandle = h; }).catch(function () {});
       var isJson = /\.json$/i.test(f.name) || f.type === "application/json";
+      var isZip = /\.zip$/i.test(f.name) || f.type === "application/zip";
+      if (isJson || isZip) { handleModelFileSelected(f); return; }
       var rd = new FileReader();
-      rd.onload = function () { if (isJson) confirmAndLoadModelFromFile(rd.result); else handleStructureFileText(rd.result, f.name); };
+      rd.onload = function () { handleStructureFileText(rd.result, f.name); };
       rd.readAsText(f);
     });
     var radiiInput = document.getElementById("elementCsvInput");
     radiiInput.addEventListener("change", function (e) { var f = e.target.files[0]; if (!f) return; var rd = new FileReader(); rd.onload = function () { loadElementSettingsCsv(rd.result); }; rd.readAsText(f); });
     var modelInput = document.getElementById("modelJsonInput");
-    modelInput.addEventListener("change", function (e) { var f = e.target.files[0]; if (!f) return; var rd = new FileReader(); rd.onload = function () { confirmAndLoadModelFromFile(rd.result); }; rd.readAsText(f); });
+    modelInput.addEventListener("change", function (e) { var f = e.target.files[0]; if (!f) return; handleModelFileSelected(f); });
     var macroInput = document.getElementById("macroInput");
     macroInput.addEventListener("change", function (e) { var f = e.target.files[0]; handleMacroFileSelected(f); macroInput.value = ""; });
     var segBtns = document.querySelectorAll("#modeSeg button");
@@ -17304,9 +17759,9 @@ select.sel:focus{border-color:var(--accent)}
       "<p>Atoms don't emit any light themselves -- <b>atom roughness</b>, <b>atom metalness</b>, and <b>reflection strength</b> (Material panel) control how they respond to the scene's lighting instead. Lower roughness gives a glossier, more reflective surface; higher metalness moves it from a plastic-like look toward bare metal (useful for a striking cover-art render, less so for a conventional scientific figure); reflection strength scales how much the environment map contributes, which mainly shows up once metalness is raised. If a selected atom's highlight is hard to make out, a glossy, brightly lit atom is usually why -- the highlight itself doesn't respond to lighting at all, but a very bright, reflective atom underneath it can still make thin highlight lines harder to see by contrast.</p>" +
       "<p><b>Export image (PNG)</b> always renders at full tessellation regardless of the high detail toggle, at the chosen <b>export resolution</b> multiple of the current view size, then restores the interactive settings afterward -- so a quick figure never requires manually maxing out quality settings first. In Chrome or Edge it opens a normal save dialog, defaulting to the folder of whichever host CIF was most recently dropped onto the app (not one opened via the file browser button, since only a genuine drag hands over that information) -- other browsers fall back to a plain download instead. That last-used folder is only remembered for the current session, not saved between visits.</p>" +
       "<p><b>Transparent background</b> drops the background colour (and briefly suspends fog, which would otherwise leave a visible tint) for that one exported frame, then restores both immediately afterward -- normal interactive display is never affected. It applies to both Export image and <b>Copy image to clipboard</b>, which renders the same way but places the PNG directly on the system clipboard for pasting into another document instead of saving a file; transparency survives that route too; wherever it lands, whether it stays transparent from there depends on the receiving application. Clipboard copying needs a recent click to work (this triggers it) and isn't available in every browser -- Export image (PNG) always works as the fallback.</p>" +
-      "<p><b>Save model...</b> and <b>Load model...</b>, at the bottom of the <b>Export</b> panel, save or restore the complete working state to a single file -- every atom including everything Grow has added, the CIF symmetry data, colour and radius overrides, bond and display settings, and the camera's exact position -- so a session can be closed and reopened later exactly where it was left, without repeating the grow steps. This is a separate, deliberate snapshot of one specific piece of work, distinct from the automatic per-browser memory of element radii and display settings described below -- a saved model file is portable and permanent, and is the one to keep if the work needs to survive a change of computer or browser.</p>" +
+      "<p><b>Save model...</b> and <b>Load model...</b>, at the bottom of the <b>Export</b> panel, save or restore the complete working state to a single file -- every atom including everything Grow has added, the CIF symmetry data, colour and radius overrides, bond and display settings, and the camera's exact position -- so a session can be closed and reopened later exactly where it was left, without repeating the grow steps. This is a separate, deliberate snapshot of one specific piece of work, distinct from the automatic per-browser memory of element radii and display settings described below -- a saved model file is portable and permanent, and is the one to keep if the work needs to survive a change of computer or browser. <b>Compress as zip</b>, just above Save model, saves that same project data as a single JSON file inside a .zip archive instead of a plain .json -- text compresses well, so a large, heavily-grown project can end up considerably smaller on disk; remembered like any other setting. Load model... reads a .zip archive back regardless of this checkbox either way. A zip containing more than one .json file -- created by hand, one file per version of a model (e.g. <span class='mono'>Figure 1a.json</span>, <span class='mono'>Figure 1b.json</span>) then zipped together -- loads with the same prev/next/dropdown <b>Navigator</b> a multi-structure CIF uses (see \"Loading structures\" below), labelled by each .json file's own name rather than anything stored inside it, so those file names are exactly what shows up to choose between.</p>" +
       "<h3>Loading structures</h3>" +
-      "<p>Dropping a <b>.cif</b> onto the 3D view loads it as the <b>host</b> and starts symmetry mode, described below -- it's a fresh structure to build outward from by growth, not a fixed set of coordinates, and replaces any previously loaded host, clearing the current guest along with it. There is no separate guest file or drop box: a <b>guest</b> (e.g. an included gas molecule) is created from the same loaded structure by selecting the atoms that belong to it and using \"Move selection to\" &gt; New guest group (Structure &gt; Edit atoms). \"Remove all guests\" clears every guest component so you can start over.</p>" +
+      "<p>Dropping a <b>.cif</b> onto the 3D view loads it as the <b>host</b> and starts symmetry mode, described below -- it's a fresh structure to build outward from by growth, not a fixed set of coordinates, and replaces any previously loaded host, clearing the current guest along with it. There is no separate guest file or drop box: a <b>guest</b> (e.g. an included gas molecule) is created from the same loaded structure by selecting the atoms that belong to it and using \"Move selection to\" &gt; New guest group (Structure &gt; Edit atoms). \"Remove all guests\" clears every guest component so you can start over. A CIF holding more than one complete structure (e.g. a CSD/Conquest search result, several <span class='mono'>data_XXXX</span> blocks concatenated in one file) loads its first entry the same way, and a <b>Navigator</b> appears at the top of Structure with prev/next buttons and a dropdown for switching between the rest -- the same Navigator a multi-.json zip archive uses (see Export &gt; Model above), just showing each structure's own block label instead of a file name.</p>" +
       "<p>A SHELX <b>.res</b> or <b>.ins</b> file drops in exactly the same way and works identically from that point on -- same host/guest handling, same Grow panel, same everything -- since both formats are read into the same unit cell + symmetry operators + asymmetric unit shape internally; the one difference is that Save CIF stays disabled afterwards, since there's no original CIF text to splice edits back into. A <b>PART n</b> instruction in the file is read and remembered per atom: automatic bond generation never bonds two atoms that have different, both non-zero PART numbers, since SHELX uses PART specifically to mark alternative, mutually-exclusive disorder components that are never really present together -- PART 0 (the default, before any PART instruction, and every CIF-loaded atom, which has no PART concept at all) still bonds to anything. A negative PART number additionally stops bonds forming, across a symmetry operation, to a grown copy with any non-zero PART number -- the standard way of handling a group disordered across a special position (e.g. a solvent molecule sitting on an inversion centre) without it bonding to its own symmetry mate. <b>Shift+Ctrl+Alt+click</b> selects every currently-displayed atom sharing the clicked atom's PART number (a second click on the same part deselects them) -- only available for a PART-tagged, .res/.ins-derived structure; it does nothing on a CIF-loaded one, which has no PART numbers to select by.</p>" +
       "<h3>CIF and symmetry (Symmetry panel)</h3>" +
       "<p>Dropping a CIF reads the unit cell, the symmetry operators (from the file's own symmetry loop), and the asymmetric unit, then displays just the asymmetric unit -- not a complete molecule -- as the starting point. If the file actually contains more atoms than the true asymmetric unit (Mercury sometimes exports a whole completed molecule this way), the extra symmetry-equivalent copies are automatically detected and removed first, so what's displayed is always just the independent set. An atom sitting exactly on a special position (a mirror plane, an inversion centre, a rotation axis) is never duplicated when a symmetry operation maps it onto itself or onto another copy already present -- this is handled automatically throughout, not something to manage by hand.</p>" +
@@ -17452,7 +17907,7 @@ select.sel:focus{border-color:var(--accent)}
        so a mid-session project load overwriting state.videoFormat later is
        unaffected by this. */
     state.videoFormat = (await isMp4EncoderCached()) ? "mp4" : "avi";
-    initThree(document.getElementById("viewport")); buildUI(); buildElementsPage(); buildGuide(); wireIO(); buildGuestGroupsUI(); refreshBondCleanupElements();
+    initThree(document.getElementById("viewport")); buildUI(); buildElementsPage(); buildGuide(); wireIO(); buildGuestGroupsUI(); refreshBondCleanupElements(); initFavoriteColorSwatches();
     window.__dbg = { state: state, voidCellBundle: voidCellBundle, voidLatticeVectors: voidLatticeVectors, K: K, VoidNet: VoidNet, buildCellModeAtoms: buildCellModeAtoms, mergeDuplicateComponents: mergeDuplicateComponents, runVoidCalculate: runVoidCalculate };
     syncNoAtomsOverlay(); /* nothing loaded yet -- show "No atoms to display" until a structure loads (renderStructure() keeps this in sync from here on) */
     setCameraMode(state.cameraMode); updateFog();
