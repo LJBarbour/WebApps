@@ -2673,7 +2673,18 @@ select.sel:focus{border-color:var(--accent)}
     cifOriginalText: null, cifOriginalLabel: null,
     /* ---- void/channel analysis (ported from VoidChannelLab, see CLAUDE.md-
        style history in that project) ---- */
-    voidMode: "cell", probeRadius: 1.5, voidQuality: 0.2, voidSurfaceOpacity: 1, voidAutoAssemble: true, voidAccurateVolumes: false,
+    voidMode: "cell", probeRadius: 1.5, voidQuality: 0.2, voidAutoAssemble: true, voidAccurateVolumes: false,
+    /* Off by default -- Calculate always clears any previous void/channel
+       results first, exactly as before this existed. Checked, Calculate
+       instead ADDS the newly found regions to whatever's already there --
+       e.g. running Calculate again at a different probe radius to compare
+       both results together -- without touching the earlier batch's own
+       colours, fragment moves, consolidation, or visibility. A per-project
+       setting (saved/restored with the rest of the void/channel settings
+       below), same class as voidAutoAssemble/voidAccurateVolumes, not a
+       durable app-wide preference. See runVoidCalculate's own comment for
+       how component ids stay collision-free across repeated additive runs. */
+    voidCalculateAdditive: false,
     voidCalculating: false, voidAbortRequested: false,
     voidNetwork: null, voidComponents: [], voidVisible: {}, _voidRestoredMeshById: {},
     voidFragments: {}, voidFragmentVisible: {}, voidFragmentMove: {}, voidChannelCopies: [],
@@ -2706,6 +2717,19 @@ select.sel:focus{border-color:var(--accent)}
     voidFragGroupOpen: {}, voidComponentColors: {}, voidInstanceColors: {},
     voidColorLinkAllVoids: false, voidLinkedColorVoids: { outer: null, inner: null },
     voidColorLinkAllChannels: false, voidLinkedColorChannels: { outer: null, inner: null },
+    /* Opacity mirrors the colour scheme above -- voidComponentOpacity is a
+       seed, voidInstanceOpacity (keyed exactly like voidInstanceColors) is
+       what's actually shown for a given instance, and voidOpacityLinkAllVoids/
+       Channels are the "Same opacity for all" override, each with its own
+       linked value -- see voidOpacitySettingFor()'s own comment. Unlike the
+       colour link (default OFF, since every void/channel starting the same
+       colour isn't a sensible default), opacity link defaults ON at 1.0 for
+       both types: that's just the plain old single "surface opacity" control
+       this replaced, unchanged as a first impression, until a user actually
+       reaches for per-instance control. */
+    voidComponentOpacity: {}, voidInstanceOpacity: {},
+    voidOpacityLinkAllVoids: true, voidLinkedOpacityVoids: 1,
+    voidOpacityLinkAllChannels: true, voidLinkedOpacityChannels: 1,
     voidConsolidated: {}, voidMergedGeometry: {},
     /* ---- molecular surface: a plain solvent-accessible "blob" over
        whatever atoms are currently selected, no topology/volume/enclosure
@@ -4304,6 +4328,7 @@ select.sel:focus{border-color:var(--accent)}
           camOrient.copy(savedOrient).multiply(new THREE.Quaternion().setFromAxisAngle(axisVec, dir * 2 * Math.PI * ft));
           camOrient.normalize();
           applyController();
+          updateVoidMeshRenderOrder(); /* this loop renders directly, bypassing animate()'s own per-frame call -- see updateVoidMeshRenderOrder's comment */
           renderer.render(scene, activeCam);
           /* force the GPU to actually finish this render before reading the
              canvas back -- createImageBitmap() right after render() is
@@ -5123,6 +5148,7 @@ select.sel:focus{border-color:var(--accent)}
     } else {
       autoRotateLastT = null;
     }
+    updateVoidMeshRenderOrder(); /* camera may have moved since the last frame -- see its own comment on why this has to be live, not just recomputed at Calculate/render-rebuild time */
     if (!state.videoExporting) renderer.render(scene, activeCam);
   }
 
@@ -8201,7 +8227,14 @@ select.sel:focus{border-color:var(--accent)}
     };
   }
   function computeVoidVolumes(components, cellBundle, probeRadius, paddedAtoms) {
-    state._voidSweptGrids = {};
+    /* NOT an unconditional state._voidSweptGrids = {} here -- see this
+       function's own note by voidCalculateAdditive/rebuildVoidSweptGridsForRender:
+       a plain (non-additive) Calculate already gets a full wipe from
+       clearVoidResultsSilent() before this ever runs, and an ADDITIVE one
+       must NOT lose the grids of whatever components it's being added to,
+       or those components silently stop being able to render/save/reload
+       correctly even though they're still sitting in state.voidComponents. */
+    state._voidSweptGrids = state._voidSweptGrids || {};
     for (var ci = 0; ci < components.length; ci++) {
       var comp = components[ci];
       var region = voidComponentRegion(comp, cellBundle, probeRadius);
@@ -8213,6 +8246,13 @@ select.sel:focus{border-color:var(--accent)}
       comp.volume = voidTotalVolumeFromGrid(grid, probeRadius, comp.type === "channel" ? cellBundle : null, shifts);
       comp.volumeSE = null;
       comp.gridStepUsed = grid.h;
+      /* This component's OWN probe radius, persisted on the component object
+         itself (survives save/load exactly like gridStepUsed does, with zero
+         new save-format work) -- see the twenty-sixth round's note on why a
+         single shared state.probeRadius can no longer stand in for this once
+         Additive Calculate lets components with DIFFERENT probe radii coexist
+         in the same state.voidComponents list. */
+      comp.probeRadius = probeRadius;
       state._voidSweptGrids[comp.id] = grid;
     }
   }
@@ -8225,11 +8265,21 @@ select.sel:focus{border-color:var(--accent)}
      that was on screen when the project was saved. Consolidated components
      render from their own persisted voidMergedGeometry instead and need no
      grid at all. */
-  function rebuildVoidSweptGridsForRender(components, cellBundle, probeRadius, paddedAtoms) {
+  function rebuildVoidSweptGridsForRender(components, cellBundle, fallbackProbeRadius, paddedAtoms) {
     state._voidSweptGrids = {};
     for (var ci = 0; ci < components.length; ci++) {
       var comp = components[ci];
       if (state.voidConsolidated[comp.id]) continue;
+      /* Each component's OWN probe radius (see computeVoidVolumes' comment)
+         if it has one -- only missing for a project saved before Additive
+         Calculate existed, when a single probe radius really did apply to
+         every component, so falling back to the caller's (state.probeRadius,
+         restored from the save) is exactly right for THAT case. Using the
+         caller's single value for EVERY component regardless, the way this
+         used to work, is what silently corrupted (or emptied) any component
+         computed at a different probe radius than whatever was active most
+         recently -- see the twenty-sixth round. */
+      var probeRadius = (comp.probeRadius != null) ? comp.probeRadius : fallbackProbeRadius;
       var region = voidComponentRegion(comp, cellBundle, probeRadius);
       var regionMin = region.regionMin, regionMax = region.regionMax;
       var atomHash = buildAtomHash(voidNearbyAtoms(paddedAtoms, regionMin, regionMax, 6.0), 3.5);
@@ -8318,7 +8368,10 @@ select.sel:focus{border-color:var(--accent)}
      likely differing in atomic radii or exact surface convention), which
      no amount of extrapolating THIS method's own grid error can close. */
   async function computeVoidVolumesAccurate(components, cellBundle, probeRadius, paddedAtoms, onProgress, isAborted) {
-    state._voidSweptGrids = {};
+    /* see computeVoidVolumes' own comment on why this can't be an
+       unconditional wipe -- additive mode needs to keep whatever grids
+       already exist for components NOT in this batch. */
+    state._voidSweptGrids = state._voidSweptGrids || {};
     var totalWork = Math.max(1, components.length * VOID_ACCURATE_H_LEVELS.length * VOID_ACCURATE_JITTER), done = 0;
     for (var ci = 0; ci < components.length; ci++) {
       var comp = components[ci];
@@ -8385,6 +8438,7 @@ select.sel:focus{border-color:var(--accent)}
       comp.volumeSE = fit[1];
       comp.gridStepUsed = pts[pts.length - 1][0];
       comp.volumePoints = pts;
+      comp.probeRadius = probeRadius; /* see computeVoidVolumes' own comment */
       state._voidSweptGrids[comp.id] = grid; /* finest level -- used for the rendered isosurface */
     }
   }
@@ -8501,6 +8555,51 @@ select.sel:focus{border-color:var(--accent)}
     wrap.appendChild(outerSw); wrap.appendChild(innerSw);
     return wrap;
   }
+  /* Opacity priority mirrors voidColorSettingFor exactly, just as a single
+     plain number (0.15-1.0) instead of an outer/inner pair: the relevant
+     "Same opacity for all voids/channels" link if that type is linked, else
+     this exact instance's own opacity if it has one, else the component-
+     level seed, else fully opaque (1). */
+  function voidOpacitySettingFor(compId, instanceKey) {
+    var isChannel = voidCompIsChannel(compId);
+    if (isChannel ? state.voidOpacityLinkAllChannels : state.voidOpacityLinkAllVoids) {
+      return isChannel ? state.voidLinkedOpacityChannels : state.voidLinkedOpacityVoids;
+    }
+    if (instanceKey && state.voidInstanceOpacity[instanceKey] != null) return state.voidInstanceOpacity[instanceKey];
+    if (state.voidComponentOpacity[compId] != null) return state.voidComponentOpacity[compId];
+    return 1;
+  }
+  function setVoidInstanceOpacityLive(compId, instanceKey, value) {
+    var isChannel = voidCompIsChannel(compId);
+    if (isChannel ? state.voidOpacityLinkAllChannels : state.voidOpacityLinkAllVoids) {
+      if (isChannel) state.voidLinkedOpacityChannels = value; else state.voidLinkedOpacityVoids = value;
+    } else {
+      state.voidInstanceOpacity[instanceKey] = value;
+    }
+    renderVoidMeshes();
+  }
+  function setVoidOpacityLinkAllForType(isChannel, v) {
+    if (isChannel) state.voidOpacityLinkAllChannels = v; else state.voidOpacityLinkAllVoids = v;
+    renderVoidMeshes();
+    buildVoidOpacityLinkRow();
+    buildVoidFragmentsPanel();
+  }
+  /* The Fragments-panel per-instance opacity control -- a bare number input,
+     no room for a label next to the colour swatches it sits alongside (see
+     the in-app Guide for what it is). 0.15-1.0, matching every other opacity
+     control in this app (see the old single "surface opacity" slider this
+     replaced). */
+  function voidInstanceOpacityInput(compId, instanceKey) {
+    var inp = document.createElement("input"); inp.type = "number"; inp.className = "num";
+    inp.min = 0.15; inp.max = 1; inp.step = 0.01; inp.value = voidOpacitySettingFor(compId, instanceKey).toFixed(2);
+    inp.addEventListener("click", function (e) { e.stopPropagation(); });
+    inp.addEventListener("input", function () {
+      var v = parseFloat(inp.value);
+      if (isFinite(v)) setVoidInstanceOpacityLive(compId, instanceKey, Math.max(0.15, Math.min(1, v)));
+    });
+    inp.addEventListener("change", function () { inp.value = voidOpacitySettingFor(compId, instanceKey).toFixed(2); });
+    return inp;
+  }
 
   /* ---------------- void/channel analysis: rendering ----------------
    * Ported near-verbatim from VoidChannelLab's renderVoidMeshes(). Populates
@@ -8531,6 +8630,117 @@ select.sel:focus{border-color:var(--accent)}
     return { a: state.cifCell.a, b: state.cifCell.b, c: state.cifCell.c, M: state.cifFracToCart };
   }
   function clearVoidMeshes() { clearGroup(voidGroup); voidMeshes = {}; }
+  /* Fixes a real transparency-sorting bug: renderVoidMeshes() gives EVERY
+     instance's BackSide mesh a fixed renderOrder of 0 and its FrontSide mesh
+     a fixed renderOrder of 1 -- correct on its own for a single isolated
+     void/channel (its own inner colour always draws before its own outer
+     one, so the translucent shell composites the same way regardless of
+     view angle), but wrong the moment two DIFFERENT components' shells
+     overlap in depth (e.g. a void sitting inside a channel wall, or two
+     nested channels): every back mesh across the WHOLE scene shares
+     renderOrder 0 and every front mesh shares renderOrder 1, so Three.js
+     draws "every shell's inside" before "every shell's outside" as two
+     fixed blocks, regardless of which shell is actually nearer the camera
+     -- exactly backwards for a nested pair whose outer shell should occlude
+     the inner one from some angles. Within each of those two same-
+     renderOrder blocks Three.js DOES still sort by camera distance, and
+     that partial, angle-dependent reordering happening on ONE side of a
+     hard block boundary that never itself moves is what produced the
+     reported "parts trade places with only a slight rotation" symptom.
+     First attempt (kept as a lesson, not the final design): re-derive EVERY
+     individual instance's own renderOrder from its own bounding-sphere
+     distance, globally, ignoring which component it belongs to. This fixed
+     the nested-component case but broke a DIFFERENT, more common one: a
+     single periodic channel is typically drawn as several adjacent
+     "completion" copies (voidActiveCompletionAxes/voidCompletionShifts)
+     tiling across neighbouring cells to look continuous -- long, elongated
+     pieces whose own extent can be comparable to the gaps between them, so
+     collapsing each one to a single bounding-sphere centre for a GLOBAL sort
+     doesn't correctly interleave overlapping SEGMENTS of what is really one
+     continuous tube. Verified directly: with only global per-instance
+     sorting, a real multi-copy channel (0_0001_project_2.zip) showed an
+     obvious, sharp-edged wrong-colour patch at a unit cell face that simply
+     wasn't there under the OLD fixed scheme -- confirmed by toggling the
+     fix on/off at the identical camera angle. The old scheme evidently
+     relied on ALL of one component's copies keeping their backs together
+     and fronts together (its own "every shell's inside, then every shell's
+     outside" grouping is fine WITHIN one multi-copy component, since those
+     copies are really one shape) -- it only broke down ACROSS components.
+     Final fix: sort by component (compId) group distance for cross-
+     component ordering (solves the original nested-component bug), but
+     preserve the old back-tier/front-tier grouping WITHIN one component's
+     own copies (avoids the new regression above) -- each component group
+     gets two consecutive renderOrder slots, one for every back mesh among
+     ALL its copies, the next for every front mesh among all its copies;
+     Three.js's own same-renderOrder distance sort still correctly orders
+     multiple instances within each of those two slots. voidGroup.children
+     is always exactly a sequence of (back, front) pairs, one pair per
+     placeInstance call -- see place()'s own back-to-back voidGroup.add()
+     calls, the only place anything is ever added to this group. */
+  function voidMeshWorldCenter(m) {
+    /* mesh.position alone is NOT the geometry's actual world location for
+       this group -- it's just voidOff (the same shared centroid offset
+       every void/channel mesh gets) plus, for a manually moved/copied
+       fragment, that fragment's own move/shift on top -- while the real
+       shape sits wherever its own vertex data (baked in absolute Cartesian
+       coordinates by the void calculation itself) places it, which can
+       differ hugely between two components even when their .position is
+       identical (the common case: two never-moved fragments both sit at
+       plain voidOff). Has to be the geometry's own bounding-sphere centre,
+       transformed by the mesh's translation, not the translation alone --
+       no rotation/scale is ever applied to a void mesh, so plain addition
+       is exact here, not an approximation. */
+    if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
+    var c = m.geometry.boundingSphere.center;
+    return { x: m.position.x + c.x, y: m.position.y + c.y, z: m.position.z + c.z };
+  }
+  function updateVoidMeshRenderOrder() {
+    if (typeof voidGroup === "undefined" || !voidGroup || voidGroup.children.length < 2) return;
+    var children = voidGroup.children;
+    var camPos = activeCam.position;
+    var groupsById = {}, groupOrder = [];
+    for (var i = 0; i + 1 < children.length; i += 2) {
+      var back = children[i], front = children[i + 1];
+      var w = voidMeshWorldCenter(back);
+      var dx = w.x - camPos.x, dy = w.y - camPos.y, dz = w.z - camPos.z;
+      var distSq = dx * dx + dy * dy + dz * dz;
+      var compId = back.userData.compId;
+      var g = groupsById[compId];
+      if (!g) { g = { pairs: [], sumDistSq: 0 }; groupsById[compId] = g; groupOrder.push(g); }
+      g.pairs.push({ back: back, front: front });
+      g.sumDistSq += distSq;
+    }
+    groupOrder.sort(function (a, b) { return (b.sumDistSq / b.pairs.length) - (a.sumDistSq / a.pairs.length); }); /* farthest component (by its own copies' average distance) drawn first */
+    var order = 0;
+    for (var gi = 0; gi < groupOrder.length; gi++) {
+      var pairs = groupOrder[gi].pairs;
+      /* every copy's FRONT first, then every copy's BACK (one shared
+         renderOrder each -- Three.js still sorts same-renderOrder objects
+         by their own distance, so multiple copies of this one component
+         remain correctly ordered among themselves). FRONT before BACK, not
+         the other way round, because of this app's own isosurface winding:
+         for any ray that crosses a void/channel wall twice (looking straight
+         through it), the NEAR crossing is always the BackSide-culled mesh
+         and the FAR crossing is always the FrontSide-culled one -- confirmed
+         directly (2026-09-16) by tinting FrontSide magenta/BackSide cyan and
+         reading back actual rendered pixels. With transparency on
+         (depthWrite off, so draw order alone decides the blend), the
+         farther layer has to paint FIRST and the nearer layer SECOND/on top,
+         or the far/inner colour ends up dominating a translucent surface
+         everywhere the view looks through both walls -- exactly the bug
+         reported after the twenty-third round's outer/inner colour fix.
+         Verified with a direct WebGL readPixels comparison at fixed screen
+         coordinates AND visually, on both a fresh DIANIN.cif void (red
+         outer/green inner, red dominant with only faint green through the
+         surface at 0.5 opacity) and the user's own periodic channel project
+         (bronze outer dominant at both 0.5 and 0.95 opacity, previously
+         solid khaki/inner at both). */
+      for (var p2 = 0; p2 < pairs.length; p2++) pairs[p2].front.renderOrder = order;
+      order++;
+      for (var p1 = 0; p1 < pairs.length; p1++) pairs[p1].back.renderOrder = order;
+      order++;
+    }
+  }
   function setVoidComponentVisible(id, vis) {
     state.voidVisible[id] = vis;
     if (voidMeshes[id]) voidMeshes[id].forEach(function (m) { m.visible = vis; });
@@ -8613,7 +8823,14 @@ select.sel:focus{border-color:var(--accent)}
           var ghx = grid.hx || grid.h, ghy = grid.hy || grid.h, ghz = grid.hz || grid.h;
           var boxMax = [boxMin[0] + (grid.nx - 1) * ghx, boxMin[1] + (grid.ny - 1) * ghy, boxMin[2] + (grid.nz - 1) * ghz];
           try {
-            iso = IsoSurface.extract(field, boxMin, boxMax, { hx: ghx, hy: ghy, hz: ghz }, state.probeRadius);
+            /* comp's OWN probe radius (see computeVoidVolumes), not the
+               single global state.probeRadius, which can differ from what
+               THIS grid was actually built with -- either the input has
+               since been edited without recalculating, or (Additive
+               Calculate) this component's own batch used a different radius
+               than whatever batch is most recently active. */
+            var extractProbeRadius = (comp.probeRadius != null) ? comp.probeRadius : state.probeRadius;
+            iso = IsoSurface.extract(field, boxMin, boxMax, { hx: ghx, hy: ghy, hz: ghz }, extractProbeRadius);
           } catch (e) { console.error("isosurface failed for void component " + comp.id, e); continue; }
           if (!state._voidIsoCache) state._voidIsoCache = {};
           state._voidIsoCache[comp.id] = { grid: grid, iso: iso };
@@ -8624,7 +8841,6 @@ select.sel:focus{border-color:var(--accent)}
         geo.setAttribute("normal", new THREE.Float32BufferAttribute(iso.normals, 3));
         geo.setIndex(iso.indices);
       }
-      var isTransparent = state.voidSurfaceOpacity < 0.99;
       function instanceColors(fragKey, copyId) {
         /* Move/Copy tints every surface blue/selected-yellow -- there's no
            live colour to preserve there, just a position to move/copy, so a
@@ -8637,25 +8853,29 @@ select.sel:focus{border-color:var(--accent)}
            current colour -- so a colour change is always judged directly on
            the real surface, and selection stays legible for both voids and
            channels precisely because it's the ONLY thing that still looks
-           like a real colour at all. */
-        if (state.voidUiMode === "move" || state.voidUiMode === "copy") {
-          var isSel = state.voidUiMode === "move" ? !!state.voidSelectedFragments[fragKey] : !!state.voidSelectedChannels[voidInstanceKey(comp.id, copyId)];
-          var c = isSel ? VOID_SELECT_COLOR_ACTIVE : VOID_SELECT_COLOR_INACTIVE;
-          return { outer: c, inner: c };
-        }
+           like a real colour at all. Opacity is a physical property, not a
+           selection indicator, so it's always this instance's own resolved
+           value (voidOpacitySettingFor) regardless of UI mode. */
         var instanceKey = voidInstanceKey(comp.id, copyId);
-        if (state.voidUiMode === "recolour") {
-          if (!state.voidSelectedChannels[instanceKey]) return { outer: VOID_RECOLOUR_UNSELECTED_COLOR, inner: VOID_RECOLOUR_UNSELECTED_COLOR };
-          if (state.voidRecolourPending) return { outer: cssToHex(state.voidRecolourPending.outer), inner: cssToHex(state.voidRecolourPending.inner) };
+        var opacity = voidOpacitySettingFor(comp.id, instanceKey);
+        if (state.voidUiMode === "move" || state.voidUiMode === "copy") {
+          var isSel = state.voidUiMode === "move" ? !!state.voidSelectedFragments[fragKey] : !!state.voidSelectedChannels[instanceKey];
+          var c = isSel ? VOID_SELECT_COLOR_ACTIVE : VOID_SELECT_COLOR_INACTIVE;
+          return { outer: c, inner: c, opacity: opacity };
         }
-        return { outer: outerColorForVoid(comp.id, instanceKey), inner: innerColorForVoid(comp.id, instanceKey) };
+        if (state.voidUiMode === "recolour") {
+          if (!state.voidSelectedChannels[instanceKey]) return { outer: VOID_RECOLOUR_UNSELECTED_COLOR, inner: VOID_RECOLOUR_UNSELECTED_COLOR, opacity: opacity };
+          if (state.voidRecolourPending) return { outer: cssToHex(state.voidRecolourPending.outer), inner: cssToHex(state.voidRecolourPending.inner), opacity: opacity };
+        }
+        return { outer: outerColorForVoid(comp.id, instanceKey), inner: innerColorForVoid(comp.id, instanceKey), opacity: opacity };
       }
-      function makeMat(side, color) {
+      function makeMat(side, color, opacity) {
         var applyMat = state.materialApplyVoid;
+        var isTransparent = opacity < 0.999;
         return new THREE.MeshStandardMaterial({
           color: color, roughness: applyMat ? state.atomRoughness : 0.35, metalness: applyMat ? state.atomMetalness : 0.0,
           envMapIntensity: applyMat ? state.atomReflectivity : 1.0,
-          transparent: isTransparent, opacity: state.voidSurfaceOpacity,
+          transparent: isTransparent, opacity: opacity,
           depthWrite: !isTransparent, side: side
         });
       }
@@ -8663,8 +8883,8 @@ select.sel:focus{border-color:var(--accent)}
       var compVisible = !!state.voidVisible[comp.id];
       var idxAx = { a: 0, b: 1, c: 2 };
       var activeAxes = consolidated ? [] : (comp.periodicityAxes || []).concat(voidActiveCompletionAxes(comp, cellBundle));
-      function makeInstanceMat(side, clipPlanes, color) {
-        var m = makeMat(side, color);
+      function makeInstanceMat(side, clipPlanes, color, opacity) {
+        var m = makeMat(side, color, opacity);
         if (clipPlanes) m.clippingPlanes = clipPlanes;
         /* Display > Clipping Plane's own setGroupClipPlanes() re-touches
            material.clippingPlanes on every redraw (see its own comment) --
@@ -8686,8 +8906,31 @@ select.sel:focus{border-color:var(--accent)}
           m.userData = { compId: comp.id, fragKey: fragKey, copyId: copyId || null, selectable: true, activeAxes: activeAxes, shiftMap: shiftMap };
           voidGroup.add(m); parts.push(m);
         }
-        var back = new THREE.Mesh(useGeo, makeInstanceMat(THREE.BackSide, clipPlanes, colors.outer)); back.renderOrder = 0;
-        var front = new THREE.Mesh(useGeo, makeInstanceMat(THREE.FrontSide, clipPlanes, colors.inner)); front.renderOrder = 1;
+        /* outer/inner <-> BackSide/FrontSide, resolved for real 2026-09-16:
+           the earlier same-day "fix" (wiring outer to FrontSide on the
+           theory that these isosurface normals point outward, so FrontSide
+           is what an ordinary external view shows) was itself backwards.
+           Verified directly, twice, by tinting FrontSide meshes magenta and
+           BackSide meshes cyan and screenshotting: a fresh DIANIN.cif
+           Calculate AND the user's own real project
+           (0_0001_project_2.zip's channel) both show BackSide (cyan)
+           overwhelmingly dominant from any ordinary external viewing angle,
+           with FrontSide (magenta) only in small folded-back patches -- the
+           exact opposite of that fix's assumption. So BackSide is what a
+           normal external view actually shows here, and outer belongs on
+           BackSide, inner on FrontSide. Existing saved projects' outer/inner
+           colour CHOICES are untouched by this -- only which one ends up
+           visually dominant changes, back to matching what the label always
+           promised. */
+        /* Initial renderOrder here only matters for the first frame --
+           updateVoidMeshRenderOrder() (see its own comment) reassigns both
+           every frame based on camera distance, and always puts FRONT
+           before BACK for the same reason: BackSide is the near/outer
+           crossing here, FrontSide the far/inner one, so front has to paint
+           first for correct transparent blending. Matched here so there's
+           no one-frame flash of the wrong order before that first update. */
+        var back = new THREE.Mesh(useGeo, makeInstanceMat(THREE.BackSide, clipPlanes, colors.outer, colors.opacity)); back.renderOrder = 1;
+        var front = new THREE.Mesh(useGeo, makeInstanceMat(THREE.FrontSide, clipPlanes, colors.inner, colors.opacity)); front.renderOrder = 0;
         place(back); place(front);
       }
       var myCopies = state.voidChannelCopies.filter(function (cp) { return cp.compId === comp.id; });
@@ -8835,6 +9078,47 @@ select.sel:focus{border-color:var(--accent)}
     oneRow(false, "Same colours for all voids");
     oneRow(true, "Same colours for all channels");
   }
+  /* Mirrors buildVoidColorLinkRow exactly, but for opacity -- checkbox plus
+     (only while checked, same as the colour link's swatch pair) a number +
+     slider pair bound to the linked value for that type. Unlike colour link,
+     this one defaults to checked/1.0 for both types (see the state comment),
+     so on a brand-new project this looks and behaves exactly like the old
+     single "surface opacity" control it replaced. */
+  function buildVoidOpacityLinkRow() {
+    var row = document.getElementById("voidOpacityLinkRow");
+    if (!row) return;
+    row.innerHTML = "";
+    function oneRow(isChannel, label) {
+      var linkRow = el("div", "ctl"); linkRow.style.margin = "4px 0";
+      var top = el("div", "ctl-top");
+      var linkLbl = el("label", "toggle");
+      var linkChk = document.createElement("input"); linkChk.type = "checkbox";
+      linkChk.checked = isChannel ? state.voidOpacityLinkAllChannels : state.voidOpacityLinkAllVoids;
+      linkChk.addEventListener("change", function () { setVoidOpacityLinkAllForType(isChannel, linkChk.checked); });
+      linkLbl.appendChild(linkChk); linkLbl.appendChild(el("span", null, label));
+      top.appendChild(linkLbl);
+      if (linkChk.checked) {
+        var val = isChannel ? state.voidLinkedOpacityChannels : state.voidLinkedOpacityVoids;
+        var num = document.createElement("input"); num.type = "number"; num.className = "num";
+        num.min = 0.15; num.max = 1; num.step = 0.01; num.value = val.toFixed(2);
+        var rng = document.createElement("input"); rng.type = "range";
+        rng.min = 0.15; rng.max = 1; rng.step = 0.01; rng.value = val;
+        function apply(v) {
+          if (isChannel) state.voidLinkedOpacityChannels = v; else state.voidLinkedOpacityVoids = v;
+          renderVoidMeshes();
+        }
+        num.addEventListener("input", function () { var v = parseFloat(num.value); if (isFinite(v)) { rng.value = v; apply(v); } });
+        rng.addEventListener("input", function () { num.value = rng.value; apply(parseFloat(rng.value)); });
+        top.appendChild(num);
+        linkRow.appendChild(top); linkRow.appendChild(rng);
+      } else {
+        linkRow.appendChild(top);
+      }
+      row.appendChild(linkRow);
+    }
+    oneRow(false, "Same opacity for all voids");
+    oneRow(true, "Same opacity for all channels");
+  }
   function deleteVoidComponent(compId) {
     state.voidComponents = state.voidComponents.filter(function (c) { return c.id !== compId; });
     delete state.voidVisible[compId];
@@ -8843,9 +9127,10 @@ select.sel:focus{border-color:var(--accent)}
     state.voidChannelCopies = state.voidChannelCopies.filter(function (c) { return c.compId !== compId; });
     Object.keys(state.voidSelectedChannels).forEach(function (k) { if (state.voidSelectedChannels[k].compId === compId) delete state.voidSelectedChannels[k]; });
     delete state.voidConsolidated[compId]; delete state.voidMergedGeometry[compId];
-    delete state.voidComponentColors[compId]; delete state.voidFragGroupOpen[compId];
+    delete state.voidComponentColors[compId]; delete state.voidComponentOpacity[compId]; delete state.voidFragGroupOpen[compId];
     var instPrefix = compId + ":";
     Object.keys(state.voidInstanceColors).forEach(function (k) { if (k.indexOf(instPrefix) === 0) delete state.voidInstanceColors[k]; });
+    Object.keys(state.voidInstanceOpacity).forEach(function (k) { if (k.indexOf(instPrefix) === 0) delete state.voidInstanceOpacity[k]; });
     renderVoidMeshes();
     buildVoidResultsTable();
     buildVoidFragmentsPanel();
@@ -8872,7 +9157,7 @@ select.sel:focus{border-color:var(--accent)}
     var removed = state.voidChannelCopies.filter(function (c) { return c.id === copyId; })[0];
     state.voidChannelCopies = state.voidChannelCopies.filter(function (c) { return c.id !== copyId; });
     Object.keys(state.voidSelectedChannels).forEach(function (k) { if (state.voidSelectedChannels[k].copyId === copyId) delete state.voidSelectedChannels[k]; });
-    if (removed) delete state.voidInstanceColors[voidInstanceKey(removed.compId, copyId)];
+    if (removed) { delete state.voidInstanceColors[voidInstanceKey(removed.compId, copyId)]; delete state.voidInstanceOpacity[voidInstanceKey(removed.compId, copyId)]; }
     renderVoidMeshes();
     buildVoidFragmentsPanel();
   }
@@ -8931,10 +9216,12 @@ select.sel:focus{border-color:var(--accent)}
              source afterwards never retroactively changes a copy already
              made from it. */
           var srcKey = voidInstanceKey(sel.compId, sel.copyId);
-          state.voidInstanceColors[voidInstanceKey(sel.compId, resultCopyId)] = {
+          var newInstKey = voidInstanceKey(sel.compId, resultCopyId);
+          state.voidInstanceColors[newInstKey] = {
             outer: hexToCss(outerColorForVoid(sel.compId, srcKey)),
             inner: hexToCss(innerColorForVoid(sel.compId, srcKey))
           };
+          state.voidInstanceOpacity[newInstKey] = voidOpacitySettingFor(sel.compId, srcKey);
         }
       }
       var newKey = sel.compId + ":" + (resultCopyId || "orig");
@@ -9371,7 +9658,8 @@ select.sel:focus{border-color:var(--accent)}
     }
     var cleaned = voidDropSmallIslands(allPos, allNorm, allIdx, VOID_ISLAND_DROP_FRACTION);
     if (cleaned.droppedTriCount) {
-      var dropMsg = voidCompLabel(compId) + ": dropped " + cleaned.droppedTriCount + " small disconnected surface triangle(s) that never joined the main piece (probe radius " + state.probeRadius.toFixed(2) + " " + U.ang + " may be right at the edge of closing a narrow neck there).";
+      var dropProbeRadius = (comp && comp.probeRadius != null) ? comp.probeRadius : state.probeRadius;
+      var dropMsg = voidCompLabel(compId) + ": dropped " + cleaned.droppedTriCount + " small disconnected surface triangle(s) that never joined the main piece (probe radius " + dropProbeRadius.toFixed(2) + " " + U.ang + " may be right at the edge of closing a narrow neck there).";
       state._voidLastWarnings = (state._voidLastWarnings || []).concat([dropMsg]);
       setStatus(dropMsg, false);
     }
@@ -9658,12 +9946,34 @@ select.sel:focus{border-color:var(--accent)}
     }
     var outerSw = colorSwatch(initOuter, function (hex) { pendingOuter = hexToCss(hex); updatePending(); });
     var innerSw = colorSwatch(initInner, function (hex) { pendingInner = hexToCss(hex); updatePending(); });
+    /* Opacity here is apply-on-click only, unlike the two swatches above --
+       no live preview while dragging, just a plain checkbox + number read at
+       the moment "Set colours" is pressed. Unchecked by default every time
+       this panel rebuilds (not persisted like "Clear selection" is): it's a
+       one-off "also touch opacity this time" decision, not a standing
+       preference. */
+    var opacityLbl = el("label", "toggle");
+    var opacityChk = document.createElement("input"); opacityChk.type = "checkbox";
+    var opacityNum = document.createElement("input"); opacityNum.type = "number"; opacityNum.className = "num";
+    opacityNum.min = 0.15; opacityNum.max = 1; opacityNum.step = 0.01;
+    opacityNum.value = (firstCompId != null ? voidOpacitySettingFor(firstCompId, firstKey) : 1).toFixed(2);
+    opacityLbl.appendChild(opacityChk); opacityLbl.appendChild(el("span", null, "Opacity"));
     setColoursBtn.addEventListener("click", function () {
       recolourKeys.forEach(function (key) {
         var compId = parseInt(key.split(":")[0], 10);
         setVoidInstanceColorLive(compId, key, "outer", pendingOuter);
         setVoidInstanceColorLive(compId, key, "inner", pendingInner);
       });
+      if (opacityChk.checked) {
+        var v = parseFloat(opacityNum.value);
+        if (isFinite(v)) {
+          var clampedV = Math.max(0.15, Math.min(1, v));
+          recolourKeys.forEach(function (key) {
+            var compId = parseInt(key.split(":")[0], 10);
+            setVoidInstanceOpacityLive(compId, key, clampedV);
+          });
+        }
+      }
       state.voidRecolourPending = null;
       if (state.voidRecolourClearOnApply) state.voidSelectedChannels = {};
       renderVoidMeshes();
@@ -9672,6 +9982,8 @@ select.sel:focus{border-color:var(--accent)}
     setColoursRow.appendChild(setColoursBtn);
     setColoursRow.appendChild(outerSw);
     setColoursRow.appendChild(innerSw);
+    setColoursRow.appendChild(opacityLbl);
+    setColoursRow.appendChild(opacityNum);
     body.appendChild(setColoursRow);
 
     var clearLbl = el("label", "toggle"); clearLbl.style.marginTop = "4px";
@@ -9720,7 +10032,9 @@ select.sel:focus{border-color:var(--accent)}
         consolidateBtn.addEventListener("click", function () { consolidateVoidComponent(compId); });
         grp.body.appendChild(consolidateBtn);
       }
-      var linkedForType = voidCompIsChannel(compId) ? state.voidColorLinkAllChannels : state.voidColorLinkAllVoids;
+      var isChannelComp = voidCompIsChannel(compId);
+      var linkedForType = isChannelComp ? state.voidColorLinkAllChannels : state.voidColorLinkAllVoids;
+      var linkedOpacityForType = isChannelComp ? state.voidOpacityLinkAllChannels : state.voidOpacityLinkAllVoids;
       var origKey = voidInstanceKey(compId, null);
       frags.forEach(function (frag) {
         var row = el("div", "ctl-inline" + (state.voidSelectedFragments[frag.key] ? " selected" : ""));
@@ -9729,6 +10043,7 @@ select.sel:focus{border-color:var(--accent)}
         row.appendChild(chk);
         row.appendChild(el("span", "hint", "frac " + fmtVoidCentroid(frag.centroid)));
         if (!linkedForType) row.appendChild(voidInstanceColorSwatchPair(compId, origKey));
+        if (!linkedOpacityForType) row.appendChild(voidInstanceOpacityInput(compId, origKey));
         grp.body.appendChild(row);
       });
       state.voidChannelCopies.filter(function (cp) { return cp.compId === compId; }).forEach(function (cp) {
@@ -9739,6 +10054,7 @@ select.sel:focus{border-color:var(--accent)}
         row.appendChild(chk);
         row.appendChild(el("span", "hint", "shift " + fmtVoidVec(cp.shift)));
         if (!linkedForType) row.appendChild(voidInstanceColorSwatchPair(compId, voidInstanceKey(compId, cp.id)));
+        if (!linkedOpacityForType) row.appendChild(voidInstanceOpacityInput(compId, voidInstanceKey(compId, cp.id)));
         var rm = el("button", "btn mini", "×");
         rm.addEventListener("click", function () { removeVoidChannelCopy(cp.id); });
         row.appendChild(rm);
@@ -9881,6 +10197,7 @@ select.sel:focus{border-color:var(--accent)}
     state.voidFragmentMove = {}; state.voidChannelCopies = []; state.voidFragmentVisible = {};
     state.voidUiMode = null; state.voidSelectedFragments = {}; state.voidSelectedChannels = {}; state.voidUiVector = [0, 0, 0];
     state.voidFragGroupOpen = {}; state.voidComponentColors = {}; state.voidInstanceColors = {};
+    state.voidComponentOpacity = {}; state.voidInstanceOpacity = {};
     state.voidConsolidated = {}; state.voidMergedGeometry = {};
   }
   function runVoidCalculate() {
@@ -9902,6 +10219,9 @@ select.sel:focus{border-color:var(--accent)}
     var abortBtn = document.getElementById("calcAbortBtn");
     if (abortBtn) { abortBtn.style.display = "block"; abortBtn.disabled = false; abortBtn.textContent = "Abort calculation"; }
     showOverlay(true, "Calculating void/channel space...");
+    var additive = state.voidCalculateAdditive;
+    if (!additive) clearVoidResultsSilent(); /* the ordinary, non-additive path -- exactly the old behaviour, just moved up front instead of being done implicitly by overwriting state below, so the additive branch can skip it entirely */
+    var priorComponentCount = state.voidComponents.length;
     setTimeout(async function () {
       try {
         var t0 = performance.now();
@@ -9930,12 +10250,42 @@ select.sel:focus{border-color:var(--accent)}
           state._voidPaddedAtoms = rawAtoms;
           state._voidLastWarnings = [];
         }
-        state.voidComponents = components;
-        state._voidRestoredMeshById = {}; /* a fresh calculation always re-extracts from its own grid -- never fall back to a stale mesh restored from a previous project load, whose component ids could collide with these new ones */
-        var prevVisible = state.voidVisible;
-        state.voidVisible = {};
-        components.forEach(function (c) { state.voidVisible[c.id] = prevVisible.hasOwnProperty(c.id) ? prevVisible[c.id] : true; });
-        resetVoidFragmentState();
+        /* Both branches above hand back components with fresh, dense 0-based
+           ids (mergeDuplicateComponents's own final step for cell mode; the
+           explicit forEach right above for grown mode) -- fine as-is for the
+           ordinary replace-everything case, but additive mode needs this
+           batch's ids to sit ABOVE whatever's already in state.voidComponents
+           so they never collide with (and so never get confused for) an
+           earlier batch's own components, fragments, colours, or copies,
+           all of which are keyed by component id. Deriving the next free id
+           from whatever's CURRENTLY loaded -- rather than a separately
+           persisted counter -- means this needs no new save-file field at
+           all: it's correct whether those existing components came from an
+           earlier additive Calculate this session, or were just restored
+           from an old project file saved before this feature existed. */
+        if (additive && state.voidComponents.length) {
+          var baseId = Math.max.apply(null, state.voidComponents.map(function (c) { return c.id; })) + 1;
+          components.forEach(function (c) { c.id += baseId; });
+        }
+        if (additive) {
+          /* Append, and only ever ADD to voidVisible/etc -- an existing
+             component's own colour, fragment moves, consolidation state,
+             and restored-mesh fallback (_voidRestoredMeshById, for a
+             component that came from a project load and hasn't been
+             recalculated live yet) must all survive untouched. Every map
+             below is keyed by component id, and this batch's ids are all
+             freshly unique (see above), so simply not clearing anything
+             and only inserting entries for the NEW ids is sufficient --
+             there's nothing to merge, just nothing to destroy. */
+          state.voidComponents = state.voidComponents.concat(components);
+          components.forEach(function (c) { state.voidVisible[c.id] = true; });
+        } else {
+          state.voidComponents = components;
+          state._voidRestoredMeshById = {}; /* a fresh (non-additive) calculation always re-extracts from its own grid -- never fall back to a stale mesh restored from a previous project load, whose component ids could collide with these new ones */
+          state.voidVisible = {};
+          components.forEach(function (c) { state.voidVisible[c.id] = true; });
+          resetVoidFragmentState();
+        }
         var cellBundleForVol = isCellMode ? voidCellBundle() : null;
         if (state.voidAccurateVolumes) {
           await computeVoidVolumesAccurate(components, cellBundleForVol, state.probeRadius, state._voidPaddedAtoms, function (frac, ci, nComp, hi, nH) {
@@ -9959,7 +10309,8 @@ select.sel:focus{border-color:var(--accent)}
         var warnMsg = state._voidLastWarnings.length ? (" -- " + state._voidLastWarnings.join(" ")) : "";
         var autoNote = state.voidAutoAssemble ? " -- assembled & consolidated" : "";
         var accNote = state.voidAccurateVolumes ? " -- accurate (h→0 extrapolated) volumes" : "";
-        setStatus("Found " + components.length + " void/channel region(s) at probe radius " + state.probeRadius.toFixed(2) + " " + U.ang + " (" + rawAtoms.length + " atoms considered, " + dt.toFixed(0) + " ms)" + accNote + autoNote + warnMsg, !!state._voidLastWarnings.length);
+        var addedNote = (additive && priorComponentCount) ? (" -- added to " + priorComponentCount + " previously calculated region(s), " + state.voidComponents.length + " total") : "";
+        setStatus("Found " + components.length + " void/channel region(s) at probe radius " + state.probeRadius.toFixed(2) + " " + U.ang + " (" + rawAtoms.length + " atoms considered, " + dt.toFixed(0) + " ms)" + accNote + autoNote + addedNote + warnMsg, !!state._voidLastWarnings.length);
         /* A finished calculation is the moment the user actually wants to
            look at results, not still be staring at the input controls or a
            now-stale Fragments list from a previous run -- so surface the
@@ -13923,9 +14274,10 @@ select.sel:focus{border-color:var(--accent)}
     if (!state.multiBlocks || state.multiBlockKind !== "json" || idx < 0 || idx >= state.multiBlocks.length) return;
     state.multiBlockIndex = idx;
     _loadingMultiBlockEntry = true;
-    try { loadModelFromFile(state.multiBlocks[idx].text); }
-    finally { _loadingMultiBlockEntry = false; }
-    syncMultiBlockNavigatorUI();
+    loadModelFromFileShowingOverlay(state.multiBlocks[idx].text, function () {
+      _loadingMultiBlockEntry = false;
+      syncMultiBlockNavigatorUI();
+    });
   }
   function navigateMultiBlockTo(idx) {
     if (state.multiBlockKind === "cif") loadCifBlockAtIndex(idx);
@@ -14435,7 +14787,9 @@ select.sel:focus{border-color:var(--accent)}
         walkPanScale: state.walkPanScale, walkLookSensitivity: state.walkLookSensitivity,
         walkHeadlampOn: state.walkHeadlampOn, walkHeadlampIntensity: state.walkHeadlampIntensity,
         favoriteColors: state.favoriteColors,
-        voidSurfaceOpacity: state.voidSurfaceOpacity, molSurfaceOpacity: state.molSurfaceOpacity,
+        voidOpacityLinkAllVoids: state.voidOpacityLinkAllVoids, voidOpacityLinkAllChannels: state.voidOpacityLinkAllChannels,
+        voidLinkedOpacityVoids: state.voidLinkedOpacityVoids, voidLinkedOpacityChannels: state.voidLinkedOpacityChannels,
+        molSurfaceOpacity: state.molSurfaceOpacity,
         compressModelAsZip: state.compressModelAsZip
         /* clipPlaneEnabled deliberately NOT persisted -- starting a fresh
            session with part of the structure invisible for no visible
@@ -14521,7 +14875,21 @@ select.sel:focus{border-color:var(--accent)}
       if (typeof data.walkHeadlampOn === "boolean") state.walkHeadlampOn = data.walkHeadlampOn;
       if (data.hasOwnProperty("walkHeadlampIntensity")) state.walkHeadlampIntensity = clamp(data.walkHeadlampIntensity, 0.5, 10, state.walkHeadlampIntensity);
       if (Array.isArray(data.favoriteColors)) state.favoriteColors = data.favoriteColors.filter(function (c) { return typeof c === "number" && isFinite(c); }).slice(0, FAV_COLOR_MAX);
-      if (data.hasOwnProperty("voidSurfaceOpacity")) state.voidSurfaceOpacity = clamp(data.voidSurfaceOpacity, 0.15, 1.0, state.voidSurfaceOpacity);
+      /* voidSurfaceOpacity was the old single app-wide opacity preference,
+         before per-type ("Same opacity for all voids/channels") linking
+         existed -- migrate it into both new linked values only when THOSE
+         aren't already present, so an old preferences blob keeps looking
+         the way it always did rather than silently losing the user's own
+         chosen opacity. */
+      var hasNewVoidOpacityPref = data.hasOwnProperty("voidLinkedOpacityVoids") || data.hasOwnProperty("voidLinkedOpacityChannels");
+      if (typeof data.voidOpacityLinkAllVoids === "boolean") state.voidOpacityLinkAllVoids = data.voidOpacityLinkAllVoids;
+      if (typeof data.voidOpacityLinkAllChannels === "boolean") state.voidOpacityLinkAllChannels = data.voidOpacityLinkAllChannels;
+      if (data.hasOwnProperty("voidLinkedOpacityVoids")) state.voidLinkedOpacityVoids = clamp(data.voidLinkedOpacityVoids, 0.15, 1.0, state.voidLinkedOpacityVoids);
+      if (data.hasOwnProperty("voidLinkedOpacityChannels")) state.voidLinkedOpacityChannels = clamp(data.voidLinkedOpacityChannels, 0.15, 1.0, state.voidLinkedOpacityChannels);
+      if (!hasNewVoidOpacityPref && data.hasOwnProperty("voidSurfaceOpacity")) {
+        var migratedVoidOpacity = clamp(data.voidSurfaceOpacity, 0.15, 1.0, 1);
+        state.voidLinkedOpacityVoids = migratedVoidOpacity; state.voidLinkedOpacityChannels = migratedVoidOpacity;
+      }
       if (data.hasOwnProperty("molSurfaceOpacity")) state.molSurfaceOpacity = clamp(data.molSurfaceOpacity, 0.05, 1.0, state.molSurfaceOpacity);
       if (typeof data.compressModelAsZip === "boolean") state.compressModelAsZip = data.compressModelAsZip;
       /* every light effectively off would leave only the fixed 0.6-intensity
@@ -15383,7 +15751,14 @@ select.sel:focus{border-color:var(--accent)}
       var ghx = grid.hx || grid.h, ghy = grid.hy || grid.h, ghz = grid.hz || grid.h;
       var boxMax = [boxMin[0] + (grid.nx - 1) * ghx, boxMin[1] + (grid.ny - 1) * ghy, boxMin[2] + (grid.nz - 1) * ghz];
       var iso;
-      try { iso = IsoSurface.extract(field, boxMin, boxMax, { hx: ghx, hy: ghy, hz: ghz }, state.probeRadius); } catch (e) { return; }
+      /* This component's OWN probe radius (see computeVoidVolumes), not the
+         single global state.probeRadius -- otherwise saving a project with
+         components from more than one probe radius (Additive Calculate)
+         silently extracts the WRONG isosurface for every component except
+         whichever one happens to match whatever's currently in the probe
+         radius input, which for grid THIS was actually built with. */
+      var extractProbeRadius = (comp.probeRadius != null) ? comp.probeRadius : state.probeRadius;
+      try { iso = IsoSurface.extract(field, boxMin, boxMax, { hx: ghx, hy: ghy, hz: ghz }, extractProbeRadius); } catch (e) { return; }
       if (!iso.positions.length) return;
       out[comp.id] = { positions: plainArrayFrom(iso.positions), normals: plainArrayFrom(iso.normals), indices: plainArrayFrom(iso.indices) };
     });
@@ -15423,11 +15798,15 @@ select.sel:focus{border-color:var(--accent)}
       showLabels: state.showLabels, labelSize: state.labelSize, labelColor: state.labelColor,
       labelHalo: state.labelHalo, labelFont: state.labelFont,
       voidMode: state.voidMode, probeRadius: state.probeRadius, voidQuality: state.voidQuality,
-      voidSurfaceOpacity: state.voidSurfaceOpacity, voidAutoAssemble: state.voidAutoAssemble, voidAccurateVolumes: state.voidAccurateVolumes,
+      voidAutoAssemble: state.voidAutoAssemble, voidAccurateVolumes: state.voidAccurateVolumes,
+      voidCalculateAdditive: state.voidCalculateAdditive,
       voidComponents: state.voidComponents, voidVisible: state.voidVisible,
       voidComponentColors: state.voidComponentColors, voidInstanceColors: state.voidInstanceColors,
       voidColorLinkAllVoids: state.voidColorLinkAllVoids, voidLinkedColorVoids: state.voidLinkedColorVoids,
       voidColorLinkAllChannels: state.voidColorLinkAllChannels, voidLinkedColorChannels: state.voidLinkedColorChannels,
+      voidComponentOpacity: state.voidComponentOpacity, voidInstanceOpacity: state.voidInstanceOpacity,
+      voidOpacityLinkAllVoids: state.voidOpacityLinkAllVoids, voidLinkedOpacityVoids: state.voidLinkedOpacityVoids,
+      voidOpacityLinkAllChannels: state.voidOpacityLinkAllChannels, voidLinkedOpacityChannels: state.voidLinkedOpacityChannels,
       voidConsolidated: state.voidConsolidated, voidMergedGeometry: state.voidMergedGeometry,
       voidFragmentMove: state.voidFragmentMove, voidFragmentVisible: state.voidFragmentVisible,
       voidChannelCopies: state.voidChannelCopies, voidFragGroupOpen: state.voidFragGroupOpen,
@@ -15714,17 +16093,37 @@ select.sel:focus{border-color:var(--accent)}
     if (data.voidMode === "grown" || data.voidMode === "cell") state.voidMode = data.voidMode;
     if (typeof data.probeRadius === "number") state.probeRadius = data.probeRadius;
     if (typeof data.voidQuality === "number") state.voidQuality = data.voidQuality;
-    if (typeof data.voidSurfaceOpacity === "number") state.voidSurfaceOpacity = data.voidSurfaceOpacity;
+    /* Same-opacity-for-all-X is restored unconditionally here, alongside
+       probe radius/grid resolution/mode, not inside restoreVoidResultsFromSnapshot
+       -- it was meaningful even with zero results under the old single
+       "surface opacity" control this replaced, and stays that way. Back-
+       compat: an old project only ever has the single voidSurfaceOpacity
+       field, migrated into both new linked values when the new fields
+       aren't present at all. */
+    var hasNewVoidOpacityField = typeof data.voidLinkedOpacityVoids === "number" || typeof data.voidLinkedOpacityChannels === "number";
+    if (typeof data.voidOpacityLinkAllVoids === "boolean") state.voidOpacityLinkAllVoids = data.voidOpacityLinkAllVoids;
+    if (typeof data.voidOpacityLinkAllChannels === "boolean") state.voidOpacityLinkAllChannels = data.voidOpacityLinkAllChannels;
+    if (typeof data.voidLinkedOpacityVoids === "number") state.voidLinkedOpacityVoids = data.voidLinkedOpacityVoids;
+    if (typeof data.voidLinkedOpacityChannels === "number") state.voidLinkedOpacityChannels = data.voidLinkedOpacityChannels;
+    if (!hasNewVoidOpacityField && typeof data.voidSurfaceOpacity === "number") {
+      state.voidLinkedOpacityVoids = data.voidSurfaceOpacity; state.voidLinkedOpacityChannels = data.voidSurfaceOpacity;
+    }
     if (typeof data.voidAutoAssemble === "boolean") state.voidAutoAssemble = data.voidAutoAssemble;
     if (typeof data.voidAccurateVolumes === "boolean") state.voidAccurateVolumes = data.voidAccurateVolumes;
+    /* Absent entirely in a project saved before this setting existed --
+       state already defaults to false (its own Additive checkbox default),
+       so an old file's void/channel components (however many, always a
+       single non-additive batch under the old behaviour) restore exactly
+       as before with no special-casing needed here. */
+    if (typeof data.voidCalculateAdditive === "boolean") state.voidCalculateAdditive = data.voidCalculateAdditive;
     var modeCellR = document.getElementById("voidModeCellRadio"), modeGrownR = document.getElementById("voidModeGrownRadio");
     if (modeCellR && modeGrownR) { modeCellR.checked = state.voidMode === "cell"; modeGrownR.checked = state.voidMode === "grown"; }
     var voidProbeInpRestore = document.getElementById("voidProbeRadiusInput"); if (voidProbeInpRestore) voidProbeInpRestore.value = state.probeRadius.toFixed(2);
     var voidGridNumRestore = document.getElementById("voidGridResNum"); if (voidGridNumRestore) voidGridNumRestore.value = state.voidQuality;
     var voidAccToggleRestore = document.getElementById("voidAccurateToggle"); if (voidAccToggleRestore) voidAccToggleRestore.checked = state.voidAccurateVolumes;
     var voidAutoToggleRestore = document.getElementById("voidAutoAssembleToggle"); if (voidAutoToggleRestore) voidAutoToggleRestore.checked = state.voidAutoAssemble;
-    var voidOpacitySliderRestore = document.getElementById("voidOpacitySlider"); if (voidOpacitySliderRestore) voidOpacitySliderRestore.value = state.voidSurfaceOpacity;
-    var voidOpacityNumRestore = document.getElementById("voidOpacityNum"); if (voidOpacityNumRestore) voidOpacityNumRestore.value = state.voidSurfaceOpacity;
+    var voidAdditiveToggleRestore = document.getElementById("voidAdditiveToggle"); if (voidAdditiveToggleRestore) voidAdditiveToggleRestore.checked = state.voidCalculateAdditive;
+    buildVoidOpacityLinkRow();
     if (typeof data.molSurfaceProbeRadius === "number") state.molSurfaceProbeRadius = data.molSurfaceProbeRadius;
     if (typeof data.molSurfaceOpacity === "number") state.molSurfaceOpacity = data.molSurfaceOpacity;
     var msProbeInpRestore = document.getElementById("molSurfProbeRadiusInput"); if (msProbeInpRestore) msProbeInpRestore.value = state.molSurfaceProbeRadius.toFixed(2);
@@ -15766,9 +16165,21 @@ select.sel:focus{border-color:var(--accent)}
        see restoreProjectSnapshot -- so only the results themselves are
        handled here. */
     state.voidComponents = data.voidComponents || [];
+    /* Back-compat for a project saved before comp.probeRadius existed (see
+       computeVoidVolumes) -- there was only ever one probe radius back then,
+       already restored into state.probeRadius just above by the caller, so
+       stamping it onto every component that doesn't already carry its own is
+       exactly correct and needed so later live re-renders, an Additive
+       Calculate on top of this load, or a re-save all keep using the right
+       value for these components instead of silently assuming whatever the
+       probe radius input happens to say later on. A component that already
+       has its own probeRadius (saved by this same, fixed code) is untouched. */
+    state.voidComponents.forEach(function (c) { if (c.probeRadius == null) c.probeRadius = state.probeRadius; });
     state.voidVisible = data.voidVisible || {};
     state.voidComponentColors = data.voidComponentColors || {};
     state.voidInstanceColors = data.voidInstanceColors || {};
+    state.voidComponentOpacity = data.voidComponentOpacity || {};
+    state.voidInstanceOpacity = data.voidInstanceOpacity || {};
     /* Back-compat: a project saved before voids/channels got independent
        "same colours for all" checkboxes only had one combined
        voidColorLinkAll/voidLinkedColor pair, covering both types at once --
@@ -15812,6 +16223,7 @@ select.sel:focus{border-color:var(--accent)}
       console.error("Could not rebuild void/channel surface geometry after loading -- the results table is still correct.", e);
     }
     buildVoidColorLinkRow();
+    buildVoidOpacityLinkRow();
     buildVoidResultsTable();
     buildVoidFragmentsPanel();
   }
@@ -15935,10 +16347,29 @@ select.sel:focus{border-color:var(--accent)}
        already loaded, give the user a chance to back out rather than
        losing it silently */
     if (state.atoms || state.guestAtoms) {
+      showOverlay(false); /* don't sit there saying "loading" while actually waiting on the user */
       var ok = window.confirm("Loading this project file will replace the structure currently loaded, including any unsaved changes. Continue?");
       if (!ok) { setStatus("Load cancelled -- current structure kept.", false); return; }
     }
-    loadModelFromFile(text);
+    loadModelFromFileShowingOverlay(text);
+  }
+  /* JSON.parse of a multi-MB project string, plus restoreProjectSnapshot's
+     own synchronous grid-rebuild work, can take several real seconds for a
+     project with sizeable void/channel or molecular-surface data -- with
+     nothing else on screen changing in the meantime (reported directly:
+     the model panel just shows "No atoms to display" throughout, no sign
+     anything is happening). Wraps the actual (synchronous, un-yielding)
+     loadModelFromFile call with the same busy overlay Calculate already
+     uses, deferred one tick (setTimeout 0) so the browser actually paints
+     the overlay before the blocking parse/restore work starts -- otherwise
+     showOverlay(true) and showOverlay(false) would both run inside the same
+     synchronous stretch and nothing would ever visibly appear. */
+  function loadModelFromFileShowingOverlay(text, onDone) {
+    showOverlay(true, "Loading project...");
+    setTimeout(function () {
+      try { loadModelFromFile(text); }
+      finally { showOverlay(false); if (onDone) onDone(); }
+    }, 0);
   }
   /* Single entry point for a dropped/selected model file that might be a
      plain .json project OR a .zip archive -- used by both the viewport
@@ -15950,9 +16381,19 @@ select.sel:focus{border-color:var(--accent)}
      from dropping a plain .json) or, for more than one, hand off to the
      same multi-entry navigator a multi-block CIF already uses. */
   function handleModelFileSelected(file) {
+    /* Shown immediately, before even reading/unzipping the file -- a large
+       zip's own decompression can take a real, noticeable chunk of the
+       "several seconds, nothing on screen indicates progress" delay this
+       was reported for, not just the JSON parse afterward (see
+       loadModelFromFileShowingOverlay). Every exit path below turns this
+       back off: confirmAndLoadModelFromFile's own cancel branch, both of
+       handleModelZipBlob's early failures, and loadModelFromFileShowingOverlay
+       itself once the real load finishes either way. */
+    showOverlay(true, "Loading project file...");
     if (/\.zip$/i.test(file.name)) { handleModelZipBlob(file, file.name); return; }
     var rd = new FileReader();
     rd.onload = function () { confirmAndLoadModelFromFile(rd.result); };
+    rd.onerror = function () { showOverlay(false); setStatus("Could not read this file.", true); };
     rd.readAsText(file);
   }
   async function handleModelZipBlob(blob, name) {
@@ -15960,10 +16401,11 @@ select.sel:focus{border-color:var(--accent)}
     try {
       entries = await unzipJsonEntries(await blob.arrayBuffer());
     } catch (e) {
+      showOverlay(false);
       setStatus("Could not read this zip file: " + (e && e.message ? e.message : e) + ".", true);
       return;
     }
-    if (!entries.length) { setStatus("No .json files found inside this zip archive.", true); return; }
+    if (!entries.length) { showOverlay(false); setStatus("No .json files found inside this zip archive.", true); return; }
     /* Navigator labels come from each entry's own FILENAME inside the zip
        (already set by unzipJsonEntries, stripped of path and .json), not
        from the project's internal saved name -- the whole point is that a
@@ -15980,6 +16422,7 @@ select.sel:focus{border-color:var(--accent)}
        between entries afterward (loadJsonBlockAtIndex) never re-prompts,
        same as the CIF navigator's own prev/next never re-prompts either. */
     if (state.atoms || state.guestAtoms) {
+      showOverlay(false); /* don't sit there saying "loading" while actually waiting on the user */
       var ok = window.confirm("Loading this project file will replace the structure currently loaded, including any unsaved changes. Continue?");
       if (!ok) { setStatus("Load cancelled -- current structure kept.", false); return; }
     }
@@ -17165,18 +17608,21 @@ select.sel:focus{border-color:var(--accent)}
     voidAccurateToggleCb.id = "voidAccurateToggle";
     var voidAutoAssembleToggleCb = toggle(vcC, "Assemble & Consolidate", state.voidAutoAssemble, function (b) { state.voidAutoAssemble = b; });
     voidAutoAssembleToggleCb.id = "voidAutoAssembleToggle";
+    var voidAdditiveToggleCb = toggle(vcC, "Additive (keep previous results)", state.voidCalculateAdditive, function (b) { state.voidCalculateAdditive = b; });
+    voidAdditiveToggleCb.id = "voidAdditiveToggle";
     var vcRow = el("div", "btnrow");
     button(vcRow, "Calculate", "ghost", runVoidCalculate);
     button(vcRow, "Clear all", "ghost", clearVoidResults);
     vcC.appendChild(vcRow);
-    /* Surface opacity and the two "Same colours for all..." links sit right
-       here, directly under Calculate/Clear all -- NOT inside the
-       Voids/Channels submenu below (they used to live there; the user asked
-       for them pulled out to top level since they're settings you reach for
-       before drilling into the results table, not part of it). */
-    var voidOpacitySlider = slider(vcC, "surface opacity", 0.15, 1.0, 0.05, state.voidSurfaceOpacity, "", function (v) { state.voidSurfaceOpacity = v; renderVoidMeshes(); });
-    voidOpacitySlider.range.id = "voidOpacitySlider";
-    voidOpacitySlider.num.id = "voidOpacityNum";
+    /* Opacity and the two "Same colours for all..."/"Same opacity for
+       all..." links sit right here, directly under Calculate/Clear all --
+       NOT inside the Voids/Channels submenu below (they used to live there;
+       the user asked for them pulled out to top level since they're
+       settings you reach for before drilling into the results table, not
+       part of it). Opacity used to be one plain slider applying to every
+       void/channel at once; now it's per-type-linkable exactly like colour
+       already was, built fresh into this row by buildVoidOpacityLinkRow(). */
+    var voidOpacityLinkRow = el("div"); voidOpacityLinkRow.id = "voidOpacityLinkRow"; vcC.appendChild(voidOpacityLinkRow);
     var voidColorLinkRow = el("div"); voidColorLinkRow.id = "voidColorLinkRow"; vcC.appendChild(voidColorLinkRow);
     var voidChannelsC = subsection(vcC, "Voids/Channels", false);
     voidChannelsC.parentElement.id = "voidChannelsSubsec";
@@ -17199,6 +17645,7 @@ select.sel:focus{border-color:var(--accent)}
     var voidFragBody = el("div"); voidFragBody.id = "voidFragmentsBody"; voidFragC.appendChild(voidFragBody);
     buildVoidMoveCopyPanel();
     buildVoidColorLinkRow();
+    buildVoidOpacityLinkRow();
     buildVoidResultsTable();
     buildVoidFragmentsPanel();
 
@@ -17828,10 +18275,12 @@ select.sel:focus{border-color:var(--accent)}
       "<p><b>Calculate</b> populates the results table (one row per void/channel, with its stability limit, swept volume, and node count) and draws the corresponding surfaces in the 3D view; <b>Clear</b> removes them. Loading a new structure, or a saved project, always clears any previous void/channel results automatically, since they'd no longer match the new atoms. <b>Limit</b> reports, for each component, how sensitive its classification (void vs. channel) is to the probe radius actually used, in whichever direction is meaningful for that type: for a <b>channel</b>, shown as \"&le; R\" -- the largest probe radius it would still be recognized as this same connected channel at; raise the probe radius above it and part of the channel gets pruned away, turning it into separate void(s) or removing it entirely. For a <b>void</b>, shown as \"&ge; R\" -- the probe radius below which it would connect to a periodic image of itself and become a channel instead; a dash means it stays a void all the way down to 0.05 &Aring;, the practical floor tested. In <b>Use grown atoms only</b> mode this is always a dash (not applicable), since that mode has no periodic images for anything to connect to. This replaced an earlier \"critical radius\" reading (the single narrowest clearance found anywhere in the whole connected shape) that, while a faithful measure of the algorithm's own pruning sensitivity, routinely got dragged down by a minor side pocket or wall crevice with no bearing on whether a probe can actually traverse the main channel -- Limit answers the more practically useful question of when the reported classification itself would change.</p>" +
       "<p>The reported volume always has some grid-discretization error baked in -- a swept volume is measured by counting grid cells, so a coarser <b>grid resolution</b> systematically undercounts, more so for a small cavity than a large one. <b>Accurate volumes (extrapolated, slower)</b> corrects for this: instead of measuring once at the chosen grid resolution, it measures each component at six progressively finer spacings and extrapolates to what the volume would be at an (unreachable) zero spacing -- the same value a rolling-probe program like MSRoll reports directly, without needing a grid at all. The Vol. column then shows that extrapolated value with its own uncertainty (e.g. \"110.7 &plusmn;1.6\"), and the calculation takes noticeably longer -- six grid builds per component instead of one. Leave it unchecked for a quick look; turn it on when the number itself is what matters.</p>" +
       "<p><b>Assemble &amp; Consolidate</b> (checked by default) does automatically, for every component Calculate finds, what the Fragments panel's own Assemble and Consolidate buttons do by hand: bring a void/channel's scattered edge/corner fragments back together nearest the origin, then bake that arrangement into one permanent piece. Uncheck it to leave every component as its individual, still-movable fragments instead.</p>" +
+      "<p><b>Additive (keep previous results)</b>, unchecked by default, controls what pressing Calculate does to whatever void/channel surfaces are already on screen. Unchecked (the default, and the only behaviour before this checkbox existed), Calculate always clears every previous result first, exactly as if Clear all had just been pressed. Checked, Calculate instead adds its newly found regions to whatever's already there, leaving every earlier region's own colour, visibility, fragment positions, and consolidation untouched -- useful for comparing two different probe radii on the same structure side by side, or building up a figure from several separate calculations. There is no limit on how many times results can be added this way; <b>Clear all</b> always removes everything regardless of how it was built up.</p>" +
       "<p><b>Two known limitations</b>, not yet resolved: a very small void (just a handful of nodes) can show a noticeably different reported volume between otherwise symmetry-equivalent copies of itself -- this is grid-discretization noise, not a real difference, and disproportionately affects tiny voids; switch on <b>Accurate volumes</b> to get numbers that agree with each other as they should. Separately, a channel periodic along more than one non-Cartesian-pure axis at once (i.e. a genuinely oblique/triclinic cell where more than one cell angle is far from 90&deg;) can show a real, visible seam where two Fragments-panel pieces are joined end-on along the channel's own length, and may also need the Fragments panel used manually rather than relying on Assemble &amp; Consolidate -- a harder grid-periodicity limitation, not something adjusting settings will fix.</p>" +
       "<p>Colour can be set at three levels, in order of precedence. The <b>Same colours for all voids</b> and <b>Same colours for all channels</b> checkboxes (top of the <b>Voids/Channels</b> list, each with its own outside/inside swatch pair) are independent of each other -- ticking one unifies every void, or every channel, immediately. Below that, each individual void/channel <b>instance</b> -- the original, or any copy made via Move/Copy/Recolour -- can carry its own colour, shown as a swatch pair next to that instance's own row in the <b>Fragments</b> panel below (hidden while that instance's type is under one of the \"Same colours\" checkboxes above); a new copy starts out with whatever colour its source had at the moment it was made. Anything with no colour of its own falls back to a fixed palette default. The <b>Voids/Channels</b> results table itself carries no colour column -- colour is only ever set via the two checkboxes above it or per-instance below.</p>" +
-      "<p>A void or channel sitting at a cell edge or corner is shown as several separate <b>fragments</b> -- each one a clipped view of the same underlying shape, positioned so the pieces are exactly complementary. The <b>Fragments</b> panel lists them grouped by which void/channel they belong to, each fragment-piece or copy row carrying its own visibility checkbox and (per the colour paragraph above) its own colour swatch pair. <b>Assemble</b> reconstructs a whole void/channel automatically: it moves every one of that component's fragments back onto each other, forming one complete piece at whichever whole-unit-cell position sits closest to the origin (ties broken toward the higher-numbered cell). <b>Consolidate</b> then bakes the currently-visible fragments into one permanent piece, free of the others' movement.</p>" +
-      "<p><b>Move/Copy/Recolour</b> offers three mutually-exclusive modes -- <b>Move mode</b>, <b>Copy mode</b>, <b>Recolour mode</b> -- each highlighted red while active, and turned off automatically the moment either this submenu or the whole Void/Channel Analysis section is collapsed. All three select fragments or channel copies by clicking them directly in the 3D view; while any is active, spacebar and Delete act on that selection instead of the atom selection. <b>Move mode</b> selects whole fragments (Shift-click extends to every fragment of whichever type -- void or channel -- was clicked, Alt-click to every fragment of that same component); <b>Copy mode</b> and <b>Recolour mode</b> share one selection scheme instead, over individual instances -- the original or a specific copy (Shift-click: every instance of that type; Alt-click: every instance of that same component, however far apart; Ctrl-click: only the instances of that component reachable from the clicked one by unit-cell-sized steps). <b>Move</b> and <b>Copy</b> reposition or duplicate-by-translation the selection using the vector boxes or the <b>+a/-a/+b/-b/+c/-c</b> nudge buttons, tinting every surface blue (unselected) or yellow (selected) so the selection itself stays legible regardless of a component's own assigned colour. <b>Recolour mode</b> renders the opposite way round: every unselected surface is tinted a flat, washed-out yellow, while every selected one keeps showing a real colour -- its own current one, or, live while a swatch below is actually being dragged, the pending edit -- so a colour change is always judged directly on the real surface rather than a preview elsewhere. <b>Set colours</b> then applies the two swatches' current colour to the whole selection; <b>Clear selection after applying</b> (unticked by default) decides whether that selection is cleared once applied or left in place for further tweaks.</p>" +
+      "<p><b>Opacity</b> works the same three-level way, as its own separate system (not tied to colour). <b>Same opacity for all voids</b> and <b>Same opacity for all channels</b> (right below the colour checkboxes, each with its own number-and-slider) are checked by default at 1.0 -- exactly the old single \"surface opacity\" control this replaced, until either is unticked. Below that, each individual instance can carry its own opacity, entered as a bare number (no room for a label there) right after that instance's own colour swatches in the <b>Fragments</b> panel (hidden while that instance's type is under one of the \"Same opacity\" checkboxes); a new copy starts out with whatever opacity its source had. Anything with no opacity of its own is fully opaque (1.0).</p>" +
+      "<p>A void or channel sitting at a cell edge or corner is shown as several separate <b>fragments</b> -- each one a clipped view of the same underlying shape, positioned so the pieces are exactly complementary. The <b>Fragments</b> panel lists them grouped by which void/channel they belong to, each fragment-piece or copy row carrying its own visibility checkbox and (per the two paragraphs above) its own colour swatch pair and/or opacity number. <b>Assemble</b> reconstructs a whole void/channel automatically: it moves every one of that component's fragments back onto each other, forming one complete piece at whichever whole-unit-cell position sits closest to the origin (ties broken toward the higher-numbered cell). <b>Consolidate</b> then bakes the currently-visible fragments into one permanent piece, free of the others' movement.</p>" +
+      "<p><b>Move/Copy/Recolour</b> offers three mutually-exclusive modes -- <b>Move mode</b>, <b>Copy mode</b>, <b>Recolour mode</b> -- each highlighted red while active, and turned off automatically the moment either this submenu or the whole Void/Channel Analysis section is collapsed. All three select fragments or channel copies by clicking them directly in the 3D view; while any is active, spacebar and Delete act on that selection instead of the atom selection. <b>Move mode</b> selects whole fragments (Shift-click extends to every fragment of whichever type -- void or channel -- was clicked, Alt-click to every fragment of that same component); <b>Copy mode</b> and <b>Recolour mode</b> share one selection scheme instead, over individual instances -- the original or a specific copy (Shift-click: every instance of that type; Alt-click: every instance of that same component, however far apart; Ctrl-click: only the instances of that component reachable from the clicked one by unit-cell-sized steps). <b>Move</b> and <b>Copy</b> reposition or duplicate-by-translation the selection using the vector boxes or the <b>+a/-a/+b/-b/+c/-c</b> nudge buttons, tinting every surface blue (unselected) or yellow (selected) so the selection itself stays legible regardless of a component's own assigned colour. <b>Recolour mode</b> renders the opposite way round: every unselected surface is tinted a flat, washed-out yellow, while every selected one keeps showing a real colour -- its own current one, or, live while a swatch below is actually being dragged, the pending edit -- so a colour change is always judged directly on the real surface rather than a preview elsewhere. <b>Set colours</b> then applies the two swatches' current colour to the whole selection; ticking the <b>Opacity</b> checkbox beside them and entering a number there also applies that opacity to the same selection when Set colours is pressed (left unticked, opacity is untouched) -- unlike the colour swatches, this has no live preview while typing, only on the click itself. <b>Clear selection after applying</b> (unticked by default) decides whether that selection is cleared once applied or left in place for further tweaks.</p>" +
       "<h3>Macro</h3>" +
       "<p>A macro is a plain-text sequence of commands, one per line, that can be replayed later to reproduce a sequence of actions -- recorded live from your own clicks and button presses, typed or pasted in by hand, or a mix of both (the memo box is an ordinary text area throughout, editable at any time). It's designed to work not just on the structure it was recorded against but on a whole series of similar ones (e.g. a variable-temperature data set for the same crystal) -- provided each structure's asymmetric unit is labelled the same way and sits in the same place, which is the user's own responsibility to ensure; nothing here can verify that automatically.</p>" +
       "<p><b>Record</b> and <b>Pause</b> are mutually exclusive (pressing one always pops the other back up). While Record is down, every action below that has a defined macro command gets appended to the memo the instant it happens -- not batched or reordered, in the exact sequence performed. Not every possible action has one: a not-yet-implemented combination is simply never recorded, silently, the same as pressing a key with no shortcut bound to it. <b>Clear</b> empties the memo (confirming first if there's anything in it to lose). <b>Save</b> and <b>Load</b> read and write a plain-text <b>.MAC</b> file -- Save suggests the current structure's own name with a .MAC extension and, in Chrome or Edge, starts its folder picker in whichever folder the structure itself was last dropped from; Load offers the same picker (also starting there), falling back to a plain file-browse button in other browsers, and confirms before replacing a non-empty memo. A .MAC file can also be dropped directly onto the 3D view to load it the same way, without going through the Load button at all. <b>Play</b>, <b>Save</b>, and <b>Load</b> are all disabled while Record is down -- pause first.</p>" +
