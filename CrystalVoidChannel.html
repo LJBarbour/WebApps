@@ -151,6 +151,7 @@ main{flex:1 1 auto;display:flex;min-height:0}
 .btn.mini.grow-active:hover{opacity:.78}
 .btn.mini.grow-active:active{filter:brightness(.82)}
 .btn.mini.axis-nudge{padding:3px 4px;flex:0 0 auto;text-transform:none}
+.btn.mini.sel-group-btn{padding:3px 5px;flex:0 0 auto}
 
 .hint{font-size:11px;color:var(--ink-faint);line-height:1.5}
 .ctl-inline{display:flex;align-items:center;gap:6px}
@@ -168,6 +169,7 @@ main{flex:1 1 auto;display:flex;min-height:0}
 .ctl-top{display:flex;align-items:center;gap:7px}
 .ctl-top label{font-size:12px;flex:0 0 auto;color:var(--ink)}
 .unit{font-family:var(--mono);font-size:10.5px;color:var(--ink-faint);width:14px}
+.sel-group-count{width:auto;min-width:14px;flex:0 0 auto;text-align:right}
 input.num{width:60px;font-family:var(--mono);font-size:11.5px;text-align:right;
   border:1px solid var(--border);border-radius:3px;padding:3px 5px;background:var(--bg);color:var(--ink);outline:none}
 input.num.wide{width:78px}
@@ -261,6 +263,15 @@ select.sel:focus{border-color:var(--accent)}
 #voidResultsTable tr.void-row{cursor:pointer}
 #voidResultsTable tr.void-row:hover{background:var(--accent-soft)}
 #voidResultsTable tr.dim{opacity:.4}
+/* -- Macro > "Void/channel batch results" -- same look as #voidResultsTable,
+   but wrapped in a scrolling div (.void-batch-scroll) since this table has
+   an extra Structure column and the sidebar itself is much narrower than
+   any of these columns really want. */
+.void-batch-scroll{width:100%;overflow-x:auto}
+#voidBatchTable{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px;white-space:nowrap}
+#voidBatchTable th{text-align:left;color:var(--ink-faint);font-size:9.5px;letter-spacing:.5px;text-transform:uppercase;
+  padding:3px 6px;border-bottom:1px solid var(--border)}
+#voidBatchTable td{padding:3px 6px;border-bottom:1px solid var(--line);color:var(--ink)}
 .swatch-dot{display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:middle;margin-right:2px}
 .badge{font-size:9.5px;padding:1px 5px;border-radius:3px;letter-spacing:.3px;text-transform:uppercase}
 .badge.channel{background:#EEF3FA;color:var(--accent)}
@@ -2771,6 +2782,18 @@ select.sel:focus{border-color:var(--accent)}
     atomRoughness: DISPLAY_DEFAULTS.atomRoughness, atomMetalness: DISPLAY_DEFAULTS.atomMetalness, atomReflectivity: DISPLAY_DEFAULTS.atomReflectivity,
     guestAtoms: null, guestName: "", guestScale: 1.0, guestBatch: 0, showGuest: true,
     guestGroups: [], cutBonds: {}, cutBondSignatures: {}, extraBonds: {}, extraBondSignatures: {}, bondEditMode: false, bondEditPair: [],
+    /* Structure > Selection & geometry > "Selection groups" -- a named,
+       reusable set of atoms (host and/or guest together) that can be
+       re-selected later without re-picking them by hand. Deliberately just
+       a list of atom uids, not a live "current selection" -- an atom can
+       belong to any number of groups at once (no exclusivity, unlike host/
+       guest membership), and deleting an atom simply leaves its uid
+       matching nothing next time the group is selected; the rest of the
+       group is untouched, no cleanup needed anywhere atoms get deleted.
+       selectionGroupSeq is a plain ever-incrementing counter (mirrors
+       guestBatch's own role for guest groups) so a group's id is always
+       unique even after others are deleted. */
+    selectionGroups: [], selectionGroupSeq: 0,
     bondSelectionEnabled: false, atomEditUiMode: null, lastClickedAtomUid: null, guestDragMode: false,
     undoStack: [], selectedBonds: {}, guestColorMode: "component",
     hostBondRadius: 0.12, guestBondRadius: 0.12,
@@ -2805,7 +2828,18 @@ select.sel:focus{border-color:var(--accent)}
     clipPlaneMode: "view", clipPlaneH: 1, clipPlaneK: 0, clipPlaneL: 0, clipPlaneHklConvention: "reciprocal",
     clipPlaneApplyHost: true, clipPlaneApplyGuest: true, clipPlaneApplyVoid: true, clipPlaneApplyChannel: true, clipPlaneApplyMolSurface: true, clipPlaneApplyUnitCell: true,
     macroRecording: false, macroPlaying: false, macroExportDirHandle: null,
-    macroBatchFolder: false, macroBatchDirHandle: null
+    macroBatchFolder: false, macroBatchDirHandle: null,
+    /* One row per void/channel region, appended whenever a CALCULATE_VOID
+       macro command actually runs (see runVoidCalculate's own comment) --
+       lets a macro that loads several structures in turn (by hand, or via
+       "Apply macro to all files in folder") build up one combined
+       volume/critical-radius comparison table across all of them. Session-
+       only, like macroExportDirHandle/macroBatchDirHandle above -- never
+       persisted in a project file, never cleared by loading a new structure,
+       only by the panel's own "Clear table" button, so it keeps accumulating
+       across as many Play presses (or batch-folder runs) as the user wants
+       before reading/exporting it. */
+    voidBatchTable: []
   };
 
   /* ---------------- camera controller ----------------
@@ -9055,6 +9089,115 @@ select.sel:focus{border-color:var(--accent)}
       body.appendChild(tr);
     });
   }
+  /* Plain-text version of buildVoidResultsTable's own tdCrit branch above --
+     same four cases, no tooltip (there's no hover target once this is just a
+     CSV/TSV cell or a plain table row in the Macro panel). Kept as its own
+     small function rather than folding the two together so neither one has
+     to thread a "want HTML or plain text" flag through it. */
+  function voidStabilityLimitText(c) {
+    if (c.stabilityLimitKind === "channel-max") return "≤ " + c.stabilityLimit.toFixed(3);
+    if (c.stabilityLimitKind === "void-threshold") return "≥ " + c.stabilityLimit.toFixed(3);
+    return "—";
+  }
+  /* Macro > "Void/channel batch results" -- one row per void/channel region,
+     appended after a CALCULATE_VOID macro command finishes (see
+     runVoidCalculate's own appendBatchRow flag), so a macro that loads
+     several structures in turn builds up one combined table across all of
+     them instead of overwriting a single-structure view every time. Reads
+     state.voidComponents (whatever the interactive results table itself is
+     showing right now for the just-finished calculation), not a snapshot
+     threaded through from the calculation itself, so additive-mode results
+     are captured exactly as the user would see them on screen. */
+  function appendVoidBatchTableRows() {
+    var structure = state.multiBlockSourceName || state.name || "(unnamed)";
+    state.voidComponents.forEach(function (c) {
+      var typeText = c.type === "channel" ? ("channel " + c.dimensionality + "D" + ((c.periodicityAxes || []).length ? " (" + c.periodicityAxes.join(",") + ")" : "")) : "void";
+      var volText = (c.volume !== undefined ? c.volume.toFixed(1) : "-") + (c.volumeSE != null ? " ±" + c.volumeSE.toFixed(1) : "") + (c.type === "channel" ? "/cell" : "");
+      state.voidBatchTable.push({
+        structure: structure, id: c.id, typeText: typeText,
+        critText: voidStabilityLimitText(c), volText: volText,
+        probeRadius: state.probeRadius
+      });
+    });
+    buildVoidBatchTableUI();
+  }
+  function clearVoidBatchTable() {
+    state.voidBatchTable = [];
+    buildVoidBatchTableUI();
+    setStatus("Void/channel batch results table cleared.", false);
+  }
+  function buildVoidBatchTableUI() {
+    var body = document.getElementById("voidBatchTableBody");
+    if (!body) return;
+    body.innerHTML = "";
+    if (!state.voidBatchTable.length) {
+      var tr0 = document.createElement("tr");
+      var td0 = document.createElement("td"); td0.colSpan = 6; td0.textContent = "No results yet -- record or play a macro with a CALCULATE_VOID command.";
+      tr0.appendChild(td0); body.appendChild(tr0);
+      return;
+    }
+    state.voidBatchTable.forEach(function (row) {
+      var tr = document.createElement("tr");
+      [row.structure, "#" + row.id, row.typeText, row.critText, row.volText, row.probeRadius.toFixed(2)].forEach(function (v) {
+        var td = document.createElement("td"); td.textContent = v; tr.appendChild(td);
+      });
+      body.appendChild(tr);
+    });
+  }
+  /* Both export paths below share one convention: one line per row, columns
+     in the same order as the on-screen table (Structure/ID/Type/Critical
+     r/Volume/Probe r), Structure quoted only for the CSV file (a comma in a
+     structure's own filename is plausible; a tab in one is not, so the
+     clipboard/TSV path never needs quoting at all -- that's the same reason
+     TSV, not CSV, is what pastes cleanly into a spreadsheet's cells). */
+  var VOID_BATCH_TABLE_HEADER = ["Structure", "ID", "Type", "Critical r (" + U.ang + ")", "Volume (" + U.ang + U.cube + ")", "Probe r (" + U.ang + ")"];
+  function voidBatchTableRowsText(sep, quoteStructure) {
+    var lines = [VOID_BATCH_TABLE_HEADER.join(sep)];
+    state.voidBatchTable.forEach(function (row) {
+      var structure = quoteStructure ? ('"' + row.structure.replace(/"/g, '""') + '"') : row.structure;
+      lines.push([structure, row.id, row.typeText, row.critText, row.volText, row.probeRadius.toFixed(2)].join(sep));
+    });
+    return lines.join("\n");
+  }
+  function copyVoidBatchTableTsv() {
+    if (!state.voidBatchTable.length) { setStatus("The void/channel batch results table is empty -- nothing to copy.", true); return; }
+    var text = voidBatchTableRowsText("\t", false);
+    if (!navigator.clipboard || !navigator.clipboard.writeText) { setStatus("This browser does not support copying text to the clipboard -- use Save as CSV instead.", true); return; }
+    navigator.clipboard.writeText(text).then(function () {
+      setStatus("Copied " + state.voidBatchTable.length + " row(s) to the clipboard -- paste directly into a spreadsheet.", false);
+    }).catch(function () {
+      setStatus("Couldn't copy to the clipboard (this can happen without a recent user click) -- try again, or use Save as CSV.", true);
+    });
+  }
+  function saveVoidBatchTableCsv() {
+    if (!state.voidBatchTable.length) { setStatus("The void/channel batch results table is empty -- nothing to save.", true); return; }
+    var suggestedName = "void_batch_results.csv";
+    /* requestSaveHandle() must be the very first thing called in response to
+       the click -- same reasoning as every other save path in this app
+       (saveCifFile/saveMacroFile/exportImage): showSaveFilePicker() itself
+       consumes the click's transient user-activation, so building the CSV
+       text first would risk that activation expiring before the picker is
+       even requested (unlikely to matter for a table this small, but there's
+       no reason to be the one save path that skips the precaution). Starts
+       in state.lastSourceHandle's own folder when known -- the same
+       structure-source-folder default every other Save dialog in this app
+       already uses, rather than always falling to the browser's plain
+       Downloads folder like the (unrelated) element-settings CSV export
+       does. */
+    var handlePromise = requestSaveHandle(suggestedName, { description: "CSV file", accept: { "text/csv": [".csv"] } });
+    var text = voidBatchTableRowsText(",", true) + "\n";
+    var rowCount = state.voidBatchTable.length;
+    handlePromise.then(function (h) {
+      if (h === "CANCELLED") { setStatus("Save cancelled.", false); return; }
+      if (h) {
+        h.createWritable().then(function (w) { return w.write(text).then(function () { return w.close(); }); })
+          .then(function () { setStatus("Saved " + rowCount + " row(s) to " + suggestedName + ".", false); })
+          .catch(function () { legacyDownloadText(text, suggestedName, "text/csv"); });
+      } else {
+        legacyDownloadText(text, suggestedName, "text/csv");
+      }
+    });
+  }
   /* "Same colours for all" -- the linked colour pair applies to every void/
      channel at once, so per-row swatches would be redundant (and editing one
      would silently affect all the others); the row's own colour cell stays
@@ -10200,11 +10343,29 @@ select.sel:focus{border-color:var(--accent)}
     state.voidComponentOpacity = {}; state.voidInstanceOpacity = {};
     state.voidConsolidated = {}; state.voidMergedGeometry = {};
   }
+  /* Returns a Promise that resolves (always -- success, calculation error,
+     or abort all resolve, never reject) once this call's async work is
+     completely finished, INCLUDING the awaited computeVoidVolumesAccurate
+     pass -- the ordinary "Calculate" button ignores the return value
+     entirely (its own click handler ran as button(vcRow, "Calculate",
+     "ghost", runVoidCalculate), same as before this was added), but the
+     CALCULATE_VOID macro command (see runMacroLine) awaits it so playback
+     doesn't race ahead to the next line against a not-yet-finished result --
+     the same convention EXTEND_FRAGS/COMPLETE_MOLS already use for their own
+     deferred work. */
   function runVoidCalculate() {
     var isCellMode = state.voidMode === "cell";
-    if (isCellMode && (!state.isCif || !state.cifCell)) { setStatus("Load a CIF file first.", true); return; }
-    if (!isCellMode && (!state.atoms || !state.atoms.length)) { setStatus("Grow some host atoms first (Structure > Grow) -- Option 2 only considers atoms that are currently grown AND visible.", true); return; }
-    if (state.voidCalculating) { setStatus("A void/channel calculation is already running -- please wait for it to finish.", true); return; }
+    if (isCellMode && (!state.isCif || !state.cifCell)) { setStatus("Load a CIF file first.", true); return Promise.resolve(false); }
+    if (!isCellMode && (!state.atoms || !state.atoms.length)) { setStatus("Grow some host atoms first (Structure > Grow) -- Option 2 only considers atoms that are currently grown AND visible.", true); return Promise.resolve(false); }
+    if (state.voidCalculating) { setStatus("A void/channel calculation is already running -- please wait for it to finish.", true); return Promise.resolve(false); }
+    /* Captured now, not read again later -- this is genuinely "was this
+       call itself a macro-driven CALCULATE_VOID", not "is a macro still
+       playing by the time the async work below finishes" (which would also
+       be true, but for the wrong reason -- nothing else resets
+       state.macroPlaying mid-calculation, so in practice the two never
+       actually differ, but capturing up front says what's really meant). */
+    var appendBatchRow = state.macroPlaying;
+    recordMacroCommand("CALCULATE_VOID");
     state.voidCalculating = true;
     state.voidAbortRequested = false;
     /* Ported from CrystalChannel's own "Abort calculation" button (35
@@ -10222,6 +10383,7 @@ select.sel:focus{border-color:var(--accent)}
     var additive = state.voidCalculateAdditive;
     if (!additive) clearVoidResultsSilent(); /* the ordinary, non-additive path -- exactly the old behaviour, just moved up front instead of being done implicitly by overwriting state below, so the additive branch can skip it entirely */
     var priorComponentCount = state.voidComponents.length;
+    return new Promise(function (resolve) {
     setTimeout(async function () {
       try {
         var t0 = performance.now();
@@ -10322,6 +10484,11 @@ select.sel:focus{border-color:var(--accent)}
         if (voidChannelsSubsecEl) voidChannelsSubsecEl.classList.add("open");
         if (voidMoveCopySubsecEl) voidMoveCopySubsecEl.classList.remove("open");
         if (voidFragmentsSubsecEl) voidFragmentsSubsecEl.classList.remove("open");
+        /* state.voidComponents (not the local `components`) so an additive
+           calculation's row set matches exactly what the interactive results
+           table itself now shows for this structure -- everything currently
+           on screen, not just what this one call added. */
+        if (appendBatchRow) appendVoidBatchTableRows();
       } catch (e) {
         if (e && e.message === "__voidAbort__") {
           setStatus("Void/channel calculation aborted.", false);
@@ -10334,8 +10501,10 @@ select.sel:focus{border-color:var(--accent)}
         state.voidAbortRequested = false;
         if (abortBtn) abortBtn.style.display = "none";
         showOverlay(false);
+        resolve(true);
       }
     }, 20);
+    });
   }
   function clearVoidResultsSilent() {
     state.voidComponents = []; state.voidVisible = {}; state.voidNetwork = null;
@@ -11666,6 +11835,16 @@ select.sel:focus{border-color:var(--accent)}
         if (!hasParts) return false;
         applyPartSelection(n, cmd === "SELECT_PART");
         return true;
+      case "CALCULATE_VOID":
+        /* No arguments -- deliberately doesn't record or replay any of the
+           void/channel calculation SETTINGS (probe radius, mode, accurate
+           volumes, ...), only the act of calculating itself. Playback always
+           uses whatever settings are currently on screen, exactly like every
+           OTHER macro command replays against the CURRENT structure/state
+           rather than a captured one. runVoidCalculate() already returns a
+           Promise that resolves once the calculation (and its own results-
+           table row append, see appendVoidBatchTableRows) is fully done. */
+        return runVoidCalculate();
       case "EXTEND_FRAGS":
         /* both async (a setTimeout defers the real work so the "Extending
            fragments..." overlay can paint first) -- returning a Promise here
@@ -11906,7 +12085,7 @@ select.sel:focus{border-color:var(--accent)}
     state.guestBatch = snap.guestBatch; state.selectedBonds = {};
     if (snap.cifAsymUnit) state.cifAsymUnit = snap.cifAsymUnit;
     if (state.isCif) { recomputeViewOffset(); renderUnitCell(); }
-    renderStructure(); updateHostInfo(); updateGuestInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); refreshReassignElementOptions(); buildGuestGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo(); updateBondSelectionInfo(); refreshSymmetryUI();
+    renderStructure(); updateHostInfo(); updateGuestInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); refreshReassignElementOptions(); buildGuestGroupsUI(); buildSelectionGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo(); updateBondSelectionInfo(); refreshSymmetryUI();
   }
   /* ---------------- Interactive bond editor (Structure > Edit bonds) ----
    * Force a bond into existence between two clicked atoms, regardless of
@@ -13147,7 +13326,7 @@ select.sel:focus{border-color:var(--accent)}
       applyRadii(guestNew);
       state.guestAtoms = (state.guestAtoms || []).concat(guestNew);
       refreshGuestAtomColors();
-      updateGuestInfo(); buildGuestColorEditor(); buildGuestGroupsUI();
+      updateGuestInfo(); buildGuestColorEditor(); buildGuestGroupsUI(); buildSelectionGroupsUI();
     }
     recomputeViewOffset();
     renderStructure(); renderUnitCell(); updateHostInfo(); buildRadiiEditor(); buildHostColorEditor(); refreshReassignElementOptions(); refreshBondCleanupElements(); refreshSymmetryUI();
@@ -13221,7 +13400,7 @@ select.sel:focus{border-color:var(--accent)}
     if (state.guestAtoms) state.guestAtoms = state.guestAtoms.filter(isOriginal);
     pruneEmptyGuestGroups();
     recomputeViewOffset();
-    renderStructure(); renderUnitCell(); updateHostInfo(); updateGuestInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); refreshReassignElementOptions(); buildGuestGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
+    renderStructure(); renderUnitCell(); updateHostInfo(); updateGuestInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); refreshReassignElementOptions(); buildGuestGroupsUI(); buildSelectionGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
     var after = (state.atoms ? state.atoms.length : 0) + (state.guestAtoms ? state.guestAtoms.length : 0);
     recordMacroCommand("DELETE_SYM_ATOMS");
     setStatus("Removed " + (before - after) + " symmetry-generated atom" + ((before - after) === 1 ? "" : "s") + ", back to the original asymmetric unit.", false);
@@ -13777,7 +13956,7 @@ select.sel:focus{border-color:var(--accent)}
     if (state.guestAtoms) state.guestAtoms = state.guestAtoms.filter(function (a) { return !toDeleteUids[a.uid]; });
     pruneEmptyGuestGroups();
     if (state.isCif) { recomputeViewOffset(); renderUnitCell(); }
-    renderStructure(); updateHostInfo(); updateGuestInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); refreshReassignElementOptions(); buildGuestGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
+    renderStructure(); updateHostInfo(); updateGuestInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); refreshReassignElementOptions(); buildGuestGroupsUI(); buildSelectionGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
     recordMacroCommand("DELETE_SELECTED_ATOMS");
     var total = Object.keys(toDeleteUids).length;
     setStatus("Deleted " + total + " atom" + (total === 1 ? "" : "s") +
@@ -13858,7 +14037,7 @@ select.sel:focus{border-color:var(--accent)}
     }
     pruneEmptyGuestGroups();
     if (state.isCif) { recomputeViewOffset(); renderUnitCell(); }
-    renderStructure(); updateHostInfo(); updateGuestInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); refreshReassignElementOptions(); buildGuestGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
+    renderStructure(); updateHostInfo(); updateGuestInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); refreshReassignElementOptions(); buildGuestGroupsUI(); buildSelectionGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
     /* Recorded from `dest` itself (the destination the user actually picked
        -- Host / an existing group / "new group"), not the group id
        moveSelectionTo() resolved it to -- so a macro replayed on a
@@ -14029,7 +14208,7 @@ select.sel:focus{border-color:var(--accent)}
     clearVoidResultsSilent();
     state.molSurfaces = []; state._molSurfaceIsoById = {}; clearGroup(molSurfaceGroup);
     recomputeViewOffset();
-    renderStructure(); renderSurface(); renderUnitCell(); updateHostInfo(); updateGuestInfo(); updateStructuralParamsInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); refreshReassignElementOptions(); buildGuestGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo();
+    renderStructure(); renderSurface(); renderUnitCell(); updateHostInfo(); updateGuestInfo(); updateStructuralParamsInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); refreshReassignElementOptions(); buildGuestGroupsUI(); buildSelectionGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo();
     refreshSymmetryUI();
     updateViewDirectionReadout();
   }
@@ -14087,7 +14266,7 @@ select.sel:focus{border-color:var(--accent)}
     recomputeViewOffset();
     applyRadii(atoms);
     refreshHostAtomColors(atoms);
-    renderStructure(); renderSurface(); renderUnitCell(); if (firstEver) frameCamera(); updateHostInfo(); updateGuestInfo(); updateStructuralParamsInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); refreshReassignElementOptions(); buildGuestGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo();
+    renderStructure(); renderSurface(); renderUnitCell(); if (firstEver) frameCamera(); updateHostInfo(); updateGuestInfo(); updateStructuralParamsInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); refreshReassignElementOptions(); buildGuestGroupsUI(); buildSelectionGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo();
     refreshSymmetryUI();
     updateViewDirectionReadout();
     if (!cifMeta) setStatus("Loaded " + state.name + ": " + atoms.length + " atoms.", false);
@@ -14554,7 +14733,7 @@ select.sel:focus{border-color:var(--accent)}
     state.guestAtoms = (state.guestAtoms || []).concat(newAtoms);
     refreshGuestAtomColors();
     recomputeViewOffset();
-    renderStructure(); updateGuestInfo(); buildGuestColorEditor(); buildGuestGroupsUI(); refreshBondCleanupElements(); refreshReassignElementOptions(); updateSelectionInfo();
+    renderStructure(); updateGuestInfo(); buildGuestColorEditor(); buildGuestGroupsUI(); buildSelectionGroupsUI(); refreshBondCleanupElements(); refreshReassignElementOptions(); updateSelectionInfo();
     setStatus("Added guest \"" + (name || "guest") + "\": " + n + " atom" + (n === 1 ? "" : "s") + ", centred at the origin" +
       (canRegisterAsu ? " (grow it by symmetry from Grow > Mouse or Sphere of inclusion, same as a host atom)" : "") + ".", false);
   }
@@ -14598,7 +14777,7 @@ select.sel:focus{border-color:var(--accent)}
       : "This will permanently delete all guest components.\n\nContinue?";
     if (!window.confirm(guestMsg)) { setStatus("Remove all guests cancelled.", false); return; }
     state.guestAtoms = null; state.guestName = ""; state.guestBatch = 0; state.guestGroups = [];
-    renderStructure(); updateGuestInfo(); buildRadiiEditor(); buildGuestColorEditor(); buildGuestGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo();
+    renderStructure(); updateGuestInfo(); buildRadiiEditor(); buildGuestColorEditor(); buildGuestGroupsUI(); buildSelectionGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo();
     setStatus("All guest components removed.", false);
   }
   function removeHost() {
@@ -14634,7 +14813,7 @@ select.sel:focus{border-color:var(--accent)}
         }));
         var eyeBtn = document.createElement("button"); eyeBtn.type = "button"; eyeBtn.className = "icon-btn"; eyeBtn.title = g.visible ? "Hide" : "Unhide";
         eyeBtn.innerHTML = g.visible ? EYE_OPEN_SVG : EYE_OFF_SVG;
-        eyeBtn.addEventListener("click", function () { g.visible = !g.visible; recomputeViewOffset(); renderStructure(); buildGuestGroupsUI(); });
+        eyeBtn.addEventListener("click", function () { g.visible = !g.visible; recomputeViewOffset(); renderStructure(); buildGuestGroupsUI(); buildSelectionGroupsUI(); });
         row.appendChild(eyeBtn);
         button(row, "Select", "mini", function () {
           if (state.guestAtoms) for (var k = 0; k < state.guestAtoms.length; k++) if (state.guestAtoms[k].batch === g.id) state.guestAtoms[k].selected = true;
@@ -14656,6 +14835,97 @@ select.sel:focus{border-color:var(--accent)}
       sel.innerHTML = html;
       if (prevVal) sel.value = prevVal;
     }
+  }
+
+  /* ---------------- Selection & geometry: named selection groups ----
+   * A lightweight, reusable "remember this set of atoms" feature -- NOT a
+   * membership concept like host/guest (an atom can be in any number of
+   * groups, or none, independent of everything else about it), just a
+   * saved list of atom uids under a name, so a particular set of atoms can
+   * be re-selected later without re-picking them by hand or re-doing
+   * whatever selection logic (lasso, ctrl-click chains, etc.) found them
+   * the first time. */
+  function createSelectionGroup(name) {
+    var selected = (state.atoms || []).concat(state.guestAtoms || []).filter(function (a) { return a.selected; });
+    if (!selected.length) { setStatus("No atoms selected to save as a group.", true); return null; }
+    state.selectionGroupSeq += 1;
+    var id = state.selectionGroupSeq;
+    var trimmed = name && name.trim();
+    state.selectionGroups.push({ id: id, name: trimmed || ("Selection " + id), uids: selected.map(function (a) { return a.uid; }) });
+    buildSelectionGroupsUI();
+    /* Clears the selection that was just saved -- the group's own Select
+       button is right there below to bring it back whenever it's wanted
+       again, so leaving the same atoms still highlighted after "saving"
+       them just reads as though nothing happened. */
+    for (var i = 0; i < selected.length; i++) selected[i].selected = false;
+    renderSelection(); updateSelectionInfo();
+    setStatus("Saved " + selected.length + " atom" + (selected.length === 1 ? "" : "s") + " as selection group \"" + (trimmed || ("Selection " + id)) + "\".", false);
+    return id;
+  }
+  function selectionGroupById(id) { return state.selectionGroups.find(function (g) { return g.id === id; }); }
+  /* Counts only uids that still match a currently-loaded atom -- a group
+     can outlive some of its own members (see state.selectionGroups' own
+     comment), so the row's displayed count always reflects what Select
+     would actually select right now, not the group's original size. */
+  function selectionGroupLiveCount(g) {
+    var uidSet = {}; g.uids.forEach(function (u) { uidSet[u] = true; });
+    var n = 0;
+    if (state.atoms) for (var i = 0; i < state.atoms.length; i++) if (uidSet[state.atoms[i].uid]) n++;
+    if (state.guestAtoms) for (var j = 0; j < state.guestAtoms.length; j++) if (uidSet[state.guestAtoms[j].uid]) n++;
+    return n;
+  }
+  /* Select ADDS this group's atoms to whatever's already selected, Deselect
+     REMOVES just this group's atoms -- never a wholesale replace of the
+     current selection -- exactly the same convention Guest groups' own
+     Select/Unselect buttons already use, so two (or more) groups can be
+     combined by selecting each in turn, and neither ever surprises the
+     user by clobbering an unrelated selection already in progress. */
+  function setSelectionGroupSelected(id, sel) {
+    var g = selectionGroupById(id); if (!g) return;
+    var uidSet = {}; g.uids.forEach(function (u) { uidSet[u] = true; });
+    if (state.atoms) for (var i = 0; i < state.atoms.length; i++) if (uidSet[state.atoms[i].uid]) state.atoms[i].selected = sel;
+    if (state.guestAtoms) for (var j = 0; j < state.guestAtoms.length; j++) if (uidSet[state.guestAtoms[j].uid]) state.guestAtoms[j].selected = sel;
+    renderSelection(); updateSelectionInfo();
+  }
+  function deleteSelectionGroup(id) {
+    state.selectionGroups = state.selectionGroups.filter(function (g) { return g.id !== id; });
+    buildSelectionGroupsUI();
+  }
+  /* Once every atom a group ever referred to has been deleted, the group
+     itself is just dead weight -- nothing left it could ever select -- so
+     it's dropped automatically rather than leaving a permanent "(0)" row
+     for the user to notice and clean up by hand. Unlike guest groups'
+     own pruneEmptyGuestGroups(), this never renumbers/renames the survivors
+     -- a selection group's name is a real, deliberately user-chosen label
+     (the whole point of the feature), not an auto-generated "Guest N" one,
+     so it must never change as a side effect of an unrelated group
+     disappearing. */
+  function pruneEmptySelectionGroups() {
+    var before = state.selectionGroups.length;
+    state.selectionGroups = state.selectionGroups.filter(function (g) { return selectionGroupLiveCount(g) > 0; });
+    return state.selectionGroups.length !== before;
+  }
+  function buildSelectionGroupsUI() {
+    pruneEmptySelectionGroups();
+    var box = document.getElementById("selectionGroupsBox");
+    if (!box) return;
+    box.innerHTML = "";
+    if (!state.selectionGroups.length) { box.innerHTML = "<div class='dim'>No selection groups yet.</div>"; return; }
+    state.selectionGroups.forEach(function (g) {
+      var row = el("div", "ctl-top");
+      var nameInp = document.createElement("input"); nameInp.type = "text"; nameInp.className = "num"; nameInp.style.flex = "1 1 auto"; nameInp.style.textAlign = "left";
+      nameInp.value = g.name;
+      nameInp.addEventListener("change", function () { g.name = nameInp.value.trim() || g.name; });
+      row.appendChild(nameInp);
+      row.appendChild(el("span", "unit sel-group-count", "(" + selectionGroupLiveCount(g) + ")"));
+      button(row, "Select", "mini sel-group-btn", function () { setSelectionGroupSelected(g.id, true); });
+      button(row, "Deselect", "mini sel-group-btn", function () { setSelectionGroupSelected(g.id, false); });
+      var delBtn = document.createElement("button"); delBtn.type = "button"; delBtn.className = "icon-btn"; delBtn.title = "Delete this selection group (the atoms themselves are untouched)";
+      delBtn.textContent = "×";
+      delBtn.addEventListener("click", function () { deleteSelectionGroup(g.id); });
+      row.appendChild(delBtn);
+      box.appendChild(row);
+    });
   }
 
   /* ---------------- info / results ---------------- */
@@ -15772,6 +16042,7 @@ select.sel:focus{border-color:var(--accent)}
       name: state.name, guestName: state.guestName,
       atoms: state.atoms, guestAtoms: state.guestAtoms,
       guestGroups: state.guestGroups, guestBatch: state.guestBatch, nextUid: nextUid,
+      selectionGroups: state.selectionGroups, selectionGroupSeq: state.selectionGroupSeq,
       isCif: state.isCif, cifCell: state.cifCell, cifSymops: state.cifSymops,
       cifAsymUnit: state.cifAsymUnit, cifFracToCart: state.cifFracToCart, cifTags: state.cifTags,
       symmetryForgotten: state.symmetryForgotten, showOnlyAsu: state.showOnlyAsu,
@@ -15952,6 +16223,10 @@ select.sel:focus{border-color:var(--accent)}
     (function normalizeHidden(arr) { if (arr) for (var i = 0; i < arr.length; i++) if (arr[i].hidden === undefined) arr[i].hidden = false; })(state.atoms);
     (function normalizeHidden(arr) { if (arr) for (var i = 0; i < arr.length; i++) if (arr[i].hidden === undefined) arr[i].hidden = false; })(state.guestAtoms);
     state.guestGroups = data.guestGroups || []; state.guestBatch = data.guestBatch || 0;
+    /* Absent entirely in a project saved before this feature existed --
+       state already defaults to [] / 0, so an old file just loads with no
+       selection groups, same as if this were a brand new one. */
+    state.selectionGroups = data.selectionGroups || []; state.selectionGroupSeq = data.selectionGroupSeq || 0;
     nextUid = Math.max(data.nextUid || 1, maxUid(state.atoms) + 1, maxUid(state.guestAtoms) + 1, 1);
     state.isCif = !!data.isCif; state.cifCell = data.cifCell || null; state.cifSymops = data.cifSymops || null;
     state.cifAsymUnit = data.cifAsymUnit || null; state.cifFracToCart = data.cifFracToCart || null;
@@ -16146,7 +16421,7 @@ select.sel:focus{border-color:var(--accent)}
     updateFog();
     renderStructure(); renderSurface(); renderUnitCell(); renderVoidMeshes();
     updateHostInfo(); updateGuestInfo(); updateStructuralParamsInfo();
-    buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); buildGuestGroupsUI();
+    buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); buildGuestGroupsUI(); buildSelectionGroupsUI();
     refreshReassignElementOptions(); refreshBondCleanupElements();
     renderSelection(); updateSelectionInfo(); updateBondSelectionInfo();
     refreshSymmetryUI();
@@ -17677,6 +17952,27 @@ select.sel:focus{border-color:var(--accent)}
     var molVolBtn = button(molVolRow, "Calculate molecular volume", "ghost", calculateMolecularVolume); molVolBtn.id = "molVolBtn"; molVolBtn.disabled = true;
     sgC.appendChild(molVolRow);
 
+    /* Named, reusable selections -- save whatever's currently selected
+       (host and/or guest together) under a name, so it can be picked out
+       again later without re-selecting by hand. See createSelectionGroup's
+       own comment for the full design (atoms can belong to any number of
+       groups, deleting an atom just quietly shrinks a group's live count). */
+    var selGroupsC = subsection(sgC, "Selection groups", false);
+    var selGroupSaveRow = el("div", "ctl-inline");
+    var selGroupNameInp = document.createElement("input"); selGroupNameInp.type = "text"; selGroupNameInp.className = "num"; selGroupNameInp.style.flex = "1 1 auto"; selGroupNameInp.style.textAlign = "left";
+    selGroupNameInp.placeholder = "Group name (optional)";
+    selGroupSaveRow.appendChild(selGroupNameInp);
+    var selGroupSaveBtn = document.createElement("button"); selGroupSaveBtn.type = "button"; selGroupSaveBtn.className = "btn ghost"; selGroupSaveBtn.textContent = "Save selection as group";
+    selGroupSaveBtn.style.flex = "0 0 auto"; selGroupSaveBtn.style.width = "auto";
+    selGroupSaveBtn.addEventListener("click", function () {
+      var id = createSelectionGroup(selGroupNameInp.value);
+      if (id !== null) selGroupNameInp.value = "";
+    });
+    selGroupSaveRow.appendChild(selGroupSaveBtn);
+    selGroupsC.appendChild(selGroupSaveRow);
+    var selGroupsBox = el("div"); selGroupsBox.id = "selectionGroupsBox"; selGroupsC.appendChild(selGroupsBox);
+    buildSelectionGroupsUI();
+
     var macroC = section(left, "Macro", false);
     var macroBtnRow = el("div", "btnrow");
     var macroRecordBtn = el("button", "btn" + (state.macroRecording ? " grow-active" : " ghost"), "Record");
@@ -17733,6 +18029,25 @@ select.sel:focus{border-color:var(--accent)}
     var macroBatchSelectBtn = button(macroBatchBtnRow, "Select folder", "ghost", selectMacroBatchFolder);
     macroBatchSelectBtn.id = "macroBatchSelectBtn";
     macroC.appendChild(macroBatchBtnRow);
+
+    /* CALCULATE_VOID's own results table -- record a macro that presses
+       Calculate under Void/Channel Analysis (with "Apply macro to all files
+       in folder" ticked, or just by loading a different structure and
+       pressing Play again by hand), and each run's regions land here as
+       their own rows, side by side across every structure processed this
+       session. See appendVoidBatchTableRows()/runVoidCalculate(). */
+    var voidBatchC = subsection(macroC, "Void/channel batch results", false);
+    var voidBatchScroll = el("div", "void-batch-scroll");
+    var voidBatchTableEl = document.createElement("table"); voidBatchTableEl.id = "voidBatchTable";
+    voidBatchTableEl.innerHTML = "<thead><tr><th>Structure</th><th>ID</th><th>Type</th><th>Critical r (" + U.ang + ")</th><th>Volume (" + U.ang + U.cube + ")</th><th>Probe r (" + U.ang + ")</th></tr></thead><tbody id=\"voidBatchTableBody\"></tbody>";
+    voidBatchScroll.appendChild(voidBatchTableEl);
+    voidBatchC.appendChild(voidBatchScroll);
+    var voidBatchBtnRow = el("div", "btnrow"); voidBatchBtnRow.style.marginTop = "4px";
+    button(voidBatchBtnRow, "Copy as TSV", "ghost", copyVoidBatchTableTsv);
+    button(voidBatchBtnRow, "Save as CSV", "ghost", saveVoidBatchTableCsv);
+    button(voidBatchBtnRow, "Clear table", "ghost", clearVoidBatchTable);
+    voidBatchC.appendChild(voidBatchBtnRow);
+    buildVoidBatchTableUI();
 
     var dispC = section(left, "Visual Effects", false);
     var resetAllRow = el("div", "btnrow");
@@ -18244,6 +18559,7 @@ select.sel:focus{border-color:var(--accent)}
       "<p>Click an atom to select it (shown with a yellow wire highlight); click a selected atom again to deselect it. The modifier keys compose: <b>Shift</b> restricts to atoms of the same element, <b>Ctrl</b> restricts to the clicked atom's bonded fragment, and <b>Alt</b> restricts to the clicked atom's whole component (the host, or one specific guest group) -- \"component\" here means host, guest 1, guest 2, and so on are all counted separately. Ctrl-click selects the whole fragment regardless of element; Alt-click selects the whole component regardless of element; Shift-click selects that element everywhere, host and guest together; Shift+Ctrl-click narrows that down to just that element within the clicked atom's fragment. <b>Ctrl+Alt-click</b> and <b>Shift+Alt-click</b> are both symmetry-scoped instead (CIF-loaded structures only -- they do nothing on an atom with no symmetry information): Ctrl+Alt selects every currently-displayed atom sharing the clicked atom's asymmetric-unit origin, i.e. every symmetry copy of that one specific atom (see \"CIF and symmetry\" above); Shift+Alt selects every atom -- from any asymmetric-unit position, host or guest -- generated by the same symmetry operator as the clicked atom, regardless of which underlying atom it came from. <b>Shift+Ctrl+Alt-click</b> selects by PART number instead (SHELX .res/.ins structures only -- see \"Loading structures\" above). Every one of these toggles based on whether the clicked atom is currently selected, so clicking the same way again on an already-selected atom deselects the matching set instead. This all works the same way on host and guest atoms. Pressing spacebar, while focus isn't in a text box or other control, selects every atom if none are currently selected, or clears the selection entirely if any are. \"Delete selection\" removes them from whichever layer they belong to.</p>" +
       "<h3>Selection &amp; geometry</h3>" +
       "<p>The <b>Selection &amp; geometry</b> section shows a live readout for whatever is currently selected. More than 4 atoms selected shows just a count and an element breakdown (C, H, O, ...), since geometry stops meaning anything specific once a selection is a bulk fragment or element rather than a handful of atoms picked in order. For 1 to 4 atoms it shows the last-selected atom's element, fractional coordinates (CIF-based structures only) and Cartesian coordinates, then builds up cumulatively: 2 atoms adds the distance between them; 3 adds the second distance and the angle at the middle atom; 4 adds the third distance, the second angle, and the torsion angle through all four. Order follows the order atoms sit in the underlying atom list (host atoms, then guest atoms), not the order they were clicked in, since atoms here are only ever flagged selected rather than tracked in a separate ordered list -- for an angle or torsion reading with a specific atom intended as the vertex, select that one first isn't guaranteed to control the result; check the readout's own labelling. Where a CIF gives coordinate uncertainties (esds) in parentheses, e.g. <span class='mono'>0.51180(12)</span>, a distance, angle, or torsion is shown in standard notation too, e.g. <span class='mono'>1.542(3)</span> -- propagated independently per coordinate (no cell-parameter or cross-atom covariance, which a CIF doesn't provide), and only for untransformed atoms (no symmetry operation or cell offset applied); a symmetry-grown copy, a SHELX .res/.ins load (which never carries esds at all), or a guest atom simply shows a plain number instead. A mixed selection shows the esd on whichever individual measurements have it and a plain number on the ones that don't.</p>" +
+      "<p><b>Selection groups</b>, further down the same section, remembers a set of atoms under a name so it can be picked out again later without re-selecting them by hand. Select whatever's wanted (host and guest atoms can be mixed together in one group), type an optional name, and press <b>Save selection as group</b> -- leaving the name blank just calls it \"Selection 1\", \"Selection 2\", and so on. Saving clears the selection that was just saved (the atoms aren't going anywhere -- the new group's own <b>Select</b> button, right below, brings them straight back whenever they're wanted again). Each saved group appears as its own row, showing its name (click into it to rename at any time), how many of its atoms are still actually present in parentheses, and <b>Select</b> / <b>Deselect</b> buttons: <b>Select</b> adds that group's atoms to whatever's already selected, <b>Deselect</b> removes just that group's atoms, so several groups can be combined by selecting each in turn without ever clobbering an unrelated selection already in progress. The small <b>&times;</b> deletes the saved group itself -- the atoms it referred to are completely untouched either way. An atom can belong to any number of groups at once, or none, entirely independent of host/guest membership; if an atom belonging to a group is later deleted from the structure, the group simply carries fewer atoms from then on (the count in parentheses drops to match) -- the rest of the group is unaffected, and once every atom it ever referred to has been deleted, the empty group itself disappears from the list automatically rather than sitting there at &ldquo;(0)&rdquo;. Selection groups are saved as part of the project file, the same as guest groups.</p>" +
       "<h3>Moving atoms between host and guest</h3>" +
       "<p>A structure can be loaded as a single combined file and split afterwards, instead of always requiring separate host and guest files: select the atoms that belong on the other side, choose a destination from the dropdown (Host, an existing guest component, or \"New guest group\"), and press \"Move selection to\". This is exactly the same selection mechanism used for deletion, so the same click and ctrl-click rules apply. A moved atom keeps its radius but takes on its new layer's colour rules, snapshotting whatever the current host or guest default is at the moment it arrives.</p>" +
       "<p>This is also how disordered guests with more than one component are separated: select one component's atoms and move them to a new guest group, then repeat for each remaining component. Guest components are listed in the <b>Guest</b> tab with an atom count and their own show/hide checkbox, and \"Select\" there re-selects all of a component's atoms at once -- useful for correcting a mistake by moving atoms out of the wrong group. If deleting or moving atoms empties a component completely, it disappears from the list and the remaining ones are renumbered so there's no gap -- the numbers are just labels and aren't used for anything else, so this has no other effect. Ctrl-click's whole-fragment shortcut can mis-select across two disorder components that happen to sit close together, since that's indistinguishable from a real bond by geometry alone; when that happens, select atom by atom instead.</p>" +
@@ -18288,6 +18604,7 @@ select.sel:focus{border-color:var(--accent)}
       "<p>Two buttons below the memo insert a command directly, regardless of whether Record is down -- there's no single live action either one corresponds to, so unlike everything above they're never recorded automatically. <b>Add current POV</b> appends a <span class='mono'>VIEW</span> command capturing the exact current camera orientation (as the same four-number quaternion a saved project file itself already uses for this), so a macro can return the view to precisely this orientation later, on this structure or another. <b>Add EXPORT_PNG</b> appends an <span class='mono'>EXPORT_PNG</span> command, optionally with whatever suffix is typed in the box beside the button (sanitized against characters a filename can't contain) -- see below.</p>" +
       "<p><span class='mono'>EXPORT_PNG</span>, when played, saves the current view as a PNG using whatever <b>Export &gt; Image</b> is currently set to (resolution, transparent background), the same as pressing <b>Export image (PNG)</b> by hand. Its filename is always the current structure's own name with its extension stripped, plus an underscore and the given suffix if one was given (e.g. structure <span class='mono'>ZIF-68.cif</span> with suffix <span class='mono'>top</span> saves <span class='mono'>ZIF-68_top.png</span>). Because writing straight to disk needs the user's permission, the very first time <b>Play</b> is pressed on a memo containing an <span class='mono'>EXPORT_PNG</span> line, a folder picker appears asking where to save -- granted once, that folder is then reused silently for every <span class='mono'>EXPORT_PNG</span> in every macro played for the rest of this browser session, with no further prompts, until a write to it actually fails (at which point the next Play asks again). Declining the picker, or using a browser without this capability at all, falls back to an ordinary individual download per image instead of failing outright.</p>" +
       "<p><b>Apply macro to all files in folder</b>, at the bottom of the panel, turns Play into a batch operation: tick the box, use <b>Select folder</b> to grant access to a folder (the box above it shows the folder's own name once chosen -- browsers never expose a full filesystem path, only that), then press Play as normal. Instead of running once against the currently-loaded structure, every <span class='mono'>.cif</span>/<span class='mono'>.res</span>/<span class='mono'>.ins</span>/<span class='mono'>.txt</span> file in that folder is loaded in turn (alphabetical order) and the whole memo is run against each one before moving to the next, reporting how many files it got through and how many commands failed along the way. If the memo also contains an <span class='mono'>EXPORT_PNG</span> line, the same batch folder doubles as the export destination -- no second permission prompt -- so this is the tool for producing one rendered image per structure across a whole folder of similar files in one action. It's entirely up to the user to make sure every file in the folder is actually compatible with the macro being played (matching ASU labelling, as above); a file that fails to load at all (wrong format, unparseable) is skipped and counted, not fatal to the rest of the batch.</p>" +
+      "<p><span class='mono'>CALCULATE_VOID</span>, when played, presses <b>Calculate</b> under Void/Channel Analysis exactly as if clicked by hand -- using whatever probe radius, mode, and other calculation settings are currently on screen at the moment it plays, never a value captured back when it was recorded, the same way every other command always acts on the current state rather than a frozen one. Combined with <b>Apply macro to all files in folder</b> (or just by loading a different structure and pressing Play again by hand), this is how to run the same void/channel analysis across a whole series of structures: each time it plays, every region found is appended as its own row to the <b>Void/channel batch results</b> table further down this panel -- Structure, ID, Type, Critical radius, Volume, and the probe radius that was actually in effect for that row -- building up one combined comparison table across everything processed so far in this browser session. That table is never cleared automatically (not by loading a new structure, not between separate Play presses) so it can keep growing across as many runs as wanted; <b>Copy as TSV</b> copies it straight to the clipboard for pasting into a spreadsheet, <b>Save as CSV</b> writes it to a file, and <b>Clear table</b> empties it. An ordinary manual click on <b>Calculate</b> (Record not down, no macro playing) never adds a row here -- only a <span class='mono'>CALCULATE_VOID</span> command actually being played does.</p>" +
       "<p>The command reference below groups every command by what it does. Most mirror a specific action one-to-one and are recorded automatically while Record is down; a handful are noted where that isn't the case.</p>" +
       "<p><b>Selection</b> (recorded on the matching click or spacebar press):</p>" +
       "<ul>" +
@@ -18335,6 +18652,10 @@ select.sel:focus{border-color:var(--accent)}
       "<li><span class='mono'>ATOM_STYLE_CLEAR_SELECTION</span> &mdash; only when the Clear selection checkbox is ticked.</li>" +
       "<li><span class='mono'>ATOM_STYLE_APPLY</span> &mdash; always last; actually applies whatever the lines above it set up.</li>" +
       "</ul>" +
+      "<p><b>Void/channel analysis</b>:</p>" +
+      "<ul>" +
+      "<li><span class='mono'>CALCULATE_VOID</span> &mdash; \"Calculate\" under Void/Channel Analysis. No arguments -- see above for exactly what it does when played, including the batch results table.</li>" +
+      "</ul>" +
       "<p><b>Export</b>:</p>" +
       "<ul>" +
       "<li><span class='mono'>EXPORT_PNG suffix</span> &mdash; never recorded automatically; only ever inserted by <b>Add EXPORT_PNG</b> (suffix is optional -- see above for exactly what it does when played).</li>" +
@@ -18356,7 +18677,7 @@ select.sel:focus{border-color:var(--accent)}
        so a mid-session project load overwriting state.videoFormat later is
        unaffected by this. */
     state.videoFormat = (await isMp4EncoderCached()) ? "mp4" : "avi";
-    initThree(document.getElementById("viewport")); buildUI(); buildElementsPage(); buildGuide(); wireIO(); buildGuestGroupsUI(); refreshBondCleanupElements(); initFavoriteColorSwatches();
+    initThree(document.getElementById("viewport")); buildUI(); buildElementsPage(); buildGuide(); wireIO(); buildGuestGroupsUI(); buildSelectionGroupsUI(); refreshBondCleanupElements(); initFavoriteColorSwatches();
     window.__dbg = { state: state, voidCellBundle: voidCellBundle, voidLatticeVectors: voidLatticeVectors, K: K, VoidNet: VoidNet, buildCellModeAtoms: buildCellModeAtoms, mergeDuplicateComponents: mergeDuplicateComponents, runVoidCalculate: runVoidCalculate };
     syncNoAtomsOverlay(); /* nothing loaded yet -- show "No atoms to display" until a structure loads (renderStructure() keeps this in sync from here on) */
     setCameraMode(state.cameraMode); updateFog();
