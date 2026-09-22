@@ -40,12 +40,23 @@ main{flex:1;display:flex;flex-direction:column;align-items:center;padding:2.5rem
 .drop-zone p{font-size:12.5px;color:var(--ink-mid);margin-top:.25rem}
 .drop-zone strong{color:var(--ink)}
 .drop-zone .dz-fmt{font-family:var(--mono);font-size:10.5px;color:var(--ink-faint);margin-top:.4rem}
+.dz-folder-link{display:block;margin:.6rem auto 0;font-family:var(--mono);font-size:10.5px;color:var(--accent);
+  background:transparent;border:none;cursor:pointer;text-decoration:underline;text-underline-offset:2px;padding:0}
+.dz-folder-link:hover{opacity:.7}
 
 /* -- File bar -- */
 .file-bar{display:flex;align-items:center;justify-content:space-between;
   background:var(--paper);border:1px solid var(--line);border-radius:5px;padding:7px 10px}
 .file-bar .fname{font-family:var(--mono);font-size:11.5px;font-weight:500;color:var(--ink)}
 .file-bar .fmeta{font-family:var(--mono);font-size:10.5px;color:var(--ink-faint)}
+
+/* -- File groups (multi-file / folder drop) -- */
+.file-group{display:flex;flex-direction:column;gap:6px}
+.file-group+.file-group{margin-top:4px;padding-top:10px;border-top:1px dashed var(--line)}
+.file-sub-header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.file-sub-header .fname{font-family:var(--mono);font-size:11px;font-weight:500;color:var(--ink);
+  overflow-wrap:anywhere;word-break:break-all}
+.file-sub-header .fmeta{font-family:var(--mono);font-size:10px;color:var(--ink-faint);flex-shrink:0}
 
 /* -- List header -- */
 .list-header{display:flex;align-items:center;justify-content:space-between}
@@ -61,22 +72,29 @@ main{flex:1;display:flex;flex-direction:column;align-items:center;padding:2.5rem
 .block-card.excluded{opacity:.35}
 
 .block-header-row{display:flex;align-items:center;gap:7px;cursor:pointer;user-select:none;margin-bottom:6px}
-.block-cb{accent-color:var(--accent);width:13px;height:13px;cursor:pointer;flex-shrink:0}
+.struct-cb{accent-color:var(--accent);width:13px;height:13px;cursor:pointer;flex-shrink:0}
 .block-name{font-family:var(--mono);font-size:12px;font-weight:500;color:var(--accent)}
 
 .file-chips{display:flex;gap:5px;flex-wrap:wrap}
-.chip{font-family:var(--mono);font-size:10.5px;font-weight:500;padding:2px 8px;border-radius:10px}
+.chip{font-family:var(--mono);font-size:10.5px;font-weight:500;padding:2px 8px 2px 6px;border-radius:10px;
+  display:inline-flex;align-items:center;gap:4px;cursor:pointer;user-select:none}
+.chip input[type=checkbox]{width:11px;height:11px;margin:0;accent-color:currentColor;cursor:pointer;flex-shrink:0}
 .chip-yes{background:var(--ok-bg);color:var(--ok);border:1px solid var(--ok-bd)}
-.chip-no{background:var(--paper2);color:var(--ink-faint);border:1px solid var(--line)}
+.chip-no{background:var(--paper2);color:var(--ink-faint);border:1px solid var(--line);cursor:default}
+.chip-no input[type=checkbox]{cursor:default}
+.chip input[type=checkbox]:disabled{cursor:default}
 
 /* -- Notice -- */
 .notice{background:var(--paper2);border:1px solid var(--line);border-radius:5px;
   padding:9px 11px;font-size:11.5px;color:var(--ink-mid);font-family:var(--mono)}
 
 /* -- Options row -- */
+.opt-group{display:flex;flex-direction:column;gap:8px}
+.opt-choice{display:flex;flex-direction:column;gap:2px}
 .opt-row{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;
   color:var(--ink-mid);cursor:pointer;user-select:none}
-.opt-row input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;cursor:pointer}
+.opt-row input[type=checkbox],.opt-row input[type=radio]{accent-color:var(--accent);width:13px;height:13px;cursor:pointer}
+.opt-hint{font-family:var(--mono);font-size:9.5px;color:var(--ink-faint);margin-left:20px;overflow-wrap:anywhere}
 
 /* -- Extract button -- */
 .extract-btn{display:block;width:100%;background:var(--accent);color:#fff;
@@ -97,7 +115,7 @@ main{flex:1;display:flex;flex-direction:column;align-items:center;padding:2.5rem
 
 <header>
   <h1>CIF Splitter</h1>
-  <span class="sub">split multi-structure CIFs &middot; extract embedded SHELX files (RES, HKL, FAB)</span>
+  <span class="sub">split multi-structure CIFs &middot; scans folders/subfolders &middot; extract embedded SHELX files (RES, HKL, FAB)</span>
 </header>
 
 <main>
@@ -105,10 +123,13 @@ main{flex:1;display:flex;flex-direction:column;align-items:center;padding:2.5rem
 
   <div class="drop-zone" id="dropZone">
     <div class="dz-icon">&#x2B06;</div>
-    <p>Drop a <strong>CIF file</strong> here, or <strong>click to browse</strong></p>
-    <p class="dz-fmt">.cif &middot; .fcf &nbsp;&mdash;&nbsp; extracts: .cif per block &middot; .res &middot; .hkl &middot; .fab</p>
+    <p>Drop <strong>CIF file(s)</strong> or a <strong>folder</strong> here, or <strong>click to browse</strong></p>
+    <p class="dz-fmt">.cif &middot; .fcf &nbsp;&mdash;&nbsp; subfolders are searched too &middot; extracts: .cif per block &middot; .res &middot; .hkl &middot; .fab</p>
   </div>
-  <input type="file" id="fileInput" accept=".cif,.fcf" style="display:none">
+  <button type="button" class="dz-folder-link" id="browseFolderBtn">or choose a folder&hellip;</button>
+  <input type="file" id="fileInput" accept=".cif,.fcf" multiple style="display:none">
+  <input type="file" id="dirInput" webkitdirectory multiple style="display:none">
+  <div class="status-msg" id="scanStatus"></div>
 
   <div id="results">
     <div class="file-bar">
@@ -120,9 +141,7 @@ main{flex:1;display:flex;flex-direction:column;align-items:center;padding:2.5rem
       <button class="btn-sel-all" id="selectAllBtn" style="display:none">Deselect all</button>
     </div>
     <div class="block-list" id="blockList"></div>
-    <label class="opt-row" id="folderOptRow" style="display:none">
-      <input type="checkbox" id="useFolders" checked> Use a separate folder per structure
-    </label>
+    <div class="opt-group" id="optGroup" style="display:none"></div>
     <button class="extract-btn" id="extractBtn">Extract to ZIP</button>
     <div class="status-msg" id="statusMsg"></div>
   </div>
@@ -181,100 +200,283 @@ function truncateAtZeroRecord(content){
   return content;
 }
 function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+const CIF_RE=/\.(cif|fcf)$/i;
 
 // -- State -------------------------------------------------------------
-let currentBlocks=[],sourceFileName='',sourceFileHandle=null;
+// allBlocks: flat list across every source CIF found, in drop order.
+// Each entry: {block, dir, fileStem, multiInFile}
+// sourceFileHandle/sourceFolderHandle: whichever the browser handed us for
+// the dropped item, used only to pick where the save dialog opens.
+let allBlocks=[],totalFilesCount=0,sourceFileName='',sourceFileHandle=null,sourceFolderHandle=null,currentBatchName='';
 
-// -- Render results ----------------------------------------------------
-function renderResults(blocks,fileName,fileSize){
-  sourceFileName=fileName;currentBlocks=blocks;
-  document.getElementById('fileName').textContent=fileName;
-  document.getElementById('fileMeta').textContent=
-    fmtSize(fileSize)+' \u00B7 '+blocks.length+' data block'+(blocks.length!==1?'s':'');
-  const hasAnyEmb=blocks.some(b=>Object.keys(b.embedded).length>0);
-  const multi=blocks.length>1;
-  const parts=[];
-  if(multi)parts.push(blocks.length+' structures');
-  if(hasAnyEmb)parts.push('embedded SHELX files detected');
-  document.getElementById('summaryLabel').textContent=parts.join(' \u00B7 ');
+// -- Build one block card ----------------------------------------------
+// A structure-level checkbox includes/excludes the whole structure (like
+// before), and each component (CIF plus whichever of RES/HKL/FAB are
+// embedded) additionally gets its own checkbox for fine-grained control
+// within a structure that's included. Absent components are shown as a
+// disabled, unchecked chip. data-has records whether a component actually
+// exists, so re-enabling after the structure checkbox is re-checked
+// doesn't accidentally enable a component that was never there.
+const COMPONENT_TYPES=[{ext:'cif',label:'CIF'},...EMBEDDED];
+function buildBlockCard(block,idx){
+  const chips=COMPONENT_TYPES.map(t=>{
+    const has=t.ext==='cif'?true:block.embedded[t.ext]!==undefined;
+    const cls=has?'chip-yes':'chip-no';
+    const attrs=(has?' checked':' disabled')+' data-has="'+(has?'1':'0')+'"';
+    const title=has?' title="Shift-click to toggle all '+t.label+' files"':'';
+    return '<label class="chip '+cls+'"'+title+'>'+
+      '<input type="checkbox" class="comp-cb" data-idx="'+idx+'" data-type="'+t.ext+'"'+attrs+'>'+
+      (has?'\u2713':'\u2014')+' '+t.label+'</label>';
+  }).join('');
+  const card=document.createElement('div');card.className='block-card';
+  card.innerHTML=
+    '<label class="block-header-row">'+
+    '<input type="checkbox" class="struct-cb" data-idx="'+idx+'" checked>'+
+    '<span class="block-name">data_'+esc(block.name)+'</span></label>'+
+    '<div class="file-chips">'+chips+'</div>';
+  return card;
+}
+
+function syncCardComponentsDisabled(card){
+  const structCb=card.querySelector('.struct-cb');
+  const structChecked=structCb?structCb.checked:true;
+  card.querySelectorAll('.comp-cb').forEach(cb=>{
+    cb.disabled=!structChecked||cb.dataset.has!=='1';
+  });
+}
+
+function refreshCardStates(){
+  document.querySelectorAll('.block-card').forEach(card=>{
+    const structCb=card.querySelector('.struct-cb');
+    const included=structCb&&structCb.checked&&[...card.querySelectorAll('.comp-cb')].some(cb=>cb.checked);
+    card.classList.toggle('excluded',!included);
+  });
+}
+
+// -- Render results (one or many source CIFs) --------------------------
+// fileEntries: [{dir, fileName, size, blocks}]  dir='' for top-level files
+function renderAll(fileEntries,skipped){
+  totalFilesCount=fileEntries.length;
+  allBlocks=[];
+  const single=fileEntries.length===1;
+  if(single)sourceFileName=fileEntries[0].fileName;
+
   const list=document.getElementById('blockList');list.innerHTML='';
-  for(let i=0;i<blocks.length;i++){
-    const block=blocks[i];
-    const chips=EMBEDDED.map(e=>{
-      const has=block.embedded[e.ext]!==undefined;
-      return '<span class="chip '+(has?'chip-yes':'chip-no')+'">'+(has?'\u2713':'\u2014')+' '+e.label+'</span>';
-    }).join('');
-    const card=document.createElement('div');card.className='block-card';
-    card.innerHTML=
-      '<label class="block-header-row">'+
-      '<input type="checkbox" class="block-cb" data-idx="'+i+'" checked>'+
-      '<span class="block-name">data_'+esc(block.name)+'</span></label>'+
-      '<div class="file-chips"><span class="chip chip-yes">\u2713 CIF</span>'+chips+'</div>';
-    card.querySelector('.block-cb').addEventListener('change',function(e){
-      card.classList.toggle('excluded',!e.target.checked);updateExtractBtn();});
-    list.appendChild(card);
+  let totalStructures=0,anyEmbedded=false;
+
+  if(single){
+    const fe=fileEntries[0];
+    document.getElementById('fileName').textContent=fe.dir?fe.dir+'/'+fe.fileName:fe.fileName;
+    document.getElementById('fileMeta').textContent=
+      fmtSize(fe.size)+' \u00B7 '+fe.blocks.length+' data block'+(fe.blocks.length!==1?'s':'');
+  }else{
+    document.getElementById('fileName').textContent=
+      fileEntries.length+' CIF files'+(skipped?' ('+skipped+' skipped)':'');
+    const totalSize=fileEntries.reduce((s,f)=>s+f.size,0);
+    document.getElementById('fileMeta').textContent=fmtSize(totalSize)+' total';
   }
-  if(!multi&&!hasAnyEmb){
-    const n=document.createElement('div');n.className='notice';
-    n.textContent='Single block \u00B7 no embedded SHELX files found. Only a .cif will be extracted.';
-    list.appendChild(n);
+
+  for(const fe of fileEntries){
+    totalStructures+=fe.blocks.length;
+    const multiInFile=fe.blocks.length>1;
+    const fileStem=safeName(fe.fileName.replace(CIF_RE,''));
+    let groupTarget=list;
+    if(!single){
+      const group=document.createElement('div');group.className='file-group';
+      const hdr=document.createElement('div');hdr.className='file-sub-header';
+      hdr.innerHTML='<span class="fname">'+esc(fe.dir?fe.dir+'/'+fe.fileName:fe.fileName)+'</span>'+
+        '<span class="fmeta">'+fmtSize(fe.size)+' \u00B7 '+fe.blocks.length+' block'+(fe.blocks.length!==1?'s':'')+'</span>';
+      group.appendChild(hdr);
+      const sublist=document.createElement('div');sublist.className='block-list';
+      group.appendChild(sublist);
+      list.appendChild(group);
+      groupTarget=sublist;
+    }
+    for(const block of fe.blocks){
+      if(Object.keys(block.embedded).length)anyEmbedded=true;
+      const idx=allBlocks.length;
+      allBlocks.push({block,dir:fe.dir,fileStem,multiInFile});
+      groupTarget.appendChild(buildBlockCard(block,idx));
+    }
+    if(fe.blocks.length===1&&!Object.keys(fe.blocks[0].embedded).length){
+      const n=document.createElement('div');n.className='notice';
+      n.textContent='Single block \u00B7 no embedded SHELX files found. Only a .cif will be extracted.';
+      groupTarget.appendChild(n);
+    }
   }
+
+  const parts=[];
+  if(!single)parts.push(totalStructures+' structure'+(totalStructures!==1?'s':'')+' across '+fileEntries.length+' files');
+  else if(fileEntries[0].blocks.length>1)parts.push(fileEntries[0].blocks.length+' structures');
+  if(anyEmbedded)parts.push('embedded SHELX files detected');
+  document.getElementById('summaryLabel').textContent=parts.join(' \u00B7 ');
+
   document.getElementById('extractBtn').disabled=false;
   document.getElementById('statusMsg').textContent='';
-  document.getElementById('folderOptRow').style.display=multi?'flex':'none';
-  document.getElementById('selectAllBtn').style.display=multi?'inline':'none';
+  renderFolderLayoutOptions(fileEntries);
+  const totalCbs=document.querySelectorAll('.comp-cb:not(:disabled)').length;
+  document.getElementById('selectAllBtn').style.display=totalCbs>1?'inline':'none';
+  refreshCardStates();
   updateExtractBtn();
   document.getElementById('results').classList.add('vis');
 }
 
-function updateExtractBtn(){
-  const cbs=[...document.querySelectorAll('.block-cb')];
-  const n=cbs.filter(cb=>cb.checked).length;
-  const btn=document.getElementById('extractBtn');
-  btn.disabled=n===0;
-  btn.textContent=n===currentBlocks.length?'Extract to ZIP':'Extract '+n+' of '+currentBlocks.length+' to ZIP';
-  const sa=document.getElementById('selectAllBtn');
-  sa.textContent=n===0?'Select all':'Deselect all';
+// A single mutually-exclusive choice for how the ZIP is laid out, instead
+// of two checkboxes where one only made sense when the other was off.
+// Only offers the "structures together vs one folder per structure"
+// distinction when it would actually matter (some file has >1 structure),
+// and only offers flattening at all when there'd otherwise be any nesting.
+function renderFolderLayoutOptions(fileEntries){
+  const multiStructural=fileEntries.some(f=>f.blocks.length>1);
+  const hasNesting=totalFilesCount>1||fileEntries.some(f=>f.dir)||multiStructural;
+  const group=document.getElementById('optGroup');
+  if(!hasNesting){
+    group.style.display='none';
+    group.innerHTML='';
+    return;
+  }
+
+  // Build example paths from the user's own dropped data (preferring a file
+  // with multiple structures, since that's the only case where the first
+  // two options actually differ) so the choice is concrete, not just prose.
+  const repFile=fileEntries.find(f=>f.blocks.length>1)||fileEntries[0];
+  const repDirParts=repFile.dir?repFile.dir.split('/').filter(Boolean).map(safeName):[];
+  const repStem=safeName(repFile.fileName.replace(CIF_RE,''));
+  const names=repFile.blocks.slice(0,2).map(b=>safeName(b.name));
+  const baseDirs=[...repDirParts,...(totalFilesCount>1?[repStem]:[])];
+  const pathJoin=parts=>parts.filter(Boolean).join('/');
+  const hintPerStructure=names.map(n=>pathJoin([...baseDirs,n,n+'.cif'])).join(', ');
+  const hintTogether=names.map(n=>pathJoin([...baseDirs,n+'.cif'])).join(', ');
+  const hintFlatten=names.map(n=>n+'.cif').join(', ');
+
+  const options=multiStructural?[
+    {value:'mirror-per-structure',label:'Keep folder structure, one folder per structure',checked:true,hint:hintPerStructure},
+    {value:'mirror-flat',label:'Keep folder structure, structures together',hint:hintTogether},
+  ]:[
+    {value:'mirror-per-structure',label:'Keep folder structure',checked:true,hint:hintTogether},
+  ];
+  options.push({value:'flatten',label:'One flat folder — no subfolders',hint:hintFlatten});
+  group.innerHTML=options.map(o=>
+    '<div class="opt-choice">'+
+      '<label class="opt-row"><input type="radio" name="folderLayout" value="'+o.value+'"'+(o.checked?' checked':'')+'> '+o.label+'</label>'+
+      '<div class="opt-hint">'+esc(o.hint)+'</div>'+
+    '</div>'
+  ).join('');
+  group.style.display='flex';
 }
 
+function updateExtractBtn(){
+  let included=0;
+  document.querySelectorAll('.block-card').forEach(card=>{
+    const structCb=card.querySelector('.struct-cb');
+    if(structCb&&structCb.checked&&[...card.querySelectorAll('.comp-cb')].some(cb=>cb.checked))included++;
+  });
+  const total=allBlocks.length;
+  const btn=document.getElementById('extractBtn');
+  btn.disabled=included===0;
+  btn.textContent=included===total?'Extract to ZIP':'Extract '+included+' of '+total+' structures to ZIP';
+  const anyChecked=[...document.querySelectorAll('.struct-cb')].some(cb=>cb.checked);
+  document.getElementById('selectAllBtn').textContent=anyChecked?'Deselect all':'Select all';
+}
+
+// Select all / Deselect all only ever includes/excludes whole structures -
+// like the per-structure checkbox, it must never change which components
+// within a structure are checked, only whether that structure counts at all.
 document.getElementById('selectAllBtn').addEventListener('click',()=>{
-  const cbs=[...document.querySelectorAll('.block-cb')];
-  const any=cbs.some(cb=>cb.checked);
-  cbs.forEach(cb=>{cb.checked=!any;cb.closest('.block-card').classList.toggle('excluded',any);});
+  const structCbs=[...document.querySelectorAll('.struct-cb')];
+  const any=structCbs.some(cb=>cb.checked);
+  structCbs.forEach(cb=>{cb.checked=!any;});
+  document.querySelectorAll('.block-card').forEach(syncCardComponentsDisabled);
+  refreshCardStates();
+  updateExtractBtn();
+});
+
+// A structure's own checkbox includes/excludes it entirely, greying out
+// (but not clearing) its component checkboxes while excluded.
+document.getElementById('blockList').addEventListener('change',function(e){
+  const cb=e.target.closest('.struct-cb');
+  if(!cb)return;
+  syncCardComponentsDisabled(cb.closest('.block-card'));
+  refreshCardStates();
+  updateExtractBtn();
+});
+
+// Shift-click a component checkbox to toggle every checkbox of that same
+// file type (CIF/RES/HKL/FAB), across every structure and every file.
+document.getElementById('blockList').addEventListener('click',function(e){
+  const cb=e.target.closest('.comp-cb');
+  if(!cb||cb.disabled)return;
+  if(e.shiftKey){
+    const type=cb.dataset.type;
+    const newState=cb.checked;
+    document.querySelectorAll('.comp-cb[data-type="'+type+'"]:not(:disabled)').forEach(o=>{o.checked=newState;});
+  }
+  refreshCardStates();
   updateExtractBtn();
 });
 
 // -- Extract to ZIP ----------------------------------------------------
 document.getElementById('extractBtn').addEventListener('click',async()=>{
-  if(!currentBlocks.length)return;
+  if(!allBlocks.length)return;
   const btn=document.getElementById('extractBtn');
   const status=document.getElementById('statusMsg');
   btn.disabled=true;status.textContent='Building ZIP\u2026';
   try{
     const zip=new JSZip();
-    const useFolders=document.getElementById('useFolders').checked;
-    for(let idx=0;idx<currentBlocks.length;idx++){
-      const cb=document.querySelector('.block-cb[data-idx="'+idx+'"]');
-      if(!cb||!cb.checked)continue;
-      const block=currentBlocks[idx];
+    const layout=(document.querySelector('input[name="folderLayout"]:checked')||{}).value||'mirror-per-structure';
+    const flatten=layout==='flatten';
+    const useFolders=layout==='mirror-per-structure';
+    // Flattening drops all folder structure, so names that would otherwise
+    // have been kept apart by their folder path get de-duplicated here.
+    const usedNames=new Set();
+    function flatPath(name){
+      if(!usedNames.has(name)){usedNames.add(name);return name;}
+      const dot=name.lastIndexOf('.');
+      const base=dot>=0?name.slice(0,dot):name;
+      const ext=dot>=0?name.slice(dot):'';
+      let n=2,candidate;
+      do{candidate=base+'_'+n+ext;n++;}while(usedNames.has(candidate));
+      usedNames.add(candidate);
+      return candidate;
+    }
+    for(let idx=0;idx<allBlocks.length;idx++){
+      const structCb=document.querySelector('.struct-cb[data-idx="'+idx+'"]');
+      if(!structCb||!structCb.checked)continue;
+      const{block,dir,fileStem,multiInFile}=allBlocks[idx];
       const stem=safeName(block.name);
-      const prefix=useFolders?stem+'/':'';
-      zip.file(prefix+stem+'.cif',toCRLF(block.text));
+      let prefix='';
+      if(!flatten){
+        const dirParts=[];
+        if(dir)dir.split('/').filter(Boolean).forEach(p=>dirParts.push(safeName(p)));
+        if(totalFilesCount>1)dirParts.push(fileStem);
+        if(useFolders&&multiInFile)dirParts.push(stem);
+        prefix=dirParts.length?dirParts.join('/')+'/':'';
+      }
+      const cifCb=document.querySelector('.comp-cb[data-idx="'+idx+'"][data-type="cif"]');
+      if(cifCb&&cifCb.checked){
+        const name=stem+'.cif';
+        zip.file(flatten?flatPath(name):prefix+name,toCRLF(block.text));
+      }
       for(const e of EMBEDDED){
         if(block.embedded[e.ext]!==undefined){
+          const cb=document.querySelector('.comp-cb[data-idx="'+idx+'"][data-type="'+e.ext+'"]');
+          if(!cb||!cb.checked)continue;
           let raw=block.embedded[e.ext];
           if(e.ext==='hkl'||e.ext==='fab')raw=truncateAtZeroRecord(raw);
           const content=raw.replace(/[\r\n]+$/,'')+'\n';
-          zip.file(prefix+stem+'.'+e.ext,toCRLF(content));
+          const name=stem+'.'+e.ext;
+          zip.file(flatten?flatPath(name):prefix+name,toCRLF(content));
         }
       }
     }
     const zipBlob=await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:6}});
-    const zipName=sourceFileName.replace(/\.cif$/i,'')+'_split.zip';
+    const zipName=totalFilesCount===1
+      ?sourceFileName.replace(CIF_RE,'')+'_split.zip'
+      :(currentBatchName?safeName(currentBatchName)+'_split.zip':'CIF_batch_split.zip');
     if(window.showSaveFilePicker){
       try{
         const fh=await window.showSaveFilePicker({suggestedName:zipName,
-          startIn:sourceFileHandle??'downloads',
+          startIn:sourceFileHandle??sourceFolderHandle??'downloads',
           types:[{description:'ZIP archive',accept:{'application/zip':['.zip']}}]});
         const w=await fh.createWritable();await w.write(zipBlob);await w.close();
         status.textContent='Saved '+zipName;
@@ -293,17 +495,96 @@ function triggerDownload(blob,name){
   setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},2000);
 }
 
-// -- File handling -----------------------------------------------------
-async function loadFile(file,handle){
-  sourceFileHandle=handle??null;
-  const text=await file.text();
-  const blocks=splitCIF(text);
-  if(!blocks.length){alert('No data_ blocks found \u2014 is this a valid CIF file?');return;}
-  renderResults(blocks,file.name,file.size);
+// -- File handling -------------------------------------------------------
+// Reads every dropped/selected CIF/FCF, splits each into blocks, and
+// renders them (grouped by source file when there's more than one).
+function setScanStatus(text){document.getElementById('scanStatus').textContent=text;}
+
+async function processFiles(items){
+  const fileEntries=[];
+  let skipped=0;
+  for(let i=0;i<items.length;i++){
+    const{file,relPath}=items[i];
+    setScanStatus('Reading file '+(i+1)+' of '+items.length+'\u2026');
+    let text;
+    try{text=await file.text();}catch(err){console.warn('Could not read '+relPath,err);skipped++;continue;}
+    let blocks;
+    try{blocks=splitCIF(text);}catch(err){console.warn('Could not parse '+relPath,err);skipped++;continue;}
+    if(!blocks.length){skipped++;continue;}
+    const posix=relPath.replace(/\\/g,'/');
+    const slash=posix.lastIndexOf('/');
+    const dir=slash>=0?posix.slice(0,slash):'';
+    const fileName=slash>=0?posix.slice(slash+1):posix;
+    fileEntries.push({dir,fileName,size:file.size,blocks});
+  }
+  if(!fileEntries.length){
+    alert('No data_ blocks found \u2014 are these valid CIF files?');
+    return;
+  }
+  renderAll(fileEntries,skipped);
+}
+
+// -- Recursive folder traversal (drag-and-drop) -------------------------
+// Tolerant of individual unreadable files/folders: one bad entry is
+// skipped (and logged) rather than aborting the whole batch.
+// Two independent browser APIs can supply this, and support varies:
+//  - File System Access API (getAsFileSystemHandle) - tried first, since
+//    it's the one this app already relies on for single-file drops.
+//  - Legacy Entries API (webkitGetAsEntry) - fallback for browsers where
+//    the handle API doesn't expose dropped directories.
+async function walkHandle(handle,prefix,collected){
+  const path=prefix?prefix+'/'+handle.name:handle.name;
+  if(handle.kind==='file'){
+    if(CIF_RE.test(handle.name)){
+      try{
+        const file=await handle.getFile();
+        collected.push({file,relPath:path});
+        setScanStatus('Found '+collected.length+' CIF file'+(collected.length!==1?'s':'')+'…');
+      }catch(err){
+        console.warn('Could not read file: '+path,err);
+      }
+    }
+  }else if(handle.kind==='directory'){
+    let children;
+    try{
+      children=[];
+      for await(const child of handle.values())children.push(child);
+    }catch(err){
+      console.warn('Could not read folder: '+path,err);
+      return;
+    }
+    await Promise.all(children.map(child=>walkHandle(child,path,collected)));
+  }
+}
+
+function readEntriesAsync(reader){
+  return new Promise((resolve,reject)=>reader.readEntries(resolve,reject));
+}
+async function walkEntry(entry,collected){
+  if(entry.isFile){
+    if(CIF_RE.test(entry.name)){
+      try{
+        const file=await new Promise((res,rej)=>entry.file(res,rej));
+        collected.push({file,relPath:entry.fullPath.replace(/^\/+/,'')});
+        setScanStatus('Found '+collected.length+' CIF file'+(collected.length!==1?'s':'')+'\u2026');
+      }catch(err){
+        console.warn('Could not read file: '+entry.fullPath,err);
+      }
+    }
+  }else if(entry.isDirectory){
+    const reader=entry.createReader();
+    let batch;
+    do{
+      try{batch=await readEntriesAsync(reader);}
+      catch(err){console.warn('Could not read folder: '+entry.fullPath,err);break;}
+      await Promise.all(batch.map(child=>walkEntry(child,collected)));
+    }while(batch.length>0);
+  }
 }
 
 const dz=document.getElementById('dropZone');
 const fi=document.getElementById('fileInput');
+const di=document.getElementById('dirInput');
 
 // Drop anywhere on the page
 document.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag');});
@@ -312,18 +593,90 @@ document.addEventListener('drop',async e=>{
   e.preventDefault();dz.classList.remove('drag');
   const items=[...(e.dataTransfer?e.dataTransfer.items:[])].filter(i=>i.kind==='file');
   if(!items.length)return;
-  const handles=await Promise.all(items.map(i=>i.getAsFileSystemHandle?i.getAsFileSystemHandle().catch(()=>null):Promise.resolve(null)));
-  const plain=items.map(i=>i.getAsFile?i.getAsFile():null);
-  for(let i=0;i<handles.length;i++){
-    const fh=handles[i];
-    if(fh&&fh.kind==='file'){const f=await fh.getFile();if(/\.(cif|fcf)$/i.test(f.name)){await loadFile(f,fh);return;}}
-    else if(plain[i]&&/\.(cif|fcf)$/i.test(plain[i].name)){await loadFile(plain[i],null);return;}
+
+  try{
+    sourceFileHandle=null;sourceFolderHandle=null;currentBatchName='';
+    setScanStatus('Scanning…');
+
+    // Capture every possible reference to each item SYNCHRONOUSLY, before
+    // any await - some browsers invalidate DataTransferItems once the
+    // event loop moves on, so we can't wait and then go back for more.
+    const captured=items.map(item=>({
+      handlePromise:item.getAsFileSystemHandle?item.getAsFileSystemHandle().catch(()=>null):null,
+      entry:item.webkitGetAsEntry?item.webkitGetAsEntry():null,
+      plainFile:item.getAsFile?item.getAsFile():null,
+    }));
+
+    if(items.length===1){
+      const c=captured[0];
+      const h=c.handlePromise?await c.handlePromise:null;
+      if(h&&h.kind==='directory'){currentBatchName=h.name;sourceFolderHandle=h;}
+      else if(h&&h.kind==='file')sourceFileHandle=h;
+      else if(c.entry&&c.entry.isDirectory)currentBatchName=c.entry.name;
+    }
+
+    const collected=[];
+    for(const c of captured){
+      const h=c.handlePromise?await c.handlePromise:null;
+      if(h){
+        await walkHandle(h,'',collected);
+      }else if(c.entry){
+        await walkEntry(c.entry,collected);
+      }else if(c.plainFile&&CIF_RE.test(c.plainFile.name)){
+        collected.push({file:c.plainFile,relPath:c.plainFile.name});
+      }
+    }
+
+    if(!collected.length){
+      setScanStatus('');
+      alert('No .cif/.fcf files found (subfolders were checked too).');
+      return;
+    }
+    await processFiles(collected);
+    setScanStatus('');
+  }catch(err){
+    setScanStatus('');
+    console.error(err);
+    alert('Something went wrong reading the dropped item(s): '+err.message);
   }
-  alert('Please drop a .cif file.');
 });
 
 dz.addEventListener('click',()=>fi.click());
-fi.addEventListener('change',async()=>{if(fi.files[0]){await loadFile(fi.files[0],null);fi.value='';}});
+fi.addEventListener('change',async()=>{
+  const files=[...fi.files];
+  if(files.length){
+    try{
+      sourceFileHandle=null;sourceFolderHandle=null;currentBatchName='';
+      await processFiles(files.map(f=>({file:f,relPath:f.name})));
+      setScanStatus('');
+    }catch(err){
+      setScanStatus('');
+      console.error(err);
+      alert('Something went wrong reading the selected file(s): '+err.message);
+    }
+  }
+  fi.value='';
+});
+
+document.getElementById('browseFolderBtn').addEventListener('click',e=>{e.stopPropagation();di.click();});
+di.addEventListener('change',async()=>{
+  const files=[...di.files].filter(f=>CIF_RE.test(f.name));
+  if(!files.length){
+    alert('No .cif/.fcf files found in that folder (subfolders were checked too).');
+    di.value='';return;
+  }
+  try{
+    sourceFileHandle=null;sourceFolderHandle=null;
+    currentBatchName=(files[0].webkitRelativePath||'').split('/')[0]||'';
+    await processFiles(files.map(f=>({file:f,relPath:f.webkitRelativePath||f.name})));
+    setScanStatus('');
+  }catch(err){
+    setScanStatus('');
+    console.error(err);
+    alert('Something went wrong reading the selected folder: '+err.message);
+  }
+  di.value='';
+});
 </script>
 </body>
 </html>
