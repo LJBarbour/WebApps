@@ -10444,23 +10444,54 @@ select.sel:focus{border-color:var(--accent)}
      pass -- the ordinary "Calculate" button ignores the return value
      entirely (its own click handler ran as button(vcRow, "Calculate",
      "ghost", runVoidCalculate), same as before this was added), but the
-     CALCULATE_VOID macro command (see runMacroLine) awaits it so playback
-     doesn't race ahead to the next line against a not-yet-finished result --
-     the same convention EXTEND_FRAGS/COMPLETE_MOLS already use for their own
-     deferred work. */
-  function runVoidCalculate() {
+     CALCULATE_VOID/CALCULATE_VOID_Q macro commands (see runMacroLine) await
+     it so playback doesn't race ahead to the next line against a not-yet-
+     finished result -- the same convention EXTEND_FRAGS/COMPLETE_MOLS
+     already use for their own deferred work.
+     forceAccurate (optional): when strictly true or false, FORCES
+     state.voidAccurateVolumes to that value before calculating (and syncs
+     the "Accurate volumes" checkbox to match) instead of trusting whatever
+     it's currently set to. This exists for CALCULATE_VOID/CALCULATE_VOID_Q
+     specifically -- see runMacroLine's own two cases -- because that
+     setting is itself part of a saved project .json (restoreProjectSnapshot
+     restores it), so batch-processing a folder of .json files would
+     otherwise have EACH file's own load silently overwrite whatever the
+     user had the checkbox set to right before pressing Play, making the
+     accurate-vs-quick choice effectively random/file-dependent rather than
+     something the macro actually controls. The strict true/false check
+     (not just truthy) is deliberate: the ordinary Calculate button's own
+     click handler calls this with a MouseEvent as its first argument
+     (button()'s own wiring passes the click event through), which must
+     never be mistaken for a forced value -- a live interactive click always
+     leaves state.voidAccurateVolumes exactly as the checkbox already has
+     it, forcing nothing. */
+  function runVoidCalculate(forceAccurate) {
     var isCellMode = state.voidMode === "cell";
     if (isCellMode && (!state.isCif || !state.cifCell)) { setStatus("Load a CIF file first.", true); return Promise.resolve(false); }
     if (!isCellMode && (!state.atoms || !state.atoms.length)) { setStatus("Grow some host atoms first (Structure > Grow) -- Option 2 only considers atoms that are currently grown AND visible.", true); return Promise.resolve(false); }
     if (state.voidCalculating) { setStatus("A void/channel calculation is already running -- please wait for it to finish.", true); return Promise.resolve(false); }
+    if (forceAccurate === true || forceAccurate === false) {
+      state.voidAccurateVolumes = forceAccurate;
+      var accCb = document.getElementById("voidAccurateToggle"); if (accCb) accCb.checked = forceAccurate;
+    }
     /* Captured now, not read again later -- this is genuinely "was this
-       call itself a macro-driven CALCULATE_VOID", not "is a macro still
+       call itself a macro-driven CALCULATE_VOID(_Q)", not "is a macro still
        playing by the time the async work below finishes" (which would also
        be true, but for the wrong reason -- nothing else resets
        state.macroPlaying mid-calculation, so in practice the two never
        actually differ, but capturing up front says what's really meant). */
     var appendBatchRow = state.macroPlaying;
-    recordMacroCommand("CALCULATE_VOID");
+    /* Records what ACTUALLY ran, not a fixed string -- a live click while
+       Recording reflects whichever of the two the "Accurate volumes"
+       checkbox genuinely had at that moment (forceAccurate is never set
+       here, see this function's own comment), so replaying that recorded
+       line reproduces the exact same accurate/quick choice, the same
+       "faithfully reproduce what was recorded" principle every other macro
+       command already follows (e.g. the ATOM_STYLE_* batch). During actual
+       playback this is a no-op regardless of which string is passed --
+       recordMacroCommand() already suppresses itself while
+       state.macroPlaying is true. */
+    recordMacroCommand(state.voidAccurateVolumes ? "CALCULATE_VOID" : "CALCULATE_VOID_Q");
     state.voidCalculating = true;
     state.voidAbortRequested = false;
     /* Ported from CrystalChannel's own "Abort calculation" button (35
@@ -11937,16 +11968,27 @@ select.sel:focus{border-color:var(--accent)}
         if (!hasParts) return false;
         applyPartSelection(n, cmd === "SELECT_PART");
         return true;
-      case "CALCULATE_VOID":
+      case "CALCULATE_VOID": case "CALCULATE_VOID_Q":
         /* No arguments -- deliberately doesn't record or replay any of the
-           void/channel calculation SETTINGS (probe radius, mode, accurate
-           volumes, ...), only the act of calculating itself. Playback always
-           uses whatever settings are currently on screen, exactly like every
-           OTHER macro command replays against the CURRENT structure/state
-           rather than a captured one. runVoidCalculate() already returns a
+           void/channel calculation SETTINGS (probe radius, mode, ...), only
+           the act of calculating itself. Playback always uses whatever
+           settings are currently on screen, exactly like every OTHER macro
+           command replays against the CURRENT structure/state rather than a
+           captured one -- with ONE deliberate exception: "Accurate volumes"
+           specifically, because that one setting is itself saved INSIDE a
+           project .json (restoreProjectSnapshot restores it), so batch-
+           processing a folder of .json files would otherwise have each
+           file's own load silently override whatever the user had it set to
+           right before pressing Play -- effectively randomizing accurate-
+           vs-quick per file rather than letting the macro actually control
+           it. CALCULATE_VOID therefore always FORCES accurate volumes on;
+           CALCULATE_VOID_Q always forces it off (a genuinely quick batch
+           calculation is a real, if unusual, thing to want, so the option is
+           kept rather than removed) -- see runVoidCalculate()'s own
+           forceAccurate parameter. runVoidCalculate() already returns a
            Promise that resolves once the calculation (and its own results-
            table row append, see appendVoidBatchTableRows) is fully done. */
-        return runVoidCalculate();
+        return runVoidCalculate(cmd === "CALCULATE_VOID");
       case "EXTEND_FRAGS":
         /* both async (a setTimeout defers the real work so the "Extending
            fragments..." overlay can paint first) -- returning a Promise here
@@ -18775,7 +18817,7 @@ select.sel:focus{border-color:var(--accent)}
       "<p><span class='mono'>EXPORT_PNG</span>, when played, saves the current view as a PNG using whatever <b>Export &gt; Image</b> is currently set to (resolution, transparent background), the same as pressing <b>Export image (PNG)</b> by hand. Its filename is always the current structure's own name with its extension stripped, plus an underscore and the given suffix if one was given (e.g. structure <span class='mono'>ZIF-68.cif</span> with suffix <span class='mono'>top</span> saves <span class='mono'>ZIF-68_top.png</span>). Because writing straight to disk needs the user's permission, the very first time <b>Play</b> is pressed on a memo containing an <span class='mono'>EXPORT_PNG</span> or <span class='mono'>SAVE_JSON</span> line, a folder picker appears asking where to save -- granted once, that folder is then reused silently for every <span class='mono'>EXPORT_PNG</span>/<span class='mono'>SAVE_JSON</span> in every macro played for the rest of this browser session, with no further prompts, until a write to it actually fails (at which point the next Play asks again). Declining the picker, or using a browser without this capability at all, falls back to an ordinary individual download per file instead of failing outright.</p>" +
       "<p><b>Apply macro to all files in folder</b>, at the bottom of the panel, turns Play into a batch operation: tick the box, use <b>Select folder</b> to grant access to a folder (the box above it shows the folder's own name once chosen -- browsers never expose a full filesystem path, only that), then press Play as normal. Instead of running once against the currently-loaded structure, every <span class='mono'>.cif</span>/<span class='mono'>.res</span>/<span class='mono'>.ins</span>/<span class='mono'>.txt</span>/<span class='mono'>.json</span> file in that folder is loaded in turn (alphabetical order) and the whole memo is run against each one before moving to the next, reporting how many files it got through and how many commands failed along the way. The <span class='mono'>.json</span> files are project files previously saved from this app (<b>Save model</b>, or <span class='mono'>SAVE_JSON</span> itself) -- the only format that actually distinguishes host from guest, since a plain CIF never does; loading each structure once, sorting its atoms into host/guest by hand, and saving that as a project is how to build a folder of files a host/guest-aware batch macro can process (a <span class='mono'>.zip</span> project archive is deliberately not picked up here -- only a plain <span class='mono'>.json</span>). If the memo also contains an <span class='mono'>EXPORT_PNG</span> or <span class='mono'>SAVE_JSON</span> line, the same batch folder doubles as the export destination -- no second permission prompt -- so this is the tool for producing one rendered image, or one updated project file, per structure across a whole folder of similar files in one action. It's entirely up to the user to make sure every file in the folder is actually compatible with the macro being played (matching ASU labelling, as above); a file that fails to load at all (wrong format, unparseable) is skipped and counted, not fatal to the rest of the batch.</p>" +
       "<p><span class='mono'>SAVE_JSON</span>, when played, writes the current model out as a project file -- the same complete payload (both atom lists, void/channel results, guest groups, display settings, camera, everything) <b>Save model</b> itself writes, and respecting that button's own <b>Compress as zip</b> checkbox exactly the same way (ticked: a <span class='mono'>.zip</span> containing one compressed <span class='mono'>.json</span> entry; unticked: plain <span class='mono'>.json</span>) -- but with no picker and an automatically-derived filename, so it fits into unattended batch playback the way <b>Save model</b>'s own file dialog never could. With no suffix, it OVERWRITES the exact file the current structure was itself loaded from, when that was a <span class='mono'>.json</span> in the first place (falling back to the structure's own CIF-derived name if it wasn't, e.g. a macro that saves partway through processing a plain CIF) -- this is the \"process a folder of projects, updating each one in place\" case. With a suffix, it saves alongside instead, as <span class='mono'>name_suffix.json</span> (or <span class='mono'>.zip</span>), the same pattern <span class='mono'>EXPORT_PNG</span>'s own suffix uses. Note that a <span class='mono'>.zip</span> written this way (box ticked) will NOT be picked up by a later batch run over the same folder -- that scan only recognizes plain <span class='mono'>.json</span> -- so leave the box unticked for a \"save now, batch-process again later\" workflow.</p>" +
-      "<p><span class='mono'>CALCULATE_VOID</span>, when played, presses <b>Calculate</b> under Void/Channel Analysis exactly as if clicked by hand -- using whatever probe radius, mode, and other calculation settings are currently on screen at the moment it plays, never a value captured back when it was recorded, the same way every other command always acts on the current state rather than a frozen one. Combined with <b>Apply macro to all files in folder</b> (or just by loading a different structure and pressing Play again by hand), this is how to run the same void/channel analysis across a whole series of structures: each time it plays, every region found is appended as its own row to the <b>Void/channel batch results</b> table further down this panel -- Structure, ID, Type, Critical radius, Volume, and the probe radius that was actually in effect for that row -- building up one combined comparison table across everything processed so far in this browser session. That table is never cleared automatically (not by loading a new structure, not between separate Play presses) so it can keep growing across as many runs as wanted; <b>Copy as TSV</b> copies it straight to the clipboard for pasting into a spreadsheet, <b>Save as CSV</b> writes it to a file, and <b>Clear table</b> empties it. An ordinary manual click on <b>Calculate</b> (Record not down, no macro playing) never adds a row here -- only a <span class='mono'>CALCULATE_VOID</span> command actually being played does.</p>" +
+      "<p><span class='mono'>CALCULATE_VOID</span> and <span class='mono'>CALCULATE_VOID_Q</span>, when played, press <b>Calculate</b> under Void/Channel Analysis exactly as if clicked by hand -- using whatever probe radius, mode, and other calculation settings are currently on screen at the moment they play, never a value captured back when they were recorded, the same way every other command always acts on the current state rather than a frozen one. <b>Accurate volumes is the one deliberate exception to that rule</b>: since that checkbox's setting is itself saved inside a project <span class='mono'>.json</span> file, batch-processing a folder of them would otherwise have each file's own load silently reset it to whatever THAT file happened to have saved, making accurate-vs-quick effectively random across a batch rather than something the macro controls. <span class='mono'>CALCULATE_VOID</span> therefore always FORCES accurate volumes ON before calculating (and ticks the checkbox to match), regardless of what's currently set or what a just-loaded <span class='mono'>.json</span> brought with it; <span class='mono'>CALCULATE_VOID_Q</span> always forces it OFF, for the rarer case where a genuinely quick batch calculation is actually wanted. While Record is down, clicking the real <b>Calculate</b> button records whichever of the two matches the checkbox's own state at that moment -- so replaying a recorded macro reproduces exactly the accurate/quick choice that was live when it was recorded, same as any other setting. Combined with <b>Apply macro to all files in folder</b> (or just by loading a different structure and pressing Play again by hand), this is how to run the same void/channel analysis across a whole series of structures: each time either command plays, every region found is appended as its own row to the <b>Void/channel batch results</b> table further down this panel -- Structure, ID, Type, Critical radius, Volume, and the probe radius that was actually in effect for that row -- building up one combined comparison table across everything processed so far in this browser session. That table is never cleared automatically (not by loading a new structure, not between separate Play presses) so it can keep growing across as many runs as wanted; <b>Copy as TSV</b> copies it straight to the clipboard for pasting into a spreadsheet, <b>Save as CSV</b> writes it to a file, and <b>Clear table</b> empties it. An ordinary manual click on <b>Calculate</b> (Record not down, no macro playing) never adds a row here -- only <span class='mono'>CALCULATE_VOID</span>/<span class='mono'>CALCULATE_VOID_Q</span> actually being played does.</p>" +
       "<p>The command reference below groups every command by what it does. Most mirror a specific action one-to-one and are recorded automatically while Record is down; a handful are noted where that isn't the case.</p>" +
       "<p><b>Selection</b> (recorded on the matching click or spacebar press):</p>" +
       "<ul>" +
@@ -18825,7 +18867,7 @@ select.sel:focus{border-color:var(--accent)}
       "</ul>" +
       "<p><b>Void/channel analysis</b>:</p>" +
       "<ul>" +
-      "<li><span class='mono'>CALCULATE_VOID</span> &mdash; \"Calculate\" under Void/Channel Analysis. No arguments -- see above for exactly what it does when played, including the batch results table.</li>" +
+      "<li><span class='mono'>CALCULATE_VOID</span> / <span class='mono'>CALCULATE_VOID_Q</span> &mdash; \"Calculate\" under Void/Channel Analysis, forcing Accurate volumes on/off respectively. No arguments -- see above for exactly what it does when played, including why the accurate-volumes setting is forced and the batch results table.</li>" +
       "</ul>" +
       "<p><b>Export</b>:</p>" +
       "<ul>" +
