@@ -2829,6 +2829,18 @@ select.sel:focus{border-color:var(--accent)}
     clipPlaneApplyHost: true, clipPlaneApplyGuest: true, clipPlaneApplyVoid: true, clipPlaneApplyChannel: true, clipPlaneApplyMolSurface: true, clipPlaneApplyUnitCell: true,
     macroRecording: false, macroPlaying: false, macroExportDirHandle: null,
     macroBatchFolder: false, macroBatchDirHandle: null,
+    /* The on-disk filename (e.g. "DIANIN_project.json") the CURRENTLY loaded
+       structure was actually read from, when it was a project JSON -- distinct
+       from state.name, which holds the CIF-derived name stored INSIDE that
+       project file (e.g. still "DIANIN.cif") and says nothing about what the
+       .json itself was called. Used only by the SAVE_JSON macro command's own
+       no-suffix default ("same name as the file this was loaded from") --
+       see saveJsonViaMacro(). Reset to null by loadAtoms()/clearStructure()
+       (any CIF/.res/.ins load) and by removeHost(), set on a successful plain
+       .json load (loadModelFromFile's own sourceName parameter) -- never on a
+       multi-entry .zip archive's own per-entry navigation, which has no one
+       "the file this came from" to speak of. */
+    lastLoadedJsonName: null,
     /* One row per void/channel region, appended whenever a CALCULATE_VOID
        macro command actually runs (see runVoidCalculate's own comment) --
        lets a macro that loads several structures in turn (by hand, or via
@@ -4500,6 +4512,89 @@ select.sel:focus{border-color:var(--accent)}
         }
       });
     });
+  }
+  /* SAVE_JSON's own macro handler -- same state.macroExportDirHandle
+     convention as exportPngViaMacro() just above (see its own comment: a
+     folder the user authorized once, reused silently for every line in
+     every macro played this session, with a plain-download fallback when
+     none was ever granted), but writes a project file (buildProjectSnapshot(),
+     the same payload the real "Save model" button writes) instead of a
+     rendered image. Respects state.compressModelAsZip exactly like the real
+     "Save model" button does -- ticked, this writes a .zip (one compressed
+     .json entry inside, via buildZipBlobFromChunks, same as
+     saveModelToFile()'s own zip branch); unticked, plain .json. Note this
+     means a SAVE_JSON that runs with that box ticked produces a file
+     playMacroBatch's own folder scan will NOT pick back up on a later run --
+     that scan deliberately only recognizes plain .json (see its own
+     comment) -- so anyone chaining "SAVE_JSON now, read it back into a batch
+     later" needs the box unticked for that particular workflow.
+     No suffix given: reuses the exact filename this structure was loaded
+     from, when it came from a .json in the first place
+     (state.lastLoadedJsonName -- see its own comment for exactly when that
+     is/isn't set), falling back to the CIF-derived state.name's own stem
+     otherwise (e.g. a macro that SAVE_JSONs partway through processing a
+     plain CIF, with no JSON source to reuse) -- either way an in-place
+     overwrite, not a "pick a new name" save. A suffix appends "_suffix" onto
+     that same stem, exactly like EXPORT_PNG's own suffix does for a PNG (the
+     .zip-vs-.json extension is decided independently, after that).
+     Deliberately NEVER auto-recorded from the real "Save model" button (that
+     button already does something genuinely different -- a user-chosen name
+     via a picker, not this auto-derived batch-folder naming) -- like
+     EXPORT_PNG, SAVE_JSON only ever appears because the user typed it in by
+     hand or pressed the dedicated "Add SAVE_JSON" button below the memo. */
+  async function saveJsonViaMacro(suffix) {
+    if (!state.atoms && !state.guestAtoms) { setStatus("Nothing loaded -- SAVE_JSON has nothing to save.", true); return false; }
+    var cleanSuffix = suffix ? suffix.replace(/[<>:"/\\|?*]/g, "_") : "";
+    var baseSource = state.lastLoadedJsonName || state.name || "CrystalVoid";
+    var base = baseSource.replace(/\.[^./\\]+$/, "") + (cleanSuffix ? "_" + cleanSuffix : "");
+    var useZip = state.compressModelAsZip;
+    var jsonName = base + ".json";
+    var filename = useZip ? (base + ".zip") : jsonName;
+    var chunks;
+    try {
+      chunks = buildProjectJsonChunks(buildProjectSnapshot());
+    } catch (e) {
+      setStatus("Could not build " + filename + ": " + (e && e.message ? e.message : e) + ".", true);
+      return false;
+    }
+    var zipBlob = null;
+    if (useZip) {
+      try {
+        zipBlob = await buildZipBlobFromChunks(chunks, jsonName);
+      } catch (e) {
+        setStatus("Could not compress " + filename + ": " + (e && e.message ? e.message : e) + ".", true);
+        return false;
+      }
+    }
+    if (state.macroExportDirHandle) {
+      try {
+        var fh = await state.macroExportDirHandle.getFileHandle(filename, { create: true });
+        var w = await fh.createWritable();
+        if (useZip) {
+          await w.write(zipBlob);
+        } else {
+          for (var i = 0; i < chunks.length; i++) {
+            await w.write(chunks[i]);
+            if (i % 40 === 0) await yieldFrame();
+          }
+        }
+        await w.close();
+        setStatus("Saved " + filename + ".", false);
+      } catch (e) {
+        /* permission may have been revoked (folder moved/deleted, user
+           revoked it in browser settings, ...) -- clear the cached handle so
+           the NEXT Play press re-prompts instead of failing the same way
+           forever, same recovery exportPngViaMacro() already uses */
+        state.macroExportDirHandle = null;
+        if (useZip) legacyDownloadZipBlob(zipBlob, filename, "writing to the granted folder failed");
+        else legacyDownloadChunks(chunks, filename, "writing to the granted folder failed");
+      }
+    } else if (useZip) {
+      legacyDownloadZipBlob(zipBlob, filename, "no folder access has been granted for this session");
+    } else {
+      legacyDownloadChunks(chunks, filename, "no folder access has been granted for this session");
+    }
+    return true;
   }
   function copyImageToClipboard() {
     if (!window.ClipboardItem || !navigator.clipboard || !navigator.clipboard.write) {
@@ -11511,6 +11606,13 @@ select.sel:focus{border-color:var(--accent)}
     var suffix = inp ? inp.value.trim().replace(/[<>:"/\\|?*]/g, "_") : "";
     appendToMacroMemo("EXPORT_PNG" + (suffix ? " " + suffix : ""));
   }
+  /* "Add SAVE_JSON" button's handler -- mirrors addExportPngCommand() just
+     above exactly (own text box, same sanitizing). */
+  function addSaveJsonCommand() {
+    var inp = document.getElementById("macroSaveJsonSuffixInp");
+    var suffix = inp ? inp.value.trim().replace(/[<>:"/\\|?*]/g, "_") : "";
+    appendToMacroMemo("SAVE_JSON" + (suffix ? " " + suffix : ""));
+  }
   /* "name<space><space>symop" for a specific atom instance, e.g.
      "H7A  1+X,1+Y,Z" -- name is the CIF's own _atom_site_label for this
      atom's asymmetric-unit position (atomLabelText, same text Save CIF and
@@ -11896,6 +11998,12 @@ select.sel:focus{border-color:var(--accent)}
            button/checkbox) -- this one only ever appears because the user
            typed it into the memo by hand, per its own spec. */
         return exportPngViaMacro(rest);
+      case "SAVE_JSON":
+        /* rest is the optional suffix, same convention as EXPORT_PNG's own
+           -- never recorded automatically (see saveJsonViaMacro's own
+           comment), only appears from typing it in or the "Add SAVE_JSON"
+           button. */
+        return saveJsonViaMacro(rest);
       case "VIEW":
         /* x y z w -- camOrient's own [x,y,z,w] quaternion components,
            exactly as "Add current POV" wrote them and as
@@ -11935,26 +12043,33 @@ select.sel:focus{border-color:var(--accent)}
     return { done: done, failed: failed };
   }
   /* "Apply macro to all files in folder" mode -- loads each .cif/.res/.ins/
-     .txt file in state.macroBatchDirHandle (same extension set #cifInput's
-     own picker filter accepts, sniffed the same content-agnostic way
-     handleStructureFileText() already treats any of them) in name order,
-     and runs the full macro against each one in turn. Built for "render
-     the same figure/export for every structure in a folder" -- e.g. one
-     EXPORT_PNG per file in a variable-temperature series, each landing in
-     the same folder under that structure's own name (exportPngViaMacro()
-     already bases the filename on state.name, which loadAtoms() sets fresh
-     on every load here). It's the caller's own responsibility that every
-     file in the folder is actually compatible with this macro (matching
-     ASU labelling etc.) -- same caveat as replaying any macro on a
-     different structure, just now automated across many at once. */
+     .txt/.json file in state.macroBatchDirHandle (the first four: same
+     extension set #cifInput's own picker filter accepts, sniffed the same
+     content-agnostic way handleStructureFileText() already treats any of
+     them; .json: a project file previously saved from this app, the only
+     format that actually distinguishes host from guest -- a plain CIF never
+     does, so a batch that needs that distinction has to be run against JSON
+     files saved that way ahead of time, one file at a time by hand, rather
+     than raw CIFs) in name order, and runs the full macro against each one
+     in turn. Built for "render the same figure/export for every structure in
+     a folder" -- e.g. one EXPORT_PNG per file in a variable-temperature
+     series, each landing in the same folder under that structure's own name
+     (exportPngViaMacro() already bases the filename on state.name, which
+     loadAtoms() sets fresh on every load here). It's the caller's own
+     responsibility that every file in the folder is actually compatible
+     with this macro (matching ASU labelling etc.) -- same caveat as
+     replaying any macro on a different structure, just now automated across
+     many at once. Deliberately NOT .zip -- see state.lastLoadedJsonName's
+     own comment on why a multi-entry archive has no one "this is the file"
+     identity to track, and the user asked for plain .json specifically. */
   async function playMacroBatch(lines) {
     var dirHandle = state.macroBatchDirHandle;
     var entries = [];
     for await (var h of dirHandle.values()) {
-      if (h.kind === "file" && /\.(cif|res|ins|txt)$/i.test(h.name)) entries.push(h);
+      if (h.kind === "file" && /\.(cif|res|ins|txt|json)$/i.test(h.name)) entries.push(h);
     }
     entries.sort(function (a, b) { return a.name.localeCompare(b.name, undefined, { numeric: true }); });
-    if (!entries.length) { setStatus("No .cif/.res/.ins files found in \"" + dirHandle.name + "\".", true); return; }
+    if (!entries.length) { setStatus("No .cif/.res/.ins/.txt/.json files found in \"" + dirHandle.name + "\".", true); return; }
     var filesOk = 0, filesFailed = 0, totalDone = 0, totalFailedLines = 0;
     for (var fi = 0; fi < entries.length; fi++) {
       var h = entries[fi];
@@ -11963,14 +12078,41 @@ select.sel:focus{border-color:var(--accent)}
         var fileObj = await h.getFile();
         content = await fileObj.text();
       } catch (e) { filesFailed++; continue; }
-      handleStructureFileText(content, h.name);
-      /* handleStructureFileText() never throws and never returns a value
-         either way (see its own call chain) -- state.name (or, for a
-         multi-block CIF, state.multiBlockSourceName) actually landing on
-         this file's own name is the only after-the-fact signal that it
-         really loaded rather than silently failing a parse/cell check and
-         leaving the PREVIOUS file's structure sitting there untouched. */
-      if (state.name !== h.name && state.multiBlockSourceName !== h.name) { filesFailed++; continue; }
+      var isJson = /\.json$/i.test(h.name);
+      var loadedOk;
+      if (isJson) {
+        /* loadModelFromFile(), not confirmAndLoadModelFromFile() -- a batch
+           run has to proceed unattended, and the confirm() dialog the latter
+           shows whenever something is already loaded (true for every file
+           after the first here) would otherwise block on a native prompt
+           this automated loop can never answer. Passing h.name as
+           sourceName is what lets SAVE_JSON's own no-suffix default later
+           find its way back to this exact filename (state.lastLoadedJsonName
+           -- see its own comment). */
+        loadModelFromFile(content, h.name);
+        /* loadModelFromFile() never throws and never returns a value either
+           way -- state.lastLoadedJsonName actually landing on this file's
+           own name (set only on a successful restore, see its own comment)
+           is the only after-the-fact signal that this JSON really loaded
+           rather than failing its format check and leaving the PREVIOUS
+           file's structure sitting there untouched. Deliberately not
+           state.name/multiBlockSourceName here -- a restored project's
+           state.name is the CIF-derived name stored INSIDE the file (e.g.
+           still "DIANIN.cif"), not this .json's own filename, so neither
+           would ever match h.name the way they do for a fresh CIF load
+           below. */
+        loadedOk = state.lastLoadedJsonName === h.name;
+      } else {
+        handleStructureFileText(content, h.name);
+        /* handleStructureFileText() never throws and never returns a value
+           either way (see its own call chain) -- state.name (or, for a
+           multi-block CIF, state.multiBlockSourceName) actually landing on
+           this file's own name is the only after-the-fact signal that it
+           really loaded rather than silently failing a parse/cell check and
+           leaving the PREVIOUS file's structure sitting there untouched. */
+        loadedOk = state.name === h.name || state.multiBlockSourceName === h.name;
+      }
+      if (!loadedOk) { filesFailed++; continue; }
       filesOk++;
       var result = await runMacroLinesOnce(lines);
       totalDone += result.done; totalFailedLines += result.failed.length;
@@ -11991,36 +12133,42 @@ select.sel:focus{border-color:var(--accent)}
     var text = ta ? ta.value : "";
     var lines = text.split("\n").map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 0; });
     if (!lines.length) { setStatus("Nothing to play -- the macro memo is empty.", true); return; }
-    var needsExportDir = lines.some(function (l) { return l === "EXPORT_PNG" || l.indexOf("EXPORT_PNG ") === 0; });
+    /* SAVE_JSON needs exactly the same folder-access setup EXPORT_PNG
+       already does (see below) -- both write into state.macroExportDirHandle. */
+    var needsExportDir = lines.some(function (l) {
+      return l === "EXPORT_PNG" || l.indexOf("EXPORT_PNG ") === 0 || l === "SAVE_JSON" || l.indexOf("SAVE_JSON ") === 0;
+    });
     if (state.macroBatchFolder) {
       if (!state.macroBatchDirHandle) { setStatus("Select a folder first, or untick \"Apply macro to all files in folder\".", true); return; }
       /* The batch folder was already granted read+write access of its own
          (see selectMacroBatchFolder()'s own {mode:"readwrite"} picker
-         call) -- reusing that same handle for EXPORT_PNG's output means
-         "process this folder" never needs a second permission prompt. */
+         call) -- reusing that same handle for EXPORT_PNG's/SAVE_JSON's own
+         output means "process this folder" never needs a second permission
+         prompt. */
       if (needsExportDir && !state.macroExportDirHandle) state.macroExportDirHandle = state.macroBatchDirHandle;
       await playMacroBatch(lines);
       return;
     }
-    /* If this script has any EXPORT_PNG line, ask for folder access RIGHT
-       HERE -- before anything else, including state.macroPlaying flipping
-       on -- because this call has to be the very first thing awaited in
-       this whole function. showDirectoryPicker() consumes the Play click's
-       transient user-activation exactly like requestSaveHandle()'s own
-       picker does (see its comment); by the time the line loop below has
-       already awaited even one earlier line, that activation is gone and
-       the picker would be rejected outright. Only asked once per session
-       -- state.macroExportDirHandle is reused by every later Play press
-       (even across different macros) until a write against it actually
-       fails, at which point exportPngViaMacro() clears it so the next
-       Play retries the picker instead of silently breaking forever. */
+    /* If this script has any EXPORT_PNG or SAVE_JSON line, ask for folder
+       access RIGHT HERE -- before anything else, including state.macroPlaying
+       flipping on -- because this call has to be the very first thing
+       awaited in this whole function. showDirectoryPicker() consumes the
+       Play click's transient user-activation exactly like
+       requestSaveHandle()'s own picker does (see its comment); by the time
+       the line loop below has already awaited even one earlier line, that
+       activation is gone and the picker would be rejected outright. Only
+       asked once per session -- state.macroExportDirHandle is reused by
+       every later Play press (even across different macros) until a write
+       against it actually fails, at which point exportPngViaMacro()/
+       saveJsonViaMacro() clears it so the next Play retries the picker
+       instead of silently breaking forever. */
     if (!state.macroExportDirHandle && window.showDirectoryPicker && needsExportDir) {
       try {
         var dirOpts = { mode: "readwrite" };
         if (state.lastSourceHandle) dirOpts.startIn = state.lastSourceHandle;
         state.macroExportDirHandle = await window.showDirectoryPicker(dirOpts);
       } catch (e) {
-        state.macroExportDirHandle = null; /* declined or dismissed -- EXPORT_PNG lines below fall back to individual downloads instead of failing outright */
+        state.macroExportDirHandle = null; /* declined or dismissed -- EXPORT_PNG/SAVE_JSON lines below fall back to individual downloads instead of failing outright */
       }
     }
     var result = await runMacroLinesOnce(lines);
@@ -14198,7 +14346,7 @@ select.sel:focus{border-color:var(--accent)}
        accidental wrong-file drop, where leaving the existing structure in
        place is the friendlier response. */
     exitAllInteractiveModes();
-    state.atoms = null; state.name = "";
+    state.atoms = null; state.name = ""; state.lastLoadedJsonName = null;
     state.isCif = false;
     state.cifCell = null; state.cifSymops = null; state.cifAsymUnit = null; state.cifFracToCart = null; state.cifTags = null;
     state.symmetryForgotten = false; state.showOnlyAsu = false;
@@ -14225,7 +14373,7 @@ select.sel:focus{border-color:var(--accent)}
     exitAllInteractiveModes();
     assignUids(atoms);
     var firstEver = !state.atoms && !state.everLoaded; state.everLoaded = true;
-    state.atoms = atoms; state.name = name || "structure";
+    state.atoms = atoms; state.name = name || "structure"; state.lastLoadedJsonName = null;
     state.isCif = !!cifMeta;
     state.symmetryForgotten = false;
     state.showOnlyAsu = false;
@@ -14792,7 +14940,7 @@ select.sel:focus{border-color:var(--accent)}
       ? "This will permanently delete the host -- including its asymmetric unit atoms and every symmetry-grown copy of them. The guest is unaffected.\n\nContinue?"
       : "This will permanently delete all host atoms. The guest is unaffected.\n\nContinue?";
     if (!window.confirm(hostMsg)) { setStatus("Remove host cancelled.", false); return; }
-    state.atoms = null; state.name = "";
+    state.atoms = null; state.name = ""; state.lastLoadedJsonName = null;
     state.isCif = false; state.symmetryForgotten = false; state.showOnlyAsu = false;
     state.cifCell = null; state.cifSymops = null; state.cifAsymUnit = null; state.cifFracToCart = null;
     renderStructure(); renderUnitCell(); updateHostInfo(); buildRadiiEditor(); buildHostColorEditor(); refreshReassignElementOptions(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
@@ -16604,7 +16752,7 @@ select.sel:focus{border-color:var(--accent)}
       hostBondRadius: p.bondRadius, showHydrogens: p.showHydrogens
     };
   }
-  function loadModelFromFile(text) {
+  function loadModelFromFile(text, sourceName) {
     var data;
     try { data = JSON.parse(text); } catch (e) { setStatus("Could not parse this file -- it may not be a CrystalVoidChannel, CrystalVoid, or MolecularGraphics project JSON.", true); return; }
     if (!data || !data.formatVersion || (data.appName !== "CrystalVoidChannel" && data.appName !== "CrystalVoid" && data.appName !== "MolecularGraphics")) {
@@ -16613,10 +16761,20 @@ select.sel:focus{border-color:var(--accent)}
     var isForeign = data.appName === "MolecularGraphics";
     var snap = isForeign ? convertFromMG(data) : data;
     restoreProjectSnapshot(snap);
+    /* sourceName is the on-disk filename this text actually came from (a
+       plain standalone .json load only -- see state.lastLoadedJsonName's own
+       comment for why a multi-entry .zip archive's per-entry navigation
+       deliberately doesn't set this), used only by the SAVE_JSON macro
+       command's no-suffix default. Set AFTER a successful restore, not
+       unconditionally at the top of this function -- a file that fails the
+       parse/format checks above never actually replaced anything, so it must
+       not silently start claiming to be "the file this structure came from"
+       either. */
+    state.lastLoadedJsonName = sourceName || null;
     setStatus("Loaded project" + (snap.name ? (" (" + snap.name + ")") : "") +
       (isForeign ? " -- converted from a MolecularGraphics project (host atoms only; no guest or cavity data to bring across)" : " -- resumed exactly as saved") + ".", false);
   }
-  function confirmAndLoadModelFromFile(text) {
+  function confirmAndLoadModelFromFile(text, sourceName) {
     /* dropping (or opening) a project file discards whatever is currently
        loaded -- host/guest atoms, undo history -- so if something is
        already loaded, give the user a chance to back out rather than
@@ -16626,7 +16784,7 @@ select.sel:focus{border-color:var(--accent)}
       var ok = window.confirm("Loading this project file will replace the structure currently loaded, including any unsaved changes. Continue?");
       if (!ok) { setStatus("Load cancelled -- current structure kept.", false); return; }
     }
-    loadModelFromFileShowingOverlay(text);
+    loadModelFromFileShowingOverlay(text, undefined, sourceName);
   }
   /* JSON.parse of a multi-MB project string, plus restoreProjectSnapshot's
      own synchronous grid-rebuild work, can take several real seconds for a
@@ -16639,10 +16797,10 @@ select.sel:focus{border-color:var(--accent)}
      the overlay before the blocking parse/restore work starts -- otherwise
      showOverlay(true) and showOverlay(false) would both run inside the same
      synchronous stretch and nothing would ever visibly appear. */
-  function loadModelFromFileShowingOverlay(text, onDone) {
+  function loadModelFromFileShowingOverlay(text, onDone, sourceName) {
     showOverlay(true, "Loading project...");
     setTimeout(function () {
-      try { loadModelFromFile(text); }
+      try { loadModelFromFile(text, sourceName); }
       finally { showOverlay(false); if (onDone) onDone(); }
     }, 0);
   }
@@ -16667,7 +16825,7 @@ select.sel:focus{border-color:var(--accent)}
     showOverlay(true, "Loading project file...");
     if (/\.zip$/i.test(file.name)) { handleModelZipBlob(file, file.name); return; }
     var rd = new FileReader();
-    rd.onload = function () { confirmAndLoadModelFromFile(rd.result); };
+    rd.onload = function () { confirmAndLoadModelFromFile(rd.result, file.name); };
     rd.onerror = function () { showOverlay(false); setStatus("Could not read this file.", true); };
     rd.readAsText(file);
   }
@@ -18010,6 +18168,18 @@ select.sel:focus{border-color:var(--accent)}
     macroExportRow.appendChild(macroExportSuffixInp);
     macroC.appendChild(macroExportRow);
 
+    var macroSaveJsonRow = el("div", "btnrow");
+    macroSaveJsonRow.style.flexWrap = "nowrap";
+    var macroSaveJsonBtn = button(macroSaveJsonRow, "Add SAVE_JSON", "ghost", addSaveJsonCommand);
+    macroSaveJsonBtn.style.flex = "0 0 auto"; macroSaveJsonBtn.style.whiteSpace = "nowrap";
+    var macroSaveJsonSuffixInp = document.createElement("input");
+    macroSaveJsonSuffixInp.type = "text"; macroSaveJsonSuffixInp.className = "num";
+    macroSaveJsonSuffixInp.id = "macroSaveJsonSuffixInp";
+    macroSaveJsonSuffixInp.placeholder = "suffix";
+    macroSaveJsonSuffixInp.style.flex = "1 1 auto"; macroSaveJsonSuffixInp.style.width = "0"; macroSaveJsonSuffixInp.style.minWidth = "0"; macroSaveJsonSuffixInp.style.textAlign = "left";
+    macroSaveJsonRow.appendChild(macroSaveJsonSuffixInp);
+    macroC.appendChild(macroSaveJsonRow);
+
     macroC.appendChild(el("hr", "divider"));
 
     var macroBatchCb = toggle(macroC, "Apply macro to all files in folder", state.macroBatchFolder, function (b) {
@@ -18601,9 +18771,10 @@ select.sel:focus{border-color:var(--accent)}
       "<p>A macro is a plain-text sequence of commands, one per line, that can be replayed later to reproduce a sequence of actions -- recorded live from your own clicks and button presses, typed or pasted in by hand, or a mix of both (the memo box is an ordinary text area throughout, editable at any time). It's designed to work not just on the structure it was recorded against but on a whole series of similar ones (e.g. a variable-temperature data set for the same crystal) -- provided each structure's asymmetric unit is labelled the same way and sits in the same place, which is the user's own responsibility to ensure; nothing here can verify that automatically.</p>" +
       "<p><b>Record</b> and <b>Pause</b> are mutually exclusive (pressing one always pops the other back up). While Record is down, every action below that has a defined macro command gets appended to the memo the instant it happens -- not batched or reordered, in the exact sequence performed. Not every possible action has one: a not-yet-implemented combination is simply never recorded, silently, the same as pressing a key with no shortcut bound to it. <b>Clear</b> empties the memo (confirming first if there's anything in it to lose). <b>Save</b> and <b>Load</b> read and write a plain-text <b>.MAC</b> file -- Save suggests the current structure's own name with a .MAC extension and, in Chrome or Edge, starts its folder picker in whichever folder the structure itself was last dropped from; Load offers the same picker (also starting there), falling back to a plain file-browse button in other browsers, and confirms before replacing a non-empty memo. A .MAC file can also be dropped directly onto the 3D view to load it the same way, without going through the Load button at all. <b>Play</b>, <b>Save</b>, and <b>Load</b> are all disabled while Record is down -- pause first.</p>" +
       "<p><b>Play</b> runs every line in the memo, in order, against whichever structure is currently loaded (or, in folder-batch mode, against each structure in turn -- see below), and reports how many ran versus how many it couldn't, by line number -- an unrecognized command word, or one whose atom reference doesn't match any atom in the structure currently loaded (the usual sign of replaying against a differently-labelled structure), is skipped rather than stopping the whole run. A command's own argument(s) follow the command word after a single space; where an argument is itself an atom reference it has the form <span class='mono'>name  matrix</span> (the atom's own CIF/SHELX label, two spaces, then the space-group operator that generated that specific copy in Jones-Faithful notation, e.g. <span class='mono'>H7A  1+X,1+Y,Z</span>) -- exactly the text already shown for that atom everywhere else in the app (labels, Save CIF, the Selection & geometry readout).</p>" +
-      "<p>Two buttons below the memo insert a command directly, regardless of whether Record is down -- there's no single live action either one corresponds to, so unlike everything above they're never recorded automatically. <b>Add current POV</b> appends a <span class='mono'>VIEW</span> command capturing the exact current camera orientation (as the same four-number quaternion a saved project file itself already uses for this), so a macro can return the view to precisely this orientation later, on this structure or another. <b>Add EXPORT_PNG</b> appends an <span class='mono'>EXPORT_PNG</span> command, optionally with whatever suffix is typed in the box beside the button (sanitized against characters a filename can't contain) -- see below.</p>" +
-      "<p><span class='mono'>EXPORT_PNG</span>, when played, saves the current view as a PNG using whatever <b>Export &gt; Image</b> is currently set to (resolution, transparent background), the same as pressing <b>Export image (PNG)</b> by hand. Its filename is always the current structure's own name with its extension stripped, plus an underscore and the given suffix if one was given (e.g. structure <span class='mono'>ZIF-68.cif</span> with suffix <span class='mono'>top</span> saves <span class='mono'>ZIF-68_top.png</span>). Because writing straight to disk needs the user's permission, the very first time <b>Play</b> is pressed on a memo containing an <span class='mono'>EXPORT_PNG</span> line, a folder picker appears asking where to save -- granted once, that folder is then reused silently for every <span class='mono'>EXPORT_PNG</span> in every macro played for the rest of this browser session, with no further prompts, until a write to it actually fails (at which point the next Play asks again). Declining the picker, or using a browser without this capability at all, falls back to an ordinary individual download per image instead of failing outright.</p>" +
-      "<p><b>Apply macro to all files in folder</b>, at the bottom of the panel, turns Play into a batch operation: tick the box, use <b>Select folder</b> to grant access to a folder (the box above it shows the folder's own name once chosen -- browsers never expose a full filesystem path, only that), then press Play as normal. Instead of running once against the currently-loaded structure, every <span class='mono'>.cif</span>/<span class='mono'>.res</span>/<span class='mono'>.ins</span>/<span class='mono'>.txt</span> file in that folder is loaded in turn (alphabetical order) and the whole memo is run against each one before moving to the next, reporting how many files it got through and how many commands failed along the way. If the memo also contains an <span class='mono'>EXPORT_PNG</span> line, the same batch folder doubles as the export destination -- no second permission prompt -- so this is the tool for producing one rendered image per structure across a whole folder of similar files in one action. It's entirely up to the user to make sure every file in the folder is actually compatible with the macro being played (matching ASU labelling, as above); a file that fails to load at all (wrong format, unparseable) is skipped and counted, not fatal to the rest of the batch.</p>" +
+      "<p>Three buttons below the memo insert a command directly, regardless of whether Record is down -- there's no single live action any of them corresponds to, so unlike everything above they're never recorded automatically. <b>Add current POV</b> appends a <span class='mono'>VIEW</span> command capturing the exact current camera orientation (as the same four-number quaternion a saved project file itself already uses for this), so a macro can return the view to precisely this orientation later, on this structure or another. <b>Add EXPORT_PNG</b> appends an <span class='mono'>EXPORT_PNG</span> command, optionally with whatever suffix is typed in the box beside the button (sanitized against characters a filename can't contain) -- see below. <b>Add SAVE_JSON</b> appends a <span class='mono'>SAVE_JSON</span> command the same way, with its own suffix box -- see further below.</p>" +
+      "<p><span class='mono'>EXPORT_PNG</span>, when played, saves the current view as a PNG using whatever <b>Export &gt; Image</b> is currently set to (resolution, transparent background), the same as pressing <b>Export image (PNG)</b> by hand. Its filename is always the current structure's own name with its extension stripped, plus an underscore and the given suffix if one was given (e.g. structure <span class='mono'>ZIF-68.cif</span> with suffix <span class='mono'>top</span> saves <span class='mono'>ZIF-68_top.png</span>). Because writing straight to disk needs the user's permission, the very first time <b>Play</b> is pressed on a memo containing an <span class='mono'>EXPORT_PNG</span> or <span class='mono'>SAVE_JSON</span> line, a folder picker appears asking where to save -- granted once, that folder is then reused silently for every <span class='mono'>EXPORT_PNG</span>/<span class='mono'>SAVE_JSON</span> in every macro played for the rest of this browser session, with no further prompts, until a write to it actually fails (at which point the next Play asks again). Declining the picker, or using a browser without this capability at all, falls back to an ordinary individual download per file instead of failing outright.</p>" +
+      "<p><b>Apply macro to all files in folder</b>, at the bottom of the panel, turns Play into a batch operation: tick the box, use <b>Select folder</b> to grant access to a folder (the box above it shows the folder's own name once chosen -- browsers never expose a full filesystem path, only that), then press Play as normal. Instead of running once against the currently-loaded structure, every <span class='mono'>.cif</span>/<span class='mono'>.res</span>/<span class='mono'>.ins</span>/<span class='mono'>.txt</span>/<span class='mono'>.json</span> file in that folder is loaded in turn (alphabetical order) and the whole memo is run against each one before moving to the next, reporting how many files it got through and how many commands failed along the way. The <span class='mono'>.json</span> files are project files previously saved from this app (<b>Save model</b>, or <span class='mono'>SAVE_JSON</span> itself) -- the only format that actually distinguishes host from guest, since a plain CIF never does; loading each structure once, sorting its atoms into host/guest by hand, and saving that as a project is how to build a folder of files a host/guest-aware batch macro can process (a <span class='mono'>.zip</span> project archive is deliberately not picked up here -- only a plain <span class='mono'>.json</span>). If the memo also contains an <span class='mono'>EXPORT_PNG</span> or <span class='mono'>SAVE_JSON</span> line, the same batch folder doubles as the export destination -- no second permission prompt -- so this is the tool for producing one rendered image, or one updated project file, per structure across a whole folder of similar files in one action. It's entirely up to the user to make sure every file in the folder is actually compatible with the macro being played (matching ASU labelling, as above); a file that fails to load at all (wrong format, unparseable) is skipped and counted, not fatal to the rest of the batch.</p>" +
+      "<p><span class='mono'>SAVE_JSON</span>, when played, writes the current model out as a project file -- the same complete payload (both atom lists, void/channel results, guest groups, display settings, camera, everything) <b>Save model</b> itself writes, and respecting that button's own <b>Compress as zip</b> checkbox exactly the same way (ticked: a <span class='mono'>.zip</span> containing one compressed <span class='mono'>.json</span> entry; unticked: plain <span class='mono'>.json</span>) -- but with no picker and an automatically-derived filename, so it fits into unattended batch playback the way <b>Save model</b>'s own file dialog never could. With no suffix, it OVERWRITES the exact file the current structure was itself loaded from, when that was a <span class='mono'>.json</span> in the first place (falling back to the structure's own CIF-derived name if it wasn't, e.g. a macro that saves partway through processing a plain CIF) -- this is the \"process a folder of projects, updating each one in place\" case. With a suffix, it saves alongside instead, as <span class='mono'>name_suffix.json</span> (or <span class='mono'>.zip</span>), the same pattern <span class='mono'>EXPORT_PNG</span>'s own suffix uses. Note that a <span class='mono'>.zip</span> written this way (box ticked) will NOT be picked up by a later batch run over the same folder -- that scan only recognizes plain <span class='mono'>.json</span> -- so leave the box unticked for a \"save now, batch-process again later\" workflow.</p>" +
       "<p><span class='mono'>CALCULATE_VOID</span>, when played, presses <b>Calculate</b> under Void/Channel Analysis exactly as if clicked by hand -- using whatever probe radius, mode, and other calculation settings are currently on screen at the moment it plays, never a value captured back when it was recorded, the same way every other command always acts on the current state rather than a frozen one. Combined with <b>Apply macro to all files in folder</b> (or just by loading a different structure and pressing Play again by hand), this is how to run the same void/channel analysis across a whole series of structures: each time it plays, every region found is appended as its own row to the <b>Void/channel batch results</b> table further down this panel -- Structure, ID, Type, Critical radius, Volume, and the probe radius that was actually in effect for that row -- building up one combined comparison table across everything processed so far in this browser session. That table is never cleared automatically (not by loading a new structure, not between separate Play presses) so it can keep growing across as many runs as wanted; <b>Copy as TSV</b> copies it straight to the clipboard for pasting into a spreadsheet, <b>Save as CSV</b> writes it to a file, and <b>Clear table</b> empties it. An ordinary manual click on <b>Calculate</b> (Record not down, no macro playing) never adds a row here -- only a <span class='mono'>CALCULATE_VOID</span> command actually being played does.</p>" +
       "<p>The command reference below groups every command by what it does. Most mirror a specific action one-to-one and are recorded automatically while Record is down; a handful are noted where that isn't the case.</p>" +
       "<p><b>Selection</b> (recorded on the matching click or spacebar press):</p>" +
@@ -18659,6 +18830,7 @@ select.sel:focus{border-color:var(--accent)}
       "<p><b>Export</b>:</p>" +
       "<ul>" +
       "<li><span class='mono'>EXPORT_PNG suffix</span> &mdash; never recorded automatically; only ever inserted by <b>Add EXPORT_PNG</b> (suffix is optional -- see above for exactly what it does when played).</li>" +
+      "<li><span class='mono'>SAVE_JSON suffix</span> &mdash; never recorded automatically; only ever inserted by <b>Add SAVE_JSON</b> (suffix is optional -- see above for exactly what it does when played, including the <b>Compress as zip</b> and same-filename-as-input behaviour).</li>" +
       "</ul>";
     document.getElementById("guideBtn").addEventListener("click", function () { document.getElementById("guideModal").classList.add("open"); });
     document.getElementById("guideClose").addEventListener("click", function () { document.getElementById("guideModal").classList.remove("open"); });
