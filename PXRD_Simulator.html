@@ -229,7 +229,7 @@ input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;}
     <div class="zoom-rect" id="zoomRect"></div>
     <div class="empty-state" id="emptyState">
       <div class="es-icon">&#x1F4D0;</div>
-      <p>Drop a CIF file to simulate its powder pattern</p>
+      <p>Drop a CIF or SHELX (.res/.ins) file to simulate its powder pattern</p>
     </div>
   </div>
   <div class="statusbar">
@@ -554,7 +554,10 @@ input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;}
         <span class="cp-label">Difference curve</span>
         <input type="checkbox" id="showDiff">
       </div>
-      <div class="cp-note">Difference needs exactly one visible simulated and one visible experimental pattern, linear scale.</div>
+      <div class="cp-row">
+        <span class="cp-label">Scale to visible peaks</span>
+        <input type="checkbox" id="scaleVisible">
+      </div>
     </div>
   </div>
 
@@ -596,11 +599,11 @@ input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;}
     <button class="close-x" id="guideClose">&times;</button>
     <h2>PXRD Simulator</h2>
     <p class="modal-sub">User Guide</p>
-    <p>Simulates powder X-ray diffractograms directly from CIF files, symmetry-correctly, and turns them into publication-ready figures. Everything runs locally in the browser; no data leaves this page.</p>
+    <p>Simulates powder X-ray diffractograms directly from CIF or SHELX (.res/.ins) files, symmetry-correctly, and turns them into publication-ready figures. Everything runs locally in the browser; no data leaves this page.</p>
 
     <h3>Quick start</h3>
     <ul>
-      <li>Drop one or more <strong>CIF</strong>, <strong>.xy</strong>, <strong>.xye</strong> or <strong>.xrdml</strong> files anywhere on the page. Each CIF becomes a simulated pattern with its own colour.</li>
+      <li>Drop one or more <strong>CIF</strong>, <strong>SHELX (.res/.ins)</strong>, <strong>.xy</strong>, <strong>.xye</strong> or <strong>.xrdml</strong> files anywhere on the page. Each structure file becomes a simulated pattern with its own colour.</li>
       <li>Optionally drop an <strong>experimental file</strong> (.xy, .xye, .dat, .csv -- two columns, 2&theta; &amp; intensity; comment lines and a single-number wavelength header line are skipped).</li>
       <li>Click a pattern card on the left to select it -- <strong>Save .xy of selected</strong> (under Output) exports that one pattern's data.</li>
       <li>Adjust, then export as <strong>PNG</strong> or <strong>.xy</strong> data.</li>
@@ -618,11 +621,12 @@ input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;}
     <ul>
       <li><kbd>drag</kbd> horizontally to zoom into a region; <kbd>double-click</kbd> or the Reset-zoom button restores the full range.</li>
       <li>Hovering reports the cursor position, plus the nearest reflection (hkl, d, I) of the selected pattern.</li>
+      <li>By default each pattern's intensity stays fixed to its own full-range maximum when you zoom, so peak heights stay honestly comparable. Turn on <strong>Scale to visible peaks</strong> (under Display) to instead rescale each visible pattern independently to its tallest peak within the zoomed 2&theta; range -- handy for inspecting weak reflections that sit next to (or share a stacked plot with) a much stronger one elsewhere in the pattern.</li>
     </ul>
 
     <h3>Physics notes</h3>
     <ul>
-      <li>Intensities: |F|&sup2; from Cromer-Mann form factors with isotropic Debye-Waller damping (Uiso; B<sub>iso</sub> converted; default 0.025 &#x212B;&sup2; when absent), site occupancies, multiplicity from the CIF symmetry operators, and the Lorentz-polarization factor (1+cos&sup2;2&theta;)/(sin&sup2;&theta; cos&theta;).</li>
+      <li>Intensities: |F|&sup2; from Cromer-Mann form factors with isotropic Debye-Waller damping (Uiso; B<sub>iso</sub> converted; anisotropic U<sub>ij</sub> in SHELX files converted to U<sub>eq</sub>; default 0.025 &#x212B;&sup2; when absent), site occupancies (SHELX free-variable-linked occupancies are decoded from FVAR), multiplicity from the symmetry operators (CIF symop list, or expanded from a SHELX LATT/SYMM), and the Lorentz-polarization factor (1+cos&sup2;2&theta;)/(sin&sup2;&theta; cos&theta;).</li>
       <li>Profiles: pseudo-Voigt with shared FWHM and mixing parameter &eta;.</li>
       <li><strong>K&alpha;&#x2082; doublet</strong> adds satellites at the tabulated &alpha;&#x2082; wavelength with adjustable intensity ratio (0.5 typical).</li>
       <li><strong>Preferred orientation</strong> uses the March-Dollase model averaged over symmetry-equivalent reflections.</li>
@@ -727,11 +731,11 @@ const RAD={
 // ===========================================================
 // 2. SYMOP PARSER
 // ===========================================================
-function parseSymop(str){
+function symopCoeffs(str){
   const parts=str.trim().toLowerCase().split(',');
   if(parts.length!==3)throw new Error('Bad symop: '+str);
   const RE=/[+-]?(?:\d+(?:\.\d*)?(?:\/\d+)?[xyz]?|[xyz])/g;
-  const coeffs=parts.map(expr=>{
+  return parts.map(expr=>{
     let cx=0,cy=0,cz=0,ct=0; RE.lastIndex=0; let m;
     while((m=RE.exec(expr))!==null){
       let tok=m[0];
@@ -745,12 +749,15 @@ function parseSymop(str){
     }
     return[cx,cy,cz,ct];
   });
+}
+function symopFromCoeffs(coeffs){
   return(x,y,z)=>[
     coeffs[0][0]*x+coeffs[0][1]*y+coeffs[0][2]*z+coeffs[0][3],
     coeffs[1][0]*x+coeffs[1][1]*y+coeffs[1][2]*z+coeffs[1][3],
     coeffs[2][0]*x+coeffs[2][1]*y+coeffs[2][2]*z+coeffs[2][3],
   ];
 }
+function parseSymop(str){return symopFromCoeffs(symopCoeffs(str));}
 
 // ===========================================================
 // 3. CIF PARSER
@@ -834,6 +841,135 @@ function parseCIF(text){
     atoms.push({label:lbl,element:el,x,y,z,occ,uiso,_f:0});
   }
   return{cell,sgNum,sgName,symops,symopStrings,atoms};
+}
+
+// ===========================================================
+// 3b. SHELX (.res / .ins) PARSER
+// ===========================================================
+const SHELX_KEYWORDS=new Set(['TITL','CELL','ZERR','LATT','SYMM','SFAC','UNIT','FVAR','HKLF','END',
+  'L.S.','LIST','FMAP','PLAN','ACTA','BOND','CONF','MORE','TEMP','WGHT','EXTI','SWAT','TWIN','BASF',
+  'MERG','OMIT','REM','SIZE','SHEL','SPEC','ISOR','SIMU','DELU','RIGU','SAME','SADI','DFIX','DANG',
+  'FLAT','CHIV','EQIV','EADP','AFIX','HFIX','FREE','RESI','MOVE','PART','BIND','CONN','DISP','LAUE',
+  'FRAG','FEND','ANIS','DEFS','ABIN','ANSC','ANSR','NCSY','PRIG','WIGL','RTAB','MPLA','HTAB','SUMP',
+  'STIR','SOCC','WPDB','BLOC','DAMP','FORM','CGLS','BUMP','SAME_UNIT','SKIP','MPLA']);
+function shelxNum(s){const n=parseFloat(String(s).replace(/\(.*\)/,''));return n;}
+function wrapFrac(v){let r=((v%1)+1)%1;if(r>1-1e-6||r<1e-6)r=0;return Math.round(r*1e6)/1e6;}
+function latticeCenterings(nAbs){
+  switch(nAbs){
+    case 2:return[[0,0,0],[0.5,0.5,0.5]];                                   // I
+    case 3:return[[0,0,0],[2/3,1/3,1/3],[1/3,2/3,2/3]];                     // R (hex axes, obverse)
+    case 4:return[[0,0,0],[0,0.5,0.5],[0.5,0,0.5],[0.5,0.5,0]];             // F
+    case 5:return[[0,0,0],[0,0.5,0.5]];                                     // A
+    case 6:return[[0,0,0],[0.5,0,0.5]];                                     // B
+    case 7:return[[0,0,0],[0.5,0.5,0]];                                     // C
+    default:return[[0,0,0]];                                                // P
+  }
+}
+function addTranslation(coeffs,t){return coeffs.map((row,i)=>[row[0],row[1],row[2],wrapFrac(row[3]+t[i])]);}
+function invertCoeffs(coeffs){return coeffs.map(row=>[-row[0],-row[1],-row[2],wrapFrac(-row[3])]);}
+function coeffsKey(coeffs){return coeffs.map(row=>row.map(v=>Math.round(v*1000)).join(',')).join('|');}
+function fracLabel(v){
+  const table=[[0,''],[1/6,'1/6'],[1/4,'1/4'],[1/3,'1/3'],[1/2,'1/2'],[2/3,'2/3'],[3/4,'3/4'],[5/6,'5/6']];
+  for(const[f,s] of table)if(Math.abs(v-f)<1e-4)return s;
+  return v.toFixed(3);
+}
+function coeffsToString(coeffs){
+  const axis=['x','y','z'];
+  return coeffs.map(([cx,cy,cz,ct])=>{
+    let s='';
+    [cx,cy,cz].forEach((c,i)=>{
+      if(Math.abs(c)<1e-6)return;
+      if(Math.abs(c-1)<1e-6)s+=(s?'+':'')+axis[i];
+      else if(Math.abs(c+1)<1e-6)s+='-'+axis[i];
+      else s+=(c>0&&s?'+':'')+c.toFixed(0)+axis[i];
+    });
+    const fs=fracLabel(ct);
+    if(fs)s=fs+(s&&!s.startsWith('-')?'+':'')+s;
+    return s||'0';
+  }).join(',');
+}
+function decodeSOF(sof,fvar){
+  if(!Number.isFinite(sof))return 1;
+  if(Math.abs(sof)<1.5)return sof; // literal occupancy, not tied to a free variable
+  const sign=sof<0?-1:1,asof=Math.abs(sof);
+  const m=Math.round(asof/10),p=asof-10*m;
+  if(m<=1)return sign*p;
+  const fv=fvar[m]!==undefined?fvar[m]:1;
+  if(sign<0&&Math.abs(p-1)<1e-4)return 1-fv; // SHELXL complementary-part convention (e.g. -21.00000)
+  return sign*p*fv;
+}
+function ueqFromUij(u,cell){
+  const[U11,U22,U33,U23,U13,U12]=u;
+  const R=recipMetricInv(cell);
+  const{a,b,c,alpha,beta,gamma}=cell;
+  const ab=a*b*Math.cos(gamma*DEG),ac=a*c*Math.cos(beta*DEG),bc=b*c*Math.cos(alpha*DEG);
+  const sum=U11*R.as*R.as*a*a+U22*R.bs*R.bs*b*b+U33*R.cs*R.cs*c*c
+    +2*U12*R.as*R.bs*ab+2*U13*R.as*R.cs*ac+2*U23*R.bs*R.cs*bc;
+  return sum/3;
+}
+function looksLikeSHELX(text){return /^\s*CELL\s/im.test(text)&&/^\s*SFAC\s/im.test(text);}
+function parseSHELX(text){
+  const rawLines=text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
+  const lines=[];
+  for(let i=0;i<rawLines.length;i++){
+    let ln=rawLines[i];
+    while(/=\s*$/.test(ln)&&i+1<rawLines.length){i++;ln=ln.replace(/=\s*$/,' ')+rawLines[i];}
+    lines.push(ln);
+  }
+  let cell=null,lattN=1,titl='',fvar=[0,1];
+  const symmStrings=[],sfac=[],atomLines=[];
+  for(const raw of lines){
+    const trm=raw.trim();
+    if(!trm||trm.startsWith('REM'))continue;
+    const parts=trm.split(/\s+/);
+    const kw=parts[0].toUpperCase();
+    if(kw==='TITL'){titl=parts.slice(1).join(' ');continue;}
+    if(kw==='CELL'){
+      const v=parts.slice(1).map(shelxNum);
+      cell={a:v[1],b:v[2],c:v[3],alpha:v[4],beta:v[5],gamma:v[6]};
+      continue;
+    }
+    if(kw==='LATT'){lattN=parseInt(parts[1])||1;continue;}
+    if(kw==='SYMM'){symmStrings.push(trm.replace(/^\S+\s*/,'').replace(/\s+/g,''));continue;}
+    if(kw==='SFAC'){sfac.push(...parts.slice(1));continue;}
+    if(kw==='FVAR'){fvar=[0,...parts.slice(1).map(shelxNum)];continue;}
+    if(SHELX_KEYWORDS.has(kw))continue;
+    if(parts.length>=6){
+      const sf=parseInt(parts[1]);
+      if(Number.isInteger(sf)&&sf>=1&&sf<=sfac.length){
+        const nums=parts.slice(2).map(shelxNum);
+        if(nums.length>=5&&nums.every(Number.isFinite))atomLines.push({label:parts[0],sfIdx:sf,nums});
+      }
+    }
+  }
+  if(!cell||!isFinite(cell.a))throw new Error('No CELL instruction found');
+  if(!sfac.length)throw new Error('No SFAC instruction found');
+  const baseOps=['x,y,z',...symmStrings].map(symopCoeffs);
+  const centerings=latticeCenterings(Math.abs(lattN));
+  let fullOps=[];
+  for(const base of baseOps)for(const t of centerings)fullOps.push(addTranslation(base,t));
+  if(lattN>0)fullOps=fullOps.concat(fullOps.map(invertCoeffs));
+  const seen=new Set(),uniqueCoeffs=[];
+  for(const c of fullOps){const key=coeffsKey(c);if(!seen.has(key)){seen.add(key);uniqueCoeffs.push(c);}}
+  const symops=uniqueCoeffs.map(symopFromCoeffs);
+  const symopStrings=uniqueCoeffs.map(coeffsToString);
+  const atoms=[];
+  for(const al of atomLines){
+    if(/^Q\d*$/i.test(al.label))continue; // skip difference-map "Q-peaks"
+    let el=(sfac[al.sfIdx-1]||'').replace(/[^A-Za-z]/g,'');
+    el=el.charAt(0).toUpperCase()+el.slice(1).toLowerCase();
+    if(!Z[el])el=el.charAt(0).toUpperCase();
+    const[x,y,z,sof,...adp]=al.nums;
+    const occ=decodeSOF(sof,fvar);
+    let uiso;
+    if(adp.length>=6)uiso=ueqFromUij(adp,cell);
+    else if(adp.length>=1)uiso=adp[0];
+    else uiso=0.025;
+    if(!(uiso>0))uiso=0.025;
+    atoms.push({label:al.label,element:el,x,y,z,occ,uiso,_f:0});
+  }
+  if(!atoms.length)throw new Error('No atom coordinates found');
+  return{cell,sgNum:0,sgName:titl||'SHELX',symops,symopStrings,atoms};
 }
 
 // ===========================================================
@@ -1070,6 +1206,7 @@ function getSettings(){
     stackOffset:parseFloat($('stackOffset').value)||0,
     baseOffset:parseFloat($('baseOffset').value)||0,
     expPoints:$('expPoints').checked, showDiff:$('showDiff').checked,
+    scaleVisible:$('scaleVisible').checked,
     legendOn:$('legendOn').checked,
     legendAlign:($('legendAlign')?$('legendAlign').value:'left'),
     showTicksRow:$('showTicksRow').checked,
@@ -1199,8 +1336,8 @@ function parseXY(text){
   for(let i=0;i<ys.length;i++)ys[i]*=100/m;
   return{ex:xs,ey:ys};
 }
-function addSimDataset(parsed,name){
-  const ds={id:uid++,type:'sim',name,color:nextColor(),visible:true,parsed,refs:null,y:null};
+function addSimDataset(parsed,name,format){
+  const ds={id:uid++,type:'sim',name,format:format||'CIF',color:nextColor(),visible:true,parsed,refs:null,y:null};
   datasets.push(ds);selId=ds.id;
   renderDsList();
   recalcAll(false);
@@ -1227,7 +1364,13 @@ function handleFiles(files){
           if(!parsed.atoms.length)throw new Error('No atom coordinates found in '+f.name);
           if(isNaN(parsed.cell.a))throw new Error('Could not read unit cell in '+f.name);
           sourceName=base;
-          addSimDataset(parsed,base);
+          addSimDataset(parsed,base,'CIF');
+        }else if(/\.(res|ins)$/i.test(f.name)||looksLikeSHELX(text)){
+          const parsed=parseSHELX(text);
+          if(!parsed.atoms.length)throw new Error('No atom coordinates found in '+f.name);
+          if(isNaN(parsed.cell.a))throw new Error('Could not read unit cell in '+f.name);
+          sourceName=base;
+          addSimDataset(parsed,base,'SHX');
         }else if(/\.xrdml$/i.test(f.name)){
           addExpDataset(parseXRDML(text),base);
         }else{
@@ -1288,7 +1431,7 @@ function renderDsList(){
       `<span class="ds-grip" title="Drag to reorder">&#x28FF;</span>`+
       `<input type="color" value="${d.color}" title="Pattern colour">`+
       `<input type="text" class="ds-name" value="${d.name.replace(/"/g,'&quot;')}" title="Rename">`+
-      `<span class="ds-badge">${d.type==='sim'?'CIF':'EXP'}</span>`+
+      `<span class="ds-badge">${d.type==='sim'?(d.format||'CIF'):'EXP'}</span>`+
       `<button class="ds-ico ${d.visible?'':'off'}" title="Show / hide">${d.visible?'&#x1F441;':'--'}</button>`+
       `<button class="ds-ico" title="Remove">\u2715</button>`;
     const[,colorIn,nameIn,,eyeBtn,rmBtn]=card.children;
@@ -1386,17 +1529,42 @@ function drawFigure(be,cw,ch,forScreen,skipLegends){
 
   // stacking offsets in display units (order = list order)
   const offs=new Map();vis.forEach((d,i)=>offs.set(d.id,i*S.stackOffset));
-
-  // -- y extent over view --
-  let yMax=10;
   const inView=t=>t>=vt[0]-1e-9&&t<=vt[1]+1e-9;
+
+  // -- per-dataset view multiplier: 1 normally (each pattern is already normalized to
+  // its own full-range max=100 in rebuildPatterns); when "Scale to visible peaks" is on,
+  // each pattern is INDEPENDENTLY rescaled so its own tallest peak within the current
+  // view reaches 100, regardless of what other visible patterns are doing -- so every
+  // pattern still fills its own band, rather than being scaled by a single shared max.
+  const viewMult=new Map();
+  for(const d of vis){
+    let mult=1;
+    if(S.scaleVisible){
+      let vMax=0;
+      if(d.type==='sim'){
+        const i0=Math.max(0,Math.floor((vt[0]-grid.x0)/grid.step)),i1=Math.min(grid.n-1,Math.ceil((vt[1]-grid.x0)/grid.step));
+        for(let i=i0;i<=i1;i++)if(d.y[i]>vMax)vMax=d.y[i];
+      }else{
+        for(let i=0;i<d.ex.length;i++)if(inView(d.ex[i])&&d.ey[i]>vMax)vMax=d.ey[i];
+      }
+      mult=vMax>0?100/vMax:1;
+    }
+    viewMult.set(d.id,mult);
+  }
+  const sv=(d,i)=>d.y[i]*viewMult.get(d.id);
+  const ev=(d,i)=>d.ey[i]*viewMult.get(d.id);
+
+  // -- y extent: over the full simulated range by default, or just the current
+  // zoomed view when "Scale to visible peaks" is on --
+  let yMax=10;
   for(const d of vis){
     const off=offs.get(d.id);
     if(d.type==='sim'){
-      const i0=Math.max(0,Math.floor((vt[0]-grid.x0)/grid.step)),i1=Math.min(grid.n-1,Math.ceil((vt[1]-grid.x0)/grid.step));
-      for(let i=i0;i<=i1;i++){const v=yT(d.y[i])+off;if(v>yMax)yMax=v;}
+      const i0=S.scaleVisible?Math.max(0,Math.floor((vt[0]-grid.x0)/grid.step)):0,
+            i1=S.scaleVisible?Math.min(grid.n-1,Math.ceil((vt[1]-grid.x0)/grid.step)):grid.n-1;
+      for(let i=i0;i<=i1;i++){const v=yT(sv(d,i))+off;if(v>yMax)yMax=v;}
     }else{
-      for(let i=0;i<d.ex.length;i++)if(inView(d.ex[i])){const v=yT(d.ey[i])+off;if(v>yMax)yMax=v;}
+      for(let i=0;i<d.ex.length;i++)if(!S.scaleVisible||inView(d.ex[i])){const v=yT(ev(d,i))+off;if(v>yMax)yMax=v;}
     }
   }
   yMax*=S.hklOn?1.16:1.06;
@@ -1441,9 +1609,9 @@ function drawFigure(be,cw,ch,forScreen,skipLegends){
 
   // stems
   if(S.showStems)for(const d of sims){
-    const off=offs.get(d.id),col=hexAlpha(d.color,0.28);
+    const off=offs.get(d.id),col=hexAlpha(d.color,0.28),mult=viewMult.get(d.id);
     for(const r of d.refs){const t=r.tth+zero;if(t<vt[0]||t>vt[1])continue;
-      const xp=X(t),y0=Y(off),y1=Y(off+yT(r.Irel)*0.22);
+      const xp=X(t),y0=Y(off),y1=Y(off+yT(r.Irel*mult)*0.22);
       be.line(xp,y0,xp,y1,col,0.9);}
   }
   // fills then lines: sims
@@ -1452,7 +1620,7 @@ function drawFigure(be,cw,ch,forScreen,skipLegends){
     const i0=Math.max(0,Math.floor((vt[0]-grid.x0)/grid.step)-1),
           i1=Math.min(grid.n-1,Math.ceil((vt[1]-grid.x0)/grid.step)+1);
     const pts=[];
-    for(let i=i0;i<=i1;i++){pts.push(X(grid.x0+i*grid.step),Y(yT(d.y[i])+off));}
+    for(let i=i0;i<=i1;i++){pts.push(X(grid.x0+i*grid.step),Y(yT(sv(d,i))+off));}
     if(S.fillOpacity>0&&pts.length){
       const fp=pts.slice();fp.push(pts[pts.length-2],Y(off),pts[0],Y(off));
       be.fillPoly(fp,hexAlpha(d.color,S.fillOpacity));
@@ -1465,17 +1633,17 @@ function drawFigure(be,cw,ch,forScreen,skipLegends){
     if(S.expPoints){
       const r=Math.max(1.6,S.lineWeight+0.8);
       for(let i=0;i<d.ex.length;i++){const t=d.ex[i];if(!inView(t))continue;
-        be.dot(X(t),Y(yT(d.ey[i])+off),r,d.color,Math.max(0.8,S.lineWeight*0.7));}
+        be.dot(X(t),Y(yT(ev(d,i))+off),r,d.color,Math.max(0.8,S.lineWeight*0.7));}
     }else{
       const pts=[];
       for(let i=0;i<d.ex.length;i++){const t=d.ex[i];if(t<vt[0]-0.3||t>vt[1]+0.3)continue;
-        pts.push(X(t),Y(yT(d.ey[i])+off));}
+        pts.push(X(t),Y(yT(ev(d,i))+off));}
       be.poly(pts,d.color,S.lineWeight);
     }
   }
   // difference curve
   if(diffActive){
-    const sd=sims[0],ed=exps[0];
+    const sd=sims[0],ed=exps[0],sdMult=viewMult.get(sd.id),edMult=viewMult.get(ed.id);
     const yBase=pt+patH+bandM+bandD/2;
     let mx=0;const dv=[];
     let j=0;
@@ -1485,8 +1653,8 @@ function drawFigure(be,cw,ch,forScreen,skipLegends){
       const t=grid.x0+i*grid.step;
       while(j<ed.ex.length-2&&ed.ex[j+1]<t)j++;
       const x0=ed.ex[j],x1=ed.ex[j+1],f=x1>x0?(t-x0)/(x1-x0):0;
-      const ev=ed.ey[j]+(ed.ey[j+1]-ed.ey[j])*Math.max(0,Math.min(1,f));
-      const v=ev-sd.y[i];dv.push(t,v);if(Math.abs(v)>mx)mx=Math.abs(v);
+      const evVal=(ed.ey[j]+(ed.ey[j+1]-ed.ey[j])*Math.max(0,Math.min(1,f)))*edMult;
+      const v=evVal-sd.y[i]*sdMult;dv.push(t,v);if(Math.abs(v)>mx)mx=Math.abs(v);
     }
     const sc=mx>0?(bandD*0.46)/mx:1;
     be.line(pl,yBase,pl+pw,yBase,hexAlpha(S.axisColor,0.35),0.8,[4,4]);
@@ -1499,32 +1667,34 @@ function drawFigure(be,cw,ch,forScreen,skipLegends){
     for(const rf of d.refs){const t=rf.tth+zero;if(t<vt[0]||t>vt[1])continue;
       be.line(X(t),yRow,X(t),yRow+7,d.color,1);}
   }
-  // hkl labels (selected sim)
+  // hkl labels (selected sim). Placed strongest-first; a label that would overlap an
+  // already-placed one is stacked upward rather than dropped, so all top-N labels show.
   if(S.hklOn){
     const sd=(()=>{const s=selectedDs();return(s&&s.type==='sim'&&s.visible&&s.y)?s:sims[0];})();
     if(sd){
       if(forScreen)hklLabelBoxes=[];
-      const off=offs.get(sd.id)||0;
+      const off=offs.get(sd.id)||0,mult=viewMult.get(sd.id);
       const cand=sd.refs.filter(r=>inView(r.tth+zero)).sort((a,b)=>b.Irel-a.Irel).slice(0,S.hklN);
-      const placed=[];
+      const placedBoxes=[]; // final (post drag-offset) boxes of already-drawn labels
+      const topLimit=pt+(S.hklVert?4:S.annotSize+2);
       for(const r of cand){
         const lbl=fmtHKL(r.h,r.k,r.l);
         const key=sd.id+'_'+r.h+'_'+r.k+'_'+r.l;
         const w=S.hklVert?S.annotSize*1.25:measureText(lbl,S.annotSize,S.annotFont)+6;
+        const bw=S.hklVert?S.annotSize*1.2:w, h=S.hklVert?w:S.annotSize;
         const xp=X(r.tth+zero);
-        if(placed.some(p=>Math.abs(p-xp)<w))continue;
-        placed.push(xp);
-        let yp=Y(off+yT(r.Irel))-5;
-        yp=Math.max(yp,pt+(S.hklVert?4:S.annotSize+2));
-        yp+=hklLabelPos[key]||0;
+        const bx=S.hklVert?xp-bw*0.3:xp-bw/2;
+        let yBase=Math.max(Y(off+yT(r.Irel*mult))-5,topLimit);
+        const manualOff=hklLabelPos[key]||0,step=h+3;
+        let by=(S.hklVert?yBase-h/2:yBase-h*0.85)+manualOff;
+        for(let guard=0;guard<40&&placedBoxes.some(b=>bx<b.x1&&bx+bw>b.x0&&by<b.y1&&by+h>b.y0);guard++){
+          yBase-=step; by=(S.hklVert?yBase-h/2:yBase-h*0.85)+manualOff;
+        }
+        placedBoxes.push({x0:bx,x1:bx+bw,y0:by,y1:by+h});
+        const yp=yBase+manualOff;
         if(S.hklVert)be.text(lbl,xp,yp,{size:S.annotSize,font:S.annotFont,color:hexAlpha(sd.color,0.9),align:'left',baseline:'middle',rotate:-90});
         else be.text(lbl,xp,yp,{size:S.annotSize,font:S.annotFont,color:hexAlpha(sd.color,0.9),align:'center',baseline:'alphabetic'});
-        if(forScreen){
-          const h=S.hklVert?w:S.annotSize;
-          const bw=S.hklVert?S.annotSize*1.2:w;
-          const bx=S.hklVert?xp-bw*0.3:xp-bw/2, by=S.hklVert?yp-h/2:yp-h*0.85;
-          hklLabelBoxes.push({key,x:bx,y:by,w:bw,h});
-        }
+        if(forScreen)hklLabelBoxes.push({key,x:bx,y:by,w:bw,h});
       }
     }
   }
@@ -1826,7 +1996,7 @@ const IDS_VAL=['wlPreset','customWl','ka2Ratio','tthMin','tthMaxIn','fwhm','eta'
   'xLabel','yLabel','fontFace','tickFont','tickSize','labelSize','annotSize','lineWeight','fillOpacity',
   'axisWeight','tickLen','tickDir','xLblOff','yLblOff','xTickStep','gridColor','gridWeight','gridStyle','sizePreset','figW','figH'];
 const IDS_CHK=['ka2On','poOn','expPoints','showDiff','showTicksRow','hklOn','hklVert',
-  'showStems','showGridV','legendOn'];
+  'showStems','showGridV','legendOn','scaleVisible'];
 function collectSettings(){
   const out={_version:'2.0'};
   for(const id of IDS_VAL){const el=$(id);if(el)out[id]=el.value;}
@@ -1907,8 +2077,12 @@ $('clearBtn').addEventListener('click',()=>{
 });
 
 // sim-parameter controls \u2192 full recalc
-['wlPreset','customWl','poOn','poH','poK','poL'].forEach(id=>
+// wavelength changes shift peak positions, so the zoom range is reset; PO only reweights
+// intensities in place, so the current 2\u03b8 view (zoom) is kept.
+['wlPreset','customWl'].forEach(id=>
   $(id).addEventListener('change',()=>{syncDerivedUI();syncRangeFieldsFromDeg(baseRangeDeg[0],baseRangeDeg[1]);recalcAll(true);}));
+['poOn','poH','poK','poL'].forEach(id=>
+  $(id).addEventListener('change',()=>{syncDerivedUI();recalcAll(false);}));
 function updateBaseRangeFromFields(){
   const xu=$('xUnit').value, lam=getLambda();
   const inv=unitInv(xu,lam);
@@ -1934,7 +2108,7 @@ $('ka2On').addEventListener('change',()=>{syncDerivedUI();rebuildPatterns();});
 // display / appearance \u2192 redraw only
 ['xUnit','yScale','expPoints','showDiff','legendOn','legendAlign','showTicksRow','hklOn','hklVert',
  'showStems','xLabel','yLabel','showGridV','fontFace','tickFont','annotFont',
- 'gridColor','tickDir','gridStyle','sizePreset','figW','figH','xTickStep'].forEach(id=>{
+ 'gridColor','tickDir','gridStyle','sizePreset','figW','figH','xTickStep','scaleVisible'].forEach(id=>{
   const el=$(id);
   el.addEventListener('change',()=>{
     if(id==='xUnit'){const XL={tth:'2\u03B8 (\u00B0)',q:'Q (\u00C5\u207B\u00B9)',d:'d (\u00C5)'};$('xLabel').value=XL[$('xUnit').value];
