@@ -338,6 +338,9 @@ select.cp-sel:focus{border-color:var(--accent);}
           <div class="cp-row"><span class="cp-label">Tick length</span><input type="range" id="tickLen" min="2" max="16" value="8"><span class="cp-val" id="tickLenV">8</span></div>
           <div class="cp-row"><span class="cp-label">Tick direction</span>
             <select class="cp-sel" id="tickDir"><option value="in">Inward</option><option value="out" selected>Outward</option></select></div>
+          <div class="cp-row"><span class="cp-label">X-axis tick interval</span><input type="number" id="xTickStep" placeholder="auto" style="width:66px;flex:none;"></div>
+          <div class="cp-row"><span class="cp-label">TGA Y-axis tick interval</span><input type="number" id="yTGATickStep" placeholder="auto" style="width:66px;flex:none;"></div>
+          <div class="cp-row"><span class="cp-label">DSC Y-axis tick interval</span><input type="number" id="yDSCTickStep" placeholder="auto" style="width:66px;flex:none;"></div>
         </div>
       </div>
 
@@ -1099,9 +1102,18 @@ function getDataRanges(){
   }
   return{xMin,xMax,tgaMin,tgaMax,dscMin,dscMax,dtgMin,dtgMax};
 }
-function axisRange(dataMin,dataMax,userMin,userMax,n){
+function strictTicks(lo,hi,step){
+  if(!step||!isFinite(step)||step<=0||hi<=lo)return null;
+  const eps=step*1e-6;
+  const ticks=[];
+  for(let v=lo;v<=hi+eps;v+=step)ticks.push(+v.toPrecision(10));
+  return ticks.length?ticks:null;
+}
+function axisRange(dataMin,dataMax,userMin,userMax,n,step){
   const lo=userMin!==null?userMin:niceR(dataMin,dataMax,n).min;
   const hi=userMax!==null?userMax:niceR(dataMin,dataMax,n).max;
+  const manual=strictTicks(lo,hi,step);
+  if(manual)return{min:lo,max:hi,ticks:manual};
   const ticks=niceR(lo,hi,n).ticks.filter(v=>v>=lo-1e-9&&v<=hi+1e-9);
   return{min:lo,max:hi,ticks:ticks.length?ticks:niceR(lo,hi,n).ticks};
 }
@@ -1144,12 +1156,13 @@ function drawFigure(be,CW,CH,forScreen){
   const xMax_=userXMax!==null?userXMax:xrNice.max;
   const xr={min:xMin_,max:xMax_};
   // ticks generated in DISPLAY units (deg C or K); pixel position maps back through kOff
-  const dispTicksAll=niceR(xMin_+kOff,xMax_+kOff,8).ticks;
+  const xStepManual=numv('xTickStep');
+  const dispTicksAll=strictTicks(xMin_+kOff,xMax_+kOff,xStepManual)||niceR(xMin_+kOff,xMax_+kOff,8).ticks;
   const xTicks=dispTicksAll.filter(v=>v>=xMin_+kOff-1e-9&&v<=xMax_+kOff+1e-9);
   const xDp=tickDecimals(xTicks.length?xTicks:dispTicksAll);
 
-  const tgaR=hasTGA?axisRange(dr.tgaMin,dr.tgaMax,numv('yTGAmin'),numv('yTGAmax'),6):{min:0,max:1,ticks:[0,0.5,1]};
-  const dscR=hasDSC?axisRange(dr.dscMin,dr.dscMax,numv('yDSCmin'),numv('yDSCmax'),6):{min:0,max:1,ticks:[0,0.5,1]};
+  const tgaR=hasTGA?axisRange(dr.tgaMin,dr.tgaMax,numv('yTGAmin'),numv('yTGAmax'),6,numv('yTGATickStep')):{min:0,max:1,ticks:[0,0.5,1]};
+  const dscR=hasDSC?axisRange(dr.dscMin,dr.dscMax,numv('yDSCmin'),numv('yDSCmax'),6,numv('yDSCTickStep')):{min:0,max:1,ticks:[0,0.5,1]};
   const dtgR=hasDTG?axisRange(dr.dtgMin,dr.dtgMax,null,null,6):{min:-1,max:0,ticks:[-1,-0.5,0]};
   const tgaDp=tickDecimals(tgaR.ticks),dscDp=tickDecimals(dscR.ticks);
 
@@ -1934,6 +1947,7 @@ const SETTING_IDS=['tgaLabel','dtgLabel','dscLabel','dtgSmooth',
  'tUnit','xLbl','dscInvert','exoArrow','fontFam','tickFontFam','annFontFam','axSz','tkSz','matchAxes',
  'xLblOff','tgaLblOff','dscLblOff',
  'gridV','gridH','gridStyle','gridCol','gridW','tickLen','tickDir','frameW',
+ 'xTickStep','yTGATickStep','yDSCTickStep',
  'tgaCol','dtgCol','dscCol','dscColorByLeg','tgaLW','dtgLW','dscLW',
  'legShow','legFont','legSz',
  'onsetVLinesTGA','onsetVLinesDSC','annSz',
