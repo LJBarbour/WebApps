@@ -1,10 +1,18 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Ewald Sphere Construction</title>
-<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script>
+  (function(){
+    try {
+      var t = localStorage.getItem("teachingAppTheme");
+      if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+  })();
+</script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{
   --bg:#0a0e1a;
@@ -17,32 +25,80 @@
   --text:#E8EAF6;
   --muted:#78909C;
   --lattice:#9FA8DA;
+  --mono-font:'Space Mono';
+  --header-bg:transparent;
+  --canvas-bg:var(--surface);
+  --hint-opacity:.55;
+  --fnote-opacity:.65;
+  --val-bg:rgba(79,195,247,0.1);
+  --pbtn-hover-bg:rgba(79,195,247,0.08);
+  --pbtn-on-bg:rgba(255,213,79,0.08);
+  --bv-bg:rgba(255,255,255,0.03);
+  --ind-bg:rgba(255,255,255,0.02);
+  --refrow-bg:rgba(255,213,79,0.05);
+  --refrow-border:rgba(255,213,79,0.18);
+  --refrow-empty-bg:rgba(255,255,255,0.02);
+  --scrollbar-thumb:rgba(255,255,255,0.07);
+  --scrollbar-thumb-hover:rgba(255,255,255,0.13);
+}
+:root[data-theme="light"]{
+  --bg:#FAF6EE;
+  --surface:#FFFFFF;
+  --surface2:#EDE6D4;
+  --border:#CEC3AA;
+  --accent:#4A6FA5;
+  --constructive:#C08A3E;
+  --destructive:#B5533C;
+  --text:#2C2416;
+  --muted:#6E6248;
+  --lattice:#8B6BA8;
+  --mono-font:'DM Mono';
+  --header-bg:var(--surface);
+  --canvas-bg:#F3EDE0;
+  --hint-opacity:.75;
+  --fnote-opacity:.85;
+  --val-bg:rgba(74,111,165,0.12);
+  --pbtn-hover-bg:rgba(74,111,165,0.08);
+  --pbtn-on-bg:rgba(192,138,62,0.1);
+  --bv-bg:rgba(44,36,22,0.04);
+  --ind-bg:rgba(44,36,22,0.03);
+  --refrow-bg:rgba(192,138,62,0.07);
+  --refrow-border:rgba(192,138,62,0.25);
+  --refrow-empty-bg:rgba(44,36,22,0.03);
+  --scrollbar-thumb:rgba(44,36,22,0.15);
+  --scrollbar-thumb-hover:rgba(44,36,22,0.25);
 }
 *{margin:0;padding:0;box-sizing:border-box;}
 html,body{height:100%;}
 body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;
-  display:flex;flex-direction:column;overflow:hidden;}
+  display:flex;flex-direction:column;overflow:hidden;transition:background-color .2s ease,color .2s ease;}
 header{padding:11px 22px;border-bottom:1px solid var(--border);display:flex;
-  align-items:baseline;gap:14px;flex-shrink:0;}
-header h1{font-family:'Space Mono',monospace;font-size:13px;font-weight:700;
+  align-items:baseline;gap:14px;flex-shrink:0;background:var(--header-bg);}
+header h1{font-family:var(--mono-font),monospace;font-size:13px;font-weight:700;
   color:var(--accent);letter-spacing:.05em;}
 header span{font-size:11px;color:var(--muted);font-weight:300;}
+.theme-toggle{display:flex;border:1px solid var(--border);border-radius:999px;overflow:hidden;
+  margin-left:auto;flex-shrink:0;}
+.theme-toggle button{appearance:none;-webkit-appearance:none;border:none;background:transparent;
+  color:var(--muted);font-family:var(--mono-font),monospace;font-size:9px;letter-spacing:.05em;
+  text-transform:uppercase;padding:6px 12px;cursor:pointer;transition:all .15s;}
+.theme-toggle button.active{background:var(--val-bg);color:var(--accent);}
 .layout{flex:1;display:grid;grid-template-columns:1fr 300px;min-height:0;overflow:hidden;}
 .canvas-area{display:flex;flex-direction:column;padding:10px 14px;gap:4px;min-height:0;}
-canvas{border-radius:7px;border:1px solid var(--border);background:var(--surface);
+canvas{border-radius:7px;border:1px solid var(--border);background:var(--canvas-bg);
   width:100%;display:block;flex:1;cursor:grab;touch-action:none;}
 canvas.dragging{cursor:grabbing;}
-.slbl{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:.1em;
+.slbl{font-family:var(--mono-font),monospace;font-size:9px;letter-spacing:.1em;
   text-transform:uppercase;color:var(--muted);margin-bottom:2px;flex-shrink:0;}
-.hint{font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);opacity:.55;
+.hint{font-family:var(--mono-font),monospace;font-size:9px;color:var(--muted);opacity:var(--hint-opacity);
   text-align:center;flex-shrink:0;margin-top:2px;}
 .panel{border-left:1px solid var(--border);background:var(--surface);padding:12px 13px;
   display:flex;flex-direction:column;overflow-y:auto;}
 .cg{margin-bottom:11px;}
 .cg label{display:flex;justify-content:space-between;align-items:center;
   font-size:11px;color:var(--muted);margin-bottom:4px;}
-.cg label span.val{font-family:'Space Mono',monospace;font-size:10px;color:var(--accent);
-  background:rgba(79,195,247,0.1);padding:2px 6px;border-radius:3px;}
+.cg label span.val{font-family:var(--mono-font),monospace;font-size:10px;color:var(--accent);
+  background:var(--val-bg);padding:2px 6px;border-radius:3px;}
 input[type=range]{width:100%;-webkit-appearance:none;appearance:none;height:3px;border-radius:2px;
   background:var(--border);outline:none;cursor:pointer;}
 input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:13px;height:13px;
@@ -51,20 +107,20 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border-radius:50%;bac
   cursor:pointer;border:2px solid var(--surface);}
 .presets{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px;}
 .pbtn{padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:transparent;
-  color:var(--muted);font-family:'Space Mono',monospace;font-size:9px;cursor:pointer;
+  color:var(--muted);font-family:var(--mono-font),monospace;font-size:9px;cursor:pointer;
   transition:all .15s;line-height:1.5;}
-.pbtn:hover,.pbtn.active{border-color:var(--accent);color:var(--accent);background:rgba(79,195,247,0.08);}
-.pbtn.on{border-color:var(--constructive);color:var(--constructive);background:rgba(255,213,79,0.08);}
+.pbtn:hover,.pbtn.active{border-color:var(--accent);color:var(--accent);background:var(--pbtn-hover-bg);}
+.pbtn.on{border-color:var(--constructive);color:var(--constructive);background:var(--pbtn-on-bg);}
 .div{height:1px;background:var(--border);margin:9px 0;flex-shrink:0;}
 .bd{background:var(--surface2);border:1px solid var(--border);border-radius:7px;
   padding:9px 11px;margin-bottom:9px;}
-.bf{font-family:'Space Mono',monospace;font-size:12px;color:var(--text);text-align:center;margin-bottom:6px;}
+.bf{font-family:var(--mono-font),monospace;font-size:12px;color:var(--text);text-align:center;margin-bottom:6px;}
 .bvg{display:grid;grid-template-columns:1fr 1fr;gap:4px;}
-.bv{background:rgba(255,255,255,0.03);border-radius:4px;padding:5px 7px;}
+.bv{background:var(--bv-bg);border-radius:4px;padding:5px 7px;}
 .bv .bn{font-size:9px;color:var(--muted);display:block;margin-bottom:1px;}
-.bv .bv2{font-family:'Space Mono',monospace;font-size:11px;color:var(--accent);}
+.bv .bv2{font-family:var(--mono-font),monospace;font-size:11px;color:var(--accent);}
 .ind{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:6px;
-  margin-bottom:7px;border-left:3px solid transparent;background:rgba(255,255,255,0.02);
+  margin-bottom:7px;border-left:3px solid transparent;background:var(--ind-bg);
   transition:border-color .2s;}
 .idot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--muted);transition:all .2s;}
 .itxt{font-size:11px;line-height:1.4;}
@@ -74,14 +130,14 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border-radius:50%;bac
 .reflist{display:flex;flex-direction:column;gap:3px;max-height:170px;overflow-y:auto;
   padding-right:3px;}
 .refrow{display:grid;grid-template-columns:48px 1fr 1fr auto;gap:4px;align-items:center;
-  padding:4px 7px;background:rgba(255,213,79,0.05);border:1px solid rgba(255,213,79,0.18);
-  border-radius:4px;font-family:'Space Mono',monospace;font-size:10px;}
+  padding:4px 7px;background:var(--refrow-bg);border:1px solid var(--refrow-border);
+  border-radius:4px;font-family:var(--mono-font),monospace;font-size:10px;}
 .refrow .hk{color:var(--constructive);font-weight:700;}
 .refrow .lbl{color:var(--muted);font-size:9px;display:flex;gap:3px;align-items:baseline;}
 .refrow .num{color:var(--text);font-size:10px;}
-.refrow.empty{display:block;background:rgba(255,255,255,0.02);border-color:var(--border);
+.refrow.empty{display:block;background:var(--refrow-empty-bg);border-color:var(--border);
   color:var(--muted);text-align:center;padding:9px;}
-.fnote{display:block;font-size:9px;color:var(--muted);line-height:1.55;margin-top:8px;opacity:.65;}
+.fnote{display:block;font-size:9px;color:var(--muted);line-height:1.55;margin-top:8px;opacity:var(--fnote-opacity);}
 .fnote em{color:var(--constructive);font-style:normal;}
 .fnote b{color:var(--accent);font-weight:normal;}
 @media (max-width: 880px){
@@ -91,14 +147,18 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border-radius:50%;bac
 }
 ::-webkit-scrollbar{width:8px;height:8px;}
 ::-webkit-scrollbar-track{background:transparent;}
-::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.07);border-radius:4px;}
-::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.13);}
+::-webkit-scrollbar-thumb{background:var(--scrollbar-thumb);border-radius:4px;}
+::-webkit-scrollbar-thumb:hover{background:var(--scrollbar-thumb-hover);}
 </style>
 </head>
 <body>
 <header>
   <h1>EWALD SPHERE CONSTRUCTION</h1>
   <span>2D · |k| = 1/λ &nbsp;|&nbsp; reciprocal lattice meets the diffraction condition</span>
+  <div class="theme-toggle" id="theme-toggle">
+    <button data-theme-btn="dark">Dark</button>
+    <button data-theme-btn="light">Light</button>
+  </div>
 </header>
 <div class="layout">
   <div class="canvas-area">
@@ -166,6 +226,75 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border-radius:50%;bac
   </div>
 </div>
 <script>
+// ── theme ─────────────────────────────────────────────────────────────────────
+// Canvas colours are not CSS-variable-driven (canvas fills aren't touched by CSS),
+// so every colour the drawing code uses per theme lives here, keyed to mirror the
+// literal values that differed between the old Dark/Light files.
+const THEME = {
+  dark: {
+    mono: 'Space Mono',
+    bgFill: '#0a0e1a',
+    gridStroke: 'rgba(255,255,255,0.025)',
+    limitStroke: 'rgba(79,195,247,0.13)',
+    limitLabel: 'rgba(79,195,247,0.30)',
+    ewaldShadowBlur: 6,
+    ewaldShadowColor: 'rgba(79,195,247,0.55)',
+    ewaldStroke: 'rgba(79,195,247,0.72)',
+    beamGradStart: 'rgba(79,195,247,0.05)',
+    beamGradEnd: 'rgba(79,195,247,0.95)',
+    beamShadowBlur: 7,
+    beamShadowColor: 'rgba(79,195,247,0.6)',
+    arrowColor: 'rgba(79,195,247,0.95)',
+    beamExtStroke: 'rgba(79,195,247,0.35)',
+    kLabelColor: 'rgba(79,195,247,0.85)',
+    xraySrcColor: 'rgba(79,195,247,0.45)',
+    latticeDot: 'rgba(159,168,218,0.55)',
+    constructiveRGB: '255,213,79',
+    constructiveHex: '#FFD54F',
+    diffBeamShadowFactor: 6,
+    crystalRing: 'rgba(232,234,246,0.32)',
+    crystalFill: '#E8EAF6',
+    crystalLabel: 'rgba(232,234,246,0.6)',
+    originRing: 'rgba(79,195,247,0.45)',
+    originFill: 'rgba(79,195,247,0.92)',
+    scaleBarStroke: 'rgba(232,234,246,0.45)',
+    scaleBarLabel: 'rgba(232,234,246,0.55)',
+    idotShadow: '0 0 8px rgba(255,213,79,0.7)',
+  },
+  light: {
+    mono: 'DM Mono',
+    bgFill: '#F3EDE0',
+    gridStroke: 'rgba(44,36,22,0.05)',
+    limitStroke: 'rgba(74,111,165,0.18)',
+    limitLabel: 'rgba(74,111,165,0.5)',
+    ewaldShadowBlur: 0,
+    ewaldShadowColor: 'rgba(0,0,0,0)',
+    ewaldStroke: 'rgba(74,111,165,0.8)',
+    beamGradStart: 'rgba(74,111,165,0.08)',
+    beamGradEnd: 'rgba(74,111,165,0.95)',
+    beamShadowBlur: 0,
+    beamShadowColor: 'rgba(0,0,0,0)',
+    arrowColor: 'rgba(74,111,165,0.95)',
+    beamExtStroke: 'rgba(74,111,165,0.4)',
+    kLabelColor: 'rgba(74,111,165,0.9)',
+    xraySrcColor: 'rgba(74,111,165,0.65)',
+    latticeDot: 'rgba(139,107,168,0.55)',
+    constructiveRGB: '192,138,62',
+    constructiveHex: '#C08A3E',
+    diffBeamShadowFactor: 0,
+    crystalRing: 'rgba(44,36,22,0.45)',
+    crystalFill: '#2C2416',
+    crystalLabel: 'rgba(44,36,22,0.7)',
+    originRing: 'rgba(74,111,165,0.5)',
+    originFill: 'rgba(74,111,165,0.95)',
+    scaleBarStroke: 'rgba(44,36,22,0.55)',
+    scaleBarLabel: 'rgba(44,36,22,0.65)',
+    idotShadow: '0 0 4px rgba(192,138,62,.45)',
+  }
+};
+let currentTheme = (document.documentElement.getAttribute('data-theme') === 'light') ? 'light' : 'dark';
+let T = THEME[currentTheme];
+
 // ── state ─────────────────────────────────────────────────────────────────────
 const state = {
   lambda: 0.7107,    // Å
@@ -271,13 +400,13 @@ function enumerateReflections(){
 
 // ── drawing ───────────────────────────────────────────────────────────────────
 function clear(){
-  ctx.fillStyle = '#0a0e1a';
+  ctx.fillStyle = T.bgFill;
   ctx.fillRect(0, 0, W, H);
 }
 
 function drawSubtleGrid(){
   ctx.save();
-  ctx.strokeStyle = 'rgba(255,255,255,0.025)';
+  ctx.strokeStyle = T.gridStroke;
   ctx.lineWidth = 1;
   const step = PX_PER_INVA * 0.5;   // gridline every 0.5 Å⁻¹
   for (let x = CENTER_X % step; x < W; x += step){
@@ -294,14 +423,14 @@ function drawLimitingSphere(){
   const Rpx = R * PX_PER_INVA;
   const [zx, zy] = project(R, 0);
   ctx.save();
-  ctx.strokeStyle = 'rgba(79,195,247,0.13)';
+  ctx.strokeStyle = T.limitStroke;
   ctx.lineWidth = 1;
   ctx.setLineDash([3, 5]);
   ctx.beginPath(); ctx.arc(zx, zy, 2 * Rpx, 0, Math.PI * 2); ctx.stroke();
   ctx.restore();
   // tiny annotation
-  ctx.fillStyle = 'rgba(79,195,247,0.30)';
-  ctx.font = '9px Space Mono, monospace';
+  ctx.fillStyle = T.limitLabel;
+  ctx.font = `9px ${T.mono}, monospace`;
   ctx.textAlign = 'right';
   ctx.fillText('limiting sphere (2/λ)', zx + 2 * Rpx - 6, zy - 2 * Rpx + 12);
 }
@@ -310,10 +439,10 @@ function drawEwald(){
   const R = 1 / state.lambda;
   const Rpx = R * PX_PER_INVA;
   ctx.save();
-  // soft outer glow
-  ctx.shadowBlur = 6;
-  ctx.shadowColor = 'rgba(79,195,247,0.55)';
-  ctx.strokeStyle = 'rgba(79,195,247,0.72)';
+  // soft outer glow (dark theme only — THEME[light].ewaldShadowBlur is 0)
+  ctx.shadowBlur = T.ewaldShadowBlur;
+  ctx.shadowColor = T.ewaldShadowColor;
+  ctx.strokeStyle = T.ewaldStroke;
   ctx.lineWidth = 1.4;
   ctx.beginPath(); ctx.arc(CENTER_X, CENTER_Y, Rpx, 0, Math.PI * 2); ctx.stroke();
   ctx.restore();
@@ -326,12 +455,12 @@ function drawIncidentBeam(){
   // beam from edge to crystal
   ctx.save();
   const grad = ctx.createLinearGradient(startX, CENTER_Y, CENTER_X, CENTER_Y);
-  grad.addColorStop(0, 'rgba(79,195,247,0.05)');
-  grad.addColorStop(1, 'rgba(79,195,247,0.95)');
+  grad.addColorStop(0, T.beamGradStart);
+  grad.addColorStop(1, T.beamGradEnd);
   ctx.strokeStyle = grad;
   ctx.lineWidth = 2.2;
-  ctx.shadowBlur = 7;
-  ctx.shadowColor = 'rgba(79,195,247,0.6)';
+  ctx.shadowBlur = T.beamShadowBlur;
+  ctx.shadowColor = T.beamShadowColor;
   ctx.beginPath();
   ctx.moveTo(startX, CENTER_Y);
   ctx.lineTo(CENTER_X, CENTER_Y);
@@ -339,11 +468,11 @@ function drawIncidentBeam(){
   ctx.restore();
 
   // arrowhead just before the crystal
-  drawArrowhead(CENTER_X - 14, CENTER_Y, 0, 'rgba(79,195,247,0.95)', 7);
+  drawArrowhead(CENTER_X - 14, CENTER_Y, 0, T.arrowColor, 7);
 
   // extension k_in through the crystal to 000 (dashed)
   ctx.save();
-  ctx.strokeStyle = 'rgba(79,195,247,0.35)';
+  ctx.strokeStyle = T.beamExtStroke;
   ctx.lineWidth = 1.1;
   ctx.setLineDash([4, 4]);
   ctx.beginPath();
@@ -353,13 +482,13 @@ function drawIncidentBeam(){
   ctx.restore();
 
   // label k_in
-  ctx.fillStyle = 'rgba(79,195,247,0.85)';
-  ctx.font = 'bold 11px Space Mono, monospace';
+  ctx.fillStyle = T.kLabelColor;
+  ctx.font = `bold 11px ${T.mono}, monospace`;
   ctx.textAlign = 'left';
-  ctx.fillText('k\u2080', (startX + CENTER_X - 24)/2 - 8, CENTER_Y - 8);
+  ctx.fillText('k₀', (startX + CENTER_X - 24)/2 - 8, CENTER_Y - 8);
   // "X-ray source"
-  ctx.fillStyle = 'rgba(79,195,247,0.45)';
-  ctx.font = '9px Space Mono, monospace';
+  ctx.fillStyle = T.xraySrcColor;
+  ctx.font = `9px ${T.mono}, monospace`;
   ctx.fillText('X-ray', startX + 4, CENTER_Y + 12);
 }
 
@@ -381,7 +510,7 @@ function drawArrowhead(x, y, angle, color, size){
 function drawLatticePoints(reflections){
   // Draw all unrotated lattice points as small dim dots (background).
   // Skip points off-canvas.
-  ctx.fillStyle = 'rgba(159,168,218,0.55)';
+  ctx.fillStyle = T.latticeDot;
   reflections.forEach(r => {
     if (r.intensity > 0.15) return;   // bright ones drawn later
     const [sx, sy] = project(r.px, r.py);
@@ -407,12 +536,12 @@ function drawDiffractedBeam(sx, sy, alpha){
   ctx.save();
   // beam gradient: from bright at crystal to fading at edge
   const grad = ctx.createLinearGradient(CENTER_X, CENTER_Y, ex, ey);
-  grad.addColorStop(0, `rgba(255,213,79,${(alpha * 0.95).toFixed(3)})`);
-  grad.addColorStop(1, `rgba(255,213,79,${(alpha * 0.15).toFixed(3)})`);
+  grad.addColorStop(0, `rgba(${T.constructiveRGB},${(alpha * 0.95).toFixed(3)})`);
+  grad.addColorStop(1, `rgba(${T.constructiveRGB},${(alpha * 0.15).toFixed(3)})`);
   ctx.strokeStyle = grad;
   ctx.lineWidth = 1.6;
-  ctx.shadowBlur = 6 * alpha;
-  ctx.shadowColor = '#FFD54F';
+  ctx.shadowBlur = T.diffBeamShadowFactor * alpha;
+  ctx.shadowColor = T.constructiveHex;
   ctx.beginPath();
   ctx.moveTo(CENTER_X, CENTER_Y);
   ctx.lineTo(ex, ey);
@@ -439,7 +568,7 @@ function drawActive(reflections){
     if (r.intensity < 0.3) return;
     const [sx, sy] = project(r.px, r.py);
     ctx.save();
-    ctx.strokeStyle = `rgba(255,213,79,${(r.intensity * 0.45).toFixed(3)})`;
+    ctx.strokeStyle = `rgba(${T.constructiveRGB},${(r.intensity * 0.45).toFixed(3)})`;
     ctx.lineWidth = 1.1;
     ctx.setLineDash([3, 3]);
     ctx.beginPath(); ctx.moveTo(zx, zy); ctx.lineTo(sx, sy); ctx.stroke();
@@ -453,18 +582,18 @@ function drawActive(reflections){
 
     const rad = 14 + 4 * a;
     const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, rad);
-    g.addColorStop(0, `rgba(255,213,79,${(a * 0.6).toFixed(3)})`);
-    g.addColorStop(0.5, `rgba(255,213,79,${(a * 0.25).toFixed(3)})`);
-    g.addColorStop(1, 'rgba(255,213,79,0)');
+    g.addColorStop(0, `rgba(${T.constructiveRGB},${(a * 0.6).toFixed(3)})`);
+    g.addColorStop(0.5, `rgba(${T.constructiveRGB},${(a * 0.25).toFixed(3)})`);
+    g.addColorStop(1, `rgba(${T.constructiveRGB},0)`);
     ctx.fillStyle = g;
     ctx.beginPath(); ctx.arc(sx, sy, rad, 0, Math.PI * 2); ctx.fill();
 
-    ctx.fillStyle = `rgba(255,213,79,${(a * 0.95 + 0.05).toFixed(3)})`;
+    ctx.fillStyle = `rgba(${T.constructiveRGB},${(a * 0.95 + 0.05).toFixed(3)})`;
     ctx.beginPath(); ctx.arc(sx, sy, 2.6 + 0.8 * a, 0, Math.PI * 2); ctx.fill();
 
     if (a > 0.45){
-      ctx.fillStyle = `rgba(255,213,79,${(a * 0.9 + 0.1).toFixed(3)})`;
-      ctx.font = 'bold 10px Space Mono, monospace';
+      ctx.fillStyle = `rgba(${T.constructiveRGB},${(a * 0.9 + 0.1).toFixed(3)})`;
+      ctx.font = `bold 10px ${T.mono}, monospace`;
       ctx.textAlign = 'left';
       const lab = `${r.h} ${r.k}`;
       // place label outward from sphere centre to keep it readable
@@ -480,16 +609,16 @@ function drawActive(reflections){
 function drawCrystalMarker(){
   ctx.save();
   // outer ring
-  ctx.strokeStyle = 'rgba(232,234,246,0.32)';
+  ctx.strokeStyle = T.crystalRing;
   ctx.lineWidth = 1;
   ctx.beginPath(); ctx.arc(CENTER_X, CENTER_Y, 8, 0, Math.PI * 2); ctx.stroke();
   // tiny cross-hatch suggesting a lattice
-  ctx.fillStyle = '#E8EAF6';
+  ctx.fillStyle = T.crystalFill;
   ctx.beginPath(); ctx.arc(CENTER_X, CENTER_Y, 3.2, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
   // label
-  ctx.fillStyle = 'rgba(232,234,246,0.6)';
-  ctx.font = '10px Space Mono, monospace';
+  ctx.fillStyle = T.crystalLabel;
+  ctx.font = `10px ${T.mono}, monospace`;
   ctx.textAlign = 'right';
   ctx.fillText('crystal', CENTER_X - 12, CENTER_Y - 10);
 }
@@ -499,18 +628,18 @@ function draw000Marker(){
   const Rpx = R * PX_PER_INVA;
   const x = CENTER_X + Rpx, y = CENTER_Y;
   ctx.save();
-  ctx.strokeStyle = 'rgba(79,195,247,0.45)';
+  ctx.strokeStyle = T.originRing;
   ctx.lineWidth = 1;
   ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.stroke();
-  ctx.fillStyle = 'rgba(79,195,247,0.92)';
+  ctx.fillStyle = T.originFill;
   ctx.beginPath(); ctx.arc(x, y, 2.6, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
-  ctx.fillStyle = 'rgba(79,195,247,0.85)';
-  ctx.font = 'bold 10px Space Mono, monospace';
+  ctx.fillStyle = T.kLabelColor;
+  ctx.font = `bold 10px ${T.mono}, monospace`;
   ctx.textAlign = 'left';
   ctx.fillText('000', x + 10, y - 8);
-  ctx.fillStyle = 'rgba(79,195,247,0.45)';
-  ctx.font = '9px Space Mono, monospace';
+  ctx.fillStyle = T.xraySrcColor;
+  ctx.font = `9px ${T.mono}, monospace`;
   ctx.fillText('reciprocal origin', x + 10, y + 12);
 }
 
@@ -519,7 +648,7 @@ function drawScaleBar(){
   const len = PX_PER_INVA;
   const x0 = 14, y0 = H - 18;
   ctx.save();
-  ctx.strokeStyle = 'rgba(232,234,246,0.45)';
+  ctx.strokeStyle = T.scaleBarStroke;
   ctx.lineWidth = 1.2;
   ctx.beginPath();
   ctx.moveTo(x0, y0);
@@ -527,8 +656,8 @@ function drawScaleBar(){
   ctx.moveTo(x0, y0 - 3); ctx.lineTo(x0, y0 + 3);
   ctx.moveTo(x0 + len, y0 - 3); ctx.lineTo(x0 + len, y0 + 3);
   ctx.stroke();
-  ctx.fillStyle = 'rgba(232,234,246,0.55)';
-  ctx.font = '9px Space Mono, monospace';
+  ctx.fillStyle = T.scaleBarLabel;
+  ctx.font = `9px ${T.mono}, monospace`;
   ctx.textAlign = 'left';
   ctx.fillText('1 Å⁻¹', x0 + len + 6, y0 + 3);
   ctx.restore();
@@ -541,7 +670,7 @@ function drawTwoThetaIndicator(brightest){
   const arcR = Math.min(36, Math.hypot(sx - CENTER_X, sy - CENTER_Y) * 0.4);
   if (arcR < 8) return;
   ctx.save();
-  ctx.strokeStyle = `rgba(255,213,79,${(brightest.intensity * 0.7).toFixed(3)})`;
+  ctx.strokeStyle = `rgba(${T.constructiveRGB},${(brightest.intensity * 0.7).toFixed(3)})`;
   ctx.lineWidth = 1.2;
   // angle from +x to the diffracted-beam direction; angle may be negative
   if (angle >= 0){
@@ -549,8 +678,8 @@ function drawTwoThetaIndicator(brightest){
   } else {
     ctx.beginPath(); ctx.arc(CENTER_X, CENTER_Y, arcR, angle, 0); ctx.stroke();
   }
-  ctx.fillStyle = `rgba(255,213,79,${(brightest.intensity * 0.85 + 0.1).toFixed(3)})`;
-  ctx.font = '10px Space Mono, monospace';
+  ctx.fillStyle = `rgba(${T.constructiveRGB},${(brightest.intensity * 0.85 + 0.1).toFixed(3)})`;
+  ctx.font = `10px ${T.mono}, monospace`;
   ctx.textAlign = 'left';
   const labelAngle = angle * 0.55;
   const lx = CENTER_X + Math.cos(labelAngle) * (arcR + 8);
@@ -560,6 +689,7 @@ function drawTwoThetaIndicator(brightest){
 }
 
 function draw(){
+  T = THEME[currentTheme];
   clear();
   drawSubtleGrid();
   drawLimitingSphere();
@@ -603,11 +733,11 @@ function updateUI(reflections, activeSorted){
   const itit = document.getElementById('itit');
   const idsc = document.getElementById('idsc');
   if (activeSorted.length > 0){
-    ind.style.borderLeftColor = '#FFD54F';
-    idot.style.background = '#FFD54F';
-    idot.style.boxShadow = '0 0 8px rgba(255,213,79,0.7)';
+    ind.style.borderLeftColor = T.constructiveHex;
+    idot.style.background = T.constructiveHex;
+    idot.style.boxShadow = T.idotShadow;
     itit.textContent = `Diffracting · ${activeSorted.length} reflection${activeSorted.length > 1 ? 's' : ''}`;
-    itit.style.color = '#FFD54F';
+    itit.style.color = T.constructiveHex;
     const r0 = activeSorted[0];
     idsc.textContent =
       `brightest (${r0.h},${r0.k})  d=${r0.d.toFixed(2)} Å  2θ=${(Math.abs(r0.twoTheta) * 180 / Math.PI).toFixed(1)}°`;
@@ -632,7 +762,7 @@ function updateUI(reflections, activeSorted){
       const ip = Math.round(r.intensity * 100);
       return (
         '<div class="refrow">' +
-          `<span class="hk">${r.h}\u00A0${r.k}</span>` +
+          `<span class="hk">${r.h} ${r.k}</span>` +
           `<span class="lbl">d <span class="num">${r.d.toFixed(2)}</span>Å</span>` +
           `<span class="lbl">2θ <span class="num">${tt.toFixed(1)}</span>°</span>` +
           `<span class="num">${ip}%</span>` +
@@ -695,6 +825,26 @@ function toggleAuto(){
     b.innerHTML = '▶&nbsp;auto-rotate';
   }
 }
+
+// ── theme toggle ──────────────────────────────────────────────────────────────
+function setTheme(theme){
+  currentTheme = (theme === 'light') ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', currentTheme);
+  try { localStorage.setItem('teachingAppTheme', currentTheme); } catch (e) {}
+  document.querySelectorAll('.theme-toggle button').forEach(b => {
+    b.classList.toggle('active', b.dataset.themeBtn === currentTheme);
+  });
+  T = THEME[currentTheme];
+  draw();   // repaint the Ewald construction immediately with the new palette
+}
+
+document.querySelectorAll('.theme-toggle button').forEach(b => {
+  b.addEventListener('click', () => setTheme(b.dataset.themeBtn));
+});
+// sync initial toggle button state to whatever theme was restored from storage
+document.querySelectorAll('.theme-toggle button').forEach(b => {
+  b.classList.toggle('active', b.dataset.themeBtn === currentTheme);
+});
 
 // ── drag rotation ─────────────────────────────────────────────────────────────
 let dragging = false;

@@ -1,18 +1,64 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
-
-
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>2D Fourier Transform — Crystallography Teaching Tool</title>
-<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=IBM+Plex+Sans:wght@300;400;600&display=swap" rel="stylesheet">
+<script>
+  (function(){
+    try {
+      var t = localStorage.getItem("teachingAppTheme");
+      if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+  })();
+</script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=IBM+Plex+Sans:wght@300;400;600&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
 :root {
   --bg:#07090f; --panel:#0d1117; --border:#1c2433; --border2:#263045;
   --text:#c8d6e5; --muted:#5a7080; --accent:#38bdf8; --accent2:#818cf8;
+  --good:#34d399; --warn:#fbbf24; --danger:#fca5a5;
   --mono:'Space Mono',monospace; --sans:'IBM Plex Sans',sans-serif;
+
+  --badge-bg:rgba(129,140,248,.08); --badge-border:rgba(129,140,248,.2);
+  --panel-glow-op:.25;
+  --istrip-bg:rgba(56,189,248,.04); --istrip-border:rgba(56,189,248,.15);
+  --frnote-color:rgba(251,191,36,.7); --frnote-bg:rgba(251,191,36,.06); --frnote-border:rgba(251,191,36,.2);
+  --input-bg:#0a0e17; --input-focus-bg:#0d1520;
+  --bset-bg:#065f46; --bset-color:#34d399; --bset-border:#064e3b;
+  --bdel-bg:#7f1d1d; --bdel-color:#fca5a5; --bdel-border:#991b1b;
+  --bclr-bg:#312e81; --bclr-color:#a5b4fc; --bclr-border:#3730a3;
+  --brand-bg:#1e3a5f; --brand-color:#7dd3fc; --brand-border:#1e4976;
+  --brand2-bg:#1a3348; --brand2-color:#93c5fd; --brand2-border:#1e4060;
+  --scroll-bg:#0a0e17; --thead-bg:#0a0e17;
+  --row-hover-bg:rgba(56,189,248,.05); --row-arow-bg:rgba(56,189,248,.09);
+  --fprow-color:rgba(251,191,36,.65);
+  --toggle-active-bg:rgba(129,140,248,.18);
 }
+
+:root[data-theme="light"] {
+  --ink:#2C2416; --paper:#FAF6EE; --cream:#F3EDE0; --pale:#EDE6D4; --rule:#CEC3AA;
+  --bg:var(--paper); --panel:#FFFFFF; --border:var(--rule); --border2:var(--rule);
+  --text:var(--ink); --muted:#6E6248; --accent:#4A6FA5; --accent2:#8B6BA8;
+  --good:#6B8F71; --warn:#C08A3E; --danger:#B5533C;
+  --mono:'DM Mono',monospace; --sans:'DM Sans',sans-serif;
+
+  --badge-bg:rgba(139,107,168,.1); --badge-border:rgba(139,107,168,.3);
+  --panel-glow-op:.5;
+  --istrip-bg:rgba(74,111,165,.05); --istrip-border:rgba(74,111,165,.18);
+  --frnote-color:#C08A3E; --frnote-bg:rgba(192,138,62,.08); --frnote-border:rgba(192,138,62,.25);
+  --input-bg:var(--cream); --input-focus-bg:#FFFFFF;
+  --bset-bg:rgba(107,143,113,.14); --bset-color:#5A7A60; --bset-border:rgba(107,143,113,.45);
+  --bdel-bg:rgba(181,83,60,.14); --bdel-color:#B5533C; --bdel-border:rgba(181,83,60,.45);
+  --bclr-bg:rgba(139,107,168,.14); --bclr-color:#8B6BA8; --bclr-border:rgba(139,107,168,.45);
+  --brand-bg:rgba(74,111,165,.16); --brand-color:#4A6FA5; --brand-border:rgba(74,111,165,.45);
+  --brand2-bg:rgba(74,111,165,.08); --brand2-color:#4A6FA5; --brand2-border:rgba(74,111,165,.3);
+  --scroll-bg:var(--cream); --thead-bg:var(--pale);
+  --row-hover-bg:rgba(74,111,165,.07); --row-arow-bg:rgba(74,111,165,.14);
+  --fprow-color:rgba(192,138,62,.9);
+  --toggle-active-bg:rgba(139,107,168,.18);
+}
+
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font-family:var(--sans);
   height:100vh;display:flex;flex-direction:column;overflow:hidden}
@@ -20,57 +66,62 @@ header{background:var(--panel);border-bottom:1px solid var(--border);
   padding:6px 14px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 header h1{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.5px}
 header p{font-size:10px;color:var(--muted);margin-top:1px}
+.hdrRight{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.theme-toggle{display:flex;border:1px solid var(--border2);border-radius:999px;overflow:hidden;flex-shrink:0}
+.theme-toggle button{font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
+  border:none;background:transparent;color:var(--muted);padding:5px 10px;cursor:pointer;transition:background .15s,color .15s}
+.theme-toggle button.active{background:var(--toggle-active-bg);color:var(--accent2)}
 .badge{font-family:var(--mono);font-size:9px;color:var(--accent2);
-  background:rgba(129,140,248,.08);border:1px solid rgba(129,140,248,.2);
+  background:var(--badge-bg);border:1px solid var(--badge-border);
   padding:3px 8px;border-radius:3px;letter-spacing:1px;text-transform:uppercase}
 #app{display:grid;grid-template-columns:360px 1fr;grid-template-rows:1fr 1fr;
   gap:5px;padding:5px;flex:1;min-height:0}
 .panel{background:var(--panel);border:1px solid var(--border);border-radius:6px;
   padding:10px;display:flex;flex-direction:column;min-height:0;overflow:hidden;position:relative}
 .panel::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;
-  background:linear-gradient(90deg,transparent,var(--accent2),transparent);opacity:.25}
+  background:linear-gradient(90deg,transparent,var(--accent2),transparent);opacity:var(--panel-glow-op)}
 .ptitle{font-family:var(--mono);font-size:9px;font-weight:700;color:var(--muted);
   text-transform:uppercase;letter-spacing:2px;padding-bottom:7px;margin-bottom:6px;
   border-bottom:1px solid var(--border);flex-shrink:0}
 canvas{flex:1;min-height:0;display:block;border-radius:3px;cursor:crosshair}
 /* controls */
 .cb{display:flex;flex-direction:column;gap:6px;flex:1;min-height:0;overflow:hidden}
-.istrip{background:rgba(56,189,248,.04);border:1px solid rgba(56,189,248,.15);
+.istrip{background:var(--istrip-bg);border:1px solid var(--istrip-border);
   border-radius:4px;padding:5px 9px;font-family:var(--mono);font-size:11px;
   display:flex;gap:8px;flex-wrap:wrap;color:var(--muted)}
 .istrip .v{color:var(--accent);font-weight:700}
-.frnote{font-family:var(--mono);font-size:9px;color:rgba(251,191,36,.7);
-  background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.2);
+.frnote{font-family:var(--mono);font-size:9px;color:var(--frnote-color);
+  background:var(--frnote-bg);border:1px solid var(--frnote-border);
   border-radius:3px;padding:3px 8px;letter-spacing:.3px;flex-shrink:0}
 .igrid{display:grid;grid-template-columns:22px 1fr 22px 1fr;gap:4px 6px;align-items:center}
 .igrid label{font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;font-style:italic}
-.igrid input{background:#0a0e17;border:1px solid var(--border2);color:var(--text);
+.igrid input{background:var(--input-bg);border:1px solid var(--border2);color:var(--text);
   padding:5px 7px;border-radius:4px;font-family:var(--mono);font-size:12px;
   text-align:right;width:100%;transition:border-color .15s}
-.igrid input:focus{outline:none;border-color:var(--accent);background:#0d1520}
+.igrid input:focus{outline:none;border-color:var(--accent);background:var(--input-focus-bg)}
 .bgrid{display:grid;grid-template-columns:1fr 1fr;gap:5px}
 .btn{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.5px;
   text-transform:uppercase;padding:7px 6px;border:none;border-radius:4px;
   cursor:pointer;transition:opacity .15s,transform .1s}
 .btn:hover{opacity:.85;transform:translateY(-1px)}
 .btn:active{transform:translateY(0)}
-.bset{background:#065f46;color:#34d399;border:1px solid #064e3b}
-.bdel{background:#7f1d1d;color:#fca5a5;border:1px solid #991b1b}
-.bclr{background:#312e81;color:#a5b4fc;border:1px solid #3730a3}
-.brand{background:#1e3a5f;color:#7dd3fc;border:1px solid #1e4976;font-size:9.5px;letter-spacing:.2px}
-.brand2{background:#1a3348;color:#93c5fd;border:1px solid #1e4060;font-size:9.5px;letter-spacing:.2px}
+.bset{background:var(--bset-bg);color:var(--bset-color);border:1px solid var(--bset-border)}
+.bdel{background:var(--bdel-bg);color:var(--bdel-color);border:1px solid var(--bdel-border)}
+.bclr{background:var(--bclr-bg);color:var(--bclr-color);border:1px solid var(--bclr-border)}
+.brand{background:var(--brand-bg);color:var(--brand-color);border:1px solid var(--brand-border);font-size:9.5px;letter-spacing:.2px}
+.brand2{background:var(--brand2-bg);color:var(--brand2-color);border:1px solid var(--brand2-border);font-size:9.5px;letter-spacing:.2px}
 .sflabel{font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:2px;flex-shrink:0}
-.sfscroll{flex:1;min-height:0;overflow-y:auto;border:1px solid var(--border);border-radius:4px;background:#0a0e17}
+.sfscroll{flex:1;min-height:0;overflow-y:auto;border:1px solid var(--border);border-radius:4px;background:var(--scroll-bg)}
 .sfscroll::-webkit-scrollbar{width:4px}
 .sfscroll::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
 table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px}
 thead th{color:var(--muted);font-weight:400;padding:4px 8px;text-align:right;
-  border-bottom:1px solid var(--border);position:sticky;top:0;background:#0a0e17}
+  border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--thead-bg)}
 tbody td{padding:4px 8px;text-align:right;border-bottom:1px solid var(--border);
   cursor:pointer;color:var(--text);transition:background .1s}
-tbody tr:hover td{background:rgba(56,189,248,.05)}
-tbody tr.arow td{background:rgba(56,189,248,.09);color:var(--accent)}
-tbody tr.fprow td{color:rgba(251,191,36,.65)}
+tbody tr:hover td{background:var(--row-hover-bg)}
+tbody tr.arow td{background:var(--row-arow-bg);color:var(--accent)}
+tbody tr.fprow td{color:var(--fprow-color)}
 tbody tr.fprow.arow td{color:var(--accent)}
 .emptymsg{padding:14px 8px;text-align:center;color:var(--muted);font-size:10px;font-style:italic}
 </style>
@@ -81,7 +132,13 @@ tbody tr.fprow.arow td{color:var(--accent)}
     <h1>2D Fourier Transform Explorer &mdash; Single-Crystal X-ray Crystallography</h1>
     <p>Click a reciprocal lattice spot to select · Drag Argand diagram to set |F| and φ · Friedel pairs (−h,−k) auto-applied on Set SF</p>
   </div>
-  <span class="badge">Teaching Tool</span>
+  <div class="hdrRight">
+    <div class="theme-toggle" id="themeToggle">
+      <button type="button" data-theme-btn="dark">Dark</button>
+      <button type="button" data-theme-btn="light">Light</button>
+    </div>
+    <span class="badge">Teaching Tool</span>
+  </div>
 </header>
 <div id="app">
   <!-- TL: Controls -->
@@ -149,6 +206,78 @@ const cvA=document.getElementById('cvA');
 const cvP=document.getElementById('cvP');
 const offBuf=document.createElement('canvas');
 offBuf.width=offBuf.height=GRID;
+
+// ── theme ──────────────────────────────────────────────────
+// Every colour (and font family) the canvas renderers use that differs
+// between the dark and light skins lives here, keyed by theme name.
+// T() returns the active theme's palette; render functions read from it
+// instead of hardcoding a single skin's colours.
+const THEME = {
+  dark: {
+    bg:'#05080f', gridLine:'rgba(28,36,51,.9)',
+    axisH:'rgba(56,189,248,.30)', axisK:'rgba(129,140,248,.30)',
+    cellDash:'rgba(129,140,248,.55)',
+    aStarLine:'rgba(56,189,248,.80)', aStarText:'#38bdf8',
+    bStarLine:'rgba(129,140,248,.80)', bStarText:'#818cf8',
+    gammaArc:'rgba(200,180,80,.45)', gammaArcText:'rgba(200,180,80,.65)',
+    indexLabel:'rgba(90,112,128,.70)',
+    friedelLine:'rgba(251,191,36,.2)', friedelRing:'rgba(251,191,36,.35)',
+    spotSat:75, spotLight:62, spotGlowAlpha:.3,
+    spotHoverFill:'#93c5fd', spotIdleFill:'rgba(56,189,248,.35)',
+    warnStrong:'#fbbf24', hoverRing:'rgba(147,197,253,.6)',
+    fpArrowLabel:'rgba(251,191,36,.65)',
+    monoFont:'Space Mono',
+    circleOdd:'rgba(28,36,51,.6)', circleEven:'rgba(28,36,51,1)',
+    friedelConjLine:'rgba(129,140,248,.28)', friedelConjDot:'rgba(129,140,248,.35)',
+    friedelConjLabel:'rgba(129,140,248,.5)',
+    vecSat:70, vecLight:60, vecLineAlpha:.20, vecDotAlpha:.28,
+    wedgeFill:'rgba(251,191,36,.12)', wedgeStroke:'rgba(251,191,36,.4)',
+    projLine:'rgba(251,191,36,.3)', componentLabel:'rgba(251,191,36,.65)',
+    vertexDot:'#fff',
+    statusBarBg:'rgba(5,8,15,.82)', statusText:'#8b9ab5',
+    colorbarBorder:'rgba(255,255,255,.2)',
+    hkLabel:'rgba(251,230,80,.85)', gammaCellLabel:'rgba(90,112,128,.6)',
+    planeLine:'rgba(160,100,10,0.90)',
+    lobePos:'rgba(251,191,36,.15)', lobeNeg:'rgba(96,165,250,.12)',
+    waveBaseline:'rgba(251,191,36,.20)', waveCurve:'rgba(251,191,36,.90)',
+    cellPrimary:'rgba(255,255,255,.75)', cellSecondary:'rgba(255,255,255,.12)',
+    originDot:'rgba(255,255,255,.8)',
+    aAxisLine:'rgba(56,189,248,.9)', bAxisLine:'rgba(129,140,248,.9)'
+  },
+  light: {
+    bg:'#F3EDE0', gridLine:'rgba(44,36,22,.10)',
+    axisH:'rgba(74,111,165,.35)', axisK:'rgba(139,107,168,.35)',
+    cellDash:'rgba(139,107,168,.6)',
+    aStarLine:'rgba(74,111,165,.85)', aStarText:'#4A6FA5',
+    bStarLine:'rgba(139,107,168,.85)', bStarText:'#8B6BA8',
+    gammaArc:'rgba(192,138,62,.55)', gammaArcText:'rgba(192,138,62,.85)',
+    indexLabel:'rgba(110,98,72,.8)',
+    friedelLine:'rgba(192,138,62,.3)', friedelRing:'rgba(192,138,62,.45)',
+    spotSat:70, spotLight:55, spotGlowAlpha:.35,
+    spotHoverFill:'#4A6FA5', spotIdleFill:'rgba(74,111,165,.4)',
+    warnStrong:'#C08A3E', hoverRing:'rgba(74,111,165,.6)',
+    fpArrowLabel:'rgba(192,138,62,.8)',
+    monoFont:'DM Mono',
+    circleOdd:'rgba(44,36,22,.12)', circleEven:'rgba(44,36,22,.22)',
+    friedelConjLine:'rgba(139,107,168,.4)', friedelConjDot:'rgba(139,107,168,.5)',
+    friedelConjLabel:'rgba(139,107,168,.7)',
+    vecSat:65, vecLight:50, vecLineAlpha:.28, vecDotAlpha:.4,
+    wedgeFill:'rgba(192,138,62,.14)', wedgeStroke:'rgba(192,138,62,.5)',
+    projLine:'rgba(192,138,62,.4)', componentLabel:'rgba(192,138,62,.85)',
+    vertexDot:'#2C2416',
+    statusBarBg:'rgba(243,237,224,.92)', statusText:'#6E6248',
+    colorbarBorder:'rgba(44,36,22,.3)',
+    hkLabel:'rgba(192,138,62,.9)', gammaCellLabel:'rgba(110,98,72,.75)',
+    planeLine:'rgba(176,118,44,0.92)',
+    lobePos:'rgba(192,138,62,.20)', lobeNeg:'rgba(74,111,165,.16)',
+    waveBaseline:'rgba(176,118,44,.35)', waveCurve:'rgba(176,118,44,.95)',
+    cellPrimary:'rgba(44,36,22,.7)', cellSecondary:'rgba(44,36,22,.16)',
+    originDot:'rgba(44,36,22,.75)',
+    aAxisLine:'rgba(74,111,165,.9)', bAxisLine:'rgba(139,107,168,.9)'
+  }
+};
+let curTheme=(document.documentElement.getAttribute('data-theme')==='light')?'light':'dark';
+const T=()=>THEME[curTheme];
 
 // ── math ───────────────────────────────────────────────────
 const rad=d=>d*Math.PI/180, deg=r=>r*180/Math.PI;
@@ -300,11 +429,12 @@ function arrow(ctx,x,y,ang,sz,col){
 function renderRecip(){
   const cv=cvR,ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
   const g=recipGeo(cv);
+  const t=T();
   ctx.clearRect(0,0,W,H);
-  ctx.fillStyle='#05080f';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle=t.bg;ctx.fillRect(0,0,W,H);
 
   // ── oblique grid (parallelogram mesh) ──────────────────
-  ctx.strokeStyle='rgba(28,36,51,.9)';ctx.lineWidth=.5;
+  ctx.strokeStyle=t.gridLine;ctx.lineWidth=.5;
   // lines of constant h (parallel to k-direction)
   for(let h=-HMAX;h<=HMAX;h++){
     const[x1,y1]=hk2xyR(h,-HMAX,g),[x2,y2]=hk2xyR(h,HMAX,g);
@@ -320,18 +450,18 @@ function renderRecip(){
   // h axis: extend along hv direction
   {
     const[x1,y1]=hk2xyR(-HMAX-1,0,g),[x2,y2]=hk2xyR(HMAX+1,0,g);
-    ctx.strokeStyle='rgba(56,189,248,.30)';ctx.lineWidth=1;
+    ctx.strokeStyle=t.axisH;ctx.lineWidth=1;
     ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
   }
   // k axis: extend along kv direction
   {
     const[x1,y1]=hk2xyR(0,-HMAX-1,g),[x2,y2]=hk2xyR(0,HMAX+1,g);
-    ctx.strokeStyle='rgba(129,140,248,.30)';ctx.lineWidth=1;
+    ctx.strokeStyle=t.axisK;ctx.lineWidth=1;
     ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
   }
 
   // ── reciprocal unit cell (dashed parallelogram 0→1) ───
-  ctx.strokeStyle='rgba(129,140,248,.55)';ctx.lineWidth=1.3;ctx.setLineDash([5,4]);
+  ctx.strokeStyle=t.cellDash;ctx.lineWidth=1.3;ctx.setLineDash([5,4]);
   ctx.beginPath();
   [[0,0],[1,0],[1,1],[0,1],[0,0]].forEach(([h,k],i)=>{
     const[x,y]=hk2xyR(h,k,g);i?ctx.lineTo(x,y):ctx.moveTo(x,y);
@@ -343,19 +473,19 @@ function renderRecip(){
   // a* arrow
   {
     const[ax,ay]=hk2xyR(1.7,0,g);
-    ctx.strokeStyle='rgba(56,189,248,.80)';ctx.lineWidth=1.5;
+    ctx.strokeStyle=t.aStarLine;ctx.lineWidth=1.5;
     ctx.beginPath();ctx.moveTo(ox,oy);ctx.lineTo(ax,ay);ctx.stroke();
-    arrowHead(ctx,ax,ay,Math.atan2(ay-oy,ax-ox),9,'rgba(56,189,248,.80)');
-    ctx.font="bold 11px 'Space Mono'";ctx.fillStyle='#38bdf8';
+    arrowHead(ctx,ax,ay,Math.atan2(ay-oy,ax-ox),9,t.aStarLine);
+    ctx.font=`bold 11px '${t.monoFont}'`;ctx.fillStyle=t.aStarText;
     ctx.fillText('a*',ax+5,ay+4);
   }
   // b* arrow
   {
     const[bx,by]=hk2xyR(0,1.7,g);
-    ctx.strokeStyle='rgba(129,140,248,.80)';ctx.lineWidth=1.5;
+    ctx.strokeStyle=t.bStarLine;ctx.lineWidth=1.5;
     ctx.beginPath();ctx.moveTo(ox,oy);ctx.lineTo(bx,by);ctx.stroke();
-    arrowHead(ctx,bx,by,Math.atan2(by-oy,bx-ox),9,'rgba(129,140,248,.80)');
-    ctx.font="bold 11px 'Space Mono'";ctx.fillStyle='#818cf8';
+    arrowHead(ctx,bx,by,Math.atan2(by-oy,bx-ox),9,t.bStarLine);
+    ctx.font=`bold 11px '${t.monoFont}'`;ctx.fillStyle=t.bStarText;
     ctx.fillText('b*',bx+4,by-5);
   }
 
@@ -364,18 +494,18 @@ function renderRecip(){
     const arcR=22;
     const angH=Math.atan2(g.hv[1],g.hv[0]);  // h-axis direction (=0)
     const angK=Math.atan2(g.kv[1],g.kv[0]);  // k-axis direction
-    ctx.strokeStyle='rgba(200,180,80,.45)';ctx.lineWidth=1;
+    ctx.strokeStyle=t.gammaArc;ctx.lineWidth=1;
     ctx.beginPath();ctx.arc(ox,oy,arcR,angH,angK,true);ctx.stroke();
     // label
     const angMid=(angH+angK)/2;
-    ctx.font="9px 'Space Mono'";ctx.fillStyle='rgba(200,180,80,.65)';
+    ctx.font=`9px '${t.monoFont}'`;ctx.fillStyle=t.gammaArcText;
     ctx.fillText('γ*',ox+arcR*1.35*Math.cos(angMid)-6,oy+arcR*1.35*Math.sin(angMid)+4);
   }
 
   // ── index labels along axes ────────────────────────────
   const labelSz=Math.round(g.sp*.42);
-  ctx.font=`${Math.max(8,labelSz)}px 'Space Mono'`;
-  ctx.fillStyle='rgba(90,112,128,.70)';
+  ctx.font=`${Math.max(8,labelSz)}px '${t.monoFont}'`;
+  ctx.fillStyle=t.indexLabel;
   for(let h=-HMAX;h<=HMAX;h++){
     if(h===0)continue;
     const[x,y]=hk2xyR(h,0,g);
@@ -390,13 +520,13 @@ function renderRecip(){
   // ── Friedel connector ─────────────────────────────────
   if(S.h!==0||S.k!==0){
     const[sx,sy]=hk2xyR(S.h,S.k,g),[fx,fy]=hk2xyR(-S.h,-S.k,g);
-    ctx.strokeStyle='rgba(251,191,36,.2)';ctx.lineWidth=1;ctx.setLineDash([2,5]);
+    ctx.strokeStyle=t.friedelLine;ctx.lineWidth=1;ctx.setLineDash([2,5]);
     ctx.beginPath();ctx.moveTo(sx,sy);ctx.lineTo(fx,fy);ctx.stroke();
     ctx.setLineDash([]);
     const fref=findRef(-S.h,-S.k);
     const fr=fref?clamp(fref.F/MAXF*g.sp*.52,3,g.sp*.55)+5:7;
     ctx.beginPath();ctx.arc(fx,fy,fr,0,Math.PI*2);
-    ctx.strokeStyle='rgba(251,191,36,.35)';ctx.lineWidth=1.5;ctx.setLineDash([3,3]);
+    ctx.strokeStyle=t.friedelRing;ctx.lineWidth=1.5;ctx.setLineDash([3,3]);
     ctx.stroke();ctx.setLineDash([]);
   }
 
@@ -412,24 +542,24 @@ function renderRecip(){
         const r=clamp(ref.F/MAXF*g.sp*.52,3,g.sp*.55);
         const hue=((deg(ref.phi)%360)+360)%360;
         ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);
-        ctx.fillStyle=`hsl(${hue},75%,62%)`;ctx.fill();
+        ctx.fillStyle=`hsl(${hue},${t.spotSat}%,${t.spotLight}%)`;ctx.fill();
         const grd=ctx.createRadialGradient(x,y,0,x,y,r*1.8);
-        grd.addColorStop(0,`hsla(${hue},75%,62%,.3)`);grd.addColorStop(1,'transparent');
+        grd.addColorStop(0,`hsla(${hue},${t.spotSat}%,${t.spotLight}%,${t.spotGlowAlpha})`);grd.addColorStop(1,'transparent');
         ctx.beginPath();ctx.arc(x,y,r*1.8,0,Math.PI*2);ctx.fillStyle=grd;ctx.fill();
       }else{
         ctx.beginPath();ctx.arc(x,y,isHov?3.5:2,0,Math.PI*2);
-        ctx.fillStyle=isHov?'#93c5fd':'rgba(56,189,248,.35)';ctx.fill();
+        ctx.fillStyle=isHov?t.spotHoverFill:t.spotIdleFill;ctx.fill();
       }
       if(isSel){
         const rr=ref?clamp(ref.F/MAXF*g.sp*.52,3,g.sp*.55)+4:7;
         ctx.beginPath();ctx.arc(x,y,rr,0,Math.PI*2);
-        ctx.strokeStyle='#fbbf24';ctx.lineWidth=2;ctx.setLineDash([]);ctx.stroke();
+        ctx.strokeStyle=t.warnStrong;ctx.lineWidth=2;ctx.setLineDash([]);ctx.stroke();
       }else if(isHov&&!ref){
         ctx.beginPath();ctx.arc(x,y,5.5,0,Math.PI*2);
-        ctx.strokeStyle='rgba(147,197,253,.6)';ctx.lineWidth=1;ctx.stroke();
+        ctx.strokeStyle=t.hoverRing;ctx.lineWidth=1;ctx.stroke();
       }
       if(isFP&&!isSel){
-        ctx.font="9px 'Space Mono'";ctx.fillStyle='rgba(251,191,36,.65)';
+        ctx.font=`9px '${t.monoFont}'`;ctx.fillStyle=t.fpArrowLabel;
         ctx.fillText('↔',x+6,y-5);
       }
     }
@@ -439,7 +569,7 @@ function renderRecip(){
   if(S.hovH!==null){
     const[hx,hy]=hk2xyR(S.hovH,S.hovK,g);
     const ref=findRef(S.hovH,S.hovK);
-    ctx.font="10px 'Space Mono'";ctx.fillStyle='#fbbf24';
+    ctx.font=`10px '${t.monoFont}'`;ctx.fillStyle=t.warnStrong;
     ctx.fillText(ref?`(${S.hovH},${S.hovK}) |F|=${ref.F.toFixed(1)}`:`(${S.hovH},${S.hovK})`,hx+8,hy-7);
   }
 }
@@ -447,25 +577,26 @@ function renderRecip(){
 // ── RENDER: Argand diagram ─────────────────────────────────
 function renderArgand(){
   const cv=cvA,ctx=cv.getContext('2d'),W=cv.width,H=cv.height,cx=W/2,cy=H/2,sc=aSc(cv);
-  ctx.clearRect(0,0,W,H);ctx.fillStyle='#05080f';ctx.fillRect(0,0,W,H);
+  const t=T();
+  ctx.clearRect(0,0,W,H);ctx.fillStyle=t.bg;ctx.fillRect(0,0,W,H);
 
   // circles
   for(let f=1;f<=MAXF;f++){
     ctx.beginPath();ctx.arc(cx,cy,f*sc,0,Math.PI*2);
-    ctx.strokeStyle=f%2?'rgba(28,36,51,.6)':'rgba(28,36,51,1)';
+    ctx.strokeStyle=f%2?t.circleOdd:t.circleEven;
     ctx.lineWidth=f%2?.5:1;ctx.stroke();
-    ctx.font="9px 'Space Mono'";ctx.fillStyle='rgba(90,112,128,.7)';
+    ctx.font=`9px '${t.monoFont}'`;ctx.fillStyle=t.indexLabel;
     ctx.fillText(f,cx+f*sc+2,cy-2);
   }
   // axes
-  ctx.strokeStyle='rgba(56,189,248,.3)';ctx.lineWidth=1;
+  ctx.strokeStyle=t.axisH;ctx.lineWidth=1;
   ctx.beginPath();ctx.moveTo(0,cy);ctx.lineTo(W,cy);ctx.stroke();
   ctx.beginPath();ctx.moveTo(cx,0);ctx.lineTo(cx,H);ctx.stroke();
-  ctx.font="bold 10px 'Space Mono'";ctx.fillStyle='#38bdf8';
+  ctx.font=`bold 10px '${t.monoFont}'`;ctx.fillStyle=t.aStarText;
   ctx.fillText('Re',W-22,cy-6);ctx.fillText('Im',cx+5,13);
   // phase labels
   const mr=MAXF*sc+14;
-  ctx.font="9px 'Space Mono'";ctx.fillStyle='rgba(90,112,128,.7)';
+  ctx.font=`9px '${t.monoFont}'`;ctx.fillStyle=t.indexLabel;
   [[0,'0°'],[90,'90°'],[180,'180°'],[-90,'−90°']].forEach(([d,l])=>{
     const a=rad(d);ctx.fillText(l,cx+mr*Math.cos(a)-12,cy-mr*Math.sin(a)+4);
   });
@@ -473,12 +604,12 @@ function renderArgand(){
   // Friedel conjugate vector (mirror of current, shown faintly)
   if(S.h!==0||S.k!==0){
     const[vxf,vyf]=fp2xy(S.F,-S.phi,cv);
-    ctx.strokeStyle='rgba(129,140,248,.28)';ctx.lineWidth=1.2;ctx.setLineDash([3,4]);
+    ctx.strokeStyle=t.friedelConjLine;ctx.lineWidth=1.2;ctx.setLineDash([3,4]);
     ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(vxf,vyf);ctx.stroke();
     ctx.setLineDash([]);
     ctx.beginPath();ctx.arc(vxf,vyf,3.5,0,Math.PI*2);
-    ctx.fillStyle='rgba(129,140,248,.35)';ctx.fill();
-    ctx.font="8px 'Space Mono'";ctx.fillStyle='rgba(129,140,248,.5)';
+    ctx.fillStyle=t.friedelConjDot;ctx.fill();
+    ctx.font=`8px '${t.monoFont}'`;ctx.fillStyle=t.friedelConjLabel;
     ctx.fillText('(−h,−k)',vxf+5,vyf-4);
   }
 
@@ -487,9 +618,9 @@ function renderArgand(){
     if((r.h===S.h&&r.k===S.k)||(r.h===-S.h&&r.k===-S.k&&(S.h!==0||S.k!==0)))continue;
     const[vx,vy]=fp2xy(r.F,r.phi,cv);
     const hue=((deg(r.phi)%360)+360)%360;
-    ctx.strokeStyle=`hsla(${hue},70%,60%,.20)`;ctx.lineWidth=1;
+    ctx.strokeStyle=`hsla(${hue},${t.vecSat}%,${t.vecLight}%,${t.vecLineAlpha})`;ctx.lineWidth=1;
     ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(vx,vy);ctx.stroke();
-    ctx.fillStyle=`hsla(${hue},70%,60%,.28)`;
+    ctx.fillStyle=`hsla(${hue},${t.vecSat}%,${t.vecLight}%,${t.vecDotAlpha})`;
     ctx.beginPath();ctx.arc(vx,vy,3,0,Math.PI*2);ctx.fill();
   }
 
@@ -500,40 +631,41 @@ function renderArgand(){
     const ar=clamp(S.F*sc*.38,12,38);
     ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(cx+ar,cy);
     ctx.arc(cx,cy,ar,0,-S.phi,S.phi>0);ctx.closePath();
-    ctx.fillStyle='rgba(251,191,36,.12)';ctx.strokeStyle='rgba(251,191,36,.4)';
+    ctx.fillStyle=t.wedgeFill;ctx.strokeStyle=t.wedgeStroke;
     ctx.lineWidth=1.2;ctx.fill();ctx.stroke();
     // dashed projections
-    ctx.strokeStyle='rgba(251,191,36,.3)';ctx.lineWidth=1;ctx.setLineDash([3,4]);
+    ctx.strokeStyle=t.projLine;ctx.lineWidth=1;ctx.setLineDash([3,4]);
     ctx.beginPath();ctx.moveTo(vx,cy);ctx.lineTo(vx,vy);ctx.stroke();
     ctx.beginPath();ctx.moveTo(cx,vy);ctx.lineTo(vx,vy);ctx.stroke();
     ctx.setLineDash([]);
     // component labels
-    ctx.font="9px 'Space Mono'";ctx.fillStyle='rgba(251,191,36,.65)';
+    ctx.font=`9px '${t.monoFont}'`;ctx.fillStyle=t.componentLabel;
     ctx.fillText((S.F*Math.cos(S.phi)).toFixed(2),vx+(vx>cx?3:-34),cy-4);
     ctx.fillText((S.F*Math.sin(S.phi)).toFixed(2),cx+(cx<W/2?4:-34),vy+(vy<cy?-4:12));
     // stem
-    ctx.strokeStyle='#fbbf24';ctx.lineWidth=2.5;
+    ctx.strokeStyle=t.warnStrong;ctx.lineWidth=2.5;
     ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(vx,vy);ctx.stroke();
     // arrowhead
     const ang=Math.atan2(vy-cy,vx-cx);
-    ctx.fillStyle='#fbbf24';
+    ctx.fillStyle=t.warnStrong;
     ctx.beginPath();ctx.moveTo(vx,vy);
     ctx.lineTo(vx-10*Math.cos(ang-.4),vy-10*Math.sin(ang-.4));
     ctx.lineTo(vx-10*Math.cos(ang+.4),vy-10*Math.sin(ang+.4));
     ctx.closePath();ctx.fill();
-    ctx.beginPath();ctx.arc(vx,vy,4.5,0,Math.PI*2);ctx.fillStyle='#fff';ctx.fill();
-    ctx.beginPath();ctx.arc(vx,vy,3,0,Math.PI*2);ctx.fillStyle='#fbbf24';ctx.fill();
+    ctx.beginPath();ctx.arc(vx,vy,4.5,0,Math.PI*2);ctx.fillStyle=t.vertexDot;ctx.fill();
+    ctx.beginPath();ctx.arc(vx,vy,3,0,Math.PI*2);ctx.fillStyle=t.warnStrong;ctx.fill();
   }else{
-    ctx.beginPath();ctx.arc(cx,cy,4,0,Math.PI*2);ctx.fillStyle='#fbbf24';ctx.fill();
+    ctx.beginPath();ctx.arc(cx,cy,4,0,Math.PI*2);ctx.fillStyle=t.warnStrong;ctx.fill();
   }
-  ctx.font="11px 'Space Mono'";ctx.fillStyle='#fbbf24';
+  ctx.font=`11px '${t.monoFont}'`;ctx.fillStyle=t.warnStrong;
   ctx.fillText(`|F| = ${S.F.toFixed(2)}    φ = ${Math.round(deg(S.phi))}°`,8,H-8);
 }
 
 // ── RENDER: real space ─────────────────────────────────────
 function renderReal(){
   const cv=cvP,ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
-  ctx.clearRect(0,0,W,H);ctx.fillStyle='#05080f';ctx.fillRect(0,0,W,H);
+  const t=T();
+  ctx.clearRect(0,0,W,H);ctx.fillStyle=t.bg;ctx.fillRect(0,0,W,H);
 
   const g=cellGeo(W,H);
   const{ax,ay,bx,by,ox,oy}=g;
@@ -602,8 +734,8 @@ function renderReal(){
 
   // ── status bar ────────────────────────────────────────
   const nSet=S.refs.length;
-  ctx.fillStyle='rgba(5,8,15,.82)';ctx.fillRect(0,H-24,W,24);
-  ctx.font="10px 'Space Mono'";ctx.fillStyle='#8b9ab5';
+  ctx.fillStyle=t.statusBarBg;ctx.fillRect(0,H-24,W,24);
+  ctx.font=`10px '${t.monoFont}'`;ctx.fillStyle=t.statusText;
   const stxt=nSet===0
     ?`PREVIEW  (${S.h},${S.k})  |F|=${S.F.toFixed(2)}  φ=${Math.round(deg(S.phi))}°`
     :`FOURIER MAP  —  ${nSet} SF${nSet>1?'s':''} accumulated`;
@@ -614,13 +746,13 @@ function renderReal(){
   const gc=ctx.createLinearGradient(bX,0,bX+bW,0);
   gc.addColorStop(0,'#1e40af');gc.addColorStop(.5,'#fff');gc.addColorStop(1,'#dc2626');
   ctx.fillStyle=gc;ctx.fillRect(bX,bY,bW,bH);
-  ctx.strokeStyle='rgba(255,255,255,.2)';ctx.lineWidth=.5;ctx.strokeRect(bX,bY,bW,bH);
-  ctx.font="8px 'Space Mono'";ctx.fillStyle='#8b9ab5';
+  ctx.strokeStyle=t.colorbarBorder;ctx.lineWidth=.5;ctx.strokeRect(bX,bY,bW,bH);
+  ctx.font=`8px '${t.monoFont}'`;ctx.fillStyle=t.statusText;
   ctx.fillText('−',bX-6,bY+6);ctx.fillText('+',bX+bW+2,bY+6);
 
-  ctx.font="bold 11px 'Space Mono'";ctx.fillStyle='rgba(251,230,80,.85)';
+  ctx.font=`bold 11px '${t.monoFont}'`;ctx.fillStyle=t.hkLabel;
   ctx.fillText(`(${S.h},${S.k})`,7,17);
-  ctx.font="9px 'Space Mono'";ctx.fillStyle='rgba(90,112,128,.6)';
+  ctx.font=`9px '${t.monoFont}'`;ctx.fillStyle=t.gammaCellLabel;
   ctx.fillText(`γ=${GAMMA_DEG}°`,ox+3,oy+12);
 }
 
@@ -629,6 +761,7 @@ function renderReal(){
 // We draw them in screen space by converting fractional→screen.
 function drawPlanes(ctx,W,H,g,h,k,phi){
   if(h===0&&k===0) return;
+  const t=T();
   const phOff=phi/(2*Math.PI);
 
   // find t-range (t = h*xf + k*yf) over the four screen corners
@@ -641,7 +774,7 @@ function drawPlanes(ctx,W,H,g,h,k,phi){
   const tHi=Math.ceil(Math.max(...corners)-phOff)+1;
 
   // Dark amber – more visible against the density map
-  ctx.strokeStyle='rgba(160,100,10,0.90)';
+  ctx.strokeStyle=t.planeLine;
   ctx.lineWidth=1.8;
   ctx.setLineDash([7,5]);
 
@@ -668,6 +801,7 @@ function drawPlanes(ctx,W,H,g,h,k,phi){
 // and with the red (maximum) density shading.
 function drawSineWave(ctx,W,H,g,h,k,F,phi){
   if((h===0&&k===0)||F<0.005) return;
+  const t=T();
 
   // Canonicalise to the positive half-plane so the normal (and therefore the
   // transverse tangent) always points in the same direction relative to the
@@ -688,16 +822,7 @@ function drawSineWave(ctx,W,H,g,h,k,F,phi){
   const tnx=-nny, tny=nnx;            // unit tangent (along planes)
 
   // Period in screen pixels = 1/|gradient| = 1/glen  (one full cycle per screen-pixel unit)
-  // Actually: gradient magnitude = glen means one cycle over 1/glen screen pixels
   const period_px=1/glen; // pixels per unit fractional — but we want pixels per plane spacing
-  // Plane spacing in screen pixels: moving 1 unit in normal direction changes h*xf+k*yf by glen
-  // So to change by 1 (next plane) you move 1/glen screen pixels. But wait: let's rethink.
-  // The period of cos(2π(h*xf+k*yf)) in screen coords along the normal direction is 1/glen px.
-  // Actually glen has units of (fractional units)/(screen pixel), so period = 1 frac-unit / glen px/frac = 1/glen screen px. That seems too small.
-  // Let me compute explicitly: if we move nnx,nny (1 screen pixel in normal dir),
-  // (h*xf+k*yf) changes by gnx*1+gny*0... no, by gnx*nnx+gny*nny = glen (by definition).
-  // So to change h*xf+k*yf by 1 (= 1 period), we need to move 1/glen screen pixels. That's the period.
-  // For our cell ~200px and h=1,k=0: glen≈1/cellPx, period≈cellPx. ✓
 
   const pw=period_px;
   // Amplitude is FIXED in screen pixels — independent of h,k resolution.
@@ -717,8 +842,8 @@ function drawSineWave(ctx,W,H,g,h,k,F,phi){
 
   // Helper: screen coords of wave point at parameter s (signed screen px from centre)
   const wavePt=(s)=>{
-    const t=t0+s*glen;
-    const disp=-amp*Math.cos(2*Math.PI*t-phi); // negate: crest toward red density
+    const tt=t0+s*glen;
+    const disp=-amp*Math.cos(2*Math.PI*tt-phi); // negate: crest toward red density
     return[W/2+s*nnx+disp*tnx, H/2+s*nny+disp*tny];
   };
 
@@ -728,8 +853,8 @@ function drawSineWave(ctx,W,H,g,h,k,F,phi){
     let first=true;
     for(let i=0;i<=nPts;i++){
       const s=-halfSpan+i*2*halfSpan/nPts;
-      const t=t0+s*glen;
-      const raw=-Math.cos(2*Math.PI*t-phi); // negated: positive lobe at density crest
+      const tt=t0+s*glen;
+      const raw=-Math.cos(2*Math.PI*tt-phi); // negated: positive lobe at density crest
       const disp=(sign>0?Math.max(0,raw):Math.min(0,raw))*amp;
       const sx=W/2+s*nnx+disp*tnx, sy=H/2+s*nny+disp*tny;
       if(first){ctx.moveTo(sx,sy);first=false;}else ctx.lineTo(sx,sy);
@@ -740,19 +865,19 @@ function drawSineWave(ctx,W,H,g,h,k,F,phi){
       ctx.lineTo(W/2+s*nnx, H/2+s*nny);
     }
     ctx.closePath();
-    ctx.fillStyle=sign>0?'rgba(251,191,36,.15)':'rgba(96,165,250,.12)';
+    ctx.fillStyle=sign>0?t.lobePos:t.lobeNeg;
     ctx.fill();
   }
 
   // Zero baseline (dashed, faint)
-  ctx.strokeStyle='rgba(251,191,36,.20)';ctx.lineWidth=.8;ctx.setLineDash([4,5]);
+  ctx.strokeStyle=t.waveBaseline;ctx.lineWidth=.8;ctx.setLineDash([4,5]);
   ctx.beginPath();
   ctx.moveTo(W/2-halfSpan*nnx,H/2-halfSpan*nny);
   ctx.lineTo(W/2+halfSpan*nnx,H/2+halfSpan*nny);
   ctx.stroke();ctx.setLineDash([]);
 
   // Wave curve
-  ctx.strokeStyle='rgba(251,191,36,.90)';ctx.lineWidth=2;ctx.setLineDash([]);
+  ctx.strokeStyle=t.waveCurve;ctx.lineWidth=2;ctx.setLineDash([]);
   ctx.beginPath();
   let first=true;
   for(let i=0;i<=nPts;i++){
@@ -765,6 +890,7 @@ function drawSineWave(ctx,W,H,g,h,k,F,phi){
 
 // ── draw oblique cell outlines ─────────────────────────────
 function drawCells(ctx,W,H,g){
+  const t=T();
   const{ax,ay,bx,by,ox,oy}=g;
   for(let n=-3;n<=3;n++){
     for(let m=-3;m<=3;m++){
@@ -776,7 +902,7 @@ function drawCells(ctx,W,H,g){
       const minY=Math.min(...ys),maxY=Math.max(...ys);
       if(maxX<-4||minX>W+4||maxY<-4||minY>H+4) continue;
       const isPrimary=n===0&&m===0;
-      ctx.strokeStyle=isPrimary?'rgba(255,255,255,.75)':'rgba(255,255,255,.12)';
+      ctx.strokeStyle=isPrimary?t.cellPrimary:t.cellSecondary;
       ctx.lineWidth=isPrimary?1.8:.6;
       ctx.setLineDash(isPrimary?[]:[3,5]);
       ctx.beginPath();
@@ -789,22 +915,22 @@ function drawCells(ctx,W,H,g){
 
   // origin dot
   ctx.beginPath();ctx.arc(ox,oy,3,0,Math.PI*2);
-  ctx.fillStyle='rgba(255,255,255,.8)';ctx.fill();
+  ctx.fillStyle=t.originDot;ctx.fill();
 
   // a-axis arrow
   const[ax1,ay1]=[ox+ax,oy+ay];
-  ctx.strokeStyle='rgba(56,189,248,.9)';ctx.lineWidth=1.8;
+  ctx.strokeStyle=t.aAxisLine;ctx.lineWidth=1.8;
   ctx.beginPath();ctx.moveTo(ox,oy);ctx.lineTo(ax1,ay1);ctx.stroke();
-  arrowHead(ctx,ax1,ay1,Math.atan2(ay1-oy,ax1-ox),10,'rgba(56,189,248,.9)');
-  ctx.font="bold 12px 'Space Mono'";ctx.fillStyle='#38bdf8';
+  arrowHead(ctx,ax1,ay1,Math.atan2(ay1-oy,ax1-ox),10,t.aAxisLine);
+  ctx.font=`bold 12px '${t.monoFont}'`;ctx.fillStyle=t.aStarText;
   ctx.fillText('a',ax1+6,ay1+4);
 
   // b-axis arrow
   const[bx1,by1]=[ox+bx,oy+by];
-  ctx.strokeStyle='rgba(129,140,248,.9)';ctx.lineWidth=1.8;
+  ctx.strokeStyle=t.bAxisLine;ctx.lineWidth=1.8;
   ctx.beginPath();ctx.moveTo(ox,oy);ctx.lineTo(bx1,by1);ctx.stroke();
-  arrowHead(ctx,bx1,by1,Math.atan2(by1-oy,bx1-ox),10,'rgba(129,140,248,.9)');
-  ctx.font="bold 12px 'Space Mono'";ctx.fillStyle='#818cf8';
+  arrowHead(ctx,bx1,by1,Math.atan2(by1-oy,bx1-ox),10,t.bAxisLine);
+  ctx.font=`bold 12px '${t.monoFont}'`;ctx.fillStyle=t.bStarText;
   ctx.fillText('b',bx1-18,by1-4);
 }
 function arrowHead(ctx,x,y,ang,sz,col){
@@ -966,6 +1092,24 @@ cvA.addEventListener('mouseleave',()=>{S.drag=false;});
 cvA.addEventListener('touchstart',e=>{e.preventDefault();S.drag=true;argandPt(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
 cvA.addEventListener('touchmove',e=>{e.preventDefault();if(S.drag)argandPt(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
 cvA.addEventListener('touchend',()=>{S.drag=false;});
+
+// ── theme toggle ─────────────────────────────────────────────
+function setTheme(theme){
+  curTheme=(theme==='light')?'light':'dark';
+  document.documentElement.setAttribute('data-theme',curTheme);
+  try{ localStorage.setItem('teachingAppTheme',curTheme); }catch(e){}
+  document.querySelectorAll('#themeToggle button').forEach(b=>{
+    b.classList.toggle('active', b.dataset.themeBtn===curTheme);
+  });
+  update(); // re-run the canvas renderers so the diagrams re-colour too
+}
+document.querySelectorAll('#themeToggle button').forEach(b=>{
+  b.addEventListener('click',()=>setTheme(b.dataset.themeBtn));
+});
+// sync the toggle UI to whatever theme was resolved at load (localStorage or default)
+document.querySelectorAll('#themeToggle button').forEach(b=>{
+  b.classList.toggle('active', b.dataset.themeBtn===curTheme);
+});
 
 // ── init ──────────────────────────────────────────────────
 let _rt;
