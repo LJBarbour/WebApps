@@ -23,7 +23,7 @@ h1,h2,h3{font-family:var(--display);font-weight:600;margin:0}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
 header{padding:10px 20px 9px;border-bottom:1.5px solid var(--line);background:var(--paper);
-  display:flex;align-items:baseline;gap:12px;flex:0 0 auto}
+  display:flex;align-items:baseline;gap:12px;flex:0 0 auto;position:relative;z-index:450}
 header h1{font-size:19px;letter-spacing:.2px}
 header .sub{color:var(--ink-mid);font-size:10px;font-family:var(--mono);letter-spacing:.4px}
 header .spacer{flex:1 1 auto}
@@ -86,7 +86,7 @@ header .spacer{flex:1 1 auto}
 .pcell input:focus{border-color:var(--accent)}
 main{flex:1 1 auto;display:flex;min-height:0}
 #leftPanel{width:345px;flex:0 0 345px;background:var(--paper);border-right:1.5px solid var(--line);
-  overflow-y:auto;padding:8px 0 40px}
+  overflow-y:auto;padding:8px 0 40px;position:relative;z-index:450}
 #viewwrap{flex:1 1 auto;position:relative;min-width:0}
 #viewport{position:absolute;inset:0}
 #viewport canvas{display:block;width:100%;height:100%}
@@ -303,7 +303,7 @@ select.sel:focus{border-color:var(--accent)}
 </main>
 <div id="elementsPage" class="page"></div>
 <div id="guideModal"><div class="guidebox"><button class="close" id="guideClose">&times;</button><div id="guideBody"></div></div></div>
-<input type="file" id="cifInput" accept=".cif,.txt,.res,.ins" style="display:none">
+<input type="file" id="cifInput" accept=".cif,.txt,.res,.ins,.xyz" style="display:none">
 <input type="file" id="elementCsvInput" accept=".csv,.txt" style="display:none">
 <input type="file" id="modelJsonInput" accept=".json,.zip" style="display:none">
 <input type="file" id="macroInput" accept=".mac,.MAC,.txt" style="display:none">
@@ -2753,6 +2753,22 @@ select.sel:focus{border-color:var(--accent)}
     showLabels: false, labelSize: 2.6, labelColor: 0x2C2416, labelHalo: true,
     labelFont: "Arial, Helvetica, sans-serif",
     showUnitCell: true, growMode: false, growUnit: "frag", growBySphere: false, sphereRadius: 4.0,
+    /* Style > Unit cell > "Show axis key" -- a small a/b/c orientation
+       indicator, shown in its OWN floating canvas layered above the whole
+       app window (not confined to the #viewport panel), draggable anywhere
+       on screen by its arrows (see renderAxisKey()/tryGrabAxisKey()), off by
+       default -- distinct from showPrincipalAxes (per-atom ADP ellipsoid
+       principal-axis rings, a completely unrelated feature that happens to
+       share the word "axis/axes"). axisKeyZoom scales how large the box (and
+       so the arrows within it) reads on screen. axisKeyOffsetX/Y is the
+       box's own top-left corner in WINDOW-relative CSS pixels (plain
+       position:fixed semantics); null means "not yet placed", resolved once
+       to a sensible default (see axisKeyPosition()) the first time the key
+       is shown, then held stable from then on (including into a saved
+       project) -- always re-clamped to the CURRENT window size on every
+       read, so neither a later resize nor a project file saved on a
+       different screen can ever strand it off-screen. */
+    showAxisKey: false, axisKeyZoom: 1.0, axisKeyOffsetX: null, axisKeyOffsetY: null, axisKeyProportional: true,
     /* Grow > Molecular neighbourhood -- see setMolNeighborMode()'s own
        comment for the mutual-exclusion contract shared with the other
        click-hijacking modes, and computeMolecularNeighborhood()'s for what
@@ -3499,6 +3515,7 @@ select.sel:focus{border-color:var(--accent)}
   function onWindowPointerMove(e) {
     if (state.videoExporting) return;
     if (!dragMode) return;
+    if (dragMode === "axisKey") { dragAxisKeyTo(e.clientX, e.clientY); return; }
     if (dragMode === "lasso") {
       /* only add a new vertex once the pointer has actually moved a few
          pixels -- without this, a slow, careful lasso drag (exactly the
@@ -3858,14 +3875,50 @@ select.sel:focus{border-color:var(--accent)}
     renderer.setPixelRatio(state.exportScale);
     renderer.setSize(cw, ch, false);
     renderer.render(scene, activeCam);
-    renderer.domElement.toBlob(function (blob) {
+    /* The axis key lives on its OWN floating canvas, layered above everything
+       via CSS, precisely so it can be dragged anywhere including outside
+       #viewport (see its own big comment above renderAxisKey()) -- but that
+       means it's entirely invisible to renderer.domElement.toBlob() below,
+       which only ever sees the MAIN renderer's own canvas. Compositing it in
+       here, onto a same-size scratch 2D canvas, is what makes "the picture
+       you see on screen" and "the picture that gets exported" actually match
+       for a PNG/clipboard export -- exactly the same reasoning the export
+       already applies to fog/background/tessellation above. Video export
+       (Export > Video) is deliberately NOT covered here -- while rotating,
+       the key would need to counter-rotate to stay screen-aligned every
+       frame, a real feature in its own right rather than a one-line fix. */
+    var includeAxisKey = state.showAxisKey && state.page === "model" && axisKeyCanvasEl && axisKeyCanvasEl.style.display !== "none";
+    if (includeAxisKey) renderAxisKey(); /* one final render against the CURRENT camera orientation, in case the last rAF-driven one is a frame stale */
+    function finish(blob) {
       renderer.setPixelRatio(oldRatio);
       renderer.setSize(cw, ch, false);
       if (state.exportTransparent) { scene.background = wasBackground; scene.fog = wasFog; renderer.setClearAlpha(1); }
       if (!wasHighDetail) { state.highDetail = false; if (sphereGeo) sphereGeo.dispose(); sphereGeo = new THREE.SphereGeometry(1, 20, 16); renderStructure(); renderSurface(); }
       else { renderer.render(scene, activeCam); }
       callback(blob, cw * state.exportScale, ch * state.exportScale);
-    }, "image/png");
+    }
+    if (!includeAxisKey) { renderer.domElement.toBlob(finish, "image/png"); return; }
+    var exportW = cw * state.exportScale, exportH = ch * state.exportScale;
+    if (!axisKeyExportCanvas) axisKeyExportCanvas = document.createElement("canvas");
+    axisKeyExportCanvas.width = exportW; axisKeyExportCanvas.height = exportH;
+    var ctx2d = axisKeyExportCanvas.getContext("2d");
+    ctx2d.clearRect(0, 0, exportW, exportH);
+    ctx2d.drawImage(renderer.domElement, 0, 0, exportW, exportH);
+    /* axisKeyCanvasEl's own position/size are in WINDOW-relative CSS pixels
+       (position:fixed); translating by the viewport's own top-left corner
+       converts to viewport-local CSS pixels, then the export's own
+       cw->exportW scale factor converts to export pixels. A part of the key
+       currently overlapping the sidebar/header (or off the window edge --
+       see axisKeyClamp()'s own comment) simply falls outside [0,exportW]x
+       [0,exportH] and is clipped by drawImage exactly like it's visually
+       occluded on screen -- no separate check needed for that. */
+    var vpRect = vp.getBoundingClientRect();
+    var keyScale = exportW / cw;
+    var keyRect = axisKeyCanvasEl.getBoundingClientRect();
+    ctx2d.drawImage(axisKeyCanvasEl,
+      (keyRect.left - vpRect.left) * keyScale, (keyRect.top - vpRect.top) * keyScale,
+      keyRect.width * keyScale, keyRect.height * keyScale);
+    axisKeyExportCanvas.toBlob(finish, "image/png");
   }
   function requestSaveHandle(suggestedName, filePickerType) {
     /* This must be the very first thing called in response to a click, before
@@ -5295,7 +5348,7 @@ select.sel:focus{border-color:var(--accent)}
       autoRotateLastT = null;
     }
     updateVoidMeshRenderOrder(); /* camera may have moved since the last frame -- see its own comment on why this has to be live, not just recomputed at Calculate/render-rebuild time */
-    if (!state.videoExporting) renderer.render(scene, activeCam);
+    if (!state.videoExporting) { renderer.render(scene, activeCam); renderAxisKey(); }
   }
 
   function showInfoPopup(title, bodyHtml) {
@@ -11937,6 +11990,10 @@ select.sel:focus{border-color:var(--accent)}
         renderUnitCell();
         el = document.getElementById("showUnitCellTg"); if (el) el.checked = state.showUnitCell;
         return true;
+      case "AXIS_KEY_ON": case "AXIS_KEY_OFF":
+        state.showAxisKey = cmd === "AXIS_KEY_ON";
+        el = document.getElementById("showAxisKeyTg"); if (el) el.checked = state.showAxisKey;
+        return true;
       case "ASU_ONLY_ON": case "ASU_ONLY_OFF":
         state.showOnlyAsu = cmd === "ASU_ONLY_ON";
         recomputeViewOffset(); clearUnselectableSelections(); renderStructure(); updateSelectionInfo();
@@ -12156,7 +12213,7 @@ select.sel:focus{border-color:var(--accent)}
     return { done: done, failed: failed };
   }
   /* "Apply macro to all files in folder" mode -- loads each .cif/.res/.ins/
-     .txt/.json file in state.macroBatchDirHandle (the first four: same
+     .xyz/.txt/.json file in state.macroBatchDirHandle (the first five: same
      extension set #cifInput's own picker filter accepts, sniffed the same
      content-agnostic way handleStructureFileText() already treats any of
      them; .json: a project file previously saved from this app, the only
@@ -12179,10 +12236,10 @@ select.sel:focus{border-color:var(--accent)}
     var dirHandle = state.macroBatchDirHandle;
     var entries = [];
     for await (var h of dirHandle.values()) {
-      if (h.kind === "file" && /\.(cif|res|ins|txt|json)$/i.test(h.name)) entries.push(h);
+      if (h.kind === "file" && /\.(cif|res|ins|xyz|txt|json)$/i.test(h.name)) entries.push(h);
     }
     entries.sort(function (a, b) { return a.name.localeCompare(b.name, undefined, { numeric: true }); });
-    if (!entries.length) { setStatus("No .cif/.res/.ins/.txt/.json files found in \"" + dirHandle.name + "\".", true); return; }
+    if (!entries.length) { setStatus("No .cif/.res/.ins/.xyz/.txt/.json files found in \"" + dirHandle.name + "\".", true); return; }
     var filesOk = 0, filesFailed = 0, totalDone = 0, totalFailedLines = 0;
     for (var fi = 0; fi < entries.length; fi++) {
       var h = entries[fi];
@@ -14098,6 +14155,267 @@ select.sel:focus{border-color:var(--accent)}
     }
     updateClipPlane(); /* fresh unit cell edges/labels just got created -- reapply the current clip plane to them */
   }
+  /* ---------------- Style > Unit cell > "Show axis key" -- free-floating corner axis gizmo ----------------
+   * A small a/b/c orientation indicator, drawn in its OWN tiny scene/camera/
+   * renderer/canvas -- a genuinely separate <canvas> element (axisKeyCanvasEl,
+   * position:fixed, its own THREE.WebGLRenderer) layered over the WHOLE app
+   * window via CSS, not confined to rendering only within the #viewport
+   * panel's own DOM rectangle the way the main 3D view's canvas is. This
+   * (rather than scissoring a sub-rectangle of the MAIN canvas, an earlier
+   * version's approach) is what lets the user drag the key freely -- a
+   * single WebGL canvas can never draw outside its own element's bounds no
+   * matter what scissor/viewport tricks are used on it. It's meant to always
+   * read as part of the MODEL panel, though, not a window-level overlay: it
+   * may only overlap the model panel's own edge, never sit fully on top of
+   * the menu chrome -- see axisKeyClamp()'s own comment for the half-overhang
+   * cap, and header/#leftPanel's own z-index:450 (above the key's 400) for
+   * how the menu's opaque background paints over the key the instant it's
+   * dragged underneath, so it looks like it slid behind the menu.
+   * Deliberately flat/unlit (MeshBasicMaterial, not elMaterial's lit
+   * MeshStandardMaterial) and in its own lightless scene, so the ARROWS read
+   * the same regardless of the main scene's own lighting rig or fog -- the
+   * same reasoning real CAD/3D-viewer corner gizmos (Blender, Fusion 360, ...)
+   * use flat saturated colour for their own axis indicators instead of a lit
+   * material. The CANVAS's own background is genuinely transparent (WebGL
+   * context created with alpha:true, cleared to alpha 0 -- see
+   * renderAxisKey()) -- being a real separate element layered on TOP of the
+   * 3D view via CSS (not a same-canvas scissor region, which could only ever
+   * fake transparency by copying whatever the main render already drew
+   * there), the browser's own compositing shows the 3D view underneath
+   * through its transparent pixels for free, with the arrows opaque on top.
+   * Position: state.axisKeyOffsetX/Y is the box's own top-left corner, in
+   * CSS pixels from the WHOLE WINDOW's own top-left (position:fixed
+   * semantics -- the same coordinate space e.clientX/clientY already use);
+   * null (both fields) means "never explicitly positioned yet", resolved to
+   * a sensible default (the #viewport panel's own bottom-left corner) the
+   * first time the key is shown, then written back into state so it sticks
+   * from then on -- also the exact position the "Reset key position" button
+   * (Style > Unit cell) restores, by simply clearing both fields back to
+   * null and letting this same resolve-once logic run again. Dragging only
+   * starts when the mousedown itself lands on one of the three arrow MESHES
+   * (a real raycast hit, not just anywhere in the box's own square) -- see
+   * the "mousedown" listener attached to axisKeyCanvasEl in initAxisKey() --
+   * a miss is forwarded straight to onCanvasPointerDown() so a click just
+   * missing an arrow still rotates the model underneath exactly as if this
+   * canvas weren't there at all, rather than the whole box hijacking every
+   * click that lands anywhere near it. The cursor is deliberately left at
+   * its plain default (no CSS cursor override) rather than the usual
+   * grab/grabbing hand, per explicit user preference. */
+  var axisKeyScene = null, axisKeyCamera = null, axisKeyCanvasEl = null, axisKeyRenderer = null;
+  var axisKeyCylGeo = null, axisKeyConeGeo = null, axisKeyMeshes = null, axisKeyLastSize = 0;
+  var axisKeyExportCanvas = null; /* lazily-created scratch 2D canvas renderExportBlob() composites onto -- see its own comment */
+  var AXIS_KEY_PX = 160; /* base CSS-pixel box size at zoom 1.0x -- see axisKeyBoxSize(), which scales the actual box by state.axisKeyZoom so the box always grows/shrinks together with the key instead of ever clipping it */
+  function initAxisKey() {
+    axisKeyScene = new THREE.Scene();
+    /* Half-extent of 1.5 world-units either side, with the longest of a/b/c
+       scaled to reach AXIS_KEY_REACH (below) within that -- fixed regardless
+       of zoom, since zoom works by resizing the BOX itself instead (a bigger
+       box showing the same fixed frustum reads as "zoomed in" exactly as if
+       the box's own content had been scaled up, but can never clip a cone
+       tip past its own edge the way scaling the content alone used to). */
+    axisKeyCamera = new THREE.OrthographicCamera(-1.5, 1.5, 1.5, -1.5, 0.1, 100);
+    axisKeyCylGeo = new THREE.CylinderGeometry(1, 1, 1, 12, 1, false);
+    axisKeyConeGeo = new THREE.ConeGeometry(1, 1, 16, 1, false);
+    var colors = { a: 0xff0000, b: 0x00ff00, c: 0x0000ff }; /* same a=red/b=green/c=blue convention as the unit cell's own RGB axis edges */
+    axisKeyMeshes = {};
+    ["a", "b", "c"].forEach(function (k) {
+      var mat = new THREE.MeshBasicMaterial({ color: colors[k] });
+      var shaft = new THREE.Mesh(axisKeyCylGeo, mat);
+      var cone = new THREE.Mesh(axisKeyConeGeo, mat);
+      axisKeyScene.add(shaft); axisKeyScene.add(cone);
+      axisKeyMeshes[k] = { shaft: shaft, cone: cone };
+    });
+    axisKeyCanvasEl = document.createElement("canvas");
+    axisKeyCanvasEl.id = "axisKeyCanvas";
+    axisKeyCanvasEl.style.position = "fixed";
+    axisKeyCanvasEl.style.zIndex = "400"; /* above the ordinary page (sidebar/viewport/status bar all default z-index), below actual modals (Guide etc, z-index 500+) so opening one still covers it normally */
+    axisKeyCanvasEl.style.display = "none";
+    document.body.appendChild(axisKeyCanvasEl);
+    axisKeyRenderer = new THREE.WebGLRenderer({ canvas: axisKeyCanvasEl, alpha: true, antialias: true });
+    axisKeyRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    axisKeyRenderer.setClearColor(0x000000, 0);
+    /* The one and only entry point for grabbing the key -- attached directly
+       to this canvas (not spliced into onCanvasPointerDown) so DOM z-order
+       alone decides who gets the click first, with no ordering to get wrong
+       between the two canvases. */
+    axisKeyCanvasEl.addEventListener("mousedown", function (e) {
+      if (e.button !== 0 || !tryGrabAxisKey(e.clientX, e.clientY)) { onCanvasPointerDown(e); return; }
+      dragMode = "axisKey"; lastX = e.clientX; lastY = e.clientY;
+      e.preventDefault();
+    });
+  }
+  var AXIS_KEY_REACH = 1.15, AXIS_KEY_CONE_LEN = 0.34, AXIS_KEY_CONE_R = 0.13, AXIS_KEY_SHAFT_R = 0.045;
+  /* Repositions/rescales the shared shaft+cone pair for each of a/b/c to the
+     CURRENT cell's real-space directions and relative lengths -- cheap
+     enough (a handful of vector ops on 3 meshes) to just redo in full every
+     time this is called rather than tracking whether the cell actually
+     changed since the last call. Returns false (nothing to draw) if there is
+     no CIF cell to take directions from. */
+  function updateAxisKeyGeometry() {
+    if (!state.isCif || !state.cifFracToCart) return false;
+    var M = state.cifFracToCart;
+    var vecs = {
+      a: new THREE.Vector3().fromArray(K.fracToCart(M, [1, 0, 0])),
+      b: new THREE.Vector3().fromArray(K.fracToCart(M, [0, 1, 0])),
+      c: new THREE.Vector3().fromArray(K.fracToCart(M, [0, 0, 1]))
+    };
+    var maxLen = Math.max(vecs.a.length(), vecs.b.length(), vecs.c.length());
+    if (!(maxLen > 1e-8)) return false;
+    /* Zoom grows the BOX (see axisKeyBoxSize()), which on its own would
+       magnify everything inside it uniformly -- length AND thickness alike,
+       reading as a plain "zoom in/out" rather than "the lines got longer".
+       Dividing the radii (and the arrowhead's own length) by zoom exactly
+       cancels the box's own magnification for THOSE dimensions, so the
+       rendered pixel THICKNESS and arrowhead SIZE stay constant across
+       zoom levels; totalLen is deliberately left alone (never divided or
+       multiplied by zoom) so the shaft's own world-space reach is fixed too
+       -- all of the "things got bigger" a user actually sees at a higher
+       zoom comes from the box's own pixel growth, applied uniformly to a
+       shape that (other than the shaft claiming back whatever length the
+       now-smaller arrowhead needs less of) doesn't itself change, which is
+       exactly "longer lines, same thickness" rather than "everything
+       scaled up together". */
+    var zoom = (isFinite(state.axisKeyZoom) && state.axisKeyZoom > 0) ? state.axisKeyZoom : 1;
+    var proportional = state.axisKeyProportional !== false; /* default true -- an old project saved before this setting existed has no field for it at all */
+    ["a", "b", "c"].forEach(function (k) {
+      var v = vecs[k], len = v.length();
+      var dir = len > 1e-8 ? v.clone().normalize() : new THREE.Vector3(0, 1, 0);
+      /* Off: every arrow reaches the same fixed reach regardless of the
+         real a/b/c ratio -- a pure orientation indicator with no length
+         information at all, for a cell so anisotropic that the shortest
+         axis would otherwise be too small to read. */
+      var totalLen = (proportional ? (len / maxLen) : 1) * AXIS_KEY_REACH;
+      var coneLen = Math.min(AXIS_KEY_CONE_LEN / zoom, totalLen * 0.6);
+      var shaftLen = Math.max(totalLen - coneLen, 0.001);
+      var shaftR = AXIS_KEY_SHAFT_R / zoom, coneR = AXIS_KEY_CONE_R / zoom;
+      var q = new THREE.Quaternion().setFromUnitVectors(YAXIS, dir);
+      var m = axisKeyMeshes[k];
+      m.shaft.quaternion.copy(q);
+      m.shaft.scale.set(shaftR, shaftLen, shaftR);
+      m.shaft.position.copy(dir).multiplyScalar(shaftLen / 2);
+      m.cone.quaternion.copy(q);
+      m.cone.scale.set(coneR, coneLen, coneR);
+      m.cone.position.copy(dir).multiplyScalar(shaftLen + coneLen / 2);
+    });
+    return true;
+  }
+  /* The axis key's current box size in CSS pixels -- grows/shrinks with
+     state.axisKeyZoom (rather than zoom just scaling fixed-size content
+     inside a fixed-size box) specifically so the key itself can never spill
+     past its own edge -- capped at 70% of the smaller WINDOW dimension so an
+     extreme zoom still leaves a sensible box rather than swallowing the
+     whole screen. */
+  function axisKeyBoxSize() {
+    var zoom = (isFinite(state.axisKeyZoom) && state.axisKeyZoom > 0) ? state.axisKeyZoom : 1;
+    var size = Math.min(Math.round(AXIS_KEY_PX * zoom), Math.floor(Math.min(window.innerWidth, window.innerHeight) * 0.7));
+    return Math.max(size, 24);
+  }
+  /* Shared clamp for both axisKeyPosition() (initial placement) and
+     dragAxisKeyTo() (live dragging): the box may hang up to HALF its own
+     size past any window edge -- "can overlap the edge of it" applied
+     uniformly to all four sides -- rather than being forced to sit fully
+     on-screen. That half-overhang cap is what keeps it reading as "part of
+     the model panel that pokes over the edge" instead of "a window free to
+     wander off into empty space": on the left/top, the part that crosses
+     into #leftPanel/header is additionally painted over by their own
+     opaque background (z-index 450, above the key's 400) so it looks like
+     it slid behind the menu; on the right/bottom, where the model panel's
+     own edge already IS the window edge, the same half-overhang cap alone
+     keeps it looking anchored rather than adrift. */
+  function axisKeyClamp(x, y, size) {
+    var half = size / 2;
+    return {
+      x: Math.min(Math.max(x, -half), window.innerWidth - half),
+      y: Math.min(Math.max(y, -half), window.innerHeight - half)
+    };
+  }
+  /* Resolves state.axisKeyOffsetX/Y (the box's own top-left corner, WINDOW-
+     relative CSS pixels) to a concrete, on-screen, clamped position -- fills
+     in a sensible one-time default (the #viewport panel's own bottom-left
+     corner) the very first time the key is ever shown, writing it back into
+     state so it's stable from then on (including into a saved project),
+     then re-clamps to the CURRENT window size on every call (see
+     axisKeyClamp()) so a later resize (or a project file saved on a
+     different screen) can never strand the box off-screen. */
+  function axisKeyPosition(size) {
+    if (state.axisKeyOffsetX === null || state.axisKeyOffsetY === null) {
+      var vp = document.getElementById("viewport");
+      var vr = vp ? vp.getBoundingClientRect() : { left: 14, bottom: window.innerHeight - 14 };
+      state.axisKeyOffsetX = Math.round(vr.left + 14);
+      state.axisKeyOffsetY = Math.round(vr.bottom - 14 - size);
+    }
+    return axisKeyClamp(state.axisKeyOffsetX, state.axisKeyOffsetY, size);
+  }
+  /* Called once per frame from animate(), only while state.showAxisKey is on
+     -- positions/sizes the floating canvas via plain CSS, then renders into
+     it with its own renderer; hidden (display:none) whenever there's nothing
+     to show, or the Model page itself isn't the active one (Elements/Guide),
+     so it never floats over an unrelated page. Tracks camOrient (or walkQuat
+     while Walk mode is active, so the gizmo keeps meaning something rather
+     than going stale) for its own tiny camera's rotation only --
+     position/target are otherwise irrelevant for an orthographic camera. */
+  function renderAxisKey() {
+    if (!state.showAxisKey || state.page !== "model") { if (axisKeyCanvasEl) axisKeyCanvasEl.style.display = "none"; return; }
+    if (!axisKeyScene) initAxisKey();
+    if (!updateAxisKeyGeometry()) { axisKeyCanvasEl.style.display = "none"; return; }
+    axisKeyCanvasEl.style.display = "block";
+    var size = axisKeyBoxSize();
+    var pos = axisKeyPosition(size);
+    axisKeyCanvasEl.style.left = pos.x + "px"; axisKeyCanvasEl.style.top = pos.y + "px";
+    if (size !== axisKeyLastSize) {
+      axisKeyLastSize = size;
+      axisKeyCanvasEl.style.width = size + "px"; axisKeyCanvasEl.style.height = size + "px";
+      axisKeyRenderer.setSize(size, size, false);
+    }
+    var quat = state.walkMode ? walkQuat : camOrient;
+    axisKeyCamera.position.copy(new THREE.Vector3(0, 0, 6).applyQuaternion(quat));
+    axisKeyCamera.quaternion.copy(quat);
+    axisKeyRenderer.render(axisKeyScene, axisKeyCamera);
+  }
+  /* Hit-tests a mousedown (called from axisKeyCanvasEl's own "mousedown"
+     listener, see initAxisKey()) against the axis key's actual ARROWS (shaft
+     or cone meshes), not just anywhere on the canvas -- otherwise a plain
+     click anywhere in the box's own transparent background (most of it,
+     once the box grew to comfortably fit the longest arrow) would grab the
+     key instead of rotating the model underneath it, exactly the
+     interference the user reported. Raycasts through the gizmo's OWN small
+     orthographic camera -- same technique pickLabelAt() already uses for the
+     main scene, just re-expressed in the canvas's own local NDC space
+     instead of the main canvas's. On a hit, remembers where WITHIN the box
+     it was grabbed (axisKeyGrabX/Y, top-left-origin CSS pixels) so the box
+     doesn't jump to be centred under the cursor on the very first move --
+     same "remember the grab offset" idea tryGrabAtomForMove/
+     tryGrabGuestForDrag already use for their own drags. */
+  var axisKeyGrabX = 0, axisKeyGrabY = 0;
+  function tryGrabAxisKey(clientX, clientY) {
+    if (!state.showAxisKey || !axisKeyScene || !axisKeyMeshes || axisKeyCanvasEl.style.display === "none") return false;
+    var canvasRect = axisKeyCanvasEl.getBoundingClientRect();
+    var localX = clientX - canvasRect.left, localY = clientY - canvasRect.top;
+    if (localX < 0 || localX > canvasRect.width || localY < 0 || localY > canvasRect.height) return false;
+    var ndcX = (localX / canvasRect.width) * 2 - 1;
+    var ndcY = -(localY / canvasRect.height) * 2 + 1;
+    if (!raycaster) raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), axisKeyCamera);
+    var targets = [];
+    ["a", "b", "c"].forEach(function (k) { var m = axisKeyMeshes[k]; if (m) { targets.push(m.shaft, m.cone); } });
+    if (!raycaster.intersectObjects(targets, false).length) return false;
+    axisKeyGrabX = localX; axisKeyGrabY = localY;
+    return true;
+  }
+  /* Called from the "axisKey" dragMode branch in onWindowPointerMove --
+     the box's new top-left corner is simply the cursor's own window
+     position minus the remembered grab offset (no coordinate-space
+     conversion needed at all now that both the box and clientX/clientY are
+     already in the same window-relative CSS-pixel space) -- clamped via the
+     same axisKeyClamp() as axisKeyPosition(), re-reading the current window
+     size fresh here (rather than trusting whatever was true at grab time)
+     so a window resize mid-drag still clamps correctly on every subsequent
+     move. */
+  function dragAxisKeyTo(clientX, clientY) {
+    var size = axisKeyBoxSize();
+    var pos = axisKeyClamp(clientX - axisKeyGrabX, clientY - axisKeyGrabY, size);
+    state.axisKeyOffsetX = pos.x; state.axisKeyOffsetY = pos.y;
+  }
   function populateSymOpMatrixDom(op) {
     var spinEls = document.querySelectorAll("#symOpMatrixGrid .matspin");
     var tEls = document.querySelectorAll("#symOpMatrixGrid .symop-t");
@@ -14620,13 +14938,78 @@ select.sel:focus{border-color:var(--accent)}
     var head = text.slice(0, 4000);
     return /(^|\n)\s*CELL\s+[-0-9.]/i.test(head) && /(^|\n)\s*(SFAC|LATT|ZERR|TITL|UNIT)\b/i.test(head);
   }
+  /* XMol .xyz's own format has no keyword to grep for at all -- just a bare
+     atom count, one freeform title/comment line, then that many "element x y
+     z" rows -- so the sniff instead checks the file's actual SHAPE: first
+     non-blank line is a lone positive integer N, and the line N+1 rows below
+     it (skipping the comment line right after the count) looks like a
+     coordinate row. Checked ahead of looksLikeShelxRes() below since a RES/
+     CIF file's own first line is never a bare number. */
+  function looksLikeXyz(text) {
+    var lines = text.split(/\r?\n/);
+    var i = 0;
+    while (i < lines.length && lines[i].trim() === "") i++;
+    if (i >= lines.length || !/^\s*[0-9]+\s*$/.test(lines[i])) return false;
+    var n = parseInt(lines[i], 10);
+    if (!(n > 0)) return false;
+    var atomLine = lines[i + 2];
+    return typeof atomLine === "string" && /^\s*[A-Za-z]{1,2}[A-Za-z0-9_]*\s+[-+0-9.]+\s+[-+0-9.]+\s+[-+0-9.]+/.test(atomLine);
+  }
   /* Single entry point for both the file-input <input type=file> "change"
      handler and the drag-and-drop handler (see wireIO()) for any structure
-     file (CIF or SHELX .res/.ins) -- neither needs to know the format itself,
-     they just hand the raw text here. */
+     file (CIF, SHELX .res/.ins, or XMol .xyz) -- neither needs to know the
+     format itself, they just hand the raw text here. */
   function handleStructureFileText(text, name) {
-    if (/\.(res|ins)$/i.test(name || "") || looksLikeShelxRes(text)) handleResFileText(text, name);
+    if (/\.xyz$/i.test(name || "") || looksLikeXyz(text)) handleXyzFileText(text, name);
+    else if (/\.(res|ins)$/i.test(name || "") || looksLikeShelxRes(text)) handleResFileText(text, name);
     else handleCifFileText(text, name);
+  }
+  /* XMol .xyz -- the simplest widely-used structure format: a bare atom
+     count, one freeform title line, then that many "element x y z" rows in
+     Cartesian angstroms. Carries no unit cell, symmetry, or bonding
+     information at all (bonds are still inferred afterward the same way any
+     CIF/RES load's atoms are, via the usual distance-based bond search) --
+     loaded through loadAtoms()'s own cifMeta=null path (see its own comment,
+     "if (!cifMeta) setStatus(...)"), the same plain-molecule path a restored
+     project with no CIF/RES origin already falls back to. Every symmetry-
+     dependent feature (Grow > Symmetry, cell-mode void/channel analysis, Fill
+     unit cell, ...) simply has nothing to work with here, same as a
+     structure whose symmetry has been "forgotten" -- there's no separate
+     flag to set beyond just never populating state.cifCell/cifSymops. */
+  function parseXyz(text) {
+    var lines = text.split(/\r?\n/);
+    var i = 0;
+    while (i < lines.length && lines[i].trim() === "") i++;
+    if (i >= lines.length) return { error: "Empty XYZ file." };
+    var n = parseInt(lines[i].trim(), 10);
+    if (!(n > 0)) return { error: "Expected a positive atom count on the first line of the XYZ file." };
+    var atoms = [];
+    for (var k = 0; k < n; k++) {
+      var line = lines[i + 2 + k];
+      if (line === undefined || line.trim() === "") return { error: "XYZ file has fewer atom lines (" + k + ") than its own declared count (" + n + ")." };
+      var parts = line.trim().split(/\s+/);
+      var elMatch = /^[A-Za-z]{1,2}/.exec(parts[0]);
+      var x = parseFloat(parts[1]), y = parseFloat(parts[2]), z = parseFloat(parts[3]);
+      if (!elMatch || parts.length < 4 || !isFinite(x) || !isFinite(y) || !isFinite(z)) {
+        return { error: "Could not parse XYZ atom line " + (k + 1) + ": \"" + line.trim() + "\"" };
+      }
+      var el = elMatch[0].charAt(0).toUpperCase() + elMatch[0].slice(1).toLowerCase();
+      atoms.push({ el: el, x: x, y: y, z: z });
+    }
+    return { atoms: atoms };
+  }
+  function handleXyzFileText(text, name) {
+    clearMultiBlockNavigator();
+    state.cifOriginalText = null; state.cifOriginalLabel = null;
+    var parsed = parseXyz(text);
+    if (parsed.error) { setStatus(parsed.error, true); return; }
+    var atoms = [];
+    for (var i = 0; i < parsed.atoms.length; i++) {
+      var a = parsed.atoms[i];
+      atoms.push({ el: a.el, x: a.x, y: a.y, z: a.z, r: K.vdw(a.el), cr: K.cov(a.el), color: K.cpk(a.el), hidden: false });
+    }
+    loadAtoms(atoms, name, null);
+    setStatus("Loaded " + (name || "structure") + ": " + atoms.length + " atom" + (atoms.length === 1 ? "" : "s") + " from an XYZ file -- no symmetry information available.", false);
   }
   function handleResFileText(text, name) {
     clearMultiBlockNavigator();
@@ -15321,7 +15704,9 @@ select.sel:focus{border-color:var(--accent)}
         voidOpacityLinkAllVoids: state.voidOpacityLinkAllVoids, voidOpacityLinkAllChannels: state.voidOpacityLinkAllChannels,
         voidLinkedOpacityVoids: state.voidLinkedOpacityVoids, voidLinkedOpacityChannels: state.voidLinkedOpacityChannels,
         molSurfaceOpacity: state.molSurfaceOpacity,
-        compressModelAsZip: state.compressModelAsZip
+        compressModelAsZip: state.compressModelAsZip,
+        showUnitCellLabels: state.showUnitCellLabels,
+        axisKeyZoom: state.axisKeyZoom, axisKeyProportional: state.axisKeyProportional
         /* clipPlaneEnabled deliberately NOT persisted -- starting a fresh
            session with part of the structure invisible for no visible
            reason (until the user finds the toggle) is worse than just
@@ -15423,6 +15808,9 @@ select.sel:focus{border-color:var(--accent)}
       }
       if (data.hasOwnProperty("molSurfaceOpacity")) state.molSurfaceOpacity = clamp(data.molSurfaceOpacity, 0.05, 1.0, state.molSurfaceOpacity);
       if (typeof data.compressModelAsZip === "boolean") state.compressModelAsZip = data.compressModelAsZip;
+      if (typeof data.showUnitCellLabels === "boolean") state.showUnitCellLabels = data.showUnitCellLabels;
+      if (data.hasOwnProperty("axisKeyZoom")) state.axisKeyZoom = clamp(data.axisKeyZoom, 0.4, 3, state.axisKeyZoom);
+      if (typeof data.axisKeyProportional === "boolean") state.axisKeyProportional = data.axisKeyProportional;
       /* every light effectively off would leave only the fixed 0.6-intensity
          hemisphere light -- not literally invisible, but dim enough on some
          monitors to look like nothing loaded. Force at least one real light
@@ -16322,6 +16710,9 @@ select.sel:focus{border-color:var(--accent)}
       videoFps: state.videoFps,
       showUnitCell: state.showUnitCell, unitCellColor: state.unitCellColor,
       unitCellThickness: state.unitCellThickness, unitCellAxisColors: state.unitCellAxisColors,
+      showAxisKey: state.showAxisKey, axisKeyZoom: state.axisKeyZoom,
+      axisKeyOffsetX: state.axisKeyOffsetX, axisKeyOffsetY: state.axisKeyOffsetY,
+      axisKeyProportional: state.axisKeyProportional,
       showCoordPolyhedra: state.showCoordPolyhedra,
       coordPolyOpacity: state.coordPolyOpacity, coordPolyColorMode: state.coordPolyColorMode, coordPolyColor: state.coordPolyColor,
       coordPolyEdgeThickness: state.coordPolyEdgeThickness,
@@ -16555,6 +16946,11 @@ select.sel:focus{border-color:var(--accent)}
     if (typeof data.unitCellColor === "number") state.unitCellColor = data.unitCellColor;
     if (typeof data.unitCellThickness === "number") state.unitCellThickness = data.unitCellThickness;
     if (typeof data.unitCellAxisColors === "boolean") state.unitCellAxisColors = data.unitCellAxisColors;
+    if (typeof data.showAxisKey === "boolean") state.showAxisKey = data.showAxisKey;
+    if (typeof data.axisKeyZoom === "number" && isFinite(data.axisKeyZoom) && data.axisKeyZoom > 0) state.axisKeyZoom = data.axisKeyZoom;
+    if (typeof data.axisKeyOffsetX === "number" && isFinite(data.axisKeyOffsetX)) state.axisKeyOffsetX = data.axisKeyOffsetX;
+    if (typeof data.axisKeyOffsetY === "number" && isFinite(data.axisKeyOffsetY)) state.axisKeyOffsetY = data.axisKeyOffsetY;
+    if (typeof data.axisKeyProportional === "boolean") state.axisKeyProportional = data.axisKeyProportional;
     if (typeof data.showCoordPolyhedra === "boolean") state.showCoordPolyhedra = data.showCoordPolyhedra;
     if (typeof data.coordPolyOpacity === "number") state.coordPolyOpacity = data.coordPolyOpacity;
     if (typeof data.coordPolyEdgeThickness === "number") state.coordPolyEdgeThickness = data.coordPolyEdgeThickness;
@@ -17023,7 +17419,7 @@ select.sel:focus{border-color:var(--accent)}
     var unitCellBody = subsection(styleC, "Unit cell", false);
     var ucRow = el("div", "ctl-inline");
     ucRow.style.justifyContent = "space-between";
-    var labelAxesTg = toggle(ucRow, "Label axes", state.showUnitCellLabels, function (b) { state.showUnitCellLabels = b; renderUnitCell(); });
+    var labelAxesTg = toggle(ucRow, "Label axes", state.showUnitCellLabels, function (b) { state.showUnitCellLabels = b; renderUnitCell(); persistPreferences(); });
     var rgbTg = toggle(ucRow, "RGB axes", state.unitCellAxisColors, function (b) { state.unitCellAxisColors = b; renderUnitCell(); });
     var ucColorWrap = el("div", "ctl-color");
     ucColorWrap.appendChild(el("label", null, "Cell colour"));
@@ -17032,6 +17428,25 @@ select.sel:focus{border-color:var(--accent)}
     ucRow.appendChild(ucColorWrap);
     unitCellBody.appendChild(ucRow);
     slider(unitCellBody, "Line thickness", 0.01, 0.15, 0.005, state.unitCellThickness, U.ang, function (v) { state.unitCellThickness = v; renderUnitCell(); });
+    /* The show/hide checkbox itself lives in Display, next to "Show unit
+       cell" (matching every other show/hide toggle's own home) -- this is
+       just the appearance-tuning slider, same split as Line thickness/Cell
+       colour/RGB axes just above being Style concerns while the toggle
+       itself is a Display one. */
+    slider(unitCellBody, "Axis key zoom", 0.4, 3, 0.1, state.axisKeyZoom, "×", function (v) { state.axisKeyZoom = v; persistPreferences(); });
+    toggle(unitCellBody, "Axis key: proportional lengths", state.axisKeyProportional, function (b) { state.axisKeyProportional = b; persistPreferences(); }).title =
+      "On (default): each arrow's length reflects the real a/b/c cell edge length. Off: all three arrows are drawn the same length -- orientation only, no length information.";
+    /* A dragged-away key can end up anywhere (including, deliberately, slid
+       out of sight behind the sidebar/header -- see axisKeyClamp()'s own
+       comment) with no visible arrow left to grab it back by -- this is the
+       one way out of that dead end, short of reloading. Clearing the
+       remembered offset (rather than computing a position directly here)
+       reuses axisKeyPosition()'s own existing "not yet placed" default-
+       resolve logic, so this button and a brand-new key's first-ever
+       appearance land in exactly the same place by construction. */
+    button(unitCellBody, "Reset key position", "ghost mini", function () {
+      state.axisKeyOffsetX = null; state.axisKeyOffsetY = null;
+    }).title = "Bring the axis key back to the bottom-left corner of the model panel (useful if it's been dragged out of view).";
 
     /* ---- Coordination polyhedra ----
        Triangulates the FULL, symmetry-derived ligand set of every currently-
@@ -17559,24 +17974,26 @@ select.sel:focus{border-color:var(--accent)}
        MG's own toggle-row2 layout, so columns line up left edges across rows
        regardless of how long any one row's own first label happens to be. */
     var showRow1 = el("div", "toggle-row2");
-    var showHTg = toggle(showRow1, "Show hydrogen atoms", state.showHydrogens !== false, function () { toggleHydrogenDisplay(); });
-    showHTg.id = "showHTg";
     var asuTg = toggle(showRow1, "Show ASU only", state.showOnlyAsu, function (b) { state.showOnlyAsu = b; clearUnselectableSelections(); renderStructure(); updateSelectionInfo(); recordMacroCommand(b ? "ASU_ONLY_ON" : "ASU_ONLY_OFF"); });
     asuTg.id = "showOnlyAsuTg";
+    var showLabelsTg = toggle(showRow1, "Show atom labels", state.showLabels, function (b) { state.showLabels = b; renderLabels(); });
+    showLabelsTg.id = "showLabelsTg";
     cifDispC.appendChild(showRow1);
     /* same .toggle-row2 grid as showRow1 above (not .ctl-inline, which sizes
-       each column to its own content) so "Show H bonds" -- second column
-       here -- lines up under "Show ASU only", also second column, instead of
-       drifting depending on how long "Show unit cell" happens to be. */
+       each column to its own content) so "Show axis key" -- second column
+       here -- lines up under "Show atom labels", also second column. */
     var ucShowRow = el("div", "toggle-row2");
     var ucShowTg = toggle(ucShowRow, "Show unit cell", state.showUnitCell, function (b) { state.showUnitCell = b; renderUnitCell(); recordMacroCommand(b ? "UNIT_CELL_ON" : "UNIT_CELL_OFF"); });
     ucShowTg.id = "showUnitCellTg";
-    toggle(ucShowRow, "Show H bonds", state.showHBonds, function (b) { state.showHBonds = b; renderStructure(); });
+    var axisKeyDispTg = toggle(ucShowRow, "Show axis key", state.showAxisKey, function (b) { state.showAxisKey = b; recordMacroCommand(b ? "AXIS_KEY_ON" : "AXIS_KEY_OFF"); });
+    axisKeyDispTg.id = "showAxisKeyTg";
+    axisKeyDispTg.title = "A small a/b/c orientation indicator (red/green/blue arrows, lengths proportional to the real a/b/c cell edge lengths) -- drag it anywhere in the 3D view, or press k to show/hide it. Size and zoom: Style > Unit cell.";
     cifDispC.appendChild(ucShowRow);
-    var labelShowRow = el("div", "toggle-row2");
-    var showLabelsTg = toggle(labelShowRow, "Show atom labels", state.showLabels, function (b) { state.showLabels = b; renderLabels(); });
-    showLabelsTg.id = "showLabelsTg";
-    cifDispC.appendChild(labelShowRow);
+    var hRow = el("div", "toggle-row2");
+    var showHTg = toggle(hRow, "Show hydrogen atoms", state.showHydrogens !== false, function () { toggleHydrogenDisplay(); });
+    showHTg.id = "showHTg";
+    toggle(hRow, "Show H bonds", state.showHBonds, function (b) { state.showHBonds = b; renderStructure(); });
+    cifDispC.appendChild(hRow);
 
     var scaleBgRow = el("div", "ctl-inline");
     scaleBgRow.appendChild(el("label", "plain", "Set scale"));
@@ -18502,6 +18919,13 @@ select.sel:focus{border-color:var(--accent)}
     recordMacroCommand(state.showUnitCell ? "UNIT_CELL_ON" : "UNIT_CELL_OFF");
     setStatus(state.showUnitCell ? "Showing unit cell." : "Hiding unit cell.", false);
   }
+  function toggleAxisKeyDisplay() {
+    if (!state.isCif) { setStatus("This only applies to a CIF-based structure.", true); return; }
+    state.showAxisKey = !state.showAxisKey;
+    var cb = document.getElementById("showAxisKeyTg"); if (cb) cb.checked = state.showAxisKey;
+    recordMacroCommand(state.showAxisKey ? "AXIS_KEY_ON" : "AXIS_KEY_OFF");
+    setStatus(state.showAxisKey ? "Showing axis key." : "Hiding axis key.", false);
+  }
   function toggleHydrogenDisplay() {
     /* purely a display toggle -- flips whether hydrogen atoms are drawn at
        all, and is completely independent of any atom's .hidden flag (set via
@@ -18651,6 +19075,7 @@ select.sel:focus{border-color:var(--accent)}
       if (e.ctrlKey && e.code === "KeyU") { e.preventDefault(); unhideAllAtoms(); return; }
       if (!e.ctrlKey && !e.altKey && !e.metaKey && e.code === "KeyA") { e.preventDefault(); toggleShowOnlyAsu(); return; }
       if (!e.ctrlKey && !e.altKey && !e.metaKey && e.code === "KeyC") { e.preventDefault(); toggleUnitCellDisplay(); return; }
+      if (!e.ctrlKey && !e.altKey && !e.metaKey && e.code === "KeyK") { e.preventDefault(); toggleAxisKeyDisplay(); return; }
       if (!e.ctrlKey && !e.altKey && !e.metaKey && e.code === "KeyH") { e.preventDefault(); toggleHydrogenDisplay(); return; }
       if (!e.ctrlKey && !e.altKey && !e.metaKey && e.code === "KeyL") { e.preventDefault(); toggleLabelDisplay(); return; }
       if (!state.walkMode && !e.ctrlKey && !e.altKey && !e.metaKey && (e.key === "-" || e.key === "=" || e.key === "+")) {
@@ -18802,12 +19227,13 @@ select.sel:focus{border-color:var(--accent)}
       "<p><b>Light follows view</b> is on by default: the lights are attached to the camera, so they always illuminate from the same relative direction no matter how the view is rotated. Turning it off fixes the lights in the scene instead, like a lit room, which can shift shading as you rotate. <b>Light angle</b> spins the whole lighting rig around the view direction (most meaningful with \"light follows view\" on). The key, fill, and rim lights -- the three light sources responsible for the reflections visible on a glossy atom -- each have their own on/off switch and intensity, so any one of them can be turned down or off entirely rather than only scaling all three together.</p>" +
       "<p><b>High detail spheres &amp; tubes</b> swaps in much finer sphere and cylinder tessellation, at some cost to rotation smoothness for large structures -- useful for previewing exactly how a figure will look before exporting. <b>Depth cueing</b> fades distant atoms toward the background colour, which can help read depth in a crowded structure; <b>fog amount</b> controls how aggressively.</p>" +
       "<p>Atoms don't emit any light themselves -- <b>atom roughness</b>, <b>atom metalness</b>, and <b>reflection strength</b> (Material panel) control how they respond to the scene's lighting instead. Lower roughness gives a glossier, more reflective surface; higher metalness moves it from a plastic-like look toward bare metal (useful for a striking cover-art render, less so for a conventional scientific figure); reflection strength scales how much the environment map contributes, which mainly shows up once metalness is raised. If a selected atom's highlight is hard to make out, a glossy, brightly lit atom is usually why -- the highlight itself doesn't respond to lighting at all, but a very bright, reflective atom underneath it can still make thin highlight lines harder to see by contrast.</p>" +
-      "<p><b>Export image (PNG)</b> always renders at full tessellation regardless of the high detail toggle, at the chosen <b>export resolution</b> multiple of the current view size, then restores the interactive settings afterward -- so a quick figure never requires manually maxing out quality settings first. In Chrome or Edge it opens a normal save dialog, defaulting to the folder of whichever host CIF was most recently dropped onto the app (not one opened via the file browser button, since only a genuine drag hands over that information) -- other browsers fall back to a plain download instead. That last-used folder is only remembered for the current session, not saved between visits.</p>" +
+      "<p><b>Export image (PNG)</b> always renders at full tessellation regardless of the high detail toggle, at the chosen <b>export resolution</b> multiple of the current view size, then restores the interactive settings afterward -- so a quick figure never requires manually maxing out quality settings first. In Chrome or Edge it opens a normal save dialog, defaulting to the folder of whichever host CIF was most recently dropped onto the app (not one opened via the file browser button, since only a genuine drag hands over that information) -- other browsers fall back to a plain download instead. That last-used folder is only remembered for the current session, not saved between visits. If <b>Show axis key</b> (Display) is on, the key is drawn into the exported image at its current on-screen position, size, and orientation, same as it appears in the live view -- a part currently overlapping the sidebar or header is clipped out of the export too, matching what's actually visible on screen.</p>" +
       "<p><b>Transparent background</b> drops the background colour (and briefly suspends fog, which would otherwise leave a visible tint) for that one exported frame, then restores both immediately afterward -- normal interactive display is never affected. It applies to both Export image and <b>Copy image to clipboard</b>, which renders the same way but places the PNG directly on the system clipboard for pasting into another document instead of saving a file; transparency survives that route too; wherever it lands, whether it stays transparent from there depends on the receiving application. Clipboard copying needs a recent click to work (this triggers it) and isn't available in every browser -- Export image (PNG) always works as the fallback.</p>" +
       "<p><b>Save model...</b> and <b>Load model...</b>, at the bottom of the <b>Export</b> panel, save or restore the complete working state to a single file -- every atom including everything Grow has added, the CIF symmetry data, colour and radius overrides, bond and display settings, and the camera's exact position -- so a session can be closed and reopened later exactly where it was left, without repeating the grow steps. This is a separate, deliberate snapshot of one specific piece of work, distinct from the automatic per-browser memory of element radii and display settings described below -- a saved model file is portable and permanent, and is the one to keep if the work needs to survive a change of computer or browser. <b>Compress as zip</b>, just above Save model, saves that same project data as a single JSON file inside a .zip archive instead of a plain .json -- text compresses well, so a large, heavily-grown project can end up considerably smaller on disk; remembered like any other setting. Load model... reads a .zip archive back regardless of this checkbox either way. A zip containing more than one .json file -- created by hand, one file per version of a model (e.g. <span class='mono'>Figure 1a.json</span>, <span class='mono'>Figure 1b.json</span>) then zipped together -- loads with the same prev/next/dropdown <b>Navigator</b> a multi-structure CIF uses (see \"Loading structures\" below), labelled by each .json file's own name rather than anything stored inside it, so those file names are exactly what shows up to choose between.</p>" +
       "<h3>Loading structures</h3>" +
       "<p>Dropping a <b>.cif</b> onto the 3D view loads it as the <b>host</b> and starts symmetry mode, described below -- it's a fresh structure to build outward from by growth, not a fixed set of coordinates, and replaces any previously loaded host, clearing the current guest along with it. There is no separate guest file or drop box: a <b>guest</b> (e.g. an included gas molecule) is created from the same loaded structure by selecting the atoms that belong to it and using \"Move selection to\" &gt; New guest group (Structure &gt; Edit atoms). \"Remove all guests\" clears every guest component so you can start over. A CIF holding more than one complete structure (e.g. a CSD/Conquest search result, several <span class='mono'>data_XXXX</span> blocks concatenated in one file) loads its first entry the same way, and a <b>Navigator</b> appears at the top of Structure with prev/next buttons and a dropdown for switching between the rest -- the same Navigator a multi-.json zip archive uses (see Export &gt; Model above), just showing each structure's own block label instead of a file name.</p>" +
       "<p>A SHELX <b>.res</b> or <b>.ins</b> file drops in exactly the same way and works identically from that point on -- same host/guest handling, same Grow panel, same everything -- since both formats are read into the same unit cell + symmetry operators + asymmetric unit shape internally; the one difference is that Save CIF stays disabled afterwards, since there's no original CIF text to splice edits back into. A <b>PART n</b> instruction in the file is read and remembered per atom: automatic bond generation never bonds two atoms that have different, both non-zero PART numbers, since SHELX uses PART specifically to mark alternative, mutually-exclusive disorder components that are never really present together -- PART 0 (the default, before any PART instruction, and every CIF-loaded atom, which has no PART concept at all) still bonds to anything. A negative PART number additionally stops bonds forming, across a symmetry operation, to a grown copy with any non-zero PART number -- the standard way of handling a group disordered across a special position (e.g. a solvent molecule sitting on an inversion centre) without it bonding to its own symmetry mate. <b>Shift+Ctrl+Alt+click</b> selects every currently-displayed atom sharing the clicked atom's PART number (a second click on the same part deselects them) -- only available for a PART-tagged, .res/.ins-derived structure; it does nothing on a CIF-loaded one, which has no PART numbers to select by.</p>" +
+      "<p>An XMol <b>.xyz</b> file (a bare atom count, a title line, then one <span class='mono'>element x y z</span> row per atom, in Cartesian &Aring;ngstr&ouml;ms) drops in the same way too, but loads as a plain molecule with no unit cell and no symmetry operators at all -- an .xyz file simply doesn't carry that information. The Grow panel, Fill unit cell, Forget symmetry, and any cell-mode void/channel analysis are all unavailable for an XYZ-loaded structure for the same reason they're unavailable after Forget symmetry is used on a CIF/RES one; Save CIF likewise stays disabled, exactly as for a SHELX load. Everything else -- display style, bonding, selection, molecular surfaces, molecular-neighbourhood-mode void/channel analysis, export -- works normally on the atoms as given.</p>" +
       "<h3>CIF and symmetry (Symmetry panel)</h3>" +
       "<p>Dropping a CIF reads the unit cell, the symmetry operators (from the file's own symmetry loop), and the asymmetric unit, then displays just the asymmetric unit -- not a complete molecule -- as the starting point. If the file actually contains more atoms than the true asymmetric unit (Mercury sometimes exports a whole completed molecule this way), the extra symmetry-equivalent copies are automatically detected and removed first, so what's displayed is always just the independent set. An atom sitting exactly on a special position (a mirror plane, an inversion centre, a rotation axis) is never duplicated when a symmetry operation maps it onto itself or onto another copy already present -- this is handled automatically throughout, not something to manage by hand.</p>" +
       "<p>The <b>Grow</b> section appears once a CIF has been loaded, with the asymmetric unit and current atom count shown at the top, and its controls split into four submenus -- <b>Mouse</b>, <b>Pack</b>, <b>Symmetry</b>, and <b>Molecular neighbourhood</b>.</p>" +
@@ -18886,7 +19312,7 @@ select.sel:focus{border-color:var(--accent)}
       "<p><b>Play</b> runs every line in the memo, in order, against whichever structure is currently loaded (or, in folder-batch mode, against each structure in turn -- see below), and reports how many ran versus how many it couldn't, by line number -- an unrecognized command word, or one whose atom reference doesn't match any atom in the structure currently loaded (the usual sign of replaying against a differently-labelled structure), is skipped rather than stopping the whole run. A command's own argument(s) follow the command word after a single space; where an argument is itself an atom reference it has the form <span class='mono'>name  matrix</span> (the atom's own CIF/SHELX label, two spaces, then the space-group operator that generated that specific copy in Jones-Faithful notation, e.g. <span class='mono'>H7A  1+X,1+Y,Z</span>) -- exactly the text already shown for that atom everywhere else in the app (labels, Save CIF, the Selection & geometry readout).</p>" +
       "<p>Three buttons below the memo insert a command directly, regardless of whether Record is down -- there's no single live action any of them corresponds to, so unlike everything above they're never recorded automatically. <b>Add current POV</b> appends a <span class='mono'>VIEW</span> command capturing the exact current camera orientation (as the same four-number quaternion a saved project file itself already uses for this), so a macro can return the view to precisely this orientation later, on this structure or another. <b>Add EXPORT_PNG</b> appends an <span class='mono'>EXPORT_PNG</span> command, optionally with whatever suffix is typed in the box beside the button (sanitized against characters a filename can't contain) -- see below. <b>Add SAVE_JSON</b> appends a <span class='mono'>SAVE_JSON</span> command the same way, with its own suffix box -- see further below.</p>" +
       "<p><span class='mono'>EXPORT_PNG</span>, when played, saves the current view as a PNG using whatever <b>Export &gt; Image</b> is currently set to (resolution, transparent background), the same as pressing <b>Export image (PNG)</b> by hand. Its filename is always the current structure's own name with its extension stripped, plus an underscore and the given suffix if one was given (e.g. structure <span class='mono'>ZIF-68.cif</span> with suffix <span class='mono'>top</span> saves <span class='mono'>ZIF-68_top.png</span>). Because writing straight to disk needs the user's permission, the very first time <b>Play</b> is pressed on a memo containing an <span class='mono'>EXPORT_PNG</span> or <span class='mono'>SAVE_JSON</span> line, a folder picker appears asking where to save -- granted once, that folder is then reused silently for every <span class='mono'>EXPORT_PNG</span>/<span class='mono'>SAVE_JSON</span> in every macro played for the rest of this browser session, with no further prompts, until a write to it actually fails (at which point the next Play asks again). Declining the picker, or using a browser without this capability at all, falls back to an ordinary individual download per file instead of failing outright.</p>" +
-      "<p><b>Apply macro to all files in folder</b>, at the bottom of the panel, turns Play into a batch operation: tick the box, use <b>Select folder</b> to grant access to a folder (the box above it shows the folder's own name once chosen -- browsers never expose a full filesystem path, only that), then press Play as normal. Instead of running once against the currently-loaded structure, every <span class='mono'>.cif</span>/<span class='mono'>.res</span>/<span class='mono'>.ins</span>/<span class='mono'>.txt</span>/<span class='mono'>.json</span> file in that folder is loaded in turn (alphabetical order) and the whole memo is run against each one before moving to the next, reporting how many files it got through and how many commands failed along the way. The <span class='mono'>.json</span> files are project files previously saved from this app (<b>Save model</b>, or <span class='mono'>SAVE_JSON</span> itself) -- the only format that actually distinguishes host from guest, since a plain CIF never does; loading each structure once, sorting its atoms into host/guest by hand, and saving that as a project is how to build a folder of files a host/guest-aware batch macro can process (a <span class='mono'>.zip</span> project archive is deliberately not picked up here -- only a plain <span class='mono'>.json</span>). If the memo also contains an <span class='mono'>EXPORT_PNG</span> or <span class='mono'>SAVE_JSON</span> line, the same batch folder doubles as the export destination -- no second permission prompt -- so this is the tool for producing one rendered image, or one updated project file, per structure across a whole folder of similar files in one action. It's entirely up to the user to make sure every file in the folder is actually compatible with the macro being played (matching ASU labelling, as above); a file that fails to load at all (wrong format, unparseable) is skipped and counted, not fatal to the rest of the batch.</p>" +
+      "<p><b>Apply macro to all files in folder</b>, at the bottom of the panel, turns Play into a batch operation: tick the box, use <b>Select folder</b> to grant access to a folder (the box above it shows the folder's own name once chosen -- browsers never expose a full filesystem path, only that), then press Play as normal. Instead of running once against the currently-loaded structure, every <span class='mono'>.cif</span>/<span class='mono'>.res</span>/<span class='mono'>.ins</span>/<span class='mono'>.xyz</span>/<span class='mono'>.txt</span>/<span class='mono'>.json</span> file in that folder is loaded in turn (alphabetical order) and the whole memo is run against each one before moving to the next, reporting how many files it got through and how many commands failed along the way. The <span class='mono'>.json</span> files are project files previously saved from this app (<b>Save model</b>, or <span class='mono'>SAVE_JSON</span> itself) -- the only format that actually distinguishes host from guest, since a plain CIF never does; loading each structure once, sorting its atoms into host/guest by hand, and saving that as a project is how to build a folder of files a host/guest-aware batch macro can process (a <span class='mono'>.zip</span> project archive is deliberately not picked up here -- only a plain <span class='mono'>.json</span>). If the memo also contains an <span class='mono'>EXPORT_PNG</span> or <span class='mono'>SAVE_JSON</span> line, the same batch folder doubles as the export destination -- no second permission prompt -- so this is the tool for producing one rendered image, or one updated project file, per structure across a whole folder of similar files in one action. It's entirely up to the user to make sure every file in the folder is actually compatible with the macro being played (matching ASU labelling, as above); a file that fails to load at all (wrong format, unparseable) is skipped and counted, not fatal to the rest of the batch.</p>" +
       "<p><span class='mono'>SAVE_JSON</span>, when played, writes the current model out as a project file -- the same complete payload (both atom lists, void/channel results, guest groups, display settings, camera, everything) <b>Save model</b> itself writes, and respecting that button's own <b>Compress as zip</b> checkbox exactly the same way (ticked: a <span class='mono'>.zip</span> containing one compressed <span class='mono'>.json</span> entry; unticked: plain <span class='mono'>.json</span>) -- but with no picker and an automatically-derived filename, so it fits into unattended batch playback the way <b>Save model</b>'s own file dialog never could. With no suffix, it OVERWRITES the exact file the current structure was itself loaded from, when that was a <span class='mono'>.json</span> in the first place (falling back to the structure's own CIF-derived name if it wasn't, e.g. a macro that saves partway through processing a plain CIF) -- this is the \"process a folder of projects, updating each one in place\" case. With a suffix, it saves alongside instead, as <span class='mono'>name_suffix.json</span> (or <span class='mono'>.zip</span>), the same pattern <span class='mono'>EXPORT_PNG</span>'s own suffix uses. Note that a <span class='mono'>.zip</span> written this way (box ticked) will NOT be picked up by a later batch run over the same folder -- that scan only recognizes plain <span class='mono'>.json</span> -- so leave the box unticked for a \"save now, batch-process again later\" workflow.</p>" +
       "<p><span class='mono'>CALCULATE_VOID</span> and <span class='mono'>CALCULATE_VOID_Q</span>, when played, press <b>Calculate</b> under Void/Channel Analysis exactly as if clicked by hand -- using whatever probe radius, mode, and other calculation settings are currently on screen at the moment they play, never a value captured back when they were recorded, the same way every other command always acts on the current state rather than a frozen one. <b>Accurate volumes is the one deliberate exception to that rule</b>: since that checkbox's setting is itself saved inside a project <span class='mono'>.json</span> file, batch-processing a folder of them would otherwise have each file's own load silently reset it to whatever THAT file happened to have saved, making accurate-vs-quick effectively random across a batch rather than something the macro controls. <span class='mono'>CALCULATE_VOID</span> therefore always FORCES accurate volumes ON before calculating (and ticks the checkbox to match), regardless of what's currently set or what a just-loaded <span class='mono'>.json</span> brought with it; <span class='mono'>CALCULATE_VOID_Q</span> always forces it OFF, for the rarer case where a genuinely quick batch calculation is actually wanted. While Record is down, clicking the real <b>Calculate</b> button records whichever of the two matches the checkbox's own state at that moment -- so replaying a recorded macro reproduces exactly the accurate/quick choice that was live when it was recorded, same as any other setting. Combined with <b>Apply macro to all files in folder</b> (or just by loading a different structure and pressing Play again by hand), this is how to run the same void/channel analysis across a whole series of structures: each time either command plays, every region found is appended as its own row to the <b>Void/channel batch results</b> table further down this panel -- Structure, ID, Type, Critical radius, Volume, and the probe radius that was actually in effect for that row -- building up one combined comparison table across everything processed so far in this browser session. That table is never cleared automatically (not by loading a new structure, not between separate Play presses) so it can keep growing across as many runs as wanted; <b>Copy as TSV</b> copies it straight to the clipboard for pasting into a spreadsheet, <b>Save as CSV</b> writes it to a file, and <b>Clear table</b> empties it. An ordinary manual click on <b>Calculate</b> (Record not down, no macro playing) never adds a row here -- only <span class='mono'>CALCULATE_VOID</span>/<span class='mono'>CALCULATE_VOID_Q</span> actually being played does.</p>" +
       "<p>The command reference below groups every command by what it does. Most mirror a specific action one-to-one and are recorded automatically while Record is down; a handful are noted where that isn't the case.</p>" +
