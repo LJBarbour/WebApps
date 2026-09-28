@@ -2795,6 +2795,23 @@ select.sel:focus{border-color:var(--accent)}
        unique even after others are deleted. */
     selectionGroups: [], selectionGroupSeq: 0,
     bondSelectionEnabled: false, atomEditUiMode: null, lastClickedAtomUid: null, guestDragMode: false,
+    /* Array of atom uids in the order they most recently BECAME selected --
+       reconciled against the real .selected flags on every updateSelectionInfo()
+       call (see reconcileSelectionOrder()) rather than maintained at each of
+       the many individual "scope[i].selected = target"-style call sites
+       scattered through selection code, so this stays correct regardless of
+       which of those paths (plain click, Shift/Ctrl/Alt-click, lasso, a
+       SELECT_* macro command...) actually changed the selection. Purely a
+       display concern for the Selection & geometry readout's 2-4-atom
+       distance/angle/torsion rows, which need SOME definite, meaningful atom
+       order (particularly torsion, where the 4-atom order is chemically
+       significant, not just cosmetic) -- getSelectedAtomObjects()'s own
+       plain array-storage order (host atoms, then guest, in whichever order
+       they happen to sit in those arrays) frequently does NOT match the
+       order the user actually selected them in, especially the moment a
+       symmetry-grown copy is involved (always appended at the END of its
+       array regardless of where it sits physically in an intended chain). */
+    selectionOrder: [],
     undoStack: [], selectedBonds: {}, guestColorMode: "component",
     hostBondRadius: 0.12, guestBondRadius: 0.12,
     hostColors: {}, guestColors: {}, defaultColors: {}, page: "model",
@@ -11405,6 +11422,38 @@ select.sel:focus{border-color:var(--accent)}
     if (state.guestAtoms) for (var j = 0; j < state.guestAtoms.length; j++) if (state.guestAtoms[j].selected) out.push(state.guestAtoms[j]);
     return out;
   }
+  /* Brings state.selectionOrder (see its own comment) back in line with
+     whichever atoms are ACTUALLY selected right now -- drops any uid whose
+     atom is no longer selected, then appends any currently-selected atom not
+     yet tracked (in getSelectedAtomObjects()'s own array order, the best
+     available ordering for atoms that all became selected in the same bulk
+     action, e.g. a Shift-click's whole-element scope). Idempotent and cheap
+     enough to call on every updateSelectionInfo() -- there is no other
+     single call site every selection-changing code path already reaches, so
+     reconciling here beats trying to instrument the dozen or so scattered
+     "atom.selected = target" sites throughout the file individually. */
+  function reconcileSelectionOrder() {
+    var selected = getSelectedAtomObjects();
+    var selectedUidSet = {}, i;
+    for (i = 0; i < selected.length; i++) selectedUidSet[selected[i].uid] = true;
+    state.selectionOrder = state.selectionOrder.filter(function (u) { return selectedUidSet[u]; });
+    var trackedSet = {};
+    for (i = 0; i < state.selectionOrder.length; i++) trackedSet[state.selectionOrder[i]] = true;
+    for (i = 0; i < selected.length; i++) if (!trackedSet[selected[i].uid]) state.selectionOrder.push(selected[i].uid);
+  }
+  /* The selected atoms in the order they most recently became selected --
+     see state.selectionOrder's own comment for why this differs from
+     getSelectedAtomObjects()'s plain array-storage order, and why that
+     difference matters specifically for a 2-4 atom distance/angle/torsion
+     reading. */
+  function getSelectedAtomsInClickOrder() {
+    reconcileSelectionOrder();
+    var byUid = {}, selected = getSelectedAtomObjects(), i;
+    for (i = 0; i < selected.length; i++) byUid[selected[i].uid] = selected[i];
+    var out = [];
+    for (i = 0; i < state.selectionOrder.length; i++) { var a = byUid[state.selectionOrder[i]]; if (a) out.push(a); }
+    return out;
+  }
   function viewAlongTwoAtoms() {
     var sel = getSelectedAtomObjects();
     if (sel.length !== 2) { setStatus("Select exactly two atoms first.", true); return; }
@@ -11434,6 +11483,25 @@ select.sel:focus{border-color:var(--accent)}
     if (!v1.length() || !v2.length()) return null;
     return v1.angleTo(v2) * 180 / Math.PI;
   }
+  /* Sign convention: IUPAC (Recommendations 1996, "Basic terminology of
+     stereochemistry") -- sighting along the b->c bond (b nearest the
+     viewer), positive means the near bond b-a needs a CLOCKWISE turn to
+     eclipse the far bond c-d. Equivalently, for zhat = unit(c-b), V1 =
+     component of (a-b) perpendicular to zhat, V2 = component of (d-c)
+     perpendicular to zhat: omega = atan2(zhat . (V1 x V2), V1 . V2) (the
+     signed right-hand-rule angle from V1 to V2 about zhat -- a rotation
+     about an axis pointing AWAY from the viewer reads as clockwise to that
+     viewer, which is exactly the IUPAC picture). This is the same
+     convention essentially every other crystallography/modelling package
+     uses (Mercury, Olex2, PLATON, SHELX, ...), and matches the well-known
+     numerically-stable "praxeolitic" torsion formula (Blondel & Karplus,
+     J Comput Chem 1996, 17, 1132) once its own b0 = -(p1-p0) convention is
+     unpacked -- verified independently against that derivation, not just
+     asserted. The atan2(m.dot(n2), n1.dot(n2)) form below (m = n1 x
+     unit(b2)) computes exactly the NEGATIVE of that -- confirmed both
+     algebraically and with a concrete numeric example (a=(1,0,0), b=origin,
+     c=(0,0,1), d=(0,1,1): IUPAC gives +90 deg, the unnegated form below
+     gives -90 deg) -- hence the leading minus sign. */
   function torsion(a, b, c, d) {
     var b1 = new THREE.Vector3(b.x - a.x, b.y - a.y, b.z - a.z);
     var b2 = new THREE.Vector3(c.x - b.x, c.y - b.y, c.z - b.z);
@@ -11442,7 +11510,7 @@ select.sel:focus{border-color:var(--accent)}
     var n2 = new THREE.Vector3().crossVectors(b2, b3);
     if (!n1.length() || !n2.length()) return null;
     var m = new THREE.Vector3().crossVectors(n1, b2.clone().normalize());
-    return Math.atan2(m.dot(n2), n1.dot(n2)) * 180 / Math.PI;
+    return -Math.atan2(m.dot(n2), n1.dot(n2)) * 180 / Math.PI;
   }
   /* Generic esd propagation for dist/angleAt/torsion alike, by numerical
      differentiation (a symbolic formula per function, especially torsion's,
@@ -11532,13 +11600,16 @@ select.sel:focus{border-color:var(--accent)}
       }
     }
     var el2 = document.getElementById("selInfo"); if (!el2) return;
-    var s = getSelectedAtomObjects();
+    var s = getSelectedAtomsInClickOrder();
     if (!s.length) { el2.innerHTML = "<div class='dim'>No atoms selected.</div>"; return; }
     /* geometry only makes sense for a handful of atoms in a definite order --
-       order here follows the atom list (host then guest), not click order,
-       since atoms are only ever flagged .selected, not tracked in a separate
-       ordered list. A bulk fragment/element selection can run far larger
-       than 4, where "which one is s[1]" stops being anything meaningful. */
+       s is in the order the atoms most recently became selected (see
+       state.selectionOrder's own comment), which is what makes a 4-atom
+       torsion reading mean the specific dihedral the user actually built up
+       by clicking, rather than whatever order those same 4 atoms happen to
+       sit in the internal host/guest arrays. A bulk fragment/element
+       selection can run far larger than 4, where "which one is s[1]" stops
+       being anything meaningful. */
     if (s.length > 4) {
       var counts = {}, order = [], i;
       for (i = 0; i < s.length; i++) {
@@ -18770,7 +18841,7 @@ select.sel:focus{border-color:var(--accent)}
       "<h3>Selecting and deleting atoms</h3>" +
       "<p>Click an atom to select it (shown with a yellow wire highlight); click a selected atom again to deselect it. The modifier keys compose: <b>Shift</b> restricts to atoms of the same element, <b>Ctrl</b> restricts to the clicked atom's bonded fragment, and <b>Alt</b> restricts to the clicked atom's whole component (the host, or one specific guest group) -- \"component\" here means host, guest 1, guest 2, and so on are all counted separately. Ctrl-click selects the whole fragment regardless of element; Alt-click selects the whole component regardless of element; Shift-click selects that element everywhere, host and guest together; Shift+Ctrl-click narrows that down to just that element within the clicked atom's fragment. <b>Ctrl+Alt-click</b> and <b>Shift+Alt-click</b> are both symmetry-scoped instead (CIF-loaded structures only -- they do nothing on an atom with no symmetry information): Ctrl+Alt selects every currently-displayed atom sharing the clicked atom's asymmetric-unit origin, i.e. every symmetry copy of that one specific atom (see \"CIF and symmetry\" above); Shift+Alt selects every atom -- from any asymmetric-unit position, host or guest -- generated by the same symmetry operator as the clicked atom, regardless of which underlying atom it came from. <b>Shift+Ctrl+Alt-click</b> selects by PART number instead (SHELX .res/.ins structures only -- see \"Loading structures\" above). Every one of these toggles based on whether the clicked atom is currently selected, so clicking the same way again on an already-selected atom deselects the matching set instead. This all works the same way on host and guest atoms. Pressing spacebar, while focus isn't in a text box or other control, selects every atom if none are currently selected, or clears the selection entirely if any are. \"Delete selection\" removes them from whichever layer they belong to.</p>" +
       "<h3>Selection &amp; geometry</h3>" +
-      "<p>The <b>Selection &amp; geometry</b> section shows a live readout for whatever is currently selected. More than 4 atoms selected shows just a count and an element breakdown (C, H, O, ...), since geometry stops meaning anything specific once a selection is a bulk fragment or element rather than a handful of atoms picked in order. For 1 to 4 atoms it shows the last-selected atom's element, fractional coordinates (CIF-based structures only) and Cartesian coordinates, then builds up cumulatively: 2 atoms adds the distance between them; 3 adds the second distance and the angle at the middle atom; 4 adds the third distance, the second angle, and the torsion angle through all four. Order follows the order atoms sit in the underlying atom list (host atoms, then guest atoms), not the order they were clicked in, since atoms here are only ever flagged selected rather than tracked in a separate ordered list -- for an angle or torsion reading with a specific atom intended as the vertex, select that one first isn't guaranteed to control the result; check the readout's own labelling. Where a CIF gives coordinate uncertainties (esds) in parentheses, e.g. <span class='mono'>0.51180(12)</span>, a distance, angle, or torsion is shown in standard notation too, e.g. <span class='mono'>1.542(3)</span> -- propagated independently per coordinate (no cell-parameter or cross-atom covariance, which a CIF doesn't provide), and only for untransformed atoms (no symmetry operation or cell offset applied); a symmetry-grown copy, a SHELX .res/.ins load (which never carries esds at all), or a guest atom simply shows a plain number instead. A mixed selection shows the esd on whichever individual measurements have it and a plain number on the ones that don't.</p>" +
+      "<p>The <b>Selection &amp; geometry</b> section shows a live readout for whatever is currently selected. More than 4 atoms selected shows just a count and an element breakdown (C, H, O, ...), since geometry stops meaning anything specific once a selection is a bulk fragment or element rather than a handful of atoms picked in order. For 1 to 4 atoms it shows the last-selected atom's element, fractional coordinates (CIF-based structures only) and Cartesian coordinates, then builds up cumulatively: 2 atoms adds the distance between them; 3 adds the second distance and the angle at the middle atom; 4 adds the third distance, the second angle, and the torsion angle through all four -- sighting from the second atom to the third, positive means the near bond needs a clockwise turn to eclipse the far bond (the standard IUPAC convention, matching Mercury, Olex2, PLATON, and SHELX). Order follows the order the atoms were actually selected in -- click them one at a time in the sequence that gives the reading you want (e.g. along a bond chain for a meaningful torsion); deselecting one and reselecting it moves it to the end of the order, and a bulk selection (Shift/Ctrl/Alt-click, a macro's SELECT_* commands) that lands on 4 or fewer atoms at once orders them however they happen to be found rather than in any deliberate sequence. The readout's own labelling always shows which element ended up in which position, so a selection that isn't what was intended is visible directly in the row labels. Where a CIF gives coordinate uncertainties (esds) in parentheses, e.g. <span class='mono'>0.51180(12)</span>, a distance, angle, or torsion is shown in standard notation too, e.g. <span class='mono'>1.542(3)</span> -- propagated independently per coordinate (no cell-parameter or cross-atom covariance, which a CIF doesn't provide), and only for untransformed atoms (no symmetry operation or cell offset applied); a symmetry-grown copy, a SHELX .res/.ins load (which never carries esds at all), or a guest atom simply shows a plain number instead. A mixed selection shows the esd on whichever individual measurements have it and a plain number on the ones that don't.</p>" +
       "<p><b>Selection groups</b>, further down the same section, remembers a set of atoms under a name so it can be picked out again later without re-selecting them by hand. Select whatever's wanted (host and guest atoms can be mixed together in one group), type an optional name, and press <b>Save selection as group</b> -- leaving the name blank just calls it \"Selection 1\", \"Selection 2\", and so on. Saving clears the selection that was just saved (the atoms aren't going anywhere -- the new group's own <b>Select</b> button, right below, brings them straight back whenever they're wanted again). Each saved group appears as its own row, showing its name (click into it to rename at any time), how many of its atoms are still actually present in parentheses, and <b>Select</b> / <b>Deselect</b> buttons: <b>Select</b> adds that group's atoms to whatever's already selected, <b>Deselect</b> removes just that group's atoms, so several groups can be combined by selecting each in turn without ever clobbering an unrelated selection already in progress. The small <b>&times;</b> deletes the saved group itself -- the atoms it referred to are completely untouched either way. An atom can belong to any number of groups at once, or none, entirely independent of host/guest membership; if an atom belonging to a group is later deleted from the structure, the group simply carries fewer atoms from then on (the count in parentheses drops to match) -- the rest of the group is unaffected, and once every atom it ever referred to has been deleted, the empty group itself disappears from the list automatically rather than sitting there at &ldquo;(0)&rdquo;. Selection groups are saved as part of the project file, the same as guest groups.</p>" +
       "<h3>Moving atoms between host and guest</h3>" +
       "<p>A structure can be loaded as a single combined file and split afterwards, instead of always requiring separate host and guest files: select the atoms that belong on the other side, choose a destination from the dropdown (Host, an existing guest component, or \"New guest group\"), and press \"Move selection to\". This is exactly the same selection mechanism used for deletion, so the same click and ctrl-click rules apply. A moved atom keeps its radius but takes on its new layer's colour rules, snapshotting whatever the current host or guest default is at the moment it arrives.</p>" +
