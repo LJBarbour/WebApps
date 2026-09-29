@@ -2463,7 +2463,7 @@ select.sel:focus{border-color:var(--accent)}
 
   var scene, camera, trueOrthoCam, pseudoOrthoCam, walkCam, activeCam, renderer, walkHeadlamp;
   var clipPlane; /* single global cutaway plane (Display > Clipping Plane) -- its normal always tracks the current view direction, see updateClipPlane() */
-  var atomsGroup, bondsGroup, surfaceGroup, guestAtomsGroup, guestBondsGroup, hbondsGroup, selectionGroup, unitCellGroup, bondEditGroup, voidGroup, ringGroup, molSurfaceGroup, labelGroup, coordPolyGroup, coordPolyGuestGroup, molNeighborGroup;
+  var atomsGroup, bondsGroup, surfaceGroup, guestAtomsGroup, guestBondsGroup, hbondsGroup, selectionGroup, unitCellGroup, bondEditGroup, voidGroup, ringGroup, molSurfaceGroup, labelGroup, coordPolyGroup, coordPolyGuestGroup, molNeighborGroup, lsPlaneGroup;
   /* Grow > Molecular neighbourhood's own preview shell -- NOT part of the
      model (never touches state.atoms/state.guestAtoms) and deliberately
      NOT recomputed on every render the way bonds/H-bonds are: the
@@ -2784,6 +2784,26 @@ select.sel:focus{border-color:var(--accent)}
        element vs one colour" choice already offered for bonds (see
        buildBondColorByRow). */
     showCoordPolyhedra: false, coordPolyOpacity: 1.0, coordPolyColorMode: "element", coordPolyColor: 0xC9A227, coordPolyEdgeThickness: 0.035,
+    /* Style > L.S. Planes -- a least-squares (orthogonal-regression) mean
+       plane fitted through whichever 3+ atoms are selected when "New plane"
+       is pressed (see createLsPlane()). Each entry is a one-time snapshot of
+       that fit, like a molecular surface -- it is NOT recomputed if those
+       atoms later move -- {id, atomUids (kept only for the readout, not
+       re-resolved to live atoms), center/normal/u/v (centroid, unit normal,
+       and the two in-plane principal axes spanning it), verts2D (each
+       fitted atom's own (u, v) projection, angularly sorted -- the rendered
+       polygon's actual vertices, see renderLsPlaneMeshes()), atomCount, rms
+       (root-mean-square perpendicular deviation of the fitted atoms from
+       the plane, the standard crystallographic "quality of fit" figure),
+       visible, color}. Colour precedence mirrors molSurfaces exactly:
+       lsPlaneColorLinkAll's shared colour > a plane's own color > the
+       shared VOID_COMPONENT_PALETTE default (see colorForLsPlane()).
+       showLsPlanes is a single master on/off (default on, like every other
+       "Show ___" toggle) that hides every plane at once regardless of its
+       own individual visible flag -- for hiding the whole feature
+       temporarily without touching (or losing track of) each plane's own
+       per-row show/hide state. */
+    lsPlanes: [], lsPlaneColorLinkAll: false, lsPlaneLinkedColor: null, lsPlaneOpacity: 0.55, showLsPlanes: true,
     /* Visual Effects > Material's roughness/metalness/reflection-strength
        sliders only ever drove atoms/bonds (elMaterial's shared matCache) --
        coordination polyhedra, the molecular surface, and void/channel
@@ -3783,6 +3803,7 @@ select.sel:focus{border-color:var(--accent)}
     coordPolyGroup = new THREE.Group(); scene.add(coordPolyGroup);
     coordPolyGuestGroup = new THREE.Group(); scene.add(coordPolyGuestGroup);
     molNeighborGroup = new THREE.Group(); scene.add(molNeighborGroup);
+    lsPlaneGroup = new THREE.Group(); scene.add(lsPlaneGroup);
     window.addEventListener("resize", onResize); onResize(); animate();
   }
   function buildEnvironment() {
@@ -5560,7 +5581,7 @@ select.sel:focus{border-color:var(--accent)}
         var cc = K.fracToCart(state.cifFracToCart, [0.5, 0.5, 0.5]);
         state.viewOffset = [-cc[0], -cc[1], -cc[2]];
       }
-      renderSurface(); renderVoidMeshes(); renderUnitCell(); renderMolSurfaceMeshes();
+      renderSurface(); renderVoidMeshes(); renderUnitCell(); renderMolSurfaceMeshes(); renderLsPlaneMeshes();
       return;
     }
     var a;
@@ -5587,11 +5608,19 @@ select.sel:focus{border-color:var(--accent)}
        unit cell box is drawn the same way (see renderUnitCell()'s own
        `off = centroid()`) -- without this, changing centering mode (or
        any other trigger of a recompute) visibly detaches the cell box
-       from the atoms it's supposed to enclose. */
+       from the atoms it's supposed to enclose. L.S. planes (renderLsPlaneMeshes)
+       are the same again -- each plane's own `center` is stored in that
+       same absolute frame (see createLsPlane()), so without a call here
+       deleting an atom (which shifts the offset via the atom-count-
+       dependent average above) left every existing plane rendered at its
+       old position while the atoms/bonds jumped to the new one, reading as
+       "the plane shifted" even though the plane's own stored geometry never
+       actually changed. */
     renderSurface();
     renderVoidMeshes();
     renderUnitCell();
     renderMolSurfaceMeshes();
+    renderLsPlaneMeshes();
   }
   function applySelectedAtomsCentering() {
     var sel = getSelectedAtomObjects();
@@ -5600,7 +5629,7 @@ select.sel:focus{border-color:var(--accent)}
     for (var i = 0; i < sel.length; i++) { x += sel[i].x; y += sel[i].y; z += sel[i].z; }
     state.viewOffset = [-x / sel.length, -y / sel.length, -z / sel.length];
     clearSelection();
-    renderStructure(); renderSurface(); renderVoidMeshes(); renderUnitCell(); renderMolSurfaceMeshes();
+    renderStructure(); renderSurface(); renderVoidMeshes(); renderUnitCell(); renderMolSurfaceMeshes(); renderLsPlaneMeshes();
     recordMacroCommand("CENTER_SELECTED");
     setStatus("Centred on " + sel.length + " selected atom" + (sel.length === 1 ? "" : "s") + ".", false);
   }
@@ -5609,7 +5638,7 @@ select.sel:focus{border-color:var(--accent)}
     if (!isFinite(fx) || !isFinite(fy) || !isFinite(fz)) { setStatus("Enter numeric x, y, z fractional coordinates.", true); return; }
     var cc = K.fracToCart(state.cifFracToCart, [fx, fy, fz]);
     state.viewOffset = [-cc[0], -cc[1], -cc[2]];
-    renderStructure(); renderSurface(); renderVoidMeshes(); renderUnitCell(); renderMolSurfaceMeshes();
+    renderStructure(); renderSurface(); renderVoidMeshes(); renderUnitCell(); renderMolSurfaceMeshes(); renderLsPlaneMeshes();
     recordMacroCommand("CENTER " + fx + "," + fy + "," + fz);
     setStatus("Centred on fractional coordinates (" + fx + ", " + fy + ", " + fz + ").", false);
   }
@@ -7749,6 +7778,217 @@ select.sel:focus{border-color:var(--accent)}
     clearGroup(molSurfaceGroup);
     buildMolSurfaceTable();
     setStatus("Cleared all molecular surfaces.", false);
+  }
+  var nextLsPlaneId = 1;
+  /* Style > L.S. Planes -- "New plane" (enabled once 3+ atoms are selected,
+     see updateSelectionInfo()). Fits the standard orthogonal-regression
+     (total-least-squares) mean plane: the plane through the centroid whose
+     normal minimizes the summed SQUARED perpendicular distance to every
+     fitted atom -- exactly the same "mean plane" Mercury/PLATON/SHELXL all
+     report, not a plane fixed by any 3 of the atoms with the rest merely
+     tested against it. That normal is the eigenvector of the atoms' own
+     3x3 covariance matrix with the SMALLEST eigenvalue (K.adpEigenSym3, the
+     same Jacobi symmetric-eigensolver already used for ADP ellipsoid
+     principal axes -- an eigen-decomposition is an eigen-decomposition
+     regardless of which physical quantity the matrix represents); the two
+     LARGEST-eigenvalue eigenvectors span the plane itself and give it an
+     orthonormal (u, v) coordinate system centred on the centroid. The
+     rendered shape is a polygon through each fitted atom's own (u, v)
+     projection -- not a bounding rectangle -- so 6 atoms roughly arranged in
+     a ring render as a hexagon with vertices approximately where the atoms
+     themselves are (and exactly there for a perfectly planar group, since
+     the projection then loses nothing). Vertices are sorted by angle around
+     the centroid before rendering, which recovers the atoms' own ring order
+     regardless of the order they happened to be selected/clicked in. The
+     smallest eigenvalue is itself exactly the summed squared perpendicular
+     deviation (a quadratic form n^T S n evaluated at its own minimizing
+     eigenvector), so the rms deviation falls out for free as
+     sqrt(that eigenvalue / atomCount) -- no separate pass over the atoms
+     needed. Like a molecular surface, this is a one-time SNAPSHOT of the fit
+     at the moment it's created, not something that tracks and refits if the
+     source atoms are later moved. */
+  function createLsPlane() {
+    var atoms = getSelectedAtomObjects().filter(function (a) { return !a.isCentroid; });
+    if (atoms.length < 3) { setStatus("Select at least 3 atoms first.", true); return; }
+    var n = atoms.length, i;
+    var cx = 0, cy = 0, cz = 0;
+    for (i = 0; i < n; i++) { cx += atoms[i].x; cy += atoms[i].y; cz += atoms[i].z; }
+    cx /= n; cy /= n; cz /= n;
+    var Sxx = 0, Syy = 0, Szz = 0, Sxy = 0, Sxz = 0, Syz = 0;
+    for (i = 0; i < n; i++) {
+      var dx = atoms[i].x - cx, dy = atoms[i].y - cy, dz = atoms[i].z - cz;
+      Sxx += dx * dx; Syy += dy * dy; Szz += dz * dz;
+      Sxy += dx * dy; Sxz += dx * dz; Syz += dy * dz;
+    }
+    var eig = K.adpEigenSym3([[Sxx, Sxy, Sxz], [Sxy, Syy, Syz], [Sxz, Syz, Szz]]);
+    var e = eig.vec; /* column 0/1/2 = eigenvectors for the largest/middle/smallest eigenvalue, see adpEigenSym3's own comment */
+    var u = new THREE.Vector3(e[0][0], e[1][0], e[2][0]).normalize();
+    var v = new THREE.Vector3(e[0][1], e[1][1], e[2][1]).normalize();
+    var normal = new THREE.Vector3(e[0][2], e[1][2], e[2][2]).normalize();
+    var verts = [];
+    for (i = 0; i < n; i++) {
+      var ddx = atoms[i].x - cx, ddy = atoms[i].y - cy, ddz = atoms[i].z - cz;
+      var pu = ddx * u.x + ddy * u.y + ddz * u.z, pv = ddx * v.x + ddy * v.y + ddz * v.z;
+      verts.push([pu, pv, Math.atan2(pv, pu)]);
+    }
+    verts.sort(function (a, b) { return a[2] - b[2]; });
+    var verts2D = verts.map(function (p) { return [p[0], p[1]]; });
+    var rms = Math.sqrt(Math.max(eig.values[2], 0) / n);
+    var id = nextLsPlaneId++;
+    state.lsPlanes.push({
+      id: id, atomUids: atoms.map(function (a) { return a.uid; }),
+      center: [cx, cy, cz], normal: [normal.x, normal.y, normal.z],
+      u: [u.x, u.y, u.z], v: [v.x, v.y, v.z], verts2D: verts2D,
+      atomCount: n, rms: rms, visible: true, color: null
+    });
+    renderLsPlaneMeshes();
+    buildLsPlaneTable();
+    clearSelection();
+    setStatus("Added plane #" + id + " through " + n + " atoms (rms deviation " + rms.toFixed(4) + " " + U.ang + ").", false);
+  }
+  function colorForLsPlaneDefault(id) { return VOID_COMPONENT_PALETTE[id % VOID_COMPONENT_PALETTE.length]; }
+  function colorForLsPlane(id) {
+    if (state.lsPlaneColorLinkAll) return state.lsPlaneLinkedColor != null ? cssToHex(state.lsPlaneLinkedColor) : colorForLsPlaneDefault(id);
+    var p = state.lsPlanes.filter(function (x) { return x.id === id; })[0];
+    return (p && p.color != null) ? cssToHex(p.color) : colorForLsPlaneDefault(id);
+  }
+  function setLsPlaneColorLive(id, hex) {
+    if (state.lsPlaneColorLinkAll) { state.lsPlaneLinkedColor = hexToCss(hex); }
+    else {
+      var p = state.lsPlanes.filter(function (x) { return x.id === id; })[0];
+      if (p) p.color = hexToCss(hex);
+    }
+    renderLsPlaneMeshes();
+  }
+  function setLsPlaneColorLinkAll(v) {
+    if (v && state.lsPlanes.length && state.lsPlaneLinkedColor == null) {
+      state.lsPlaneLinkedColor = hexToCss(colorForLsPlane(state.lsPlanes[0].id));
+    }
+    state.lsPlaneColorLinkAll = v;
+    renderLsPlaneMeshes();
+    buildLsPlaneTable();
+    buildLsPlaneColorLinkRow();
+  }
+  function setLsPlaneVisible(id, vis) {
+    var p = state.lsPlanes.filter(function (x) { return x.id === id; })[0];
+    if (p) p.visible = vis;
+    renderLsPlaneMeshes();
+  }
+  function deleteLsPlane(id) {
+    state.lsPlanes = state.lsPlanes.filter(function (x) { return x.id !== id; });
+    renderLsPlaneMeshes();
+    buildLsPlaneTable();
+  }
+  function clearAllLsPlanes() {
+    state.lsPlanes = [];
+    renderLsPlaneMeshes();
+    buildLsPlaneTable();
+    setStatus("Cleared all L.S. planes.", false);
+  }
+  /* Builds a flat fan-triangulated polygon geometry in the plane's own LOCAL
+     (u, v, 0) coordinates -- one triangle per pair of adjacent perimeter
+     vertices, all sharing the centroid (0,0,0) as their third vertex -- so
+     the mesh's actual outline follows wherever the fitted atoms themselves
+     sit (angularly sorted, see createLsPlane()'s own comment), rather than
+     a generic bounding rectangle. Correct winding (consistent (0,0,1) local
+     normal throughout) follows directly from verts2D already being sorted
+     by ascending angle, the standard right-hand-rule fan construction. A
+     flat, non-self-overlapping polygon like this has no depth-sorting
+     reason to split into separate BackSide/FrontSide meshes the way a
+     closed molecular-surface/void blob does -- one THREE.DoubleSide
+     transparent mesh reads correctly from either side. */
+  function lsPlaneGeometry(verts2D) {
+    var n = verts2D.length;
+    var positions = new Float32Array((n + 1) * 3), normals = new Float32Array((n + 1) * 3);
+    for (var i = 0; i < n; i++) {
+      positions[(i + 1) * 3] = verts2D[i][0]; positions[(i + 1) * 3 + 1] = verts2D[i][1]; positions[(i + 1) * 3 + 2] = 0;
+    }
+    for (var k = 0; k < (n + 1) * 3; k += 3) normals[k + 2] = 1;
+    var indices = [];
+    for (var j = 0; j < n; j++) indices.push(0, j + 1, ((j + 1) % n) + 1);
+    var geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
+    geo.setIndex(indices);
+    return geo;
+  }
+  function renderLsPlaneMeshes() {
+    clearGroup(lsPlaneGroup);
+    if (!state.lsPlanes.length) return;
+    var off = centroid();
+    var isTransparent = state.lsPlaneOpacity < 0.999;
+    state.lsPlanes.forEach(function (p) {
+      var geo = lsPlaneGeometry(p.verts2D);
+      var mat = new THREE.MeshStandardMaterial({
+        color: colorForLsPlane(p.id), roughness: 0.5, metalness: 0.0,
+        transparent: isTransparent, opacity: state.lsPlaneOpacity,
+        depthWrite: !isTransparent, side: THREE.DoubleSide
+      });
+      var mesh = new THREE.Mesh(geo, mat);
+      mesh.visible = p.visible && state.showLsPlanes;
+      var uVec = new THREE.Vector3(p.u[0], p.u[1], p.u[2]);
+      var vVec = new THREE.Vector3(p.v[0], p.v[1], p.v[2]);
+      var nVec = new THREE.Vector3(p.normal[0], p.normal[1], p.normal[2]);
+      mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(uVec, vVec, nVec));
+      mesh.position.set(p.center[0] + off[0], p.center[1] + off[1], p.center[2] + off[2]);
+      lsPlaneGroup.add(mesh);
+    });
+  }
+  function buildLsPlaneTable() {
+    var body = document.getElementById("lsPlaneResultsBody");
+    if (!body) return;
+    var clearBtn = document.getElementById("lsPlaneClearBtn");
+    if (clearBtn) clearBtn.disabled = !state.lsPlanes.length;
+    body.innerHTML = "";
+    if (!state.lsPlanes.length) {
+      var tr0 = document.createElement("tr");
+      var td0 = document.createElement("td"); td0.colSpan = 4; td0.textContent = "Select 3+ atoms and click New plane.";
+      tr0.appendChild(td0); body.appendChild(tr0);
+      return;
+    }
+    state.lsPlanes.forEach(function (p) {
+      var tr = document.createElement("tr");
+      tr.className = "void-row" + (p.visible ? "" : " dim");
+      var tdChk = document.createElement("td");
+      var chk = document.createElement("input"); chk.type = "checkbox"; chk.checked = p.visible;
+      chk.addEventListener("change", function () { setLsPlaneVisible(p.id, chk.checked); tr.className = "void-row" + (chk.checked ? "" : " dim"); });
+      tdChk.appendChild(chk); tr.appendChild(tdChk);
+      var tdLabel = document.createElement("td");
+      tdLabel.textContent = "#" + p.id + " (" + p.atomCount + " atoms, rms " + p.rms.toFixed(4) + " " + U.ang + ")";
+      tr.appendChild(tdLabel);
+      var tdColor = document.createElement("td");
+      if (!state.lsPlaneColorLinkAll) {
+        var sw = colorSwatch(colorForLsPlane(p.id), function (hex) { setLsPlaneColorLive(p.id, hex); });
+        sw.addEventListener("click", function (e) { e.stopPropagation(); });
+        tdColor.appendChild(sw);
+      }
+      tr.appendChild(tdColor);
+      var tdDel = document.createElement("td");
+      var delBtn = el("button", "btn mini", "×");
+      delBtn.addEventListener("click", function (e) { e.stopPropagation(); deleteLsPlane(p.id); });
+      tdDel.appendChild(delBtn); tr.appendChild(tdDel);
+      tr.addEventListener("click", function (e) { if (e.target !== chk) { chk.checked = !chk.checked; chk.dispatchEvent(new Event("change")); } });
+      body.appendChild(tr);
+    });
+  }
+  /* Same idea as Molecular Surface's own link row: the shared colour pair
+     applies to every plane at once, so per-row swatches would be redundant
+     while linked -- the row's colour cell stays empty and this one shared
+     swatch appears here instead. */
+  function buildLsPlaneColorLinkRow() {
+    var row = document.getElementById("lsPlaneColorLinkRow");
+    if (!row) return;
+    row.innerHTML = "";
+    var linkRow = el("div", "ctl-inline"); linkRow.style.margin = "4px 0";
+    var linkLbl = el("label", "toggle");
+    var linkChk = document.createElement("input"); linkChk.type = "checkbox"; linkChk.checked = state.lsPlaneColorLinkAll;
+    linkChk.addEventListener("change", function () { setLsPlaneColorLinkAll(linkChk.checked); });
+    linkLbl.appendChild(linkChk); linkLbl.appendChild(el("span", null, "Same colour for all"));
+    linkRow.appendChild(linkLbl);
+    if (state.lsPlaneColorLinkAll) {
+      linkRow.appendChild(colorSwatch(colorForLsPlane(state.lsPlanes.length ? state.lsPlanes[0].id : 0), function (hex) { setLsPlaneColorLive(null, hex); }));
+    }
+    row.appendChild(linkRow);
   }
   function voidNearbyAtoms(paddedAtoms, regionMin, regionMax, margin) {
     var out = [];
@@ -11619,11 +11859,13 @@ select.sel:focus{border-color:var(--accent)}
     var centroidBtn = document.getElementById("centroidBtn");
     var molVolBtn = document.getElementById("molVolBtn");
     var molSurfCalcBtn2 = document.getElementById("molSurfCalcBtn");
+    var lsPlaneNewBtn2 = document.getElementById("lsPlaneNewBtn");
     if (vecBtn) vecBtn.disabled = (c.host + c.guest !== 2);
     if (planeBtn) planeBtn.disabled = (c.host + c.guest !== 3);
     if (centroidBtn) centroidBtn.disabled = (c.host + c.guest < 2);
     if (molVolBtn) molVolBtn.disabled = (c.host + c.guest < 1);
     if (molSurfCalcBtn2) molSurfCalcBtn2.disabled = (c.host + c.guest < 1);
+    if (lsPlaneNewBtn2) lsPlaneNewBtn2.disabled = (c.host + c.guest < 3);
     var moveToAsuBtn2 = document.getElementById("moveToAsuBtn");
     if (moveToAsuBtn2) moveToAsuBtn2.disabled = (c.host + c.guest === 0) || !!state.symmetryForgotten;
     var reassignElBtn = document.getElementById("reassignElBtn");
@@ -14104,10 +14346,15 @@ select.sel:focus{border-color:var(--accent)}
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillText(text, 64, 68);
     var tex = new THREE.CanvasTexture(canvas);
-    var mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+    /* Genuinely positioned AT the unit cell corner, so it depth-tests
+       normally against everything else in the scene (an atom, a plane, the
+       cell's own edges) instead of always painting on top regardless of
+       what's actually in front of it -- a corner label behind a nearer
+       object should be hidden by it, the same as any other real thing
+       sitting at that position would be. */
+    var mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
     var sprite = new THREE.Sprite(mat);
     sprite.scale.set(worldSize, worldSize, worldSize);
-    sprite.renderOrder = 20; /* always readable, like a reference overlay rather than a physical object */
     return sprite;
   }
   function renderUnitCell() {
@@ -14786,6 +15033,7 @@ select.sel:focus{border-color:var(--accent)}
     clearGroup(surfaceGroup);
     clearVoidResultsSilent();
     state.molSurfaces = []; state._molSurfaceIsoById = {}; clearGroup(molSurfaceGroup);
+    state.lsPlanes = []; clearGroup(lsPlaneGroup); buildLsPlaneTable();
     recomputeViewOffset();
     renderStructure(); renderSurface(); renderUnitCell(); updateHostInfo(); updateGuestInfo(); updateStructuralParamsInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); refreshReassignElementOptions(); buildGuestGroupsUI(); buildSelectionGroupsUI(); refreshBondCleanupElements(); updateSelectionInfo();
     refreshSymmetryUI();
@@ -14820,6 +15068,7 @@ select.sel:focus{border-color:var(--accent)}
     state.centeringMode = "all";
     clearVoidResultsSilent();
     state.molSurfaces = []; state._molSurfaceIsoById = {}; clearGroup(molSurfaceGroup);
+    state.lsPlanes = []; clearGroup(lsPlaneGroup); buildLsPlaneTable();
     var loadCenteringSel = document.getElementById("centeringModeSelect");
     if (loadCenteringSel) {
       loadCenteringSel.value = "all";
@@ -16736,6 +16985,8 @@ select.sel:focus{border-color:var(--accent)}
       molSurfaceProbeRadius: state.molSurfaceProbeRadius, molSurfaceOpacity: state.molSurfaceOpacity,
       molSurfaces: state.molSurfaces, molSurfaceColorLinkAll: state.molSurfaceColorLinkAll, molSurfaceLinkedColor: state.molSurfaceLinkedColor,
       molSurfaceIsoById: molSurfaceIsoForSave, nextMolSurfaceId: nextMolSurfaceId,
+      lsPlanes: state.lsPlanes, lsPlaneColorLinkAll: state.lsPlaneColorLinkAll, lsPlaneLinkedColor: state.lsPlaneLinkedColor,
+      lsPlaneOpacity: state.lsPlaneOpacity, nextLsPlaneId: nextLsPlaneId, showLsPlanes: state.showLsPlanes,
       voidComponentMeshes: voidComponentMeshesForSave,
       camera: { camDist: camDist, camOrient: [camOrient.x, camOrient.y, camOrient.z, camOrient.w], camTarget: [camTarget.x, camTarget.y, camTarget.z] },
       bgColor: state.bgColor, cameraMode: state.cameraMode, depthScalingAngle: state.depthScalingAngle, highDetail: state.highDetail,
@@ -17066,6 +17317,20 @@ select.sel:focus{border-color:var(--accent)}
     else clearVoidResultsSilent();
     if (data.molSurfaces && data.molSurfaces.length) restoreMolSurfacesFromSnapshot(data);
     else { state.molSurfaces = []; state._molSurfaceIsoById = {}; clearGroup(molSurfaceGroup); buildMolSurfaceTable(); }
+    /* Unlike molSurfaces, a plane's entire geometry (center/normal/u/v/half-
+       extents) already lives in state.lsPlanes itself -- there's no separate
+       large mesh-data store (no _lsPlaneIsoById equivalent) to restore
+       alongside it, so this is a plain field copy plus a re-render. */
+    state.lsPlanes = data.lsPlanes || [];
+    if (typeof data.lsPlaneColorLinkAll === "boolean") state.lsPlaneColorLinkAll = data.lsPlaneColorLinkAll;
+    state.lsPlaneLinkedColor = data.lsPlaneLinkedColor || null;
+    if (typeof data.lsPlaneOpacity === "number") state.lsPlaneOpacity = data.lsPlaneOpacity;
+    if (typeof data.nextLsPlaneId === "number") nextLsPlaneId = data.nextLsPlaneId;
+    var lsPlaneOpacitySliderRestore = document.getElementById("lsPlaneOpacitySlider"); if (lsPlaneOpacitySliderRestore) lsPlaneOpacitySliderRestore.value = state.lsPlaneOpacity;
+    var lsPlaneOpacityNumRestore = document.getElementById("lsPlaneOpacityNum"); if (lsPlaneOpacityNumRestore) lsPlaneOpacityNumRestore.value = state.lsPlaneOpacity;
+    if (typeof data.showLsPlanes === "boolean") state.showLsPlanes = data.showLsPlanes;
+    var showLsPlanesTgRestore = document.getElementById("showLsPlanesTg"); if (showLsPlanesTgRestore) showLsPlanesTgRestore.checked = state.showLsPlanes;
+    renderLsPlaneMeshes(); buildLsPlaneTable(); buildLsPlaneColorLinkRow();
 
     /* re-derive every atom's actual radius/colour from the current (never
        clobbered by the file above) element preferences, rather than trusting
@@ -17477,6 +17742,34 @@ select.sel:focus{border-color:var(--accent)}
     coordColorRow.appendChild(byElLbl); coordColorRow.appendChild(singleLbl2);
     coordColorRow.appendChild(colorSwatch(state.coordPolyColor, function (hex) { state.coordPolyColor = hex; renderStructure(); }));
     coordPolyBody.appendChild(coordColorRow);
+
+    /* ---- L.S. Planes ----
+       "New plane" (enabled by updateSelectionInfo() once 3+ atoms are
+       selected) fits and accumulates a least-squares mean plane -- see
+       createLsPlane()'s own comment for the maths. Deliberately modelled on
+       Molecular Surface's own list (button + opacity slider + "same colour
+       for all" link row + per-row checkbox/colour/delete table), since both
+       are "keep adding named, individually-hideable/colourable geometry
+       derived from a selection" features -- just living under Style rather
+       than as their own top-level section, since a plane is closer to an
+       appearance/annotation aid than an analytical result. */
+    var lsPlaneBody = subsection(styleC, "L.S. Planes", false);
+    var showLsPlanesTg = toggle(lsPlaneBody, "Show planes", state.showLsPlanes, function (b) { state.showLsPlanes = b; renderLsPlaneMeshes(); });
+    showLsPlanesTg.id = "showLsPlanesTg";
+    var lsPlaneRow = el("div", "btnrow");
+    var lsPlaneNewBtn = button(lsPlaneRow, "New plane", "ghost", createLsPlane); lsPlaneNewBtn.id = "lsPlaneNewBtn"; lsPlaneNewBtn.disabled = true;
+    var lsPlaneClearBtn = button(lsPlaneRow, "Clear all", "ghost", clearAllLsPlanes); lsPlaneClearBtn.id = "lsPlaneClearBtn"; lsPlaneClearBtn.disabled = true;
+    lsPlaneBody.appendChild(lsPlaneRow);
+    lsPlaneNewBtn.title = "Select 3 or more atoms first, then fit and add a least-squares mean plane through them.";
+    var lsPlaneOpacitySlider = slider(lsPlaneBody, "Plane opacity", 0.05, 1.0, 0.05, state.lsPlaneOpacity, "", function (v) { state.lsPlaneOpacity = v; renderLsPlaneMeshes(); });
+    lsPlaneOpacitySlider.range.id = "lsPlaneOpacitySlider";
+    lsPlaneOpacitySlider.num.id = "lsPlaneOpacityNum";
+    var lsPlaneColorLinkRow = el("div"); lsPlaneColorLinkRow.id = "lsPlaneColorLinkRow"; lsPlaneBody.appendChild(lsPlaneColorLinkRow);
+    var lsPlaneTable = document.createElement("table"); lsPlaneTable.id = "lsPlaneResultsTable";
+    lsPlaneTable.innerHTML = "<thead><tr><th></th><th></th><th></th><th></th></tr></thead><tbody id=\"lsPlaneResultsBody\"></tbody>";
+    lsPlaneBody.appendChild(lsPlaneTable);
+    buildLsPlaneColorLinkRow();
+    buildLsPlaneTable();
 
     /* ---- Host ---- */
     var hinfo = el("div", "readout"); hinfo.id = "hostInfo"; hinfo.innerHTML = "&mdash;"; hostTab.appendChild(hinfo);
@@ -19251,7 +19544,7 @@ select.sel:focus{border-color:var(--accent)}
       "<h3>Molecular neighbourhood</h3>" +
       "<p>A different way of growing: rather than adding atoms outright, it previews what's nearby first, so a direction can be chosen before committing to it -- useful for a framework or polymer that could otherwise be extended in several different directions at once. Enter a <b>Sphere of inclusion</b> radius, then press the button below it (solid red while active, exactly like Mouse's own grow-mode button). Every symmetry-generated atom not currently displayed, but within that radius of at least one atom that already is (host or guest, whichever layer it would belong to), is shown as a small unbonded sphere, joined by a dotted line to each real atom it's close enough to -- these are a preview only, never added to the model, and cost nothing to leave on screen since they're recomputed only when the mode is turned on, the radius changes, or a fragment is added, not on every frame. <b>Black nodes</b> (ticked by default) shows every one of these preview spheres in plain black, keeping them visually distinct from anything already in the model; unticking it instead colours each one the same as the real atom it represents (its usual CPK or custom colour), which makes it far easier to judge what a given preview position actually is -- e.g. picking out a lone counter-ion's own colour among a crowd of hydrogens -- at the cost of that “obviously still just a preview” distinctness black gives. Either way, the dotted contact lines themselves stay black, and the preview spheres' own radii still scale with each atom's own display radius, exactly like a real atom would.</p>" +
       "<p>Clicking one of these black spheres adds the whole connected fragment it belongs to -- the same Fragment-unit growth Mouse's own grow mode uses -- and the preview then refreshes around the newly-larger structure: any black sphere the new fragment happened to reach simply stops being previewed (it's a real atom now), and a fresh ring of black spheres appears around whatever's now the edge of the structure. Repeating this lets a structure be built out one fragment at a time, following whichever direction actually looks interesting, rather than growing everything within reach at once. Leaving Molecular neighbourhood -- pressing its button again, closing its own tab, switching to Mouse/Pack/Symmetry, or opening a different section entirely -- discards whatever black spheres are still on screen; nothing about them is ever kept. Like grow mode, it needs a CIF that still has its symmetry information.</p>" +
-      "<p>The <b>Display</b> section, just below Grow, is always available. Its own general settings hold <b>Show hydrogen atoms</b> and <b>ASU only</b> as one paired row, then <b>Show unit cell</b> paired with <b>Show H bonds</b>; a <b>Background colour</b> swatch; <b>Centering</b> (All/Visible/Selected atoms, with an Apply button that only appears for \"Selected atoms\", since that mode is otherwise frozen at whatever it was last applied to); <b>Set scale</b>, an arbitrary whole-number reference for the current zoom level -- bigger means more zoomed in, updates live as you zoom, and can be typed into directly (it carries no physical unit; its purpose is matching the same apparent zoom between different structures rather than measuring anything); and duplicate <b>Select all</b> / <b>Clear selection</b> / <b>Hide selection</b> / <b>Unhide all</b> buttons for convenience, identical to the ones in Structure &gt; Edit atoms. Nested inside Display: <b>Direction</b>, a <b>View direction</b> set of crystallographic view shortcuts -- buttons for looking straight down each cell axis (a, b, c) and perpendicular to each pair-wise plane (bc, ac, ab), a general <b>[hkl]</b> field for viewing along any specific direction entered as its own three numbers, and <b>View along vector</b> / <b>View perpendicular to plane</b> (see \"Viewing along a vector or a plane\" below), which orient the camera from a selection of atoms instead. <b>Unit cell</b> holds a <b>Label axes</b> toggle for the a/b/c corner labels, a <b>RGB axes</b> option to colour the a/b/c edges red/green/blue, the cell's own <b>Cell colour</b>, and <b>line thickness</b> -- the show/hide toggle itself lives in Display's general settings above, not here.</p>" +
+      "<p>The <b>Display</b> section, just below Grow, is always available. Its own general settings hold <b>Show hydrogen atoms</b> and <b>ASU only</b> as one paired row, then <b>Show unit cell</b> paired with <b>Show H bonds</b>; a <b>Background colour</b> swatch; <b>Centering</b> (All/Visible/Selected atoms, with an Apply button that only appears for \"Selected atoms\", since that mode is otherwise frozen at whatever it was last applied to); <b>Set scale</b>, an arbitrary whole-number reference for the current zoom level -- bigger means more zoomed in, updates live as you zoom, and can be typed into directly (it carries no physical unit; its purpose is matching the same apparent zoom between different structures rather than measuring anything); and duplicate <b>Select all</b> / <b>Clear selection</b> / <b>Hide selection</b> / <b>Unhide all</b> buttons for convenience, identical to the ones in Structure &gt; Edit atoms. Nested inside Display: <b>Direction</b>, a <b>View direction</b> set of crystallographic view shortcuts -- buttons for looking straight down each cell axis (a, b, c) and perpendicular to each pair-wise plane (bc, ac, ab), a general <b>[hkl]</b> field for viewing along any specific direction entered as its own three numbers, and <b>View along vector</b> / <b>View perpendicular to plane</b> (see \"Viewing along a vector or a plane\" below), which orient the camera from a selection of atoms instead. <b>Unit cell</b> holds a <b>Label axes</b> toggle for the a/b/c corner labels, a <b>RGB axes</b> option to colour the a/b/c edges red/green/blue, the cell's own <b>Cell colour</b>, and <b>line thickness</b> -- the show/hide toggle itself lives in Display's general settings above, not here. Each corner label sits genuinely at that corner in 3D and is occluded normally by anything nearer the camera (an atom, an L.S. plane, ...), not painted on top of everything regardless of what's actually in front of it.</p>" +
       "<p>Growing by clicking (atom or fragment), by sphere of inclusion, by an explicit packing range (Pack), and by a specific chosen symmetry operation or translation (Symmetry) are all implemented, as described above. Only CIFs with an explicit list of symmetry operators are supported -- one that gives only a space group name or number, with no operator list, is read as P1 (no symmetry) since looking up operators from thousands of possible space group settings isn't implemented.</p>" +
       "<h3>Host and guest are independent layers</h3>" +
       "<p>Loading a new host CIF starts fresh, clearing any guest along with the old host. Within one loaded structure, though, host and guest stay independent: deleting or hiding atoms in one layer (Structure &gt; Edit atoms) never affects the other. \"Remove host\" and \"Remove all guests\" each ask for confirmation first, since for a CIF-based structure they permanently delete the relevant asymmetric unit atoms along with everything grown from them by symmetry, not just what happens to be currently displayed. Each only ever clears its own layer.</p>" +
@@ -19289,6 +19582,8 @@ select.sel:focus{border-color:var(--accent)}
       "<p>\"Reassign element to\", just below \"Move selection to\", changes the element of the selected atom(s) to any element in the periodic table, whether or not that element was already present in the structure -- a new one is picked up automatically, with its own colour and radius, the moment it's assigned. Reassigning a centroid turns it into a real atom of that element from then on: it stops being a fixed white marker and starts looking and behaving like any other atom in whichever layer it belongs to.</p>" +
       "<h3>Viewing along a vector or a plane</h3>" +
       "<p>Select exactly two atoms and \"View along vector\" (Display &gt; Direction) becomes available, orienting the camera to look straight along the line through them. Select exactly three and \"View perpendicular to plane\" becomes available instead, orienting the camera face-on to the plane they define. Both only ever rotate the view -- they never move the zoom level or what the camera is centred on -- and each is disabled again the moment the selection count isn't exactly right for it.</p>" +
+      "<h3>L.S. planes (Style)</h3>" +
+      "<p><b>Show planes</b>, the first control in Style &gt; L.S. Planes, is a single master on/off (on by default) that hides every plane at once without deleting any of them or disturbing each one's own individual show/hide checkbox in the list below -- turn it back on and every plane reappears exactly as it was left. Select three or more atoms and <b>New plane</b> becomes available, fitting and adding a <b>least-squares mean plane</b> through them -- the plane through their centroid whose orientation minimizes the summed squared perpendicular distance to every one of them, the same \"best-fit plane\" reported by Mercury, PLATON, or SHELXL, not simply a plane fixed by picking any three of the atoms. The rendered shape is a polygon through each atom's own position projected onto the plane, not a generic rectangle -- select the six atoms of a ring and the plane reads as a hexagon with its own vertices sitting right where the atoms are (exactly there if they're perfectly planar, very close otherwise). The selection is cleared automatically once the plane is added, so a second, different group of atoms can be selected straight away for another one. Every plane made this way accumulates in a list rather than replacing the last one -- each row shows its own atom count and <b>rms deviation</b> (how far, on average, the fitted atoms actually sit off their own best-fit plane -- 0 would mean perfectly flat), with its own show/hide checkbox and colour swatch, or tick <b>Same colour for all</b> to colour every plane at once instead; a single <b>Plane opacity</b> slider applies to all of them. <b>Clear all</b> removes every plane in one step. A plane is a one-time snapshot of the fit at the moment it's created -- like a molecular surface, it does not follow the atoms it was fitted from if they are later moved, grown further, or deleted.</p>" +
       "<h3>Walk mode</h3>" +
       "<p>Display &gt; Walk mode is a separate, free-fly first-person view for exploring the inside of a void or channel -- a completely different way of looking at the structure from the usual orbit view (Orthographic/Pseudo-orthographic/Depth scaling, Visual Effects &gt; Scene), rather than a variation on it. Turning it on drops the camera into the scene at exactly wherever the orbit view was last looking, facing the same direction; turning it off (the same button, closing the Walk mode submenu, or collapsing the whole Display section) returns instantly to that orbit view exactly as it was left -- nothing about the ordinary view is disturbed by walking around in here.</p>" +
       "<p>Controls while walking: <b>mouse wheel</b> moves forward and backward along whichever way the camera is currently facing (scrolling up/away means forward, matching how right-drag zoom already treats \"up\" as closer everywhere else in the app); <b>left-drag</b> turns the look direction -- rotating purely on the spot around your own current position (nothing here orbits around the structure or any point within it, the way the ordinary view does), with no limit at all on how far up or down you can look, since there's no \"ground\" to keep upright against; <b>right-drag</b> pans/strafes purely in the plane of the screen -- sideways and up/down as the screen shows them, never forward/backward -- without turning, for sliding past something without having to look away from it first; <b>shift-left-drag</b> rolls -- tilts the horizon, rotating around the direction you're currently facing -- using the exact same \"grab a wheel centred on the viewport\" gesture as the ordinary orbit view's own shift-drag roll. Both plain drags use a \"grab and drag the scene\" convention -- drag right and the view moves as if you'd pushed the structure itself to the right -- matching the ordinary orbit view's own rotate-drag rather than a first-person-shooter's \"push the mouse to turn your head\" convention; <b>Reverse drag directions</b> flips that convention for looking around (not panning) for whoever finds it backwards the other way. Because looking around has no clamp, enough mixed dragging can accumulate a bit of roll (the horizon can end up tilted) -- <b>Recenter view</b> snaps straight back to the exact view you had when you turned walk mode on, undoing any drift or disorientation in one click. Three independent sliders control how fast each of the three actions above responds -- speeding up one never affects another: <b>Walk speed</b> scales one wheel-step's forward/backward distance; <b>Pan sensitivity</b> scales how far one pixel of right-drag slides you sideways/up/down; <b>Swivel/roll sensitivity</b> scales both how far one pixel of left-drag turns the view and how far a shift-left-drag rolls it (the same slider covers both, since they're really the same action -- turning). <b>Headlamp</b> is a light that travels with you, independent of Visual Effects &gt; Lighting's own setup -- handy for seeing what's actually nearby inside an otherwise dark or dim structure, and switches off the instant you leave Walk mode so it never lingers into the ordinary view; its own intensity slider sits right underneath. Every setting in this Walk mode panel -- the three sliders above, Headlamp on/off and intensity, Reverse drag directions, and Collision detection with its own checklist below -- is remembered the next time the file is opened, the same as any other Display/Lighting/Material preference.</p>" +
