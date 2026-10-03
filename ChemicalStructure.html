@@ -549,6 +549,18 @@
     opacity: 0; pointer-events: none; transition: all .18s ease; box-shadow: var(--shadow-lg);
   }
   .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  /* "working" indicator: painted at once, before the layout starts (the main thread is busy
+     after that); the spinner's rotation runs off the main thread, so it keeps turning */
+  .busy {
+    position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); z-index: 9; display: none; align-items: center; gap: 11px;
+    background: var(--raised); color: var(--ink); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: var(--shadow-lg);
+    padding: 11px 18px 11px 14px; font-size: 13px; font-weight: 600; pointer-events: none;
+  }
+  .busy.show { display: flex; }
+  .busy .spin { width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid var(--line-2); border-top-color: var(--accent); animation: busySpin .75s linear infinite; will-change: transform; flex: none; }
+  .busy .busy-sub { display: block; font: 500 11px/1.3 var(--mono); color: var(--muted); margin-top: 2px; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @keyframes busySpin { to { transform: rotate(360deg); } }
+  .stage-wrap.is-busy { cursor: progress; }
 
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
@@ -643,6 +655,7 @@
   </div>
   <div class="ctx-bar" id="ctx-bar"></div>
   <div class="hover-card" id="hover-card"></div>
+  <div class="busy" id="busy" role="status" aria-live="polite"><span class="spin"></span><span><span id="busy-label">Generating the schematic…</span><span class="busy-sub" id="busy-sub"></span></span></div>
   <div class="float-cluster zoom-cluster">
     <button class="fbtn" id="zoom-out" title="Zoom out">&minus;</button>
     <button class="fbtn pct" id="zoom-pct" title="Reset to 100%">100%</button>
@@ -10453,7 +10466,7 @@ function wireCodes(){
   var add = $("imp-add"), rep = $("imp-replace");
   function doImport(replace){
     var t = $("code-import").value;
-    try { insertParsed(parseAnyStructure(t), replace); } catch(e){ toast(e.message); }
+    drawStructure(t, replace, "");
   }
   if (add) add.addEventListener("click", function(){ doImport(false); });
   if (rep) rep.addEventListener("click", function(){ doImport(true); });
@@ -11454,6 +11467,45 @@ function toast(msg){
   clearTimeout(toast.timer);
   toast.timer = setTimeout(function(){ t.classList.remove("show"); }, Math.min(8000, 1800 + String(msg).length*35));
 }
+/* ---------------- "working" indicator ----------------
+   Large structures take a second or two to lay out, all on the main thread. The indicator is
+   put up and painted first, then the work runs. */
+var busyJob = null, busyRunning = false, busyHold = 0;
+function busyShow(label, sub){
+  $("busy-label").textContent = label;
+  $("busy-sub").textContent = sub || "";
+  $("busy").classList.add("show");
+  $("stage-wrap").classList.add("is-busy");
+}
+function busyHide(){
+  if (busyRunning || busyHold) return;
+  $("busy").classList.remove("show");
+  $("stage-wrap").classList.remove("is-busy");
+}
+function afterPaint(fn){
+  var done = false;
+  function go(){ if (!done){ done = true; fn(); } }
+  requestAnimationFrame(function(){ setTimeout(go, 0); });
+  setTimeout(go, 250);   /* a hidden tab gets no animation frames */
+}
+/* run fn once the indicator is on screen; a call made while one is still waiting replaces it,
+   so stepping quickly through the navigator draws only the structure you stop at */
+function runBusy(label, sub, fn){
+  busyJob = { label:label, sub:sub, fn:fn };
+  busyShow(label, sub);
+  if (busyRunning) return;
+  busyRunning = true;
+  afterPaint(function step(){
+    var job = busyJob; busyJob = null;
+    if (job){ try { job.fn(); } catch(e){ toast((job.sub ? job.sub + ": " : "") + "could not read this structure (" + e.message + ")"); } }
+    if (busyJob){ busyShow(busyJob.label, busyJob.sub); afterPaint(step); return; }
+    busyRunning = false;
+    busyHide();
+  });
+}
+function drawStructure(text, replace, name, parseOpts){
+  runBusy("Generating the schematic…", name || "", function(){ insertParsed(parseAnyStructure(text, parseOpts), replace); });
+}
 function copyText(text){
   function fallback(){
     var ta = document.createElement("textarea");
@@ -11606,8 +11658,7 @@ function cifNavGo(i){
   if (!cifNav || i < 0 || i >= cifNav.blocks.length) return;
   cifNav.index = i;
   showCifNav();
-  try { insertParsed(parseAnyStructure(cifNav.blocks[i].text), true); }
-  catch(e){ toast(cifNav.blocks[i].label + ": could not read this structure (" + e.message + ")"); }
+  drawStructure(cifNav.blocks[i].text, true, cifNav.blocks[i].label + " (" + (i + 1) + " of " + cifNav.blocks.length + ")");
 }
 
 /* ---------------- folders, several files, ZIP archives ----------------
@@ -11734,9 +11785,12 @@ function entriesFromFiles(files){
 /* open a collection (folder, several files, ZIP) in the navigator */
 async function openCollection(list, kind, name){
   if (!list.length){ toast("No files found"); return; }
-  toast("Reading " + (kind === "zip" ? name : list.length + " file" + (list.length > 1 ? "s" : "")) + "…");
   var r;
-  try { r = await readFileList(list); } catch(e){ toast("Could not read " + (name || "the files") + ": " + e.message); return; }
+  busyHold++;
+  busyShow("Reading " + (kind === "zip" ? "the ZIP archive" : list.length + " file" + (list.length > 1 ? "s" : "")) + "…", name || "");
+  try { r = await readFileList(list); }
+  catch(e){ toast("Could not read " + (name || "the files") + ": " + e.message); return; }
+  finally { busyHold--; busyHide(); }
   var ex = entriesFromFiles(r.files), entries = ex.entries;
   var notes = [];
   if (ex.bad) notes.push(ex.bad + " file" + (ex.bad > 1 ? "s" : "") + " without a usable structure skipped");
@@ -11745,7 +11799,7 @@ async function openCollection(list, kind, name){
   if (!entries.length){ toast("No structure files (CIF, RES, INS, PDB, XYZ, MOL, SDF, SMI) found in " + (name || "what was dropped") + (notes.length ? " · " + notes.join(" · ") : "")); return; }
   if (entries.length === 1){
     closeCifNav();
-    try { insertParsed(parseAnyStructure(entries[0].text), replaceOnOpen()); } catch(e){ toast(entries[0].label + ": could not read this structure (" + e.message + ")"); }
+    drawStructure(entries[0].text, replaceOnOpen(), entries[0].label);
     return;
   }
   cifNav = { blocks:entries, index:0, name:name || "", kind:kind, stamp:String(Date.now()) };
@@ -11829,7 +11883,7 @@ function loadText(text, name){
       return;
     }
     closeCifNav();
-    insertParsed(parseAnyStructure(text), replaceOnOpen());
+    drawStructure(text, replaceOnOpen(), name);
   } catch(e){ toast("Could not read this file: " + e.message); }
 }
 $("btn-open").addEventListener("click", function(){ $("file-input").click(); });
@@ -11883,7 +11937,7 @@ document.addEventListener("paste", function(e){
     try {
       var r = parseAnyStructure(text);
       e.preventDefault();
-      insertParsed(r);
+      runBusy("Generating the schematic…", "", function(){ insertParsed(r); });
       return;
     } catch(err){ if (clip){ e.preventDefault(); pasteClip(BOND_LEN, BOND_LEN); return; } toast("The clipboard text is not a SMILES string or Molfile"); }
   } else if (clip){ pasteClip(BOND_LEN, BOND_LEN); }
@@ -11907,11 +11961,11 @@ function paletteCommands(){
    ["Show 3D model", function(){ showDeckTab("d3"); }],
    ["Re-import the last crystal structure (SHELX or CIF): asymmetric unit only", function(){
      if (!lastCrystal){ toast("No SHELX or CIF file has been imported yet"); return; }
-     try { insertParsed(parseAnyStructure(lastCrystal.text, { asymOnly:true })); } catch(e){ toast(e.message); }
+     drawStructure(lastCrystal.text, false, lastCrystal.title || "", { asymOnly:true });
    }],
    ["Re-import the last crystal structure (SHELX or CIF): completed by symmetry", function(){
      if (!lastCrystal){ toast("No SHELX or CIF file has been imported yet"); return; }
-     try { insertParsed(parseAnyStructure(lastCrystal.text)); } catch(e){ toast(e.message); }
+     drawStructure(lastCrystal.text, false, lastCrystal.title || "");
    }],
    ["Clean up layout", cleanUp], ["Fit to window", fitToContent, "F"], ["Select all", function(){ atoms.forEach(function(a){ a.selected = true; }); render(); }, "Ctrl A"],
    ["Flip horizontally (keeps stereochemistry)", function(){ flipSelection(true); }, "Shift H"], ["Flip vertically (keeps stereochemistry)", function(){ flipSelection(false); }, "Shift V"],

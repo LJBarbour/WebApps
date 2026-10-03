@@ -1,0 +1,1686 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CIFTables</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@300;600&family=DM+Sans:wght@400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#FAF6EE;--paper:#F3EDE0;--paper2:#EDE6D4;--ink:#2C2416;--ink-mid:#6B5C3E;
+  --ink-faint:#B8A98A;--accent:#4A6FA5;--accent-soft:#EEF3FA;--line:#DDD5C0;--border:#CEC3AA;
+  --mono:'DM Mono',monospace;--sans:'DM Sans',sans-serif;--display:'Fraunces',serif;
+  --good:#4E8367;--good-soft:#BFD9C8;--ok:#C79A2E;--ok-soft:#EBD9A5;--poor:#C4513F;--poor-soft:#EDB8AE;
+}
+:root[data-theme="dark"]{
+  --bg:#16130F;--paper:#1F1B15;--paper2:#2A251D;--ink:#EFE8D8;--ink-mid:#B9AC8A;
+  --ink-faint:#7C7258;--accent:#86AEE6;--accent-soft:#1F2A3A;--line:#352F22;--border:#4A4231;
+  --good:#6FB38C;--good-soft:#2C4A39;--ok:#DDB04A;--ok-soft:#5A4A1E;--poor:#E27664;--poor-soft:#5C2C25;
+  color-scheme:dark;
+}
+body{transition:background .25s,color .25s}
+html,body{min-height:100%;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:13px}
+body{display:flex;flex-direction:column;overflow-x:hidden}
+::-webkit-scrollbar{width:7px;height:7px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+
+/* -- Header -- */
+header{flex-shrink:0;padding:10px 18px 9px;border-bottom:1.5px solid var(--line);
+       display:flex;align-items:baseline;gap:12px}
+header h1{font-family:var(--display);font-weight:600;font-size:19px;color:var(--ink)}
+header .sub{font-size:10px;color:var(--ink-mid);font-family:var(--mono);letter-spacing:.5px}
+
+/* -- Main -- */
+main{flex:1;display:flex;flex-direction:column;align-items:center;padding:2rem 1.5rem 4rem;gap:1.5rem}
+.content{width:100%;max-width:960px;display:flex;flex-direction:column;gap:1.25rem}
+
+/* -- Drop zone -- */
+.drop-zone{border:1.5px dashed var(--border);border-radius:6px;background:var(--paper);
+  padding:2.5rem 1.5rem;text-align:center;cursor:pointer;
+  transition:border-color .15s,background .15s}
+.drop-zone:hover,.drop-zone.drag{border-color:var(--accent);background:var(--accent-soft)}
+.drop-zone .dz-icon{font-size:2rem;margin-bottom:.5rem;color:var(--ink-faint)}
+.drop-zone p{font-size:12.5px;color:var(--ink-mid)}
+.drop-zone strong{color:var(--ink)}
+.drop-zone .dz-hint{font-family:var(--mono);font-size:10px;color:var(--ink-faint);margin-top:.35rem}
+.drop-zone .dz-actions{margin-top:.8rem}
+input[type=file]{display:none}
+
+/* -- Status line -- */
+.msg{font-family:var(--mono);font-size:11px;color:var(--ink-mid);line-height:1.5}
+.msg:empty{display:none}
+.msg.err{color:#B03020}
+
+/* -- Top bar: navigator + toolbar (sticky) -- */
+.topbar{display:none;position:sticky;top:0;z-index:20;background:var(--bg);padding:6px 0;gap:10px;
+  align-items:center;justify-content:space-between;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+.topbar.show{display:flex}
+.cif-nav{display:none;align-items:center;gap:6px;flex:1;min-width:260px}
+.cif-nav.show{display:flex}
+.cn-title{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.8px;color:var(--ink-faint)}
+.cif-nav select{flex:1;min-width:120px;max-width:420px;height:26px;border:1px solid var(--border);border-radius:4px;
+  background:var(--paper);color:var(--ink);font:500 12px var(--mono);padding:0 6px}
+.cn-btn{height:26px;min-width:30px;border:1px solid var(--border);border-radius:4px;background:transparent;
+  color:var(--ink-mid);font-size:14px;cursor:pointer}
+.cn-btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+.cn-btn:disabled{opacity:.35;cursor:default}
+.cn-count{font-family:var(--mono);font-size:11px;color:var(--ink-faint);white-space:nowrap}
+
+/* -- Toolbar -- */
+.toolbar{display:flex;justify-content:flex-end;gap:8px}
+.btn{font-family:var(--mono);font-size:10px;letter-spacing:.6px;text-transform:uppercase;
+  color:var(--ink-mid);background:transparent;border:1px solid var(--border);border-radius:3px;
+  padding:3px 10px;cursor:pointer}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+
+/* -- File card -- */
+.file-card{background:var(--paper);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.file-hdr{display:flex;align-items:center;justify-content:space-between;gap:1rem;
+  padding:7px 11px;background:var(--bg);border-bottom:1px solid var(--line)}
+.file-name{font-family:var(--mono);font-size:12px;font-weight:500;color:var(--ink)}
+.file-meta{font-family:var(--mono);font-size:10.5px;color:var(--ink-faint);white-space:nowrap}
+
+/* -- Block wrap -- */
+.block-wrap{padding:12px 14px 14px}
+.block-wrap+.block-wrap{border-top:1px solid var(--line)}
+.block-hdr{display:flex;align-items:center;gap:9px;margin-bottom:10px}
+.block-name{font-family:var(--mono);font-size:12px;color:var(--ink-mid);font-weight:500}
+
+/* -- Tabs: a segmented control with live counts -- */
+.tab-bar{display:flex;gap:3px;flex-wrap:wrap;margin-bottom:14px;padding:3px;background:var(--paper2);border-radius:11px}
+.tab-btn{font-family:var(--mono);font-size:10.5px;letter-spacing:.3px;padding:6px 11px;background:transparent;
+  border:0;border-radius:8px;color:var(--ink-mid);cursor:pointer;display:inline-flex;align-items:center;gap:6px;
+  transition:background .15s,color .15s,box-shadow .15s}
+.tab-btn:hover{color:var(--accent)}
+.tab-btn.active{background:var(--bg);color:var(--accent);font-weight:600;box-shadow:0 1px 3px rgba(40,28,8,.2),0 0 0 1px var(--line)}
+.tab-btn.empty{opacity:.45}
+.tab-btn.empty.active{opacity:.8}
+.tb-n{font-size:9px;font-weight:600;padding:1px 6px;border-radius:9px;background:var(--line);color:var(--ink-mid)}
+.tab-btn.active .tb-n{background:var(--accent);color:var(--bg)}
+.page{display:none}
+.page.active{display:block}
+@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.fade-in{animation:rise .3s ease both}
+@media (prefers-reduced-motion:reduce){.fade-in{animation:none}}
+
+/* -- Category grid (Summary page) -- */
+.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:720px){.cat-grid{grid-template-columns:1fr}}
+.cat-sec{border:1px solid var(--line);border-radius:5px;background:var(--bg);overflow:hidden}
+.cat-title{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;
+  color:var(--accent);background:var(--accent-soft);padding:5px 10px;border-bottom:1px solid var(--line)}
+
+/* -- Parameter table -- */
+.ptable{width:100%;border-collapse:collapse}
+.ptable tr+tr td{border-top:1px solid rgba(44,36,22,.06)}
+.ptable td{padding:4px 10px;font-size:12px;vertical-align:top;line-height:1.4}
+.ptable td.lbl{color:var(--ink-mid);width:52%;white-space:normal}
+.ptable td.val{color:var(--ink);font-family:var(--mono);font-weight:500;word-break:break-word}
+.ptable td.val sub{font-family:var(--mono)}
+.ptable .na{color:var(--ink-faint);font-family:var(--sans);font-weight:400}
+.ptable tr:hover td{background:rgba(74,111,165,.05)}
+
+/* -- Geometry data tables (atoms / angles / hbonds / torsions) -- */
+.table-toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:10px;flex-wrap:wrap}
+.table-count{font-family:var(--mono);font-size:10.5px;color:var(--ink-faint)}
+.table-scroll{max-height:560px;overflow:auto;border:1px solid var(--line);border-radius:5px}
+table.data-table{width:100%;border-collapse:collapse;font-size:11.5px}
+table.data-table th{position:sticky;top:0;background:var(--paper2);font-family:var(--mono);font-size:9.5px;
+  text-transform:uppercase;letter-spacing:.4px;color:var(--ink-mid);text-align:left;padding:5px 8px;
+  border-bottom:1px solid var(--border);white-space:nowrap}
+table.data-table td{padding:4px 8px;font-family:var(--mono);white-space:nowrap;border-bottom:1px solid rgba(44,36,22,.05)}
+table.data-table tr:hover td{background:rgba(74,111,165,.05)}
+.table-empty{padding:16px;text-align:center;color:var(--ink-faint);font-size:12px}
+.table-empty code{font-family:var(--mono);background:var(--paper2);padding:1px 4px;border-radius:3px}
+.table-note{font-family:var(--mono);font-size:10px;color:var(--ink-faint);padding:6px 2px 0}
+
+/* -- Table 1 / Report pages -- */
+.pub-title{font-family:var(--mono);font-size:11px;color:var(--ink-mid)}
+.pub-title b{color:var(--ink)}
+.report-box{background:#fff;border:1px solid var(--line);border-radius:5px;padding:18px 20px;margin-top:8px;
+  font-family:Georgia,'Times New Roman',serif;font-size:13.5px;line-height:1.75;color:#1a1a1a}
+.report-box sub{font-size:70%}
+.report-box sup{font-size:70%}
+
+/* -- Inline error banner -- */
+.err-banner{margin:.5rem 0;padding:7px 10px;background:#FDF0EE;
+  border:1px solid #E8B0A8;border-radius:5px;font-size:12px;color:#B03020}
+
+/* -- Spinner / loading -- */
+.loading{text-align:center;padding:1.5rem;font-family:var(--mono);font-size:11px;color:var(--ink-faint)}
+
+/* ===================== design layer ===================== */
+header{align-items:center}
+header .brand{flex-shrink:0}
+header .theme{margin-left:auto}
+.btn{border-radius:6px;transition:border-color .15s,color .15s,background .15s}
+.btn:hover{background:var(--accent-soft)}
+.file-card{border-radius:12px}
+
+/* drop zone shrinks to a slim strip once something is loaded */
+.drop-zone{transition:padding .25s,border-color .15s,background .15s}
+.drop-zone.compact{padding:.55rem 1rem;display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap}
+.drop-zone.compact .dz-icon,.drop-zone.compact .dz-hint{display:none}
+.drop-zone.compact p{font-size:11.5px}
+.drop-zone.compact .dz-actions{margin:0}
+
+/* navigator: arrows + searchable list + position strip */
+.topbar{align-items:flex-start}
+.cif-nav.show{display:flex;flex-direction:column;align-items:stretch;gap:5px;position:relative}
+.cn-row{display:flex;align-items:center;gap:6px}
+.cn-btn{height:30px;min-width:32px;border-radius:8px;font-size:11px}
+.cn-current{flex:1;min-width:0;display:flex;align-items:center;gap:10px;height:30px;padding:0 12px;border:1px solid var(--border);
+  border-radius:8px;background:var(--paper);color:var(--ink);cursor:pointer;text-align:left}
+.cn-current:hover{border-color:var(--accent)}
+.cn-name{font:600 13px var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.cn-count{font:500 11px var(--mono);color:var(--ink-faint);white-space:nowrap}
+.cn-caret{color:var(--ink-faint);font-size:11px}
+.cn-ticks{display:flex;gap:2px;height:8px;align-items:stretch}
+.tk{flex:1;min-width:2px;border:0;padding:0;border-radius:2px;background:var(--line);cursor:pointer;transition:background .12s,transform .12s}
+.tk:hover{background:var(--ink-faint);transform:scaleY(1.4)}
+.tk.on{background:var(--accent);transform:scaleY(1.5)}
+.tk-bar{flex:1;background:var(--line);border-radius:3px;cursor:pointer;overflow:hidden}
+.tk-bar b{display:block;height:100%;background:var(--accent);border-radius:3px}
+.cn-pop{position:absolute;top:100%;left:0;right:0;margin-top:6px;z-index:40;background:var(--paper);border:1px solid var(--border);
+  border-radius:10px;box-shadow:0 14px 34px -10px rgba(30,20,5,.45);padding:8px;display:flex;flex-direction:column;gap:6px;max-width:660px}
+.cn-pop[hidden]{display:none}
+.cn-pop input{height:30px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--ink);font:500 12px var(--mono);padding:0 10px;outline:none}
+.cn-pop input:focus{border-color:var(--accent)}
+.cn-list{max-height:320px;overflow:auto;display:flex;flex-direction:column;gap:1px}
+.cn-item{display:grid;grid-template-columns:34px minmax(60px,auto) 1fr;gap:8px;align-items:baseline;text-align:left;padding:5px 8px;
+  border:0;border-radius:6px;background:transparent;color:var(--ink);cursor:pointer;font:500 12px var(--mono)}
+.cn-item:hover,.cn-item.hi{background:var(--accent-soft)}
+.cn-item.cur .ci-l{color:var(--accent)}
+.ci-n{color:var(--ink-faint);font-size:10px;text-align:right}
+.ci-l{font-weight:600}
+.ci-p{color:var(--ink-faint);font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cn-more{padding:8px;text-align:center;color:var(--ink-faint);font:11px var(--mono)}
+
+/* file header breadcrumb */
+.file-name{display:flex;align-items:center;flex-wrap:wrap;gap:5px;min-width:0}
+.file-name span{color:var(--ink-mid)}
+.file-name i{font-style:normal;color:var(--ink-faint)}
+.file-name .last{color:var(--ink);font-weight:600}
+
+/* hero */
+.hero{display:flex;gap:18px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:2px 2px 16px}
+.hero-main{flex:1;min-width:250px}
+.hero-kick{font:500 10.5px var(--mono);color:var(--ink-faint);letter-spacing:.5px}
+.hero-formula{font:600 31px/1.15 var(--display);color:var(--ink);letter-spacing:-.01em;margin-top:2px;word-break:break-word}
+.hero-formula sub{font-size:.56em;vertical-align:-.28em}
+.hero-name{font-size:12.5px;color:var(--ink-mid);margin-top:3px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}
+.chip{display:inline-flex;gap:7px;align-items:baseline;padding:3px 10px;border-radius:999px;background:var(--paper2);border:1px solid var(--line);font:500 11.5px var(--mono);color:var(--ink)}
+.chip em{font-style:normal;color:var(--ink-faint);font-size:9.5px;letter-spacing:.5px;text-transform:uppercase}
+.chip .dim{color:var(--ink-faint)}
+.hero-fig{width:190px;text-align:center}
+.cellfig{height:140px;cursor:grab;touch-action:none;user-select:none;border-radius:14px;
+  background:radial-gradient(circle at 50% 42%,var(--accent-soft),transparent 72%)}
+.cellfig:active{cursor:grabbing}
+.cellfig svg{display:block;margin:0 auto}
+.figleg{font:500 10px/1.5 var(--mono);color:var(--ink-mid);margin-top:2px}
+.figleg span{margin-right:6px}
+.viewbtns{display:flex;align-items:center;justify-content:center;gap:4px;margin-top:6px;font:500 9.5px var(--mono);color:var(--ink-faint)}
+.viewbtns span{margin-right:2px;letter-spacing:.3px}
+.viewbtns button{min-width:24px;height:20px;padding:0 6px;border:1px solid var(--border);border-radius:6px;background:transparent;
+  color:var(--c,var(--ink-mid));font:italic 600 12px var(--display);cursor:pointer;transition:background .15s,border-color .15s}
+.viewbtns button[data-v="3d"]{font:600 9.5px var(--mono);font-style:normal;color:var(--ink-mid)}
+.viewbtns button:hover{border-color:var(--c,var(--accent));background:var(--accent-soft)}
+
+/* data-quality gauges */
+.gauges{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:8px;margin-bottom:12px}
+.gauge{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px 11px 9px;transition:transform .15s,border-color .15s}
+.gauge:hover{transform:translateY(-2px);border-color:var(--gc)}
+.g-good{--gc:var(--good)}.g-ok{--gc:var(--ok)}.g-poor{--gc:var(--poor)}
+.g-top{display:flex;justify-content:space-between;align-items:center}
+.g-lbl{font:600 9.5px var(--mono);letter-spacing:.6px;text-transform:uppercase;color:var(--ink-mid)}
+.g-dot{width:8px;height:8px;border-radius:50%;background:var(--gc);box-shadow:0 0 0 3px var(--bg),0 0 0 4px var(--gc);opacity:.9}
+.g-val{font:600 21px/1.2 var(--display);letter-spacing:-.01em;margin:3px 0 8px;color:var(--ink)}
+.g-val sub{font-size:.6em}
+.g-track{position:relative;display:flex;height:5px;border-radius:3px}
+.g-track i{display:block;height:100%}
+.g-track i:first-of-type{border-radius:3px 0 0 3px}
+.g-track i:last-of-type{border-radius:0 3px 3px 0}
+.z-good{background:var(--good-soft)}.z-ok{background:var(--ok-soft)}.z-poor{background:var(--poor-soft)}
+.g-mark{position:absolute;top:-5px;width:0;height:15px;border-left:2px solid var(--gc);transform:translateX(-1px);border-radius:1px}
+.g-mark::before{content:"";position:absolute;top:-1px;left:-5px;border:4px solid transparent;border-top:5px solid var(--gc);border-bottom:0}
+.g-sub{font:500 9.5px var(--mono);color:var(--ink-faint);margin-top:6px}
+
+/* geometry tables */
+.esd{color:inherit;font-size:inherit}
+.ob{text-decoration:overline;text-decoration-thickness:.08em}
+.na{color:var(--ink-faint)}
+.el{display:inline-flex;align-items:center;justify-content:center;min-width:21px;height:18px;padding:0 4px;margin-right:9px;border-radius:5px;
+  background:var(--c);color:#fff;font:700 9.5px var(--mono)}
+.data-table b.lab{font-weight:600}
+table.data-table tbody tr:nth-child(even) td{background:rgba(120,100,60,.045)}
+table.data-table tbody tr:hover td{background:rgba(74,111,165,.1)}
+.data-table td.gl-td,.data-table th.gl-td{width:34px;padding-left:0;padding-right:8px}
+.gl{display:block;color:var(--ink)}
+.tbl-tools{display:flex;gap:6px;align-items:center}
+.tbl-filter{height:24px;width:150px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font:500 11.5px var(--mono);padding:0 8px;outline:none}
+.tbl-filter:focus{border-color:var(--accent)}
+.te-mark{font:600 30px var(--display);color:var(--ink-faint);opacity:.55;margin-bottom:2px}
+.te-hint{margin-top:6px;font-size:11px;max-width:420px;margin-left:auto;margin-right:auto}
+
+/* Table 1 / report as paper sheets */
+.paper{background:#FFFDF7;color:#1c1a16;border:1px solid #E6DEC8;border-radius:3px;
+  box-shadow:0 1px 0 #fff inset,0 12px 26px -16px rgba(50,35,10,.5);padding:22px 30px 24px;
+  font-family:'Times New Roman',Georgia,serif;font-size:14px;line-height:1.55}
+.paper-cap{font-size:13.5px;margin-bottom:10px}
+table.booktabs{width:100%;border-collapse:collapse;border-top:1.7px solid #1c1a16;border-bottom:1.7px solid #1c1a16}
+table.booktabs td{padding:2.5px 14px 2.5px 0;vertical-align:top;font-size:13px}
+table.booktabs td.lbl{width:58%}
+.paper sub,.paper sup{font-size:70%}
+.paper.report{line-height:1.85;text-align:justify;hyphens:auto}
+
+@media print{
+  header .sub,.drop-zone,.topbar,.msg,.file-meta,.tab-bar{display:none}
+  body{font-size:11px}
+  .cat-grid{grid-template-columns:1fr}
+  .file-card{border:none}
+  .block-wrap+.block-wrap{page-break-before:always}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <svg class="brand" viewBox="0 0 28 28" width="26" height="26" aria-hidden="true">
+    <polygon points="6,19 17,23 24,17 13,13" fill="var(--accent)" opacity=".18"/>
+    <g fill="none" stroke-linecap="round" stroke-width="1.5">
+      <path d="M6 19L17 23L24 17" stroke="var(--ink-mid)" opacity=".8"/><path d="M13 13L24 17M6 19L13 13" stroke="var(--ink-mid)" opacity=".35" stroke-dasharray="2 2.4"/>
+      <path d="M6 19V8L13 4L24 8V17M17 23V12M6 8L17 12L24 8" stroke="var(--ink-mid)" opacity=".8"/>
+      <path d="M6 19L17 23" stroke="#C4513F" stroke-width="2.2"/><path d="M6 19L6 8" stroke="#4A6FA5" stroke-width="2.2"/><path d="M6 19L13 13" stroke="#4E8367" stroke-width="2.2"/>
+    </g>
+  </svg>
+  <h1>CIFTables</h1>
+  <span class="sub">unit cell &middot; geometry &middot; atoms &middot; Table 1 &middot; report text</span>
+  <button class="btn theme" id="themeBtn" type="button" title="Switch between the light and dark theme">Theme</button>
+</header>
+
+<main>
+<div class="content">
+
+  <div class="drop-zone" id="dropZone">
+    <div class="dz-icon">&#x2B06;</div>
+    <p>Drop <strong>CIF file(s)</strong>, a <strong>folder</strong> or a <strong>ZIP</strong> here, or <strong>click to browse</strong></p>
+    <p class="dz-hint">Offline &mdash; no data leaves your browser &nbsp;&middot;&nbsp; .cif &middot; .zip &middot; subfolders and nested ZIPs are searched</p>
+    <p class="dz-actions"><button class="btn" id="folderBtn" type="button">Choose folder&hellip;</button></p>
+  </div>
+  <input type="file" id="fileInput" accept=".cif,.zip" multiple>
+  <input type="file" id="folderInput" webkitdirectory multiple>
+
+  <div class="msg" id="msg"></div>
+
+  <div class="topbar" id="topbar">
+    <div class="cif-nav" id="cif-nav" role="group" aria-label="CIF navigator">
+      <div class="cn-row">
+        <span class="cn-title" id="cn-title">CIF</span>
+        <button class="cn-btn" id="cn-prev" type="button" title="Previous structure  ( [ )">&#9664;</button>
+        <button class="cn-current" id="cn-current" type="button" aria-haspopup="listbox"><span class="cn-name" id="cn-name"></span><span class="cn-count" id="cn-count"></span><span class="cn-caret">&#9662;</span></button>
+        <button class="cn-btn" id="cn-next" type="button" title="Next structure  ( ] )">&#9654;</button>
+      </div>
+      <div class="cn-ticks" id="cn-ticks"></div>
+      <div class="cn-pop" id="cn-pop" hidden>
+        <input id="cn-filter" type="search" placeholder="Filter structures…  (↑ ↓ then Enter)" autocomplete="off" aria-label="Filter structures">
+        <div class="cn-list" id="cn-list" role="listbox"></div>
+      </div>
+    </div>
+    <div class="toolbar" id="toolbar">
+      <button class="btn" onclick="window.print()">Print</button>
+      <button class="btn" onclick="clearResults()">Clear</button>
+    </div>
+  </div>
+
+  <div id="output"></div>
+
+</div>
+</main>
+
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════════════
+//  CIF TOKENISER
+// ═══════════════════════════════════════════════════════
+function tokenise(text){
+  const toks=[],lines=text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
+  let i=0;
+  while(i<lines.length){
+    const ln=i+1,line=lines[i];
+    if(line.startsWith(';')){
+      let s='';i++;
+      while(i<lines.length){if(lines[i].startsWith(';')){i++;break;}s+=lines[i]+'\n';i++;}
+      toks.push({t:'V',v:s.trim(),ln});continue;
+    }
+    let p=0;
+    while(p<line.length){
+      while(p<line.length&&/\s/.test(line[p]))p++;
+      if(p>=line.length||line[p]==='#')break;
+      const ch=line[p];
+      if(ch==="'"){p++;let s='';
+        while(p<line.length&&!(line[p]==="'"&&(p+1>=line.length||/\s/.test(line[p+1]))))s+=line[p++];
+        if(p<line.length)p++;toks.push({t:'V',v:s,ln});continue;}
+      if(ch==='"'){p++;let s='';
+        while(p<line.length&&!(line[p]==='"'&&(p+1>=line.length||/\s/.test(line[p+1]))))s+=line[p++];
+        if(p<line.length)p++;toks.push({t:'V',v:s,ln});continue;}
+      let w='';
+      while(p<line.length&&!/\s/.test(line[p])&&line[p]!=='#')w+=line[p++];
+      const wl=w.toLowerCase();
+      if(wl.startsWith('data_'))toks.push({t:'B',v:w.slice(5),ln});
+      else if(wl==='loop_')toks.push({t:'L',ln});
+      else if(w.startsWith('_'))toks.push({t:'K',v:wl,ln});
+      else toks.push({t:'V',v:w,ln});
+    }
+    i++;
+  }
+  return toks;
+}
+
+// ═══════════════════════════════════════════════════════
+//  CIF PARSER
+// ═══════════════════════════════════════════════════════
+function parseCIF(toks){
+  const blocks=[];let i=0;
+  while(i<toks.length&&toks[i].t!=='B')i++;
+  while(i<toks.length){
+    if(toks[i].t!=='B'){i++;continue;}
+    const block={name:toks[i].v,items:{},loops:[]};i++;
+    while(i<toks.length&&toks[i].t!=='B'){
+      if(toks[i].t==='K'){
+        const key=toks[i].v;i++;
+        if(i<toks.length&&toks[i].t==='V'){block.items[key]={v:toks[i].v};i++;}
+      }else if(toks[i].t==='L'){
+        i++;
+        const loop={keys:[],rows:[]};
+        while(i<toks.length&&toks[i].t==='K'){loop.keys.push(toks[i].v);i++;}
+        if(!loop.keys.length)continue;
+        const vals=[];
+        while(i<toks.length&&toks[i].t==='V'){vals.push(toks[i].v);i++;}
+        const n=loop.keys.length;
+        for(let r=0;r+n<=vals.length;r+=n)loop.rows.push(vals.slice(r,r+n));
+        block.loops.push(loop);
+      }else i++;
+    }
+    blocks.push(block);
+  }
+  return blocks;
+}
+
+// ═══════════════════════════════════════════════════════
+//  HELPERS
+// ═══════════════════════════════════════════════════════
+function gi(block,...keys){
+  for(const key of keys){const k=key.toLowerCase();
+    const it=block.items[k];
+    if(it&&it.v&&it.v!=='.'&&it.v!=='?')return it.v;
+    for(const loop of block.loops){const idx=loop.keys.indexOf(k);
+      if(idx>=0&&loop.rows.length>0){const v=loop.rows[0][idx];if(v&&v!=='.'&&v!=='?')return v;}}
+  }
+  return null;
+}
+function lc(block,...keys){
+  for(const key of keys){const k=key.toLowerCase();
+    for(const loop of block.loops){const idx=loop.keys.indexOf(k);if(idx>=0)return loop.rows.map(r=>r[idx]);}}
+  return null;
+}
+function cleanVal(v){return(v===undefined||v===null||v==='.'||v==='?')?null:v;}
+function pn(s){if(!s||s==='.'||s==='?')return null;const n=parseFloat(s.replace(/\([^)]*\)/,''));return isNaN(n)?null:n;}
+function gn(block,...keys){const v=gi(block,...keys);return v?pn(v):null;}
+function calcVol(a,b,c,al,be,ga){
+  const r=Math.PI/180,ca=Math.cos(al*r),cb=Math.cos(be*r),cg=Math.cos(ga*r);
+  const v2=1-ca*ca-cb*cb-cg*cg+2*ca*cb*cg;return v2>1e-10?a*b*c*Math.sqrt(v2):null;
+}
+function crystalSystem(n){
+  if(n<=2)return'triclinic';if(n<=15)return'monoclinic';if(n<=74)return'orthorhombic';
+  if(n<=142)return'tetragonal';if(n<=167)return'trigonal';if(n<=194)return'hexagonal';
+  if(n<=230)return'cubic';return null;
+}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+const CIF_GREEK={a:'α',b:'β',g:'γ',d:'δ',e:'ε',z:'ζ',h:'η',q:'θ',
+  i:'ι',k:'κ',l:'λ',m:'μ',n:'ν',c:'ξ',o:'ο',p:'π',
+  r:'ρ',s:'σ',t:'τ',u:'υ',f:'φ',x:'χ',y:'ψ',w:'ω'};
+function unmarkup(s){
+  if(!s)return s;
+  return String(s).replace(/\\([a-zA-Z])/g,(m,ch)=>{const g=CIF_GREEK[ch.toLowerCase()];return g!==undefined?g:m;});
+}
+function tv(s){return s?esc(unmarkup(s)):null;}
+function fmtFormula(s){if(!s)return null;return esc(unmarkup(s)).replace(/(\d+(?:\.\d+)?)/g,'<sub>$1</sub>');}
+function fmtSz(b){return b<1024?b+' B':b<1048576?(b/1024).toFixed(1)+' KB':(b/1048576).toFixed(2)+' MB';}
+function sanitizeFilename(s){return (String(s).replace(/[^A-Za-z0-9_-]+/g,'_').replace(/^_+|_+$/g,''))||'structure';}
+const MAX_TABLE_ROWS=2000;
+
+// ═══════════════════════════════════════════════════════
+//  CATEGORY BUILDERS  (Summary page — no atom sites or bond geometry)
+// ═══════════════════════════════════════════════════════
+function catIdentity(block){
+  const name=gi(block,'_chemical_name_common')||gi(block,'_chemical_name_systematic');
+  const formula=gi(block,'_chemical_formula_sum');
+  const moiety=gi(block,'_chemical_formula_moiety');
+  const mw=gi(block,'_chemical_formula_weight');
+  const ccdc=gi(block,'_database_code_depnum_ccdc_archive');
+  return[
+    {label:'Compound name',value:name?tv(name):null},
+    {label:'Empirical formula',value:fmtFormula(formula)},
+    {label:'Moiety formula',value:fmtFormula(moiety),optional:true},
+    {label:'Formula weight (g/mol)',value:mw?tv(mw):null},
+    {label:'CCDC deposition number',value:ccdc?tv(ccdc):null,optional:true},
+  ];
+}
+function catCell(block){
+  const itStr=gi(block,'_space_group_it_number','_symmetry_int_tables_number');
+  const itN=itStr?parseInt(itStr):null;
+  const sys=itN?crystalSystem(itN):null;
+  const hm=gi(block,'_space_group_name_h-m_alt','_symmetry_space_group_name_h-m','_space_group_name_h-m');
+  const hall=gi(block,'_space_group_name_hall','_symmetry_space_group_name_hall');
+  const a=gi(block,'_cell_length_a'),b=gi(block,'_cell_length_b'),c=gi(block,'_cell_length_c');
+  const al=gi(block,'_cell_angle_alpha'),be=gi(block,'_cell_angle_beta'),ga=gi(block,'_cell_angle_gamma');
+  let vol=gi(block,'_cell_volume');
+  if(!vol){
+    const an=pn(a),bn=pn(b),cn=pn(c),aln=pn(al),ben=pn(be),gan=pn(ga);
+    if(an&&bn&&cn&&aln&&ben&&gan){const vc=calcVol(an,bn,cn,aln,ben,gan);if(vc)vol=vc.toFixed(1)+' (calc.)';}
+  }
+  const z=gi(block,'_cell_formula_units_z');
+  const dens=gi(block,'_exptl_crystal_density_diffrn');
+  const f000=gi(block,'_exptl_crystal_f_000');
+  const mu=gi(block,'_exptl_absorpt_coefficient_mu');
+  return[
+    {label:'Crystal system',value:sys?tv(sys):null},
+    {label:'Space group',value:hm?hmHtml(hm,true):null},
+    {label:'Space group (Hall)',value:hall?tv(hall.trim()):null,optional:true},
+    {label:'Space group (IT no.)',value:itStr?tv(itStr):null},
+    {label:'a (Å)',value:a?tv(a):null},
+    {label:'b (Å)',value:b?tv(b):null},
+    {label:'c (Å)',value:c?tv(c):null},
+    {label:'α (°)',value:al?tv(al):null},
+    {label:'β (°)',value:be?tv(be):null},
+    {label:'γ (°)',value:ga?tv(ga):null},
+    {label:'Volume (Å³)',value:vol?tv(String(vol)):null},
+    {label:'Z',value:z?tv(z):null},
+    {label:'Density, calc. (g/cm³)',value:dens?tv(dens):null},
+    {label:'F(000)',value:f000?tv(f000):null},
+    {label:'Absorption coeff. μ (mm⁻¹)',value:mu?tv(mu):null},
+  ];
+}
+function catDescription(block){
+  const colour=gi(block,'_exptl_crystal_colour');
+  const habit=gi(block,'_exptl_crystal_description');
+  const smax=gi(block,'_exptl_crystal_size_max'),smid=gi(block,'_exptl_crystal_size_mid'),smin=gi(block,'_exptl_crystal_size_min');
+  const size=(smax&&smid&&smin)?tv(smax)+' × '+tv(smid)+' × '+tv(smin)+' mm':null;
+  return[
+    {label:'Colour',value:colour?tv(colour):null},
+    {label:'Habit / description',value:habit?tv(habit):null,optional:true},
+    {label:'Crystal size (mm)',value:size},
+  ];
+}
+function catCollection(block){
+  const temp=gi(block,'_diffrn_ambient_temperature');
+  const radType=gi(block,'_diffrn_radiation_type');
+  const wl=gi(block,'_diffrn_radiation_wavelength');
+  const device=gi(block,'_diffrn_measurement_device_type');
+  const thMin=gi(block,'_diffrn_reflns_theta_min'),thMax=gi(block,'_diffrn_reflns_theta_max');
+  let thetaRange=null;
+  if(thMax&&thMin)thetaRange=tv(thMin)+' – '+tv(thMax)+'°';
+  else if(thMax)thetaRange='≤ '+tv(thMax)+'°';
+  const nColl=gi(block,'_diffrn_reflns_number');
+  const nIndep=gi(block,'_reflns_number_total');
+  const nObs=gi(block,'_reflns_number_gt');
+  const rint=gi(block,'_diffrn_reflns_av_r_equivalents');
+  const compV=gn(block,'_diffrn_measured_fraction_theta_max','_diffrn_measured_fraction_theta_full');
+  const comp=compV!==null?(compV*100).toFixed(1)+'%':null;
+  return[
+    {label:'Temperature (K)',value:temp?tv(temp):null},
+    {label:'Radiation',value:radType?tv(radType):null},
+    {label:'Wavelength (Å)',value:wl?tv(wl):null},
+    {label:'Diffractometer',value:device?tv(device):null,optional:true},
+    {label:'θ range (°)',value:thetaRange},
+    {label:'Reflections collected',value:nColl?tv(nColl):null},
+    {label:'Independent reflections',value:nIndep?tv(nIndep):null},
+    {label:'Observed refl. [I&gt;2σ(I)]',value:nObs?tv(nObs):null},
+    {label:'R(int)',value:rint?tv(rint):null},
+    {label:'Completeness to θmax',value:comp},
+  ];
+}
+function catRefinement(block){
+  const method=gi(block,'_refine_ls_structure_factor_coef');
+  const nrefl=gi(block,'_refine_ls_number_reflns'),nrestr=gi(block,'_refine_ls_number_restraints'),nparam=gi(block,'_refine_ls_number_parameters');
+  const drp=(nrefl&&nparam)?tv(nrefl)+' / '+tv(nrestr||'0')+' / '+tv(nparam):null;
+  const goof=gi(block,'_refine_ls_goodness_of_fit_ref');
+  const r1=gi(block,'_refine_ls_r_factor_gt','_refine_ls_r_factor_obs');
+  const wr2=gi(block,'_refine_ls_wr_factor_gt')||gi(block,'_refine_ls_wr_factor_ref','_refine_ls_wr_factor_obs');
+  const finalR=(r1||wr2)?('R1 = '+(r1?tv(r1):'?')+', wR2 = '+(wr2?tv(wr2):'?')):null;
+  const r1all=gi(block,'_refine_ls_r_factor_all');
+  const wr2all=gi(block,'_refine_ls_wr_factor_ref','_refine_ls_wr_factor_obs');
+  const allR=(r1all||wr2all)?('R1 = '+(r1all?tv(r1all):'?')+', wR2 = '+(wr2all?tv(wr2all):'?')):null;
+  const ext=gi(block,'_refine_ls_extinction_coef');
+  const flack=gi(block,'_refine_ls_abs_structure_flack');
+  const peak=gi(block,'_refine_diff_density_max'),hole=gi(block,'_refine_diff_density_min');
+  const diffPH=(peak&&hole)?('+'+tv(peak)+' / '+tv(hole)+' e·Å⁻³'):null;
+  const solProg=gi(block,'_computing_structure_solution');
+  const refProg=gi(block,'_computing_structure_refinement');
+  return[
+    {label:'Refinement method',value:method?tv(method):null,optional:true},
+    {label:'Data / restraints / parameters',value:drp},
+    {label:'Goodness-of-fit on F²',value:goof?tv(goof):null},
+    {label:'Final R indices [I&gt;2σ(I)]',value:finalR},
+    {label:'R indices (all data)',value:allR},
+    {label:'Extinction coefficient',value:ext?tv(ext):null,optional:true},
+    {label:'Flack parameter',value:flack?tv(flack):null,optional:true},
+    {label:'Largest diff. peak/hole (e·Å⁻³)',value:diffPH},
+    {label:'Structure solution',value:solProg?tv(solProg):null,optional:true},
+    {label:'Structure refinement',value:refProg?tv(refProg):null,optional:true},
+  ];
+}
+
+// ═══════════════════════════════════════════════════════
+//  GEOMETRY TABLE BUILDERS  (Atoms / Angles / H-bonds / Torsions pages)
+// ═══════════════════════════════════════════════════════
+const CPK={H:'#B9B3A3',C:'#6B6558',N:'#4A6FA5',O:'#C4513F',F:'#7BA05B',Cl:'#4E8367',Br:'#9B4B2F',I:'#7A4E9A',
+  S:'#C79A2E',P:'#D98B3A',B:'#D49A8A',Si:'#A6957A',Na:'#8A6FC0',K:'#8A6FC0',Li:'#8A6FC0',Mg:'#6FA58B',Ca:'#6FA58B',
+  Zn:'#6F8FA8',Cu:'#B87333',Fe:'#B5603A',Co:'#6A7FB5',Ni:'#5E9E80',Mn:'#9A6FA8',Cr:'#7C8FA0',Ti:'#8A93A3',
+  Zr:'#5E9EA0',Pd:'#4F8A8B',Pt:'#6B7B8C',Ag:'#9AA3AD',Au:'#C9A227',Cd:'#B58AA5',Hg:'#A3A3B5',Al:'#C79A94',
+  Ru:'#4F8A8B',Rh:'#5A7F9A',Ir:'#4F6F9A',Mo:'#6FA3A8',W:'#6A7B8C',V:'#8A93A3',Eu:'#7A9A5E',Gd:'#7A9A5E',La:'#7A9A5E'};
+function elOf(type,label){
+  let s=(/^[A-Za-z]+/.exec(type&&type!=='.'?type:'')||[''])[0];
+  if(s)return s[0].toUpperCase()+(s[1]||'').toLowerCase();
+  s=(/^[A-Za-z]+/.exec(label||'')||[''])[0];
+  if(!s)return '';
+  return s.length>1&&/[a-z]/.test(s[1])?s[0].toUpperCase()+s[1]:s[0].toUpperCase();
+}
+function ev(v){
+  v=cleanVal(v);if(v===null)return '<span class="na">—</span>';
+  const m=/^(.*?)(\(\d+\))$/.exec(v);
+  return m?esc(m[1])+'<span class="esd">'+esc(m[2])+'</span>':esc(v);
+}
+function arcGlyph(v){
+  const a=pn(v);if(a===null)return '';
+  const cx=12,cy=15,R=9,rr=5.5,rad=a*Math.PI/180;
+  const x2=cx+R*Math.cos(rad),y2=cy-R*Math.sin(rad),bx=cx+rr*Math.cos(rad),by=cy-rr*Math.sin(rad);
+  return '<svg class="gl" viewBox="0 0 24 18" width="24" height="18" aria-hidden="true"><path d="M'+(cx+R)+' '+cy+'L'+cx+' '+cy+'L'+x2.toFixed(1)+' '+y2.toFixed(1)+
+    '" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity=".55"/><path d="M'+(cx+rr)+' '+cy+'A'+rr+' '+rr+' 0 0 0 '+bx.toFixed(1)+' '+by.toFixed(1)+
+    '" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round"/></svg>';
+}
+function dialGlyph(v){
+  const t=pn(v);if(t===null)return '';
+  const c=9,R=7,rad=t*Math.PI/180,x=c+R*Math.sin(rad),y=c-R*Math.cos(rad);
+  return '<svg class="gl" viewBox="0 0 18 18" width="18" height="18" aria-hidden="true"><circle cx="9" cy="9" r="7.4" fill="none" stroke="currentColor" stroke-width="1" opacity=".3"/>'+
+    '<line x1="9" y1="9" x2="9" y2="1.6" stroke="currentColor" stroke-width="1.2" opacity=".55" stroke-linecap="round"/>'+
+    '<line x1="9" y1="9" x2="'+x.toFixed(1)+'" y2="'+y.toFixed(1)+'" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round"/>'+
+    '<circle cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="1.7" fill="var(--accent)"/></svg>';
+}
+function sp(label,sym){return esc(label)+(cleanVal(sym)?'<sup>'+esc(sym)+'</sup>':'');}
+function sc(label,sym){return label+(cleanVal(sym)?'('+sym+')':'');}
+function dataTable(kind,total,shown,head,rows){
+  return '<div class="table-toolbar"><span class="table-count" data-kind="'+esc(kind)+'" data-total="'+total+'">'+total+' '+esc(kind)+'</span>'+
+    '<span class="tbl-tools"><input class="tbl-filter" type="search" placeholder="Filter rows…" aria-label="Filter rows" autocomplete="off">'+
+    '<button class="btn copy-btn" type="button" title="Copy the visible rows as tab-separated text">Copy TSV</button></span></div>'+
+    '<div class="table-scroll"><table class="data-table"><thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table></div>'+
+    (total>shown?'<div class="table-note">Showing the first '+shown+' of '+total+' rows; the filter searches those.</div>':'');
+}
+function emptyTable(tag,hint){
+  return '<div class="table-empty"><div class="te-mark">∅</div>No <code>'+tag+'</code> loop in this CIF block.'+(hint?'<div class="te-hint">'+hint+'</div>':'')+'</div>';
+}
+function renderAtomsTable(block){
+  const labels=lc(block,'_atom_site_label');
+  if(!labels||!labels.length)return emptyTable('_atom_site');
+  const types=lc(block,'_atom_site_type_symbol');
+  const xs=lc(block,'_atom_site_fract_x'),ys=lc(block,'_atom_site_fract_y'),zs=lc(block,'_atom_site_fract_z');
+  const ueq=lc(block,'_atom_site_u_iso_or_equiv'),biso=lc(block,'_atom_site_b_iso_or_equiv');
+  const uCol=ueq||biso,uLabel=ueq?'U<sub>eq</sub> (Å²)':(biso?'B<sub>iso</sub> (Å²)':'U / B');
+  const occ=lc(block,'_atom_site_occupancy'),adp=lc(block,'_atom_site_adp_type');
+  const n=labels.length,shown=Math.min(n,MAX_TABLE_ROWS);
+  let rows='';
+  for(let i=0;i<shown;i++){
+    const el=elOf(types&&types[i],labels[i]),col=CPK[el]||'#8A8470';
+    rows+='<tr data-s="'+esc((labels[i]+' '+el).toLowerCase())+'"><td data-copy="'+esc(labels[i])+'"><span class="el" style="--c:'+col+'">'+esc(el||'?')+'</span><b class="lab">'+esc(labels[i])+'</b></td>'+
+      '<td>'+ev(xs&&xs[i])+'</td><td>'+ev(ys&&ys[i])+'</td><td>'+ev(zs&&zs[i])+'</td>'+
+      '<td>'+ev(uCol&&uCol[i])+'</td><td>'+esc(cleanVal(occ&&occ[i])||'1')+'</td>'+
+      (adp?'<td>'+esc(cleanVal(adp[i])||'—')+'</td>':'')+'</tr>';
+  }
+  return dataTable('atom sites',n,shown,'<th>Atom</th><th>x</th><th>y</th><th>z</th><th>'+uLabel+'</th><th>Occ.</th>'+(adp?'<th>ADP</th>':''),rows);
+}
+function renderAnglesTable(block){
+  const a1=lc(block,'_geom_angle_atom_site_label_1'),a2=lc(block,'_geom_angle_atom_site_label_2'),a3=lc(block,'_geom_angle_atom_site_label_3');
+  const ang=lc(block,'_geom_angle');
+  if(!a1||!ang||!a1.length)return emptyTable('_geom_angle');
+  const sy1=lc(block,'_geom_angle_site_symmetry_1'),sy3=lc(block,'_geom_angle_site_symmetry_3');
+  const n=a1.length,shown=Math.min(n,MAX_TABLE_ROWS);
+  let rows='';
+  for(let i=0;i<shown;i++){
+    const s1=sy1&&sy1[i],s3=sy3&&sy3[i];
+    const lbl=sp(a1[i],s1)+' – '+esc(a2[i])+' – '+sp(a3[i],s3);
+    const copy=sc(a1[i],s1)+'-'+a2[i]+'-'+sc(a3[i],s3);
+    rows+='<tr data-s="'+esc((a1[i]+' '+a2[i]+' '+a3[i]).toLowerCase())+'"><td data-copy="'+esc(copy)+'">'+lbl+'</td><td>'+ev(ang[i])+'</td><td class="gl-td">'+arcGlyph(ang[i])+'</td></tr>';
+  }
+  return dataTable('angles',n,shown,'<th>Atoms</th><th>Angle (°)</th><th class="gl-td"></th>',rows);
+}
+function renderHBondsTable(block){
+  const d=lc(block,'_geom_hbond_atom_site_label_d'),h=lc(block,'_geom_hbond_atom_site_label_h'),a=lc(block,'_geom_hbond_atom_site_label_a');
+  if(!d||!d.length)return emptyTable('_geom_hbond','Hydrogen-bond tables are usually added by PLATON or Olex2 reports rather than by SHELXL itself.');
+  const dh=lc(block,'_geom_hbond_distance_dh'),ha=lc(block,'_geom_hbond_distance_ha'),da=lc(block,'_geom_hbond_distance_da');
+  const dha=lc(block,'_geom_hbond_angle_dha'),symA=lc(block,'_geom_hbond_site_symmetry_a');
+  const n=d.length,shown=Math.min(n,MAX_TABLE_ROWS);
+  let rows='';
+  for(let i=0;i<shown;i++){
+    const hh=(h&&h[i])||'H',sA=symA&&symA[i];
+    const lbl=esc(d[i])+'–'+esc(hh)+'···'+sp(a[i],sA);
+    rows+='<tr data-s="'+esc((d[i]+' '+hh+' '+a[i]).toLowerCase())+'"><td data-copy="'+esc(d[i]+'-'+hh+'...'+sc(a[i],sA))+'">'+lbl+'</td>'+
+      '<td>'+ev(dh&&dh[i])+'</td><td>'+ev(ha&&ha[i])+'</td><td>'+ev(da&&da[i])+'</td><td>'+ev(dha&&dha[i])+'</td><td class="gl-td">'+arcGlyph(dha&&dha[i])+'</td></tr>';
+  }
+  return dataTable('hydrogen bonds',n,shown,'<th>D–H···A</th><th>d(D–H) Å</th><th>d(H···A) Å</th><th>d(D···A) Å</th><th>∠(DHA) °</th><th class="gl-td"></th>',rows);
+}
+function renderTorsionsTable(block){
+  const a1=lc(block,'_geom_torsion_atom_site_label_1'),a2=lc(block,'_geom_torsion_atom_site_label_2'),
+        a3=lc(block,'_geom_torsion_atom_site_label_3'),a4=lc(block,'_geom_torsion_atom_site_label_4');
+  const tor=lc(block,'_geom_torsion');
+  if(!a1||!tor||!a1.length)return emptyTable('_geom_torsion');
+  const sy=[1,2,3,4].map(k=>lc(block,'_geom_torsion_site_symmetry_'+k));
+  const n=a1.length,shown=Math.min(n,MAX_TABLE_ROWS);
+  const s=(k,i)=>sy[k]&&sy[k][i];
+  let rows='';
+  for(let i=0;i<shown;i++){
+    const lbl=sp(a1[i],s(0,i))+' – '+sp(a2[i],s(1,i))+' – '+sp(a3[i],s(2,i))+' – '+sp(a4[i],s(3,i));
+    const copy=[sc(a1[i],s(0,i)),sc(a2[i],s(1,i)),sc(a3[i],s(2,i)),sc(a4[i],s(3,i))].join('-');
+    rows+='<tr data-s="'+esc((a1[i]+' '+a2[i]+' '+a3[i]+' '+a4[i]).toLowerCase())+'"><td data-copy="'+esc(copy)+'">'+lbl+'</td><td>'+ev(tor[i])+'</td><td class="gl-td">'+dialGlyph(tor[i])+'</td></tr>';
+  }
+  return dataTable('torsion angles',n,shown,'<th>Atoms</th><th>Torsion (°)</th><th class="gl-td"></th>',rows);
+}
+// live row filter + "Copy TSV" (delegated, so it works for every table on every page)
+document.addEventListener('input',e=>{
+  const inp=e.target.closest&&e.target.closest('.tbl-filter');if(!inp)return;
+  const page=inp.closest('.page'),words=inp.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  let vis=0;
+  page.querySelectorAll('tbody tr').forEach(r=>{const ok=words.every(w=>(r.dataset.s||'').includes(w));r.hidden=!ok;if(ok)vis++;});
+  const c=page.querySelector('.table-count'),tot=+c.dataset.total;
+  c.textContent=(words.length?vis+' of '+tot:tot)+' '+c.dataset.kind;
+});
+function copyText(text,btn){
+  const done=()=>{const t=btn.textContent;btn.textContent='Copied ✓';setTimeout(()=>{btn.textContent=t;},1400);};
+  const fallback=()=>{const ta=document.createElement('textarea');ta.value=text;ta.style.cssText='position:fixed;opacity:0';document.body.appendChild(ta);ta.select();try{document.execCommand('copy');done();}catch(e){btn.textContent='Copy failed';}document.body.removeChild(ta);};
+  if(navigator.clipboard&&window.isSecureContext)navigator.clipboard.writeText(text).then(done,fallback);else fallback();
+}
+document.addEventListener('click',e=>{
+  const btn=e.target.closest&&e.target.closest('.copy-btn');if(!btn)return;
+  const table=btn.closest('.page').querySelector('table.data-table');
+  const cellsOf=tr=>Array.from(tr.children).filter(c=>!c.classList.contains('gl-td')).map(c=>(c.dataset.copy!==undefined?c.dataset.copy:c.textContent).trim());
+  const lines=[cellsOf(table.querySelector('thead tr')).join('\t')];
+  table.querySelectorAll('tbody tr').forEach(r=>{if(!r.hidden)lines.push(cellsOf(r).join('\t'));});
+  copyText(lines.join('\n'),btn);
+});
+
+// ═══════════════════════════════════════════════════════
+//  RICH-TEXT MODEL  (shared by on-screen Table 1 / Report and RTF export)
+// ═══════════════════════════════════════════════════════
+function R(text,opts){return Object.assign({text:String(text)},opts||{});}
+function IT(t){return R(t,{i:true});}
+function SUB(t){return R(t,{sub:true});}
+function SUP(t){return R(t,{sup:true});}
+function BOLD(t){return R(t,{b:true});}
+function PLAIN(t){return R(t);}
+function runsToHTML(runs){
+  if(!runs)return '';
+  return runs.map(r=>{
+    let s=esc(r.text);
+    if(r.bar)s='<span class="ob">'+s+'</span>';
+    if(r.sub)s='<sub>'+s+'</sub>';
+    if(r.sup)s='<sup>'+s+'</sup>';
+    if(r.i)s='<i>'+s+'</i>';
+    if(r.b)s='<b>'+s+'</b>';
+    return s;
+  }).join('');
+}
+function rtfEscapeText(s){
+  return String(s).split('').map(ch=>{
+    const code=ch.codePointAt(0);
+    if(ch==='\\'||ch==='{'||ch==='}')return '\\'+ch;
+    if(code<128)return ch;
+    if(code<=255)return "\\'"+code.toString(16).padStart(2,'0');
+    return '\\u'+code+'?';
+  }).join('');
+}
+function runsToRTF(runs){
+  if(!runs)return '';
+  return runs.map(r=>{
+    let body=rtfEscapeText(r.text);
+    // overbar: Word's own EQ box field with a top border; readers that ignore fields show the plain character
+    if(r.bar)body='{\\field{\\*\\fldinst{ EQ \\\\x \\\\to('+body+') }}{\\fldrslt '+body+'}}';
+    if(r.sub)body='{\\sub '+body+'}';
+    if(r.sup)body='{\\super '+body+'}';
+    if(r.i)body='{\\i '+body+'}';
+    if(r.b)body='{\\b '+body+'}';
+    return body;
+  }).join('');
+}
+// Hermann–Mauguin symbol with screw axes written properly: "P 42/n" → P4₂/n, "P 21 21 21" → P2₁2₁2₁.
+// A pair is a screw axis (2₁ 3₁ 3₂ 4₁ 4₂ 4₃ 6₁…6₅) when it stands alone between spaces, slashes or the lattice letter,
+// or is written N(M). "-42m" (4-bar then 2) and "422" are left alone.
+function hmRuns(s,italic){
+  // Hermann–Mauguin symbol in its standard compact form: no spaces, letters italic, digits upright,
+  // screw axes as subscripts (4₂, 2₁ …) and inversion axes with an overbar (3̅, 4̅ …).
+  s=unmarkup(String(s)).trim().replace(/\s*\/\s*/g,'/');          // "P 4 2 / n" → "P 4 2/n"
+  const pure=/^([A-Za-z])((?:21)+)$/.exec(s);                      // compact P212121
+  if(pure)s=pure[1]+' '+pure[2].match(/21/g).join(' ');
+  const SCREW=new Set(['21','31','32','41','42','43','61','62','63','64','65']);
+  // 1: "-3" etc. (overbar) · 2,3: "4(2)" · 4,5: "4 2" before a slash (a screw axis, never two separate axes) · 6,7: glued "42" / "21"
+  const re=/-([1346])|([2346])\(([1-5])\)|(?<=[\s\/A-Za-z])([246])\s([1-5])(?=\/)|(?:^|(?<=[\s\/A-Za-z]))([2346])([1-5])(?=$|[\s\/])/g;
+  const out=[];let last=0,m;
+  // italic applies to the letters only; everything else is upright, and spaces are dropped
+  const text=t=>{if(t)t.split(/([A-Za-z]+)/).forEach(p=>{
+    const q=/^[A-Za-z]+$/.test(p)?p:p.replace(/\s+/g,'');
+    if(q)out.push(R(q,italic&&/^[A-Za-z]+$/.test(q)?{i:true}:{}));
+  });};
+  while((m=re.exec(s))){
+    text(s.slice(last,m.index));
+    if(m[1])out.push(R(m[1],{bar:true}));
+    else{
+      const d=m[2]||m[4]||m[6],sub=m[3]||m[5]||m[7];
+      if(SCREW.has(d+sub)){text(d);out.push(R(sub,{sub:true}));}
+      else text(m[0]);
+    }
+    last=re.lastIndex;
+  }
+  text(s.slice(last));
+  return out;
+}
+function hmHtml(s,italic){return runsToHTML(hmRuns(s,italic));}
+function formulaRuns(s){
+  if(!s)return null;
+  const clean=unmarkup(s);
+  return clean.split(/(\d+(?:\.\d+)?)/).filter(p=>p!=='').map(p=>/^\d+(?:\.\d+)?$/.test(p)?SUB(p):PLAIN(p));
+}
+
+// ═══════════════════════════════════════════════════════
+//  TABLE 1  (Crystal data and structure refinement)
+// ═══════════════════════════════════════════════════════
+function buildTable1Rows(block){
+  const rows=[];
+  const push=(label,value,optional)=>{
+    if(optional&&(!value||!value.length))return;
+    rows.push({label:label||[],value:(value&&value.length)?value:[PLAIN('not reported')]});
+  };
+
+  push([PLAIN('Identification code')],[PLAIN(block.name)]);
+
+  push([PLAIN('Empirical formula')],formulaRuns(gi(block,'_chemical_formula_sum')));
+
+  const mw=gi(block,'_chemical_formula_weight');
+  push([PLAIN('Formula weight')],mw?[PLAIN(mw)]:null,true);
+
+  const temp=gi(block,'_diffrn_ambient_temperature');
+  push([PLAIN('Temperature (K)')],temp?[PLAIN(temp)]:null,true);
+
+  const wl=gi(block,'_diffrn_radiation_wavelength');
+  push([PLAIN('Wavelength (Å)')],wl?[PLAIN(wl)]:null,true);
+
+  const itStr=gi(block,'_space_group_it_number','_symmetry_int_tables_number');
+  const itN=itStr?parseInt(itStr):null;
+  const sys=itN?crystalSystem(itN):null;
+  push([PLAIN('Crystal system')],sys?[PLAIN(sys)]:null,true);
+
+  const hm=gi(block,'_space_group_name_h-m_alt','_symmetry_space_group_name_h-m','_space_group_name_h-m');
+  push([PLAIN('Space group')],hm?hmRuns(hm,true):null,true);
+
+  const a=gi(block,'_cell_length_a'),b=gi(block,'_cell_length_b'),c=gi(block,'_cell_length_c');
+  const al=gi(block,'_cell_angle_alpha'),be=gi(block,'_cell_angle_beta'),ga=gi(block,'_cell_angle_gamma');
+  push([IT('a'),PLAIN(' (Å)')],a?[PLAIN(a)]:null,true);
+  push([IT('b'),PLAIN(' (Å)')],b?[PLAIN(b)]:null,true);
+  push([IT('c'),PLAIN(' (Å)')],c?[PLAIN(c)]:null,true);
+  push([PLAIN('α (°)')],al?[PLAIN(al)]:null,true);
+  push([PLAIN('β (°)')],be?[PLAIN(be)]:null,true);
+  push([PLAIN('γ (°)')],ga?[PLAIN(ga)]:null,true);
+
+  let vol=gi(block,'_cell_volume');
+  if(!vol){const an=pn(a),bn=pn(b),cn=pn(c),aln=pn(al),ben=pn(be),gan=pn(ga);
+    if(an&&bn&&cn&&aln&&ben&&gan){const vc=calcVol(an,bn,cn,aln,ben,gan);if(vc)vol=vc.toFixed(1);}}
+  push([PLAIN('Volume (Å'),SUP('3'),PLAIN(')')],vol?[PLAIN(String(vol))]:null,true);
+
+  const z=gi(block,'_cell_formula_units_z');
+  push([IT('Z')],z?[PLAIN(z)]:null,true);
+
+  const dens=gi(block,'_exptl_crystal_density_diffrn');
+  push([PLAIN('Density, calculated (g cm'),SUP('-3'),PLAIN(')')],dens?[PLAIN(dens)]:null,true);
+
+  const mu=gi(block,'_exptl_absorpt_coefficient_mu');
+  push([PLAIN('Absorption coefficient (mm'),SUP('-1'),PLAIN(')')],mu?[PLAIN(mu)]:null,true);
+
+  const f000=gi(block,'_exptl_crystal_f_000');
+  push([IT('F'),SUB('000')],f000?[PLAIN(f000)]:null,true);
+
+  const smax=gi(block,'_exptl_crystal_size_max'),smid=gi(block,'_exptl_crystal_size_mid'),smin=gi(block,'_exptl_crystal_size_min');
+  push([PLAIN('Crystal size (mm)')],(smax&&smid&&smin)?[PLAIN(smax+' × '+smid+' × '+smin)]:null,true);
+
+  const thMin=gi(block,'_diffrn_reflns_theta_min'),thMax=gi(block,'_diffrn_reflns_theta_max');
+  push([PLAIN('θ range for data collection (°)')],(thMin&&thMax)?[PLAIN(thMin+' to '+thMax)]:null,true);
+
+  const hMin=gi(block,'_diffrn_reflns_limit_h_min'),hMax=gi(block,'_diffrn_reflns_limit_h_max');
+  const kMin=gi(block,'_diffrn_reflns_limit_k_min'),kMax=gi(block,'_diffrn_reflns_limit_k_max');
+  const lMin=gi(block,'_diffrn_reflns_limit_l_min'),lMax=gi(block,'_diffrn_reflns_limit_l_max');
+  if(hMin&&hMax&&kMin&&kMax&&lMin&&lMax){
+    push([PLAIN('Miller index ranges')],[
+      PLAIN(hMin+'\u2264'),IT('h'),PLAIN('\u2264'+hMax+', '+kMin+'\u2264'),IT('k'),PLAIN('\u2264'+kMax+', '+lMin+'\u2264'),IT('l'),PLAIN('\u2264'+lMax)
+    ]);
+  }
+
+  const nColl=gi(block,'_diffrn_reflns_number');
+  push([PLAIN('Reflections collected')],nColl?[PLAIN(nColl)]:null,true);
+
+  const nIndep=gi(block,'_reflns_number_total');
+  const rint=gi(block,'_diffrn_reflns_av_r_equivalents');
+  if(nIndep){
+    const v=[PLAIN(nIndep)];
+    if(rint)v.push(PLAIN(' ['),IT('R'),SUB('int'),PLAIN(' = '+rint+']'));
+    push([PLAIN('Independent reflections')],v);
+  }
+
+  const compV=gn(block,'_diffrn_measured_fraction_theta_max','_diffrn_measured_fraction_theta_full');
+  push([PLAIN('Completeness to θ'),SUB('max')],compV!==null?[PLAIN((compV*100).toFixed(1)+'%')]:null,true);
+
+  const tMax=gi(block,'_exptl_transmission_factor_max'),tMin=gi(block,'_exptl_transmission_factor_min');
+  push([PLAIN('Max. and min. transmission')],(tMax&&tMin)?[PLAIN(tMax+' and '+tMin)]:null,true);
+
+  const coef=gi(block,'_refine_ls_structure_factor_coef');
+  const onF2=!coef||/2|sqd/i.test(coef);
+  push([PLAIN('Refinement method')],[PLAIN('Full-matrix least-squares on '),IT('F'),onF2?SUP('2'):PLAIN('')]);
+
+  const nrefl=gi(block,'_refine_ls_number_reflns'),nrestr=gi(block,'_refine_ls_number_restraints'),nparam=gi(block,'_refine_ls_number_parameters');
+  push([PLAIN('Data / restraints / parameters')],(nrefl&&nparam)?[PLAIN(nrefl+' / '+(nrestr||'0')+' / '+nparam)]:null,true);
+
+  const goof=gi(block,'_refine_ls_goodness_of_fit_ref');
+  push([PLAIN('Goodness-of-fit on '),IT('F'),SUP('2')],goof?[PLAIN(goof)]:null,true);
+
+  const r1=gi(block,'_refine_ls_r_factor_gt','_refine_ls_r_factor_obs');
+  const wr2=gi(block,'_refine_ls_wr_factor_gt')||gi(block,'_refine_ls_wr_factor_ref','_refine_ls_wr_factor_obs');
+  if(r1||wr2){
+    push([PLAIN('Final '),IT('R'),PLAIN(' indices ['),IT('I'),PLAIN('>2σ('),IT('I'),PLAIN(')]')],
+      [IT('R'),PLAIN('1 = '+(r1||'?')+', '),IT('wR'),PLAIN('2 = '+(wr2||'?'))]);
+  }
+  const r1all=gi(block,'_refine_ls_r_factor_all');
+  const wr2all=gi(block,'_refine_ls_wr_factor_ref','_refine_ls_wr_factor_obs');
+  if(r1all||wr2all){
+    push([PLAIN('R indices (all data)')],[IT('R'),PLAIN('1 = '+(r1all||'?')+', '),IT('wR'),PLAIN('2 = '+(wr2all||'?'))]);
+  }
+
+  const peak=gi(block,'_refine_diff_density_max'),hole=gi(block,'_refine_diff_density_min');
+  push([PLAIN('Largest diff. peak and hole (e Å'),SUP('-3'),PLAIN(')')],(peak&&hole)?[PLAIN(peak+' and '+hole)]:null,true);
+
+  const flack=gi(block,'_refine_ls_abs_structure_flack');
+  push([PLAIN('Absolute structure parameter')],flack?[PLAIN(flack)]:null,true);
+
+  return rows;
+}
+
+// ═══════════════════════════════════════════════════════
+//  REPORT PARAGRAPH  ("Crystal data for X: ...")
+// ═══════════════════════════════════════════════════════
+function nonTrivialAngles(al,be,ga){
+  const check=v=>{const n=pn(v);if(n===null)return false;return Math.abs(n-90)>0.03&&Math.abs(n-120)>0.03;};
+  const out=[];
+  if(check(al))out.push(['α',al]);
+  if(check(be))out.push(['β',be]);
+  if(check(ga))out.push(['γ',ga]);
+  return out;
+}
+function buildReportRuns(block){
+  const runs=[];
+  const add=(...rs)=>runs.push(...rs);
+
+  add(BOLD('Crystal data for '+block.name+': '));
+
+  const formula=formulaRuns(gi(block,'_chemical_formula_sum'));
+  if(formula){add(...formula);add(PLAIN(', '));}
+
+  const mw=gi(block,'_chemical_formula_weight');
+  if(mw)add(IT('M'),PLAIN(' = '+mw+', '));
+
+  const itStr=gi(block,'_space_group_it_number','_symmetry_int_tables_number');
+  const itN=itStr?parseInt(itStr):null;
+  const sys=itN?crystalSystem(itN):null;
+  const hm=gi(block,'_space_group_name_h-m_alt','_symmetry_space_group_name_h-m','_space_group_name_h-m');
+  if(sys)add(PLAIN(sys+', '));
+  add(PLAIN('space group '));
+  if(hm)add(...hmRuns(hm,true));
+  if(itN)add(PLAIN(' (No. '+itN+')'));
+  add(PLAIN(', '));
+
+  const a=gi(block,'_cell_length_a'),b=gi(block,'_cell_length_b'),c=gi(block,'_cell_length_c');
+  const al=gi(block,'_cell_angle_alpha'),be=gi(block,'_cell_angle_beta'),ga=gi(block,'_cell_angle_gamma');
+  if(a)add(IT('a'),PLAIN(' = '+a+', '));
+  if(b)add(IT('b'),PLAIN(' = '+b+', '));
+  if(c)add(IT('c'),PLAIN(' = '+c+' Å'));
+  for(const[sym,val] of nonTrivialAngles(al,be,ga))add(PLAIN(', '+sym+' = '+val+'°'));
+  add(PLAIN(', '));
+
+  let vol=gi(block,'_cell_volume');
+  if(!vol){const an=pn(a),bn=pn(b),cn=pn(c),aln=pn(al),ben=pn(be),gan=pn(ga);
+    if(an&&bn&&cn&&aln&&ben&&gan){const vc=calcVol(an,bn,cn,aln,ben,gan);if(vc)vol=vc.toFixed(1);}}
+  if(vol)add(IT('V'),PLAIN(' = '+vol+' Å'),SUP('3'),PLAIN(', '));
+
+  const z=gi(block,'_cell_formula_units_z');
+  if(z)add(IT('Z'),PLAIN(' = '+z+', '));
+
+  const dens=gi(block,'_exptl_crystal_density_diffrn');
+  if(dens)add(IT('D'),SUB('c'),PLAIN(' = '+dens+' g cm'),SUP('-3'),PLAIN(', '));
+
+  const f000=gi(block,'_exptl_crystal_f_000');
+  if(f000)add(IT('F'),SUB('000'),PLAIN(' = '+f000+', '));
+
+  const radType=gi(block,'_diffrn_radiation_type');
+  if(radType)add(PLAIN(unmarkup(radType).trim()+' radiation, '));
+
+  const wl=gi(block,'_diffrn_radiation_wavelength');
+  if(wl)add(PLAIN('λ = '+wl+' Å,  '));
+
+  const temp=gi(block,'_diffrn_ambient_temperature');
+  if(temp)add(IT('T'),PLAIN(' = '+temp+' K, '));
+
+  const thMaxN=gn(block,'_diffrn_reflns_theta_max');
+  if(thMaxN!==null)add(PLAIN('2θ'),SUB('max'),PLAIN(' = '+(thMaxN*2).toFixed(1)+'°, '));
+
+  const nColl=gi(block,'_diffrn_reflns_number');
+  if(nColl)add(PLAIN(nColl+' reflections collected, '));
+
+  const nIndep=gi(block,'_reflns_number_total');
+  const rint=gi(block,'_diffrn_reflns_av_r_equivalents');
+  if(nIndep){
+    add(PLAIN(nIndep+' unique'));
+    if(rint)add(PLAIN(' ('),IT('R'),SUB('int'),PLAIN(' = '+rint+')'));
+    add(PLAIN('.  '));
+  }
+
+  const goof=gi(block,'_refine_ls_goodness_of_fit_ref');
+  if(goof)add(PLAIN('Final '),IT('GooF'),PLAIN(' = '+goof+', '));
+
+  const r1=gi(block,'_refine_ls_r_factor_gt','_refine_ls_r_factor_obs');
+  if(r1)add(IT('R'),PLAIN('1 = '+r1+', '));
+  const wr2=gi(block,'_refine_ls_wr_factor_gt')||gi(block,'_refine_ls_wr_factor_ref','_refine_ls_wr_factor_obs');
+  if(wr2)add(IT('wR'),PLAIN('2 = '+wr2+', '));
+
+  const nObs=gi(block,'_reflns_number_gt');
+  const coef=gi(block,'_refine_ls_structure_factor_coef');
+  const onF2=!coef||/2|sqd/i.test(coef);
+  if(nObs){
+    add(IT('R'),PLAIN(' indices based on '+nObs+' reflections with '),IT('I'),PLAIN(' > 2σ('),IT('I'),PLAIN(') (refinement on '),IT('F'),onF2?SUP('2'):PLAIN(''),PLAIN('), '));
+  }
+
+  const nparam=gi(block,'_refine_ls_number_parameters');
+  if(nparam)add(PLAIN(nparam+' parameters, '));
+  const nrestr=gi(block,'_refine_ls_number_restraints');
+  add(PLAIN((nrestr||'0')+' restraints.  '));
+
+  const absCorr=gi(block,'_exptl_absorpt_correction_type');
+  if(absCorr&&!/^none$/i.test(absCorr))add(PLAIN('Lp and absorption corrections applied, '));
+  else add(PLAIN('Lorentz and polarization corrections applied, '));
+
+  const mu=gi(block,'_exptl_absorpt_coefficient_mu');
+  if(mu)add(PLAIN('μ = '+mu+' mm'),SUP('-1'),PLAIN('.  '));
+
+  const flack=gi(block,'_refine_ls_abs_structure_flack');
+  if(flack){
+    add(PLAIN('Absolute structure parameter = '+flack+' (Flack, H. D. '),IT('Acta Cryst.'),PLAIN(' 1983, '),IT('A39'),PLAIN(', 876-881).'));
+  }
+
+  return runs;
+}
+
+// ═══════════════════════════════════════════════════════
+//  RTF EXPORT ASSEMBLY
+// ═══════════════════════════════════════════════════════
+let RTF_STORE={};
+function rtfDocHeader(){
+  return '{\\rtf1\\ansi\\ansicpg1252\\deff0\\deflang1033'+
+    '{\\fonttbl{\\f0\\froman\\fprq2\\fcharset0 Times New Roman;}{\\f1\\froman\\fprq2\\fcharset2 Symbol;}}'+
+    '\\viewkind4\\uc1\\pard\\f0\\fs20 ';
+}
+function buildTable1RTF(block,rows){
+  let body=rtfDocHeader()+'\\tx4300 ';
+  body+='{\\b Table 1.} Crystal data and structure refinement for '+rtfEscapeText(block.name)+'.\\par\n';
+  for(const r of rows){
+    body+=(r.label.length?runsToRTF(r.label):'')+'\\tab '+runsToRTF(r.value)+'\\par\n';
+  }
+  body+='}';
+  return body;
+}
+function buildReportRTF(runs){
+  return rtfDocHeader()+runsToRTF(runs)+'\\par\n}';
+}
+function downloadBlob(filename,content){
+  const blob=new Blob([content],{type:'application/rtf'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url),2000);
+}
+document.addEventListener('click',e=>{
+  const btn=e.target.closest('.export-btn');if(!btn)return;
+  const content=RTF_STORE[btn.dataset.key];
+  if(content)downloadBlob(btn.dataset.filename,content);
+});
+
+// ═══════════════════════════════════════════════════════
+//  UI RENDERING
+// ═══════════════════════════════════════════════════════
+function renderTable(rows){
+  const visible=rows.filter(r=>!(r.optional&&(r.value===null||r.value===undefined)));
+  return '<table class="ptable">'+visible.map(r=>
+    '<tr><td class="lbl">'+r.label+'</td><td class="val">'+
+    (r.value!==null&&r.value!==undefined?r.value:'<span class="na">not reported</span>')+
+    '</td></tr>').join('')+'</table>';
+}
+function renderCategory(title,rows){
+  return '<div class="cat-sec"><div class="cat-title">'+title+'</div>'+renderTable(rows)+'</div>';
+}
+
+// ── data-quality gauges: value, verdict colour and position on a good/ok/poor scale ──
+function buildGauges(block){
+  const out=[];
+  const scale=(v,lo,hi)=>(v-lo)/(hi-lo);
+  const grade=(v,good,ok,dir)=>dir==='low'?(v<=good?'good':v<=ok?'ok':'poor'):(v>=good?'good':v>=ok?'ok':'poor');
+  const add=(label,text,pos,zones,g,sub,tip)=>out.push({label,text,pos,zones,g,sub,tip});
+  const r1s=gi(block,'_refine_ls_r_factor_gt','_refine_ls_r_factor_obs'),r1=pn(r1s);
+  if(r1!==null)add('R₁',esc(r1s),scale(r1,0,.15),[[1/3,'good'],[2/3,'ok'],[1,'poor']],grade(r1,.05,.10,'low'),'target ≤ 0.05','Conventional R factor on observed reflections. ≤ 0.05 good, ≤ 0.10 acceptable.');
+  const w2s=gi(block,'_refine_ls_wr_factor_ref','_refine_ls_wr_factor_obs','_refine_ls_wr_factor_gt'),w2=pn(w2s);
+  if(w2!==null)add('wR₂',esc(w2s),scale(w2,0,.3),[[.4,'good'],[2/3,'ok'],[1,'poor']],grade(w2,.12,.20,'low'),'target ≤ 0.12','Weighted R factor on F². ≤ 0.12 good, ≤ 0.20 acceptable.');
+  const gfs=gi(block,'_refine_ls_goodness_of_fit_ref','_refine_ls_goodness_of_fit_all'),gf=pn(gfs);
+  if(gf!==null){const d=Math.abs(gf-1);add('GooF',esc(gfs),scale(gf,.5,1.5),[[.25,'poor'],[.4,'ok'],[.6,'good'],[.75,'ok'],[1,'poor']],d<=.1?'good':d<=.25?'ok':'poor','ideal ≈ 1','Goodness of fit on F². Close to 1 means the weights and model agree with the data.');}
+  const comp=gn(block,'_diffrn_measured_fraction_theta_max','_diffrn_measured_fraction_theta_full');
+  if(comp!==null)add('Completeness',(comp*100).toFixed(1)+'%',scale(comp,.9,1),[[.5,'poor'],[.9,'ok'],[1,'good']],grade(comp,.99,.95,'high'),'target ≥ 99 %','Fraction of unique reflections measured to θmax.');
+  const wl=gn(block,'_diffrn_radiation_wavelength'),thm=gn(block,'_diffrn_reflns_theta_max');
+  if(wl&&thm){const dm=wl/(2*Math.sin(thm*Math.PI/180));add('Resolution',dm.toFixed(2)+' Å',scale(dm,.6,1.4),[[.3,'good'],[.5,'ok'],[1,'poor']],grade(dm,.84,1,'low'),'target ≤ 0.84 Å','d(min) = λ / 2 sin θmax. Lower is better; 0.84 Å is the usual publication target.');}
+  const nr=gn(block,'_refine_ls_number_reflns','_reflns_number_total'),np=gn(block,'_refine_ls_number_parameters');
+  if(nr&&np){const q=nr/np;add('Data / param.',q.toFixed(1),scale(q,0,20),[[.4,'poor'],[.5,'ok'],[1,'good']],grade(q,10,8,'high'),'target ≥ 10','Reflections per refined parameter. Below about 8 the model is poorly determined.');}
+  const ris=gi(block,'_diffrn_reflns_av_r_equivalents'),ri=pn(ris);
+  if(ri!==null)add('R<sub>int</sub>',esc(ris),scale(ri,0,.15),[[1/3,'good'],[2/3,'ok'],[1,'poor']],grade(ri,.05,.10,'low'),'target ≤ 0.05','Agreement between symmetry-equivalent reflections.');
+  const fls=gi(block,'_refine_ls_abs_structure_flack'),fl=pn(fls);
+  if(fl!==null)add('Flack',esc(fls),scale(fl,-.5,1),[[.1333,'poor'],[.2667,'ok'],[.4,'good'],[.5333,'ok'],[1,'poor']],Math.abs(fl)<=.1?'good':Math.abs(fl)<=.3?'ok':'poor','near 0','Absolute-structure parameter: ≈ 0 correct, ≈ 1 inverted, ≈ 0.5 twinned or racemic.');
+  return out;
+}
+function gaugeHtml(g){
+  const segs=g.zones.map((z,i)=>'<i class="z-'+z[1]+'" style="flex:'+(((z[0]-(i?g.zones[i-1][0]:0))*100)).toFixed(2)+'"></i>').join('');
+  const pos=Math.max(0,Math.min(1,g.pos))*100;
+  return '<div class="gauge g-'+g.g+'" title="'+esc(g.tip)+'"><div class="g-top"><span class="g-lbl">'+g.label+'</span><span class="g-dot"></span></div>'+
+    '<div class="g-val">'+g.text+'</div><div class="g-track">'+segs+'<b class="g-mark" style="left:'+pos.toFixed(1)+'%"></b></div><div class="g-sub">'+esc(g.sub)+'</div></div>';
+}
+function renderSummaryPage(block){
+  const CATS=[
+    ['Structure Identification',catIdentity(block)],
+    ['Unit Cell &amp; Space Group',catCell(block)],
+    ['Crystal Description',catDescription(block)],
+    ['Data Collection',catCollection(block)],
+    ['Refinement &amp; Data Quality',catRefinement(block)],
+  ];
+  const gs=buildGauges(block);
+  return (gs.length?'<div class="gauges">'+gs.map(gaugeHtml).join('')+'</div>':'')+
+    '<div class="cat-grid">'+CATS.map(([t,r])=>renderCategory(t,r)).join('')+'</div>';
+}
+function renderTable1Page(block,uid){
+  const rows=buildTable1Rows(block);
+  const html=rows.map(r=>'<tr><td class="lbl">'+runsToHTML(r.label)+'</td><td class="val">'+runsToHTML(r.value)+'</td></tr>').join('');
+  const key='table1-'+uid,fname=sanitizeFilename(block.name)+'_Table1.rtf';
+  RTF_STORE[key]=buildTable1RTF(block,rows);
+  return '<div class="table-toolbar"><span class="pub-title">Manuscript-ready · opens in Word</span>'+
+    '<button class="btn export-btn" data-key="'+key+'" data-filename="'+esc(fname)+'">Export RTF</button></div>'+
+    '<div class="paper"><div class="paper-cap"><b>Table 1.</b> Crystal data and structure refinement for '+esc(block.name)+'.</div>'+
+    '<table class="booktabs"><tbody>'+html+'</tbody></table></div>';
+}
+function renderReportPage(block,uid){
+  const runs=buildReportRuns(block);
+  const key='report-'+uid,fname=sanitizeFilename(block.name)+'_Report.rtf';
+  RTF_STORE[key]=buildReportRTF(runs);
+  return '<div class="table-toolbar"><span class="pub-title">Experimental-section paragraph · opens in Word</span>'+
+    '<button class="btn export-btn" data-key="'+key+'" data-filename="'+esc(fname)+'">Export RTF</button></div>'+
+    '<div class="paper report">'+runsToHTML(runs)+'</div>';
+}
+
+// ═══════════════════════════════════════════════════════
+//  PAGES  (built lazily: only the visible page of the selected structure)
+// ═══════════════════════════════════════════════════════
+const $=id=>document.getElementById(id);
+const PAGE_DEFS=[
+  ['summary','Summary',renderSummaryPage],
+  ['atoms','Atomic Coordinates',renderAtomsTable],
+  ['angles','Bond Angles',renderAnglesTable],
+  ['hbonds','Hydrogen Bonds',renderHBondsTable],
+  ['torsions','Torsion Angles',renderTorsionsTable],
+  ['table1','Table 1',renderTable1Page],
+  ['report','Report Text',renderReportPage],
+];
+let CUR=null;            // {block, uid, cell} of the structure on screen
+let LAST_TAB='summary';  // tab kept while stepping through the navigator
+function ensurePage(wrap,tab){
+  const pg=wrap.querySelector('.page[data-tab="'+tab+'"]');
+  if(!pg||pg.dataset.ready||!CUR)return;
+  const def=PAGE_DEFS.find(d=>d[0]===tab);
+  pg.innerHTML=def[2](CUR.block,CUR.uid);
+  pg.dataset.ready='1';
+}
+function switchTab(btn){
+  const wrap=btn.closest('.block-wrap'),tab=btn.dataset.tab;
+  LAST_TAB=tab;
+  wrap.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active',b===btn));
+  ensurePage(wrap,tab);
+  wrap.querySelector('.pages').querySelectorAll('.page').forEach(p=>{
+    const on=p.dataset.tab===tab;p.classList.toggle('active',on);
+    if(on){p.classList.remove('fade-in');void p.offsetWidth;p.classList.add('fade-in');}
+  });
+}
+
+// ── unit-cell figure: orthographic (parallel) projection of the true lattice, trackball rotation as in CrystalVoidChannel ──
+//    drag = free rotate (cell follows the cursor, no pole clamp) · shift+drag = roll · double-click = default view · a / b / c = view along an axis
+const AXC={a:'#C4513F',b:'#4E8367',c:'#4A6FA5'};
+const ROT_SPEED=.01;   // rad per pixel
+function cellParams(block){
+  const g=k=>gn(block,k);
+  const a=g('_cell_length_a'),b=g('_cell_length_b'),c=g('_cell_length_c');
+  const al=g('_cell_angle_alpha'),be=g('_cell_angle_beta'),ga=g('_cell_angle_gamma');
+  return(a&&b&&c&&al&&be&&ga)?{a,b,c,al,be,ga}:null;
+}
+function cellVectors(p){
+  const r=Math.PI/180,ca=Math.cos(p.al*r),cb=Math.cos(p.be*r),cg=Math.cos(p.ga*r),sg=Math.sin(p.ga*r);
+  if(Math.abs(sg)<1e-6)return null;
+  const cx=p.c*cb,cy=p.c*(ca-cb*cg)/sg,cz2=p.c*p.c-cx*cx-cy*cy;
+  if(cz2<=0)return null;
+  return[[p.a,0,0],[p.b*cg,p.b*sg,0],[cx,cy,Math.sqrt(cz2)]];
+}
+// the view is a 3x3 rotation (row-major) taking lattice Cartesians to screen axes: x right, y up, z towards the viewer
+function m3mul(A,B){const C=new Array(9);for(let i=0;i<3;i++)for(let j=0;j<3;j++)C[i*3+j]=A[i*3]*B[j]+A[i*3+1]*B[3+j]+A[i*3+2]*B[6+j];return C;}
+function m3orth(M){
+  const n=v=>{const l=Math.hypot(v[0],v[1],v[2])||1;return[v[0]/l,v[1]/l,v[2]/l];};
+  const x=n([M[0],M[1],M[2]]);let y=[M[3],M[4],M[5]];
+  const d=x[0]*y[0]+x[1]*y[1]+x[2]*y[2];y=n([y[0]-d*x[0],y[1]-d*x[1],y[2]-d*x[2]]);
+  return[x[0],x[1],x[2],y[0],y[1],y[2],x[1]*y[2]-x[2]*y[1],x[2]*y[0]-x[0]*y[2],x[0]*y[1]-x[1]*y[0]];
+}
+const rotX=a=>{const c=Math.cos(a),s=Math.sin(a);return[1,0,0,0,c,-s,0,s,c];};
+const rotY=a=>{const c=Math.cos(a),s=Math.sin(a);return[c,0,s,0,1,0,-s,0,c];};
+const rotZ=a=>{const c=Math.cos(a),s=Math.sin(a);return[c,-s,0,s,c,0,0,0,1];};
+function m3q(M){
+  const t=M[0]+M[4]+M[8];let w,x,y,z,s;
+  if(t>0){s=Math.sqrt(t+1)*2;w=s/4;x=(M[7]-M[5])/s;y=(M[2]-M[6])/s;z=(M[3]-M[1])/s;}
+  else if(M[0]>M[4]&&M[0]>M[8]){s=Math.sqrt(1+M[0]-M[4]-M[8])*2;w=(M[7]-M[5])/s;x=s/4;y=(M[1]+M[3])/s;z=(M[2]+M[6])/s;}
+  else if(M[4]>M[8]){s=Math.sqrt(1+M[4]-M[0]-M[8])*2;w=(M[2]-M[6])/s;x=(M[1]+M[3])/s;y=s/4;z=(M[5]+M[7])/s;}
+  else{s=Math.sqrt(1+M[8]-M[0]-M[4])*2;w=(M[3]-M[1])/s;x=(M[2]+M[6])/s;y=(M[5]+M[7])/s;z=s/4;}
+  return[w,x,y,z];
+}
+function qm3(q){const[w,x,y,z]=q;return[1-2*(y*y+z*z),2*(x*y-w*z),2*(x*z+w*y),2*(x*y+w*z),1-2*(x*x+z*z),2*(y*z-w*x),2*(x*z-w*y),2*(y*z+w*x),1-2*(x*x+y*y)];}
+function qslerp(a,b,u){
+  let d=a[0]*b[0]+a[1]*b[1]+a[2]*b[2]+a[3]*b[3];if(d<0){b=b.map(v=>-v);d=-d;}
+  if(d>.9995){const r=a.map((v,i)=>v+(b[i]-v)*u),l=Math.hypot(...r);return r.map(v=>v/l);}
+  const th=Math.acos(d),s=Math.sin(th),k0=Math.sin((1-u)*th)/s,k1=Math.sin(u*th)/s;
+  return a.map((v,i)=>v*k0+b[i]*k1);
+}
+function defaultView(){   // c up, looking slightly down onto the a-b plane
+  const cz=Math.cos(.6),sz=Math.sin(.6),ct=Math.cos(1),st=Math.sin(1);
+  return[cz,-sz,0, st*sz,st*cz,ct, -ct*sz,-ct*cz,st];
+}
+const VIEW={R:defaultView()};
+let ANIM=0;
+function animateView(Rt){
+  const q0=m3q(VIEW.R),q1=m3q(Rt),t0=performance.now(),id=++ANIM;
+  (function step(now){
+    if(id!==ANIM)return;
+    let u=Math.min(1,(now-t0)/320);u=u*u*(3-2*u);
+    VIEW.R=m3orth(qm3(qslerp(q0,q1,u)));drawCell();
+    if(u<1)requestAnimationFrame(step);
+  })(t0);
+}
+function viewAlong(axis){   // the chosen axis points at the viewer, as in "view down a"
+  if(!CUR||!CUR.cell)return;
+  const V=cellVectors(CUR.cell);if(!V)return;
+  const nrm=v=>{const l=Math.hypot(v[0],v[1],v[2])||1;return[v[0]/l,v[1]/l,v[2]/l];};
+  const d=nrm(V[{a:0,b:1,c:2}[axis]]),h=nrm(V[{a:2,b:0,c:1}[axis]]);   // right-handed cyclic: down c → a right, b up; down a → b right, c up; down b → c right, a up
+  const dot=h[0]*d[0]+h[1]*d[1]+h[2]*d[2],up=nrm(h.map((t,i)=>t-dot*d[i]));
+  const right=[up[1]*d[2]-up[2]*d[1],up[2]*d[0]-up[0]*d[2],up[0]*d[1]-up[1]*d[0]];
+  animateView([...right,...up,...d]);
+}
+function cellSvg(p){
+  const V=cellVectors(p);if(!V)return '';
+  const W=190,H=140,R=VIEW.R;
+  // The cell turns rigidly about its own centre, drawn at ONE fixed scale and position. Nothing is re-fitted to the
+  // projected outline (that makes the picture breathe as a face swings towards you), and depth is measured against
+  // the cell's circumscribed radius, so it never depends on the current orientation.
+  const cen=[0,1,2].map(k=>(V[0][k]+V[1][k]+V[2][k])/2),P=[];
+  let rad=0;
+  for(let i=0;i<8;i++){
+    const f=[i&1?1:0,i&2?1:0,i&4?1:0];
+    const q=[0,1,2].map(k=>f[0]*V[0][k]+f[1]*V[1][k]+f[2]*V[2][k]-cen[k]);
+    rad=Math.max(rad,Math.hypot(q[0],q[1],q[2]));
+    P.push({x:R[0]*q[0]+R[1]*q[1]+R[2]*q[2],y:-(R[3]*q[0]+R[4]*q[1]+R[5]*q[2]),d:-(R[6]*q[0]+R[7]*q[1]+R[8]*q[2])});   // d grows away from the viewer
+  }
+  const s=(H/2-17)/rad;
+  const X=q=>q.x*s+W/2,Y=q=>q.y*s+H/2;
+  let svg='<svg viewBox="0 0 '+W+' '+H+'" width="'+W+'" height="'+H+'" aria-label="Unit cell, orthographic view">';
+  svg+='<polygon points="'+[0,1,3,2].map(i=>X(P[i]).toFixed(1)+','+Y(P[i]).toFixed(1)).join(' ')+'" fill="var(--accent)" opacity=".13"/>';
+  const edges=[];
+  for(let i=0;i<8;i++)for(const bit of[1,2,4])if(!(i&bit))edges.push([i,i|bit]);
+  edges.sort((e1,e2)=>(P[e2[0]].d+P[e2[1]].d)-(P[e1[0]].d+P[e1[1]].d));   // far edges first
+  // gentle depth cue (no size or width changes beyond a few percent, so rotating never feels like it pulses):
+  // opacity fades with distance, and each coloured axis fades from the origin (far) to its tip (near)
+  const T=q=>.5+.5*q.d/rad;   // 0 = nearest possible, 1 = farthest possible; a fixed scale, so it varies smoothly with rotation
+  const fade=t=>1-.45*t;
+  let defs='',body='';
+  for(const[i,j]of edges){
+    const ax=i===0?({1:'a',2:'b',4:'c'})[i^j]:null;
+    const x1=X(P[i]).toFixed(1),y1=Y(P[i]).toFixed(1),x2=X(P[j]).toFixed(1),y2=Y(P[j]).toFixed(1);
+    if(ax){
+      let stroke=AXC[ax];
+      if(Math.hypot(x2-x1,y2-y1)>2){
+        defs+='<linearGradient id="gx'+ax+'" gradientUnits="userSpaceOnUse" x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'">'+
+          '<stop offset="0" stop-color="'+AXC[ax]+'" stop-opacity="'+fade(T(P[i])).toFixed(2)+'"/><stop offset="1" stop-color="'+AXC[ax]+'" stop-opacity="'+fade(T(P[j])).toFixed(2)+'"/></linearGradient>';
+        stroke='url(#gx'+ax+')';
+      }
+      body+='<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+stroke+'" stroke-width="2.4" stroke-linecap="round"/>';
+    }else{
+      body+='<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="var(--ink-mid)" stroke-width="1.1" opacity="'+(.85*fade((T(P[i])+T(P[j]))/2)).toFixed(2)+'"/>';
+    }
+  }
+  svg+='<defs>'+defs+'</defs>'+body;
+  P.forEach((q,i)=>{
+    const t=T(q),cx=X(q).toFixed(1),cy=Y(q).toFixed(1);
+    if(i===0)svg+='<circle cx="'+cx+'" cy="'+cy+'" r="'+(5.6-.6*t).toFixed(1)+'" fill="none" stroke="var(--ink-mid)" stroke-width="1" opacity="'+(.2+.25*t).toFixed(2)+'"/>'+
+      '<circle cx="'+cx+'" cy="'+cy+'" r="'+(3.2-.6*t).toFixed(1)+'" fill="var(--ink)" opacity="'+fade(t*.8).toFixed(2)+'"/>';
+    else svg+='<circle cx="'+cx+'" cy="'+cy+'" r="'+(1.8-.4*t).toFixed(1)+'" fill="var(--ink-mid)" opacity="'+(.85*fade(t)).toFixed(2)+'"/>';
+  });
+  for(const[bit,k]of[[1,'a'],[2,'b'],[4,'c']]){
+    const o=P[0],e=P[bit],dx=X(e)-X(o),dy=Y(e)-Y(o),L=Math.hypot(dx,dy);
+    const lo=Math.max(0,Math.min(1,(L-3)/22));   // viewed end-on the axis is a point: fade its label out smoothly instead of popping
+    if(lo<=0)continue;
+    const lofs=10*Math.min(1,(L/18)*(L/18));      // and let it settle onto the axis tip, so it can't whip round as the axis swings through end-on
+    svg+='<text opacity="'+lo.toFixed(2)+'" x="'+(X(e)+dx/L*lofs).toFixed(1)+'" y="'+(Y(e)+dy/L*lofs).toFixed(1)+'" fill="'+AXC[k]+'" font-family="Fraunces,Georgia,serif" font-style="italic" font-weight="600" font-size="13" text-anchor="middle" dominant-baseline="central">'+k+'</text>';
+  }
+  return svg+'</svg>';
+}
+function drawCell(){const el=$('cellfig');if(el&&CUR&&CUR.cell)el.innerHTML=cellSvg(CUR.cell);}
+function bindCellFig(){
+  const el=$('cellfig');if(!el)return;
+  let drag=null;
+  el.addEventListener('pointerdown',e=>{ANIM++;drag={x:e.clientX,y:e.clientY,roll:e.shiftKey};el.setPointerCapture(e.pointerId);});
+  el.addEventListener('pointermove',e=>{
+    if(!drag)return;
+    let M;
+    if(drag.roll){
+      const r=el.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2;
+      const a0=Math.atan2(-(drag.y-cy),drag.x-cx),a1=Math.atan2(-(e.clientY-cy),e.clientX-cx);
+      M=m3mul(rotZ(a1-a0),VIEW.R);
+    }else{
+      M=m3mul(m3mul(rotY((e.clientX-drag.x)*ROT_SPEED),rotX((e.clientY-drag.y)*ROT_SPEED)),VIEW.R);
+    }
+    VIEW.R=m3orth(M);drag.x=e.clientX;drag.y=e.clientY;drawCell();
+  });
+  el.addEventListener('pointerup',()=>{drag=null;});
+  el.addEventListener('pointercancel',()=>{drag=null;});
+  el.addEventListener('dblclick',()=>animateView(defaultView()));
+}
+document.addEventListener('click',e=>{
+  const b=e.target.closest&&e.target.closest('.viewbtns button');if(!b)return;
+  if(b.dataset.v==='3d')animateView(defaultView());else viewAlong(b.dataset.v);
+});
+
+// ── hero: formula, key facts, cell ──
+function chip(label,html){return '<span class="chip"><em>'+label+'</em>'+html+'</span>';}
+function heroHtml(block,cell){
+  const formula=fmtFormula(gi(block,'_chemical_formula_sum'));
+  const name=gi(block,'_chemical_name_common')||gi(block,'_chemical_name_systematic');
+  const itStr=gi(block,'_space_group_it_number','_symmetry_int_tables_number'),itN=itStr?parseInt(itStr):null;
+  const sys=itN?crystalSystem(itN):null;
+  const hm=gi(block,'_space_group_name_h-m_alt','_symmetry_space_group_name_h-m','_space_group_name_h-m');
+  const z=gi(block,'_cell_formula_units_z'),t=gi(block,'_diffrn_ambient_temperature'),rad=gi(block,'_diffrn_radiation_type');
+  let vol=gi(block,'_cell_volume');
+  if(!vol&&cell){const v=calcVol(cell.a,cell.b,cell.c,cell.al,cell.be,cell.ga);if(v)vol=v.toFixed(1);}
+  const chips=[
+    sys?chip('system',esc(sys)):'',
+    hm?chip('space group',hmHtml(hm,true)+(itN?' <span class="dim">No. '+itN+'</span>':'')):'',
+    z?chip('Z',tv(z)):'',
+    vol?chip('V',tv(String(vol))+' Å<sup>3</sup>'):'',
+    t?chip('T',tv(t)+' K'):'',
+    rad?chip('radiation',tv(rad)):'',
+  ].join('');
+  const leg=cell?'<div class="figleg"><span style="color:'+AXC.a+'"><b>a</b> '+cell.a.toFixed(3)+'</span><span style="color:'+AXC.b+'"><b>b</b> '+cell.b.toFixed(3)+'</span><span style="color:'+AXC.c+'"><b>c</b> '+cell.c.toFixed(3)+'</span> Å'+
+    '<br>α '+cell.al.toFixed(2)+' β '+cell.be.toFixed(2)+' γ '+cell.ga.toFixed(2)+'°</div>':'';
+  return '<div class="hero"><div class="hero-main"><div class="hero-kick">data_'+esc(block.name)+'</div>'+
+    '<div class="hero-formula">'+(formula||'<span class="na">no formula</span>')+'</div>'+
+    (name?'<div class="hero-name">'+tv(name)+'</div>':'')+
+    '<div class="chips">'+chips+'</div></div>'+
+    (cell?'<div class="hero-fig"><div id="cellfig" class="cellfig" title="Orthographic view. Drag to rotate · Shift+drag to roll · double-click to reset"></div>'+leg+
+      '<div class="viewbtns"><span>view along</span>'+
+      ['a','b','c'].map(k=>'<button type="button" data-v="'+k+'" style="--c:'+AXC[k]+'" title="Orthographic view down the '+k+' axis">'+k+'</button>').join('')+
+      '<button type="button" data-v="3d" title="Back to the default oblique view">3D</button></div></div>':'')+'</div>';
+}
+function pageCounts(block){
+  const n=(...k)=>{const c=lc(block,...k);return c?c.length:0;};
+  return{atoms:n('_atom_site_label'),angles:n('_geom_angle'),hbonds:n('_geom_hbond_atom_site_label_d'),torsions:n('_geom_torsion')};
+}
+function crumbs(path){
+  const parts=path.replace(' › ','/').split('/');
+  return parts.map((p,i)=>(i?'<i>›</i>':'')+'<span'+(i===parts.length-1?' class="last"':'')+'>'+esc(p)+'</span>').join('');
+}
+function renderEntry(entry,idx){
+  RTF_STORE={};
+  const out=$('output');
+  const block=parseCIF(tokenise(entry.text))[0];
+  const head='<div class="file-card fade-in"><div class="file-hdr"><span class="file-name" title="'+esc(entry.path)+'">'+crumbs(entry.path)+'</span>'+
+    '<span class="file-meta">'+fmtSz(entry.text.length)+'</span></div>';
+  if(!block){CUR=null;out.innerHTML=head+'<div class="block-wrap"><div class="err-banner">No data block could be read from this entry.</div></div></div>';return;}
+  const cell=cellParams(block);
+  CUR={block,uid:'e'+idx,cell};
+  const counts=pageCounts(block);
+  const active=PAGE_DEFS.some(d=>d[0]===LAST_TAB)?LAST_TAB:'summary';
+  const tabs=PAGE_DEFS.map(d=>{
+    const n=counts[d[0]];
+    return '<button class="tab-btn'+(d[0]===active?' active':'')+(n===0?' empty':'')+'" data-tab="'+d[0]+'" onclick="switchTab(this)">'+esc(d[1])+(n!==undefined?'<span class="tb-n">'+n+'</span>':'')+'</button>';
+  }).join('');
+  const pages=PAGE_DEFS.map(d=>'<div class="page'+(d[0]===active?' active':'')+'" data-tab="'+d[0]+'"></div>').join('');
+  out.innerHTML=head+'<div class="block-wrap">'+heroHtml(block,cell)+'<div class="tab-bar">'+tabs+'</div><div class="pages">'+pages+'</div></div></div>';
+  drawCell();bindCellFig();
+  ensurePage(out.querySelector('.block-wrap'),active);
+}
+
+// ═══════════════════════════════════════════════════════
+//  COLLECTION: structures found in files, folders and ZIP archives
+//  (one entry per CIF data block that holds cell or atom data)
+// ═══════════════════════════════════════════════════════
+const CIF_EXT=/\.cif$/i,ZIP_EXT=/\.zip$/i;
+const STRUCT_TEST=/_cell_length_a|_atom_site_fract_x|_atom_site_label/i;
+const MAX_ENTRIES=5000,MAX_BYTES=400*1024*1024;
+let NAV=null;   // {entries:[{label,path,text}], index, name, kind, stamp}
+
+function splitCifBlocks(text){
+  const starts=[],n=text.length;let pos=0,inText=false;
+  while(pos<n){
+    let nl=text.indexOf('\n',pos);if(nl<0)nl=n;
+    const c=text.charCodeAt(pos);
+    if(c===59)inText=!inText;            // ';' in column 1 opens/closes a text field
+    else if(!inText&&(c===100||c===68||c===32||c===9)){
+      const m=/^\s*data_(\S*)/i.exec(text.slice(pos,Math.min(nl,pos+200)));
+      if(m)starts.push({at:pos,raw:m[1]});
+    }
+    pos=nl+1;
+  }
+  const out=[];
+  starts.forEach((s,i)=>{
+    const body=text.slice(s.at,i+1<starts.length?starts[i+1].at:n);
+    if(!STRUCT_TEST.test(body))return;
+    const csd=/^CSD_CIF_(.+)$/i.exec(s.raw);
+    out.push({label:csd?csd[1]:(s.raw||'(unnamed)'),text:body});
+  });
+  return out;
+}
+function entriesFromFiles(files){
+  const entries=[];let bad=0;
+  files.forEach(f=>{
+    const blocks=splitCifBlocks(f.text);
+    if(!blocks.length){bad++;return;}
+    if(blocks.length===1)entries.push({label:f.path.split('/').pop().replace(/\.[^.]+$/,''),path:f.path,text:blocks[0].text});
+    else blocks.forEach(b=>entries.push({label:b.label,path:f.path+' › '+b.label,text:b.text}));
+  });
+  const seen={};
+  entries.forEach(e=>{seen[e.label]=(seen[e.label]||0)+1;});
+  entries.forEach(e=>{if(seen[e.label]>1)e.label=e.path.replace(/\.[^.\/›]+(?= ›|$)/,'');});
+  return{entries,bad};
+}
+
+// ── ZIP reading (hand-rolled container; deflate via the browser's DecompressionStream) ──
+function u16(dv,o){return dv.getUint16(o,true);}
+function u32(dv,o){return dv.getUint32(o,true);}
+async function readZip(buf,prefix,budget){
+  const dv=new DataView(buf),n=buf.byteLength;let eocd=-1;
+  for(let p=n-22;p>=Math.max(0,n-65557);p--)if(u32(dv,p)===0x06054b50){eocd=p;break;}
+  if(eocd<0)throw new Error('not a ZIP file (or a damaged one)');
+  const count=u16(dv,eocd+10);let cd=u32(dv,eocd+16);const out=[];
+  const dec=new TextDecoder('utf-8');
+  for(let k=0;k<count&&cd+46<=n;k++){
+    if(u32(dv,cd)!==0x02014b50)break;
+    const flags=u16(dv,cd+8),method=u16(dv,cd+10),csize=u32(dv,cd+20),usize=u32(dv,cd+24);
+    const nlen=u16(dv,cd+28),xlen=u16(dv,cd+30),clen=u16(dv,cd+32),lho=u32(dv,cd+42);
+    const name=dec.decode(new Uint8Array(buf,cd+46,nlen)).split('\\').join('/');   // PowerShell 5 writes backslashes
+    cd+=46+nlen+xlen+clen;
+    const base=name.split('/').pop();
+    if(/\/$/.test(name)||/(^|\/)__MACOSX\//.test(name)||/^\._/.test(base))continue;
+    const isZip=ZIP_EXT.test(name);
+    if(!CIF_EXT.test(name)&&!isZip)continue;
+    if(flags&1){budget.skipped.push(prefix+name+' (encrypted)');continue;}
+    if(csize===0xFFFFFFFF||usize===0xFFFFFFFF||lho===0xFFFFFFFF){budget.skipped.push(prefix+name+' (ZIP64)');continue;}
+    if(out.length+budget.count>=MAX_ENTRIES||budget.bytes+usize>MAX_BYTES){budget.truncated=true;break;}
+    if(u32(dv,lho)!==0x04034b50)continue;
+    const start=lho+30+u16(dv,lho+26)+u16(dv,lho+28),raw=new Uint8Array(buf,start,csize);let bytes;
+    try{
+      if(method===0)bytes=raw;
+      else if(method===8){
+        if(typeof DecompressionStream!=='function')throw new Error('this browser cannot unpack compressed ZIP entries');
+        bytes=new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
+      }else{budget.skipped.push(prefix+name+' (compression method '+method+')');continue;}
+    }catch(e){budget.skipped.push(prefix+name+' ('+e.message+')');continue;}
+    budget.bytes+=bytes.length;
+    if(isZip){
+      try{(await readZip(bytes.slice().buffer,prefix+name+'/',budget)).forEach(x=>out.push(x));}
+      catch(e){budget.skipped.push(prefix+name+' ('+e.message+')');}
+    }else out.push({path:prefix+name,text:dec.decode(bytes)});
+  }
+  return out;
+}
+
+// ── folders: dropped directory entries (old API) or File System Access handles (new API) ──
+function walkEntry(entry,path,errs){
+  const fail=e=>errs.push((e&&(e.name||e.message))||'error');
+  return new Promise(resolve=>{
+    if(entry.isFile){entry.file(f=>resolve([{path:path+entry.name,file:f}]),e=>{fail(e);resolve([]);});return;}
+    if(!entry.isDirectory){resolve([]);return;}
+    const reader=entry.createReader();let all=[];
+    (function more(){
+      reader.readEntries(batch=>{
+        if(!batch.length){
+          Promise.all(all.map(e=>walkEntry(e,path+entry.name+'/',errs))).then(lists=>resolve([].concat.apply([],lists)));
+          return;
+        }
+        all=all.concat(Array.prototype.slice.call(batch));more();
+      },e=>{fail(e);resolve([]);});
+    })();
+  });
+}
+async function walkHandle(h,path,errs){
+  try{
+    if(h.kind==='file')return[{path:path+h.name,file:await h.getFile()}];
+    const out=[];
+    for await(const c of h.values()){(await walkHandle(c,path+h.name+'/',errs)).forEach(x=>out.push(x));}
+    return out;
+  }catch(e){errs.push(e.name||e.message||'error');return[];}
+}
+async function readFileList(list){
+  const budget={count:0,bytes:0,skipped:[],truncated:false},out=[];
+  list.sort((p,q)=>p.path.localeCompare(q.path,undefined,{numeric:true,sensitivity:'base'}));
+  for(const it of list){
+    if(out.length>=MAX_ENTRIES||budget.bytes>MAX_BYTES){budget.truncated=true;break;}
+    try{
+      if(ZIP_EXT.test(it.path)){(await readZip(await it.file.arrayBuffer(),it.path+'/',budget)).forEach(x=>out.push(x));}
+      else if(CIF_EXT.test(it.path)){budget.bytes+=it.file.size;out.push({path:it.path,text:await it.file.text()});}
+    }catch(e){budget.skipped.push(it.path+' ('+e.message+')');}
+    budget.count=out.length;
+  }
+  return{files:out,budget};
+}
+
+// ── status line ──
+function setMsg(text,isErr){const m=$('msg');m.textContent=text||'';m.classList.toggle('err',!!isErr);}
+const tick=()=>new Promise(r=>setTimeout(r,20));
+
+// ── open a collection (single CIF, several files, folder, ZIP) ──
+async function openCollection(list,kind,name){
+  if(!list.length){setMsg('No files found.',true);return;}
+  setMsg('');
+  $('output').innerHTML='<div class="loading">Reading '+(kind==='zip'?'the ZIP archive':list.length+' file'+(list.length>1?'s':''))+'…</div>';
+  await tick();
+  let r;
+  try{r=await readFileList(list);}
+  catch(e){clearResults();setMsg('Could not read '+(name||'the files')+': '+e.message,true);return;}
+  const ex=entriesFromFiles(r.files),entries=ex.entries,notes=[];
+  if(ex.bad)notes.push(ex.bad+' file'+(ex.bad>1?'s':'')+' without cell or atom data skipped');
+  if(r.budget.skipped.length)notes.push(r.budget.skipped.length+' unreadable: '+r.budget.skipped.slice(0,3).join(', ')+(r.budget.skipped.length>3?'…':''));
+  if(r.budget.truncated)notes.push('only the first '+entries.length+' were read (limit '+MAX_ENTRIES+' files or '+(MAX_BYTES>>20)+' MB)');
+  if(!entries.length){
+    clearResults();
+    setMsg('No CIF data blocks with cell or atom data found in '+(name||'what was dropped')+(notes.length?' · '+notes.join(' · '):'')+'.',true);
+    return;
+  }
+  NAV={entries,index:0,name:name||'',kind,stamp:String(Date.now())};
+  $('topbar').classList.add('show');
+  $('dropZone').classList.add('compact');
+  navGo(0);
+  setMsg(entries.length>1?(name?name+': ':'')+entries.length+' structures found. Choose one in the navigator; only the selected structure is processed.'+(notes.length?' · '+notes.join(' · '):''):notes.join(' · '),false);
+}
+
+// ── navigator: ◂ ▸ arrows, a searchable list, and a clickable position strip ──
+const KIND_LABEL={folder:'FOLDER',zip:'ZIP',files:'FILES',cif:'CIF'};
+const POP={list:[],hi:0};
+function syncNav(){
+  const bar=$('cif-nav');
+  if(!NAV||NAV.entries.length<2){bar.classList.remove('show');closePop();return;}
+  const cur=NAV.entries[NAV.index],n=NAV.entries.length;
+  $('cn-title').textContent=KIND_LABEL[NAV.kind]||'CIF';
+  $('cn-name').textContent=cur.label;
+  $('cn-current').title=cur.path+'  ·  press / to search the list';
+  $('cn-count').textContent=(NAV.index+1)+' / '+n;
+  $('cn-prev').disabled=NAV.index<=0;
+  $('cn-next').disabled=NAV.index>=n-1;
+  const t=$('cn-ticks');
+  if(t.getAttribute('data-for')!==NAV.stamp){
+    t.innerHTML=n<=150?NAV.entries.map((e,i)=>'<button class="tk" type="button" data-i="'+i+'" title="'+esc(e.label)+'" aria-label="'+esc(e.label)+'"></button>').join(''):'<div class="tk-bar"><b></b></div>';
+    t.setAttribute('data-for',NAV.stamp);
+  }
+  if(n<=150){const on=t.querySelector('.tk.on');if(on)on.classList.remove('on');const c=t.children[NAV.index];if(c)c.classList.add('on');}
+  else t.querySelector('.tk-bar b').style.width=((NAV.index+1)/n*100)+'%';
+  bar.title=NAV.name?NAV.name+': '+n+' structures':'';
+  bar.classList.add('show');
+}
+function navGo(i){
+  if(!NAV||i<0||i>=NAV.entries.length)return;
+  NAV.index=i;
+  syncNav();
+  renderEntry(NAV.entries[i],i);
+}
+function renderPopList(q){
+  const words=q.trim().toLowerCase().split(/\s+/).filter(Boolean),idx=[];
+  NAV.entries.forEach((e,i)=>{const s=(e.label+' '+e.path).toLowerCase();if(words.every(w=>s.includes(w)))idx.push(i);});
+  POP.list=idx;POP.hi=Math.max(0,idx.indexOf(NAV.index));
+  const shown=idx.slice(0,300);
+  $('cn-list').innerHTML=shown.length?shown.map((i,k)=>'<button class="cn-item'+(i===NAV.index?' cur':'')+(k===POP.hi?' hi':'')+'" data-i="'+i+'" type="button" role="option">'+
+    '<span class="ci-n">'+(i+1)+'</span><span class="ci-l">'+esc(NAV.entries[i].label)+'</span><span class="ci-p">'+esc(NAV.entries[i].path)+'</span></button>').join('')+
+    (idx.length>300?'<div class="cn-more">'+(idx.length-300)+' more — keep typing to narrow the list</div>':''):'<div class="cn-more">No structure matches</div>';
+  const hi=$('cn-list').querySelector('.hi');if(hi)hi.scrollIntoView({block:'nearest'});
+}
+function openPop(){
+  if(!NAV||NAV.entries.length<2)return;
+  $('cn-pop').hidden=false;$('cn-filter').value='';renderPopList('');$('cn-filter').focus();
+}
+function closePop(){$('cn-pop').hidden=true;}
+function movePopHi(d){
+  const items=$('cn-list').querySelectorAll('.cn-item');if(!items.length)return;
+  POP.hi=Math.max(0,Math.min(items.length-1,POP.hi+d));
+  items.forEach((b,k)=>b.classList.toggle('hi',k===POP.hi));
+  items[POP.hi].scrollIntoView({block:'nearest'});
+}
+$('cn-prev').addEventListener('click',()=>{if(NAV)navGo(NAV.index-1);});
+$('cn-next').addEventListener('click',()=>{if(NAV)navGo(NAV.index+1);});
+$('cn-current').addEventListener('click',()=>{if($('cn-pop').hidden)openPop();else closePop();});
+$('cn-filter').addEventListener('input',()=>renderPopList($('cn-filter').value));
+$('cn-filter').addEventListener('keydown',e=>{
+  if(e.key==='ArrowDown'){e.preventDefault();movePopHi(1);}
+  else if(e.key==='ArrowUp'){e.preventDefault();movePopHi(-1);}
+  else if(e.key==='Enter'){e.preventDefault();const i=POP.list[POP.hi];if(i!==undefined){closePop();navGo(i);}}
+  else if(e.key==='Escape'){closePop();$('cn-current').focus();}
+});
+$('cn-list').addEventListener('click',e=>{const b=e.target.closest('.cn-item');if(b){closePop();navGo(+b.dataset.i);}});
+$('cn-ticks').addEventListener('click',e=>{
+  const tk=e.target.closest('.tk');
+  if(tk){navGo(+tk.dataset.i);return;}
+  const bar=e.target.closest('.tk-bar');
+  if(bar&&NAV){const r=bar.getBoundingClientRect();navGo(Math.min(NAV.entries.length-1,Math.max(0,Math.floor((e.clientX-r.left)/r.width*NAV.entries.length))));}
+});
+document.addEventListener('click',e=>{if(!$('cn-pop').hidden&&!e.target.closest('#cif-nav'))closePop();});
+document.addEventListener('keydown',e=>{
+  if(!NAV||NAV.entries.length<2||e.ctrlKey||e.metaKey||e.altKey)return;
+  const tag=(e.target.tagName||'').toLowerCase();
+  if(tag==='input'||tag==='textarea'||tag==='select')return;
+  if(e.key==='['||e.key===']'){e.preventDefault();navGo(NAV.index+(e.key===']'?1:-1));}
+  else if(e.key==='/'){e.preventDefault();openPop();}
+});
+
+// ── theme (light "paper" / dark "lab"), remembered in this browser ──
+(function(){
+  let t=null;
+  try{t=localStorage.getItem('ciftables-theme');}catch(e){}
+  if(t!=='dark'&&t!=='light')t=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';
+  document.documentElement.setAttribute('data-theme',t);
+  $('themeBtn').addEventListener('click',()=>{
+    const next=document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark';
+    document.documentElement.setAttribute('data-theme',next);
+    try{localStorage.setItem('ciftables-theme',next);}catch(e){}
+  });
+})();
+
+function clearResults(){
+  NAV=null;CUR=null;RTF_STORE={};
+  $('output').innerHTML='';
+  $('topbar').classList.remove('show');
+  $('cif-nav').classList.remove('show');
+  $('dropZone').classList.remove('compact');
+  $('fileInput').value='';$('folderInput').value='';
+  setMsg('');
+}
+
+// ═══════════════════════════════════════════════════════
+//  FILE HANDLING  (drop zone, file picker, folder picker)
+// ═══════════════════════════════════════════════════════
+const dz=$('dropZone'),fi=$('fileInput'),fo=$('folderInput');
+
+function handleDrop(dt){
+  const items=dt.items?Array.from(dt.items):[];
+  // both APIs must be asked for now, while the drop event is live
+  const handles=items.map(it=>it.kind==='file'&&it.getAsFileSystemHandle?it.getAsFileSystemHandle():null).filter(Boolean);
+  const entries=items.map(it=>it.kind==='file'&&it.webkitGetAsEntry?it.webkitGetAsEntry():null).filter(Boolean);
+  const files=dt.files?Array.from(dt.files):[];
+  const hasDir=entries.some(e=>e.isDirectory);
+  if(!hasDir){
+    if(!files.length)return;
+    openCollection(files.map(f=>({path:f.name,file:f})),files.length===1?(ZIP_EXT.test(files[0].name)?'zip':'cif'):'files',files.length===1?files[0].name:files.length+' files');
+    return;
+  }
+  const n=Math.max(entries.length,handles.length),first=entries[0]||{};
+  const dirName=n===1?(first.name||'folder'):n+' items';
+  const kind=n===1?'folder':'files';
+  (async()=>{
+    const errs=[];let list=[];
+    if(handles.length){
+      let hs=await Promise.all(handles.map(p=>p.then(h=>h,e=>{errs.push(e.name||e.message);return null;})));
+      hs=hs.filter(Boolean);
+      for(const h of hs)(await walkHandle(h,'',errs)).forEach(x=>list.push(x));
+    }
+    if(!list.length&&entries.length){
+      const lists=await Promise.all(entries.map(e=>walkEntry(e,'',errs)));
+      list=[].concat.apply([],lists);
+    }
+    if(!list.length){
+      setMsg('The browser would not let the page read the folder "'+dirName+'"'+(errs.length?' ('+errs[0]+')':'')+'. Use the "Choose folder…" button and pick it there instead.',true);
+      return;
+    }
+    openCollection(list,kind,dirName);
+  })();
+}
+
+document.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag');});
+document.addEventListener('dragleave',e=>{if(e.relatedTarget===null)dz.classList.remove('drag');});
+document.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('drag');handleDrop(e.dataTransfer);});
+dz.addEventListener('click',()=>fi.click());
+$('folderBtn').addEventListener('click',e=>{e.stopPropagation();fo.click();});
+fi.addEventListener('change',e=>{
+  const files=Array.from(e.target.files);if(!files.length)return;
+  openCollection(files.map(f=>({path:f.name,file:f})),files.length===1?(ZIP_EXT.test(files[0].name)?'zip':'cif'):'files',files.length===1?files[0].name:files.length+' files');
+});
+fo.addEventListener('change',e=>{
+  const files=Array.from(e.target.files);if(!files.length)return;
+  const list=files.map(f=>({path:f.webkitRelativePath||f.name,file:f}));
+  openCollection(list,'folder',(list[0].path.split('/')[0])||'folder');
+});
+</script>
+</body>
+</html>
