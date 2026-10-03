@@ -319,6 +319,21 @@
   .fbtn:hover { border-color: var(--accent); color: var(--ink); }
   .fbtn.on { background: var(--accent-soft-2); border-color: var(--accent); color: var(--ink); }
   .fbtn.pct { min-width: 54px; font-family: var(--mono); font-weight: 600; }
+  .fbtn.fchk { cursor: pointer; font-weight: 600; user-select: none; }
+  .fbtn.fchk input { margin: 0; accent-color: var(--accent); }
+  .fbtn.fchk:has(input:checked) { background: var(--accent-soft-2); border-color: var(--accent); color: var(--ink); }
+  .cif-nav {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 7; display: none; align-items: center; gap: 6px;
+    background: var(--raised); border: 1px solid var(--line-2); border-radius: 11px; box-shadow: var(--shadow); padding: 4px 6px 4px 10px;
+  }
+  .cif-nav.show { display: flex; }
+  .cif-nav .cn-title { font: 700 10.5px/1 var(--mono); letter-spacing: .08em; color: var(--muted); }
+  .cif-nav select { height: 28px; min-width: 120px; max-width: 220px; border: 1px solid var(--line-2); border-radius: 7px; background: var(--paper); color: var(--ink); font: 600 13px/1 var(--mono); padding: 0 6px; }
+  .cif-nav .cn-btn { appearance: none; border: 0; background: transparent; color: var(--ink-2); height: 28px; min-width: 28px; border-radius: 7px; font-size: 15px; font-weight: 700; }
+  .cif-nav .cn-btn:hover:not(:disabled) { background: var(--accent-soft); color: var(--ink); }
+  .cif-nav .cn-btn:disabled { opacity: .35; }
+  .cif-nav .cn-count { font: 500 11.5px/1 var(--mono); color: var(--muted); white-space: nowrap; }
+  .cif-nav .cn-x { font-size: 18px; color: var(--muted); }
   .status {
     position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 5;
     font-size: 11.5px; color: var(--muted); white-space: nowrap; pointer-events: none;
@@ -624,6 +639,15 @@
     <button class="fbtn pct" id="zoom-pct" title="Reset to 100%">100%</button>
     <button class="fbtn" id="zoom-in" title="Zoom in">+</button>
     <button class="fbtn" id="zoom-fit" title="Fit to drawing (F)">Fit</button>
+    <label class="fbtn fchk" title="When ticked, opening or dropping a structure file clears the drawing and loads the new structure on its own; otherwise it is added to the drawing"><input type="checkbox" id="opt-replace">Replace on open</label>
+  </div>
+  <div class="cif-nav" id="cif-nav" role="group" aria-label="CIF navigator">
+    <span class="cn-title">CIF</span>
+    <button class="cn-btn" id="cn-prev" title="Previous structure">&larr;</button>
+    <select id="cn-sel" title="Structures in this file"></select>
+    <button class="cn-btn" id="cn-next" title="Next structure">&rarr;</button>
+    <span class="cn-count" id="cn-count"></span>
+    <button class="cn-btn cn-x" id="cn-close" title="Close the navigator">&times;</button>
   </div>
   <div class="float-cluster view-cluster" id="view-cluster">
     <button class="fbtn" data-opt="grid" title="Dot grid">Grid</button>
@@ -740,9 +764,9 @@
         <p><b>Shared library.</b> When the app is on a website, it also reads <code>ChemicalStructureLibrary.json</code> from the same folder as the app, if there is one. Its entries work like your own: they name structures (marked <i>shared library</i>), turn up in search and appear in a <b>Shared</b> tab of the templates panel. They cannot be changed in the app, but <b>Copy to mine</b> puts one in your own library, where you can rename it. Your own name wins wherever both have the same structure. A copy is kept so the shared entries still work offline. When the app is opened from a file on your computer, the browser does not allow it to read the shared file, so it is not used there.</p>
         <p><b>Keeping the shared library (for the site's curator).</b> Add structures to your own library as usual, and <b>Import</b> any library files people send you. Then click <b>Export for website</b>. This saves <code>ChemicalStructureLibrary.json</code> with every shared entry already published plus your own entries, so uploading it never loses what was there. To drop a shared entry, click <b>Leave out</b> beside it before exporting. Upload the file next to <code>ChemicalStructure.html</code>, replacing the old one; visitors see the new entries the next time they open the app.</p>
         <h4>Delocalised bonds</h4>
-        <p>Groups whose charge is shared over several atoms are drawn with delocalised bonds, a solid line with a dashed line inside the group, and their net charge shown once beside the group instead of on one atom. This covers carboxylates (R–CO<sub>2</sub><sup>−</sup>), nitro groups and nitrate, and amidinium and guanidinium ions. A nitro group is neutral overall, so it shows no charge. Only the drawing changes: SMILES, names, formulae and spectra still use the ordinary structure with one C=O and one C–O<sup>−</sup>. For a structure imported from a crystal file, a group is drawn delocalised only if its bond lengths really are equal (within 0.05 Å); a carboxylic acid, or an asymmetric carboxylate, keeps its localised bonds. The <b>Deloc</b> button in the bottom bar turns this off. The <b>±</b> button next to it hides the group charges but keeps the delocalised bonds, for example to draw a coordinated carboxylate or a partial structure without a formal charge. The drawing still has its charges underneath, so formula, mass and SMILES are unchanged. The <b>delocalised</b> bond tool (in the bond menu) switches single bonds between the two drawings; drawing a new bond with it gives a delocalised single bond.</p>
+        <p>Groups whose charge is shared over several atoms are drawn with delocalised bonds, a solid line with a dashed line inside the group, and their net charge shown once beside the group instead of on one atom. This covers carboxylates (R–CO<sub>2</sub><sup>−</sup>), nitro groups and nitrate, amidinium and guanidinium ions, and β-diketonates such as acac, free or chelated to a metal (O–C–C–C–O drawn as one delocalised unit, the dashed line on the inside of the chelate ring). A nitro group is neutral overall, so it shows no charge. Only the drawing changes: SMILES, names, formulae and spectra still use the ordinary structure with one C=O and one C–O<sup>−</sup>. For a structure imported from a crystal file, a group is drawn delocalised only if its bond lengths really are equal (within 0.05 Å); a carboxylic acid, or an asymmetric carboxylate, keeps its localised bonds. The <b>Deloc</b> button in the bottom bar turns this off. The <b>±</b> button next to it hides the group charges but keeps the delocalised bonds, for example to draw a coordinated carboxylate or a partial structure without a formal charge. The drawing still has its charges underneath, so formula, mass and SMILES are unchanged. The <b>delocalised</b> bond tool (in the bond menu) switches single bonds between the two drawings; drawing a new bond with it gives a delocalised single bond.</p>
         <h4>Metal complexes</h4>
-        <p>A bond from a ligand atom to a metal counts towards the ligand's valence only when the ligand needs it. A pyridine or imidazole N, an amine, an ether or water O already has its full valence, so its bond to the metal is taken as dative (a donated lone pair): the N stays neutral and is not flagged. A Cl, or a carboxylate or alkoxide O, needs the bond, so it counts as a normal covalent bond, and the ligand is drawn neutral without extra hydrogens. Metals have no fixed valence in a complex and are never flagged. Crystal structures (CIF, SHELX) are read the same way: bond orders and charges are worked out for the organic ligands without their metal bonds, so a Cu-bound imidazole keeps its ring double bond instead of becoming an imidazolium. A terminal O, S or N on a single metal that still needs more than one bond is given a multiple bond to the metal: oxo M=O, sulfido M=S, imido M=NR or nitrido M≡N (as in osmate esters, OsO(OR)<sub>4</sub>).</p>
+        <p>A bond from a ligand atom to a metal counts towards the ligand's valence only when the ligand needs it. A pyridine or imidazole N, an amine, an ether or water O already has its full valence, so its bond to the metal is taken as dative (a donated lone pair): the N stays neutral and is not flagged. A Cl, or a carboxylate or alkoxide O, needs the bond, so it counts as a normal covalent bond, and the ligand is drawn neutral without extra hydrogens. Metals have no fixed valence in a complex and are never flagged. Crystal structures (CIF, SHELX) are read the same way: bond orders and charges are worked out for the organic ligands without their metal bonds, so a Cu-bound imidazole keeps its ring double bond instead of becoming an imidazolium. A terminal O, S or N on a single metal that still needs more than one bond is given a multiple bond to the metal: oxo M=O, sulfido M=S, imido M=NR or nitrido M≡N (as in osmate esters, OsO(OR)<sub>4</sub>). A carbon bonded to a metal counts that bond as one of its own (aryl, alkyl or vinyl complexes, cyclometalated ligands). A carbon on a metal whose only other neighbours are two nitrogens (or N and O/S), by single bonds, is an N-heterocyclic carbene: it gets no hydrogen, and its ring keeps its own double bonds (a 1,2,4-triazol-5-ylidene has just the one C=N, opposite the metal).</p>
       </section>
       <section class="gsec" data-g="keys">
         <table>
@@ -832,6 +856,10 @@
       <section class="gsec" data-g="io">
         <h4>Opening files</h4>
         <p>Open (or drag and drop onto the canvas) a drawing saved from this app (.json), an MDL Molfile (.mol, V2000), the first structure of an SD file (.sdf), a SMILES file (.smi, .txt), or 3D coordinates as a CIF (.cif), a SHELX file (.res, .ins), PDB (.pdb, .ent) or XYZ (.xyz). 3D files are turned into a clean 2D schematic with wedges and E/Z geometry taken from the coordinates. You can also paste any of these as text onto the canvas.</p>
+        <h4>Adding or replacing</h4>
+        <p>An opened or dropped structure is normally added to what is already drawn. Tick <b>Replace on open</b> (bottom left, next to Fit) to have it clear the drawing and load the new structure on its own instead; the drop outline says which will happen. Undo (<kbd>Ctrl Z</kbd>) brings the previous drawing back either way. A saved drawing (.json) always replaces the current one.</p>
+        <h4>CIF files with several structures</h4>
+        <p>When a CIF holds more than one structure, for example a CSD/ConQuest export, the <b>CIF navigator</b> appears at the top of the canvas. Pick a structure by its REFCODE in the list, or step through them with the arrows. Each choice replaces the drawing with that structure, and the Overview's Crystal card shows its cell and F(000). Blocks without atom coordinates are left out of the list. The navigator stays until another file is opened or you close it with ×.</p>
         <h4>Which 3D format?</h4>
         <ul>
           <li><b>SDF / MDL Molfile</b> is the best choice for a small molecule. It stores the element, the 3D coordinates, every bond with its order, and formal charges, and nearly every chemistry program reads it, including Mercury, Avogadro, PyMOL, Chimera, Open Babel and RDKit.</li>
@@ -1417,8 +1445,17 @@ function perceive(mol){
       if (vl0 && vl0.length && own >= vl0[0]) eff = bs - mbs;
     }
     a.metalBonds = mbs;
-    a.hTot = (a.hFixed !== null && a.hFixed !== undefined) ? a.hFixed : (a.el === "*" ? 0 : implicitH(a.el, a.charge, a.radical, eff));
-    a.valenceError = isElement(a.el) && !METALS[a.el] && (eff + a.hTot + (a.radical || 0)) > maxValence(a.el, a.charge);
+    /* an N-heterocyclic (or diamino) carbene on a metal: C bonded to the metal and by single
+       bonds to two N (or N and O/S), nothing else. It carries no hydrogen. */
+    var carbene = false;
+    if (a.el === "C" && mbs && !a.charge){
+      var org = L[i].filter(function(e){ return !METALS[mol.atoms[e.atom].el]; });
+      carbene = org.length === 2 && org.every(function(e){ return mol.bonds[e.bond].order === 1 && /^(N|O|S)$/.test(mol.atoms[e.atom].el); }) &&
+        org.some(function(e){ return mol.atoms[e.atom].el === "N"; });
+    }
+    a.carbene = carbene;
+    a.hTot = (a.hFixed !== null && a.hFixed !== undefined) ? a.hFixed : (a.el === "*" || carbene ? 0 : implicitH(a.el, a.charge, a.radical, eff));
+    a.valenceError = isElement(a.el) && !METALS[a.el] && !carbene && (eff + a.hTot + (a.radical || 0)) > maxValence(a.el, a.charge);
     a.arom = false;
   });
   mol.bonds.forEach(function(b){ b.arom = false; b.ring = false; });
@@ -4791,8 +4828,19 @@ function from3D(atoms, bondList, opts){
   function terminalO(i){ return HL[i].filter(function(e){ var o = mol.atoms[e.atom]; return (o.el === "O" || o.el === "S") && HL[e.atom].length === 1 && !nH[e.atom] && !o.charge; }).length; }
   function blen(i, j){ return d3(P[i], P[j]); }
   var flat = complete ? {} : planarRings(mol, P);
+  /* a carbon on a metal bonded to two nitrogens (or N and O/S) and nothing else: an
+     N-heterocyclic (or acyclic diamino) carbene. Its bond to the metal is all it has
+     besides the two single C-N bonds: no double bond, no hydrogen. */
+  function carbene(i){
+    if (mol.atoms[i].el !== "C" || !mb[i] || nH[i] || HL[i].length !== 2) return false;
+    var els = HL[i].map(function(e){ return mol.atoms[e.atom].el; });
+    return els.indexOf("N") >= 0 && els.every(function(x){ return x === "N" || x === "O" || x === "S"; });
+  }
   mol.atoms.forEach(function(a, i){
     var nb = HL[i].map(function(e){ return e.atom; }), nbh = nb.length, deg = nbh + nH[i], el = a.el, given = a.charge;
+    if (carbene(i)){ need[i] = 0; return; }
+    /* a metal-carbon bond is the carbon's own sigma bond (aryl, alkyl, vinyl on a metal) */
+    if (el === "C" && mb[i]) deg += mb[i];
     if (complete){
       if (!given){
         if (el === "N" && deg === 4) a.charge = 1;
@@ -4942,7 +4990,7 @@ function from3D(atoms, bondList, opts){
     if (complete){
       var v = targetValence(a.el, a.charge);
       if ((a.el === "O" || a.el === "S") && HL[i].length === 1 && sumO === 1 && !a.charge){ a.charge = -1; madeAnion.push(i); }
-      else if (a.el === "C" && v !== null && sumO < v && HL[i].length) warnings.push("carbon " + (i + 1) + " has only " + sumO + " bonds; check the hydrogens in the file");
+      else if (a.el === "C" && v !== null && sumO + mb[i] < v && HL[i].length && !carbene(i)) warnings.push("carbon " + (i + 1) + " has only " + sumO + " bonds; check the hydrogens in the file");
     }
   });
   /* an anionic ligand atom bound to a metal (Cl-, RCOO-, RO-) is drawn neutral with a covalent
@@ -4956,7 +5004,7 @@ function from3D(atoms, bondList, opts){
   /* a ligand atom on one metal that still lacks two or more bonds is multiply bonded to it:
      oxo M=O, sulfido M=S, imido M=NR, nitrido M≡N */
   mol.atoms.forEach(function(a, i){
-    if (isMetal[i] || !mb[i] || a.charge) return;
+    if (isMetal[i] || !mb[i] || a.charge || !/^(O|S|Se|N)$/.test(a.el)) return;
     var v = targetValence(a.el, 0);
     if (v === null) return;
     var own = HL[i].reduce(function(s, e){ return s + mol.bonds[e.bond].order; }, 0) + nH[i];
@@ -6922,7 +6970,7 @@ C.setUserLibrary = function(list){
 var atoms = [], bonds = [], arrows = [], texts = [];
 var nextId = 1;
 var tool = "select";
-var opts = { grid:true, atomNums:false, stereo:true, hoverInfo:true, halfHead:false, deloc:true, delocCharge:true };
+var opts = { grid:true, atomNums:false, stereo:true, hoverInfo:true, halfHead:false, deloc:true, delocCharge:true, replaceOnOpen:false };
 var view = { panX:0, panY:0, zoom:1 };
 var history = [], historyIndex = -1, suppressHistory = false;
 var BOND_LEN = 42;
@@ -7984,20 +8032,64 @@ function computeDeloc(){
           lengthsAgree(c, np.concat(am).map(function(x){ return x.o; }), 0.06)) group = np.concat(am);
     }
     if (!group) return;
-    var cx = 0, cy = 0;
-    group.forEach(function(x){ cx += x.o.x/group.length; cy += x.o.y/group.length; });
-    var q = c.charge || 0;
-    group.forEach(function(x){ DELOC.bonds[x.b.id] = { centre:c.id, gx:cx, gy:cy }; q += x.o.charge || 0; DELOC.hide[x.o.id] = true; });
-    DELOC.hide[c.id] = true;
-    if (q && opts.delocCharge){
-      /* the net charge, once, just beyond the group on the side away from the centre */
-      var dx = cx - c.x, dy = cy - c.y, d = Math.hypot(dx, dy);
-      var pos;
-      if (d > BOND_LEN*0.2) pos = { x: cx + dx/d*15, y: cy + dy/d*15 };
-      else { var ang = freeDirection(c); pos = { x: c.x + Math.cos(ang)*BOND_LEN*0.45, y: c.y + Math.sin(ang)*BOND_LEN*0.45 }; }
-      DELOC.labels.push({ x:pos.x, y:pos.y, q:q, ids:[c.id].concat(group.map(function(x){ return x.o.id; })) });
-    }
+    addDelocGroup(c, group);
   });
+  /* beta-diketonates (acac, dibenzoylmethanide...), free or chelated: O=C-C=C-O drawn as one
+     delocalised O-C-C-C-O unit, the dashed line on the inside of the arc */
+  function onlyMetalsBesides(o, keep){ return bondsAt(o.id).every(function(b){ var x = findAtom(otherAtom(b, o.id)); return x && (x.id === keep || Chem.METALS[x.el]); }); }
+  atoms.forEach(function(o1){
+    if (o1.el !== "O") return;
+    var cb = bondsAt(o1.id).filter(function(b){ var x = findAtom(otherAtom(b, o1.id)); return x && x.el === "C"; });
+    if (cb.length !== 1) return;
+    var c1 = findAtom(otherAtom(cb[0], o1.id));
+    if (!onlyMetalsBesides(o1, c1.id)) return;
+    bondsAt(c1.id).forEach(function(b12){
+      var c2 = findAtom(otherAtom(b12, c1.id));
+      if (!c2 || c2.el !== "C" || b12 === cb[0]) return;
+      bondsAt(c2.id).forEach(function(b23){
+        var c3 = findAtom(otherAtom(b23, c2.id));
+        if (!c3 || c3.el !== "C" || c3.id === c1.id) return;
+        bondsAt(c3.id).forEach(function(b3o){
+          var o2 = findAtom(otherAtom(b3o, c3.id));
+          if (!o2 || o2.el !== "O" || o2.id <= o1.id || !onlyMetalsBesides(o2, c3.id)) return;
+          var ord = [cb[0].order, b12.order, b23.order, b3o.order].join("");
+          if (ord !== "2121" && ord !== "1212") return;
+          var four = [cb[0], b12, b23, b3o];
+          if (four.some(function(b){ return b.stereo !== "none" || b.deloc === false || DELOC.bonds[b.id]; })) return;
+          /* crystal coordinates: the two C-O and the two C-C bonds must agree */
+          var dCO1 = xyzLen(o1, c1), dCO2 = xyzLen(o2, c3), dCC1 = xyzLen(c1, c2), dCC2 = xyzLen(c2, c3);
+          if (dCO1 !== null && dCO2 !== null && (Math.abs(dCO1 - dCO2) > 0.06 || Math.abs(dCC1 - dCC2) > 0.06)) return;
+          var pts = [o1, c1, c2, c3, o2];
+          addDelocGroup(c2, four.map(function(b){ return { b:b, o:c2 }; }), pts, [o1, o2, c1, c2, c3]);
+        });
+      });
+    });
+  });
+  /* group: [{ b: bond, o: the atom it leads to }], c: the group's centre atom. For a
+     beta-diketonate, pts are the O-C-C-C-O atoms and the net charge sits on chargeAtoms. */
+  function addDelocGroup(c, group, pts, chargeAtoms){
+    var ring = !!pts;
+    pts = pts || group.map(function(x){ return x.o; });
+    var cx = 0, cy = 0;
+    pts.forEach(function(p){ cx += p.x/pts.length; cy += p.y/pts.length; });
+    var q = 0, owners = chargeAtoms || [c].concat(group.map(function(x){ return x.o; }));
+    owners.forEach(function(a){ q += a.charge || 0; DELOC.hide[a.id] = true; });
+    group.forEach(function(x){ DELOC.bonds[x.b.id] = { centre:c.id, gx:cx, gy:cy }; });
+    if (q && opts.delocCharge){
+      var pos;
+      if (ring){
+        /* beyond the middle carbon, outside the arc */
+        var ux = c.x - cx, uy = c.y - cy, ul = Math.hypot(ux, uy) || 1;
+        pos = { x: c.x + ux/ul*BOND_LEN*0.55, y: c.y + uy/ul*BOND_LEN*0.55 };
+      } else {
+        /* the net charge, once, just beyond the group on the side away from the centre */
+        var dx = cx - c.x, dy = cy - c.y, d = Math.hypot(dx, dy);
+        if (d > BOND_LEN*0.2) pos = { x: cx + dx/d*15, y: cy + dy/d*15 };
+        else { var ang = freeDirection(c); pos = { x: c.x + Math.cos(ang)*BOND_LEN*0.45, y: c.y + Math.sin(ang)*BOND_LEN*0.45 }; }
+      }
+      DELOC.labels.push({ x:pos.x, y:pos.y, q:q, ids:pts.map(function(p){ return p.id; }).concat([c.id]) });
+    }
+  }
 }
 function isDelocDrawn(b){ return !!DELOC.bonds[b.id]; }
 function renderDelocLabels(mono, only){
@@ -11451,14 +11543,77 @@ function buildReport(){
 }
 
 /* ---------------- open / drop / paste ---------------- */
+/* Opening or dropping a file adds its structure to the drawing, or, with "Replace on open"
+   ticked, replaces the drawing. A CIF holding several structures (a CSD/ConQuest export, say)
+   opens the CIF navigator instead: pick a REFCODE and that structure replaces the drawing. */
+var cifNav = null;   /* { blocks:[{ label, text }], index, name } */
+function splitCifBlocks(text){
+  var lines = String(text).split(/\r?\n/), starts = [];
+  for (var i = 0; i < lines.length; i++){ var m = /^\s*data_(\S+)/i.exec(lines[i]); if (m) starts.push({ line:i, raw:m[1] }); }
+  if (starts.length < 2) return null;
+  var blocks = [];
+  starts.forEach(function(s, b){
+    var end = b + 1 < starts.length ? starts[b + 1].line : lines.length;
+    var body = lines.slice(s.line, end).join("\n");
+    if (!/_atom_site_(fract|cartn)_x/i.test(body)) return;
+    /* CSD/ConQuest exports call each block CSD_CIF_<REFCODE>: show just the refcode */
+    var csd = /^CSD_CIF_(.+)$/i.exec(s.raw);
+    blocks.push({ label: csd ? csd[1] : s.raw, text: body });
+  });
+  return blocks.length > 1 ? blocks : null;
+}
+function showCifNav(){
+  var nav = $("cif-nav");
+  if (!cifNav){ nav.classList.remove("show"); return; }
+  var sel = $("cn-sel");
+  if (sel.getAttribute("data-for") !== cifNav.stamp){
+    sel.innerHTML = cifNav.blocks.map(function(b, i){ return '<option value="' + i + '">' + esc(b.label) + '</option>'; }).join("");
+    sel.setAttribute("data-for", cifNav.stamp);
+  }
+  sel.value = String(cifNav.index);
+  $("cn-prev").disabled = cifNav.index <= 0;
+  $("cn-next").disabled = cifNav.index >= cifNav.blocks.length - 1;
+  $("cn-count").textContent = (cifNav.index + 1) + " of " + cifNav.blocks.length;
+  nav.title = cifNav.name ? cifNav.name + ": " + cifNav.blocks.length + " structures" : "";
+  nav.classList.add("show");
+}
+function cifNavGo(i){
+  if (!cifNav || i < 0 || i >= cifNav.blocks.length) return;
+  cifNav.index = i;
+  showCifNav();
+  try { insertParsed(parseAnyStructure(cifNav.blocks[i].text), true); }
+  catch(e){ toast(cifNav.blocks[i].label + ": could not read this structure (" + e.message + ")"); }
+}
+function closeCifNav(){ cifNav = null; showCifNav(); }
+$("cn-prev").addEventListener("click", function(){ if (cifNav) cifNavGo(cifNav.index - 1); });
+$("cn-next").addEventListener("click", function(){ if (cifNav) cifNavGo(cifNav.index + 1); });
+$("cn-sel").addEventListener("change", function(){ cifNavGo(parseInt($("cn-sel").value, 10)); $("cn-sel").blur(); });
+$("cn-close").addEventListener("click", closeCifNav);
+$("cif-nav").addEventListener("pointerdown", function(e){ e.stopPropagation(); });
+function replaceOnOpen(){ return !!opts.replaceOnOpen; }
+$("opt-replace").checked = replaceOnOpen();
+$("opt-replace").addEventListener("change", function(){ opts.replaceOnOpen = $("opt-replace").checked; saveOpts(); updateDropHint(); });
+function updateDropHint(){
+  $("drop-hint").textContent = (replaceOnOpen() ? "Drop to replace the drawing: " : "Drop to add to the drawing: ") + ".cif, .res/.ins, .pdb, .xyz, .mol, .sdf, .smi or drawing .json";
+}
+updateDropHint();
 function loadText(text, name){
-  name = (name || "").toLowerCase();
+  var lname = (name || "").toLowerCase();
   try {
-    if (/\.json$/.test(name) || /^\s*\{/.test(text)){
+    if (/\.json$/.test(lname) || /^\s*\{/.test(text)){
+      closeCifNav();
       restore(text); clearSelection(); focusId = null; commit(); fitToContent(); toast("Drawing opened");
       return;
     }
-    insertParsed(parseAnyStructure(text));
+    var blocks = /^\s*data_/m.test(text) ? splitCifBlocks(text) : null;
+    if (blocks){
+      cifNav = { blocks:blocks, index:0, name:name || "", stamp:String(Date.now()) };
+      cifNavGo(0);
+      toast((name ? name + ": " : "") + blocks.length + " structures. Choose one in the CIF navigator at the top; each replaces the drawing.");
+      return;
+    }
+    closeCifNav();
+    insertParsed(parseAnyStructure(text), replaceOnOpen());
   } catch(e){ toast("Could not read this file: " + e.message); }
 }
 $("btn-open").addEventListener("click", function(){ $("file-input").click(); });
@@ -11729,6 +11884,7 @@ window.ChemDrawerApp = {
     if (localStorage.getItem("chemDrawerDeckOpen") === "0") document.body.classList.add("deck-closed");
   } catch(e){}
   loadOpts();
+  $("opt-replace").checked = replaceOnOpen(); updateDropHint();
   syncOptButtons();
   buildRail();
   loadAutosave();
