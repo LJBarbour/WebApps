@@ -327,6 +327,14 @@
     background: var(--raised); border: 1px solid var(--line-2); border-radius: 11px; box-shadow: var(--shadow); padding: 4px 6px 4px 10px;
   }
   .cif-nav.show { display: flex; }
+  .cif-nav-tab {
+    position: absolute; top: 0; left: 50%; transform: translateX(-50%); z-index: 7; display: none; align-items: center; gap: 0;
+    background: var(--raised); border: 1px solid var(--line-2); border-top: 0; border-radius: 0 0 9px 9px; box-shadow: var(--shadow); padding: 0 2px 0 4px;
+  }
+  .cif-nav-tab.show { display: flex; }
+  .cif-nav-tab .cn-btn { appearance: none; border: 0; background: transparent; color: var(--muted); height: 22px; min-width: 22px; border-radius: 6px; font: 700 10.5px/1 var(--mono); letter-spacing: .08em; padding: 0 6px; }
+  .cif-nav-tab .cn-btn:hover { background: var(--accent-soft); color: var(--ink); }
+  .cif-nav-tab .cn-x { font-size: 14px; letter-spacing: 0; padding: 0 4px; }
   .cif-nav .cn-title { font: 700 10.5px/1 var(--mono); letter-spacing: .08em; color: var(--muted); }
   .cif-nav select { height: 28px; min-width: 120px; max-width: 220px; border: 1px solid var(--line-2); border-radius: 7px; background: var(--paper); color: var(--ink); font: 600 13px/1 var(--mono); padding: 0 6px; }
   .cif-nav .cn-btn { appearance: none; border: 0; background: transparent; color: var(--ink-2); height: 28px; min-width: 28px; border-radius: 7px; font-size: 15px; font-weight: 700; }
@@ -575,6 +583,7 @@
   <div class="bar-group">
     <button class="bar-btn icon" id="btn-new" title="New drawing"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 1.5h5.5L13 5v9.5H4z"/><path d="M9 1.5V5.5h4"/></svg></button>
     <button class="bar-btn icon" id="btn-open" title="Open (.json drawing, .mol, .sdf, .smi)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1.5 4.5v9h11l2-6.5H4.3l-2 6.5"/><path d="M1.5 4.5V2.5h4.5l1.5 2h5v2.5"/></svg></button>
+    <button class="bar-btn icon" id="btn-folder" title="Open a folder: browse every structure file in it and its subfolders"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1.5 3h4.5l1.5 2h7v8.5h-13z"/><path d="M4 8h8M4 10.5h8"/></svg></button>
     <button class="bar-btn icon" id="btn-save" title="Save drawing (Ctrl+S)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 2h9.5L14 4.5V14H2z"/><path d="M5 2v4h6V2M5 14V9.5h6V14"/></svg></button>
   </div>
   <div class="bar-group">
@@ -647,7 +656,11 @@
     <select id="cn-sel" title="Structures in this file"></select>
     <button class="cn-btn" id="cn-next" title="Next structure">&rarr;</button>
     <span class="cn-count" id="cn-count"></span>
-    <button class="cn-btn cn-x" id="cn-close" title="Close the navigator">&times;</button>
+    <button class="cn-btn cn-x" id="cn-close" title="Close the navigator (a tab stays here to bring it back)">&times;</button>
+  </div>
+  <div class="cif-nav-tab" id="cif-nav-tab" role="group" aria-label="Closed navigator">
+    <button class="cn-btn" id="cn-reopen" title="Show the navigator again">&#9662; <span id="cn-reopen-label">CIF</span></button>
+    <button class="cn-btn cn-x" id="cn-forget" title="Forget this list">&times;</button>
   </div>
   <div class="float-cluster view-cluster" id="view-cluster">
     <button class="fbtn" data-opt="grid" title="Dot grid">Grid</button>
@@ -859,9 +872,9 @@
         <h4>Adding or replacing</h4>
         <p>An opened or dropped structure is normally added to what is already drawn. Tick <b>Replace on open</b> (bottom left, next to Fit) to have it clear the drawing and load the new structure on its own instead; the drop outline says which will happen. Undo (<kbd>Ctrl Z</kbd>) brings the previous drawing back either way. A saved drawing (.json) always replaces the current one.</p>
         <h4>CIF files with several structures</h4>
-        <p>When a CIF holds more than one structure, for example a CSD/ConQuest export, the <b>CIF navigator</b> appears at the top of the canvas. Pick a structure by its REFCODE in the list, or step through them with the arrows. Each choice replaces the drawing with that structure, and the Overview's Crystal card shows its cell and F(000). Blocks without atom coordinates are left out of the list. The navigator stays until another file is opened or you close it with ×.</p>
+        <p>When a CIF holds more than one structure, for example a CSD/ConQuest export, the <b>CIF navigator</b> appears at the top of the canvas. Pick a structure by its REFCODE in the list, or step through them with the arrows. Each choice replaces the drawing with that structure, and the Overview's Crystal card shows its cell and F(000). Blocks without atom coordinates are left out of the list. The navigator stays until another file is opened or you close it with ×. Closing only hides it: a small tab (say “▾ FOLDER · 3/25”) stays at the top of the canvas, and clicking it brings the navigator back where you left it (so does <b>Show the navigator again</b> in Ctrl K). The tab's own × forgets the list; dropping a new folder, ZIP or multi-structure CIF replaces it.</p>
         <h4>Folders, several files and ZIP archives</h4>
-        <p>Drop a <b>folder</b> on the canvas, or choose <b>Open folder…</b> in the command palette, and every structure file in it and in all its subfolders (.cif, .res, .ins, .pdb, .ent, .xyz, .mol, .sdf, .smi) is listed in the same navigator. The navigator's label then reads FOLDER. A <b>.zip</b> file is opened in the same way (ZIP), including ZIP files inside it or inside the folder. So are <b>several files</b> dropped at once or chosen together in the Open dialog (FILES). Each file gives one entry, named after the file, with the folder path added where two files have the same name; a CIF holding several structures gives one entry per structure, by REFCODE (hover over an entry for its full path). Files that turn out not to contain a structure (a CIF without atom coordinates, say) are left out, and the message says how many. As with multi-structure CIFs, each choice replaces the drawing. If only one structure is found, it simply opens as a single file would. Everything is read inside your browser; nothing is uploaded.</p>
+        <p>Drop a <b>folder</b> on the canvas, or click the <b>folder button</b> next to Open (also <b>Open folder…</b> in the command palette), and every structure file in it and in all its subfolders (.cif, .res, .ins, .pdb, .ent, .xyz, .mol, .sdf, .smi) is listed in the same navigator. The navigator's label then reads FOLDER. A <b>.zip</b> file is opened in the same way (ZIP), including ZIP files inside it or inside the folder. So are <b>several files</b> dropped at once or chosen together in the Open dialog (FILES). Each file gives one entry, named after the file, with the folder path added where two files have the same name; a CIF holding several structures gives one entry per structure, by REFCODE (hover over an entry for its full path). Files that turn out not to contain a structure (a CIF without atom coordinates, say) are left out, and the message says how many. As with multi-structure CIFs, each choice replaces the drawing. If only one structure is found, it simply opens as a single file would. Everything is read inside your browser; nothing is uploaded. Some browsers will not let a page opened straight from disk read a dropped folder; the app then says so, and the folder button always works (the browser asks you to confirm before it shares the folder).</p>
         <h4>Which 3D format?</h4>
         <ul>
           <li><b>SDF / MDL Molfile</b> is the best choice for a small molecule. It stores the element, the 3D coordinates, every bond with its order, and formal charges, and nearly every chemistry program reads it, including Mercury, Avogadro, PyMOL, Chimera, Open Babel and RDKit.</li>
@@ -11565,8 +11578,16 @@ function splitCifBlocks(text){
   });
   return blocks.length > 1 ? blocks : null;
 }
+var lastNav = null;   /* the navigator last closed, kept so it can be shown again */
 function showCifNav(){
-  var nav = $("cif-nav");
+  var nav = $("cif-nav"), tab = $("cif-nav-tab");
+  if (cifNav) lastNav = null;
+  tab.classList.toggle("show", !cifNav && !!lastNav);
+  if (lastNav){
+    var kindName = { folder:"FOLDER", zip:"ZIP", files:"FILES" }[lastNav.kind] || "CIF";
+    $("cn-reopen-label").textContent = kindName + " · " + (lastNav.index + 1) + "/" + lastNav.blocks.length;
+    $("cn-reopen").title = "Show the navigator again" + (lastNav.name ? " (" + lastNav.name + ", " + lastNav.blocks.length + " structures)" : "");
+  }
   if (!cifNav){ nav.classList.remove("show"); return; }
   var sel = $("cn-sel");
   if (sel.getAttribute("data-for") !== cifNav.stamp){
@@ -11645,22 +11666,35 @@ async function readZip(buf, prefix, budget){
   return out;
 }
 /* all files under dropped items (folders walked recursively): [{ path, file }] */
-function walkEntry(entry, path){
+function walkEntry(entry, path, errs){
+  errs = errs || [];
+  function fail(e){ errs.push((e && (e.name || e.message)) || "error"); }
   return new Promise(function(resolve){
-    if (entry.isFile){ entry.file(function(f){ resolve([{ path: path + entry.name, file:f }]); }, function(){ resolve([]); }); return; }
+    if (entry.isFile){ entry.file(function(f){ resolve([{ path: path + entry.name, file:f }]); }, function(e){ fail(e); resolve([]); }); return; }
     if (!entry.isDirectory){ resolve([]); return; }
     var reader = entry.createReader(), all = [];
     (function more(){
       reader.readEntries(function(batch){
         if (!batch.length){
-          Promise.all(all.map(function(e){ return walkEntry(e, path + entry.name + "/"); })).then(function(lists){ resolve([].concat.apply([], lists)); });
+          Promise.all(all.map(function(e){ return walkEntry(e, path + entry.name + "/", errs); })).then(function(lists){ resolve([].concat.apply([], lists)); });
           return;
         }
         all = all.concat(Array.prototype.slice.call(batch));
         more();
-      }, function(){ resolve([]); });
+      }, function(e){ fail(e); resolve([]); });
     })();
   });
+}
+/* the same through the newer File System Access handles (works where the old entries are refused, e.g. pages opened from disk) */
+async function walkHandle(h, path, errs){
+  try {
+    if (h.kind === "file") return [{ path: path + h.name, file: await h.getFile() }];
+    var out = [];
+    for await (var c of h.values()){
+      (await walkHandle(c, path + h.name + "/", errs)).forEach(function(x){ out.push(x); });
+    }
+    return out;
+  } catch(e){ errs.push(e.name || e.message || "error"); return []; }
 }
 /* read the files (and ZIPs among them) into [{ path, text }] */
 async function readFileList(list){
@@ -11721,14 +11755,35 @@ async function openCollection(list, kind, name){
 /* dropped items: one ordinary file opens as before; folders, ZIPs or several files go to the navigator */
 function handleDrop(dt){
   var items = dt.items ? Array.prototype.slice.call(dt.items) : [];
+  /* both must be asked for now, while the drop event is live */
+  var handles = items.map(function(it){ return it.kind === "file" && it.getAsFileSystemHandle ? it.getAsFileSystemHandle() : null; }).filter(Boolean);
   var entries = items.map(function(it){ return it.kind === "file" && it.webkitGetAsEntry ? it.webkitGetAsEntry() : null; }).filter(Boolean);
   var files = dt.files ? Array.prototype.slice.call(dt.files) : [];
   var single = files.length === 1 && !(entries[0] && entries[0].isDirectory) && !ZIP_EXT.test(files[0].name);
   if (single){ var f = files[0], rd = new FileReader(); rd.onload = function(ev){ loadText(ev.target.result, f.name); }; rd.readAsText(f); return true; }
-  if (entries.length){
-    var dirName = entries.length === 1 ? entries[0].name : entries.length + " items";
-    var kind = entries.length === 1 && entries[0].isDirectory ? "folder" : entries.length === 1 && ZIP_EXT.test(entries[0].name) ? "zip" : "files";
-    Promise.all(entries.map(function(e){ return walkEntry(e, ""); })).then(function(lists){ openCollection([].concat.apply([], lists), kind, dirName); });
+  if (entries.length || handles.length){
+    var first = entries[0] || {}, n = Math.max(entries.length, handles.length);
+    var dirName = n === 1 ? first.name || (files[0] && files[0].name) || "folder" : n + " items";
+    var kind = n === 1 && first.isDirectory ? "folder" : n === 1 && ZIP_EXT.test(dirName) ? "zip" : "files";
+    (async function(){
+      var errs = [], list = [];
+      /* newer handles first, then the older entries */
+      if (handles.length){
+        var hs = await Promise.all(handles.map(function(p){ return p.then(function(h){ return h; }, function(e){ errs.push(e.name || e.message); return null; }); }));
+        hs = hs.filter(Boolean);
+        if (hs.length && n === 1 && hs[0].kind === "directory") kind = "folder";
+        for (var i = 0; i < hs.length; i++) (await walkHandle(hs[i], "", errs)).forEach(function(x){ list.push(x); });
+      }
+      if (!list.length && entries.length){
+        var lists = await Promise.all(entries.map(function(e){ return walkEntry(e, "", errs); }));
+        list = [].concat.apply([], lists);
+      }
+      if (!list.length && kind === "folder"){
+        toast("The browser would not let the app read the folder \"" + dirName + "\"" + (errs.length ? " (" + errs[0] + ")" : "") + ". Use the folder button next to Open (or Open folder… in Ctrl K) and pick it there instead.");
+        return;
+      }
+      openCollection(list, kind, dirName);
+    })();
     return true;
   }
   if (files.length){
@@ -11737,7 +11792,15 @@ function handleDrop(dt){
   }
   return false;
 }
-function closeCifNav(){ cifNav = null; showCifNav(); }
+function closeCifNav(){ if (cifNav) lastNav = cifNav; cifNav = null; showCifNav(); }
+function reopenCifNav(){
+  if (cifNav) return;
+  if (!lastNav){ toast("No navigator to show: drop a folder, ZIP or multi-structure CIF first"); return; }
+  cifNav = lastNav; showCifNav();
+}
+$("cn-reopen").addEventListener("click", reopenCifNav);
+$("cn-forget").addEventListener("click", function(){ lastNav = null; showCifNav(); });
+$("cif-nav-tab").addEventListener("pointerdown", function(e){ e.stopPropagation(); });
 $("cn-prev").addEventListener("click", function(){ if (cifNav) cifNavGo(cifNav.index - 1); });
 $("cn-next").addEventListener("click", function(){ if (cifNav) cifNavGo(cifNav.index + 1); });
 $("cn-sel").addEventListener("change", function(){ cifNavGo(parseInt($("cn-sel").value, 10)); $("cn-sel").blur(); });
@@ -11770,6 +11833,7 @@ function loadText(text, name){
   } catch(e){ toast("Could not read this file: " + e.message); }
 }
 $("btn-open").addEventListener("click", function(){ $("file-input").click(); });
+$("btn-folder").addEventListener("click", function(){ $("folder-input").click(); });
 $("file-input").addEventListener("change", function(e){
   var fs = Array.prototype.slice.call(e.target.files || []);
   e.target.value = "";
@@ -11835,7 +11899,7 @@ function paletteCommands(){
   Object.keys(TOOL_NAMES).forEach(function(t){ add("tool", TOOL_NAMES[t], function(){ setTool(t); }, "", tk[t]); });
   ELEMENTS_FLY.forEach(function(e){ add("tool", "Atom " + e, function(){ setTool("el-" + e); }); });
   ABBREVS.forEach(function(l){ add("tool", "Label " + l, function(){ setTool("el-" + l); }, "abbreviation"); });
-  [["New drawing", function(){ $("btn-new").click(); }], ["Open file…", function(){ $("file-input").click(); }], ["Open folder… (browse every structure file in it)", function(){ $("folder-input").click(); }], ["Save drawing", function(){ exportAs("json"); }, "Ctrl S"],
+  [["New drawing", function(){ $("btn-new").click(); }], ["Open file…", function(){ $("file-input").click(); }], ["Open folder… (browse every structure file in it)", function(){ $("folder-input").click(); }], ["Show the navigator again", reopenCifNav], ["Save drawing", function(){ exportAs("json"); }, "Ctrl S"],
    ["Undo", undo, "Ctrl Z"], ["Redo", redo, "Ctrl Y"], ["Copy image to clipboard", function(){ $("btn-copy").click(); }],
    ["Export PNG", function(){ exportAs("png"); }], ["Export SVG", function(){ exportAs("svg"); }], ["Export Molfile", function(){ exportAs("mol"); }],
    ["Export SMILES", function(){ exportAs("smi"); }], ["Export spectra report", function(){ exportAs("report"); }],
