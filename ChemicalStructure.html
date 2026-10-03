@@ -642,7 +642,7 @@
     <label class="fbtn fchk" title="When ticked, opening or dropping a structure file clears the drawing and loads the new structure on its own; otherwise it is added to the drawing"><input type="checkbox" id="opt-replace">Replace on open</label>
   </div>
   <div class="cif-nav" id="cif-nav" role="group" aria-label="CIF navigator">
-    <span class="cn-title">CIF</span>
+    <span class="cn-title" id="cn-title">CIF</span>
     <button class="cn-btn" id="cn-prev" title="Previous structure">&larr;</button>
     <select id="cn-sel" title="Structures in this file"></select>
     <button class="cn-btn" id="cn-next" title="Next structure">&rarr;</button>
@@ -860,6 +860,8 @@
         <p>An opened or dropped structure is normally added to what is already drawn. Tick <b>Replace on open</b> (bottom left, next to Fit) to have it clear the drawing and load the new structure on its own instead; the drop outline says which will happen. Undo (<kbd>Ctrl Z</kbd>) brings the previous drawing back either way. A saved drawing (.json) always replaces the current one.</p>
         <h4>CIF files with several structures</h4>
         <p>When a CIF holds more than one structure, for example a CSD/ConQuest export, the <b>CIF navigator</b> appears at the top of the canvas. Pick a structure by its REFCODE in the list, or step through them with the arrows. Each choice replaces the drawing with that structure, and the Overview's Crystal card shows its cell and F(000). Blocks without atom coordinates are left out of the list. The navigator stays until another file is opened or you close it with ×.</p>
+        <h4>Folders, several files and ZIP archives</h4>
+        <p>Drop a <b>folder</b> on the canvas, or choose <b>Open folder…</b> in the command palette, and every structure file in it and in all its subfolders (.cif, .res, .ins, .pdb, .ent, .xyz, .mol, .sdf, .smi) is listed in the same navigator. The navigator's label then reads FOLDER. A <b>.zip</b> file is opened in the same way (ZIP), including ZIP files inside it or inside the folder. So are <b>several files</b> dropped at once or chosen together in the Open dialog (FILES). Each file gives one entry, named after the file, with the folder path added where two files have the same name; a CIF holding several structures gives one entry per structure, by REFCODE (hover over an entry for its full path). Files that turn out not to contain a structure (a CIF without atom coordinates, say) are left out, and the message says how many. As with multi-structure CIFs, each choice replaces the drawing. If only one structure is found, it simply opens as a single file would. Everything is read inside your browser; nothing is uploaded.</p>
         <h4>Which 3D format?</h4>
         <ul>
           <li><b>SDF / MDL Molfile</b> is the best choice for a small molecule. It stores the element, the 3D coordinates, every bond with its order, and formal charges, and nearly every chemistry program reads it, including Mercury, Avogadro, PyMOL, Chimera, Open Babel and RDKit.</li>
@@ -904,7 +906,8 @@
 </div>
 
 <div class="toast" id="toast"></div>
-<input type="file" id="file-input" accept=".json,.mol,.sdf,.smi,.txt,.pdb,.ent,.xyz,.res,.ins,.cif,application/json" style="display:none">
+<input type="file" id="file-input" multiple accept=".json,.mol,.sdf,.smi,.txt,.pdb,.ent,.xyz,.res,.ins,.cif,.zip,application/json,application/zip" style="display:none">
+<input type="file" id="folder-input" webkitdirectory multiple style="display:none">
 <script>
 /* ============================================================
    CHEM CORE — molecular graph, valence, SMILES, rings,
@@ -11567,9 +11570,10 @@ function showCifNav(){
   if (!cifNav){ nav.classList.remove("show"); return; }
   var sel = $("cn-sel");
   if (sel.getAttribute("data-for") !== cifNav.stamp){
-    sel.innerHTML = cifNav.blocks.map(function(b, i){ return '<option value="' + i + '">' + esc(b.label) + '</option>'; }).join("");
+    sel.innerHTML = cifNav.blocks.map(function(b, i){ return '<option value="' + i + '"' + (b.path ? ' title="' + esc(b.path) + '"' : "") + '>' + esc(b.label) + '</option>'; }).join("");
     sel.setAttribute("data-for", cifNav.stamp);
   }
+  $("cn-title").textContent = { folder:"FOLDER", zip:"ZIP", files:"FILES" }[cifNav.kind] || "CIF";
   sel.value = String(cifNav.index);
   $("cn-prev").disabled = cifNav.index <= 0;
   $("cn-next").disabled = cifNav.index >= cifNav.blocks.length - 1;
@@ -11584,6 +11588,155 @@ function cifNavGo(i){
   try { insertParsed(parseAnyStructure(cifNav.blocks[i].text), true); }
   catch(e){ toast(cifNav.blocks[i].label + ": could not read this structure (" + e.message + ")"); }
 }
+
+/* ---------------- folders, several files, ZIP archives ----------------
+   Every structure file found (in subfolders too, and inside ZIP files, nested ones included)
+   becomes one entry of the navigator; a CIF holding several structures gives one entry each. */
+var STRUCT_EXT = /\.(cif|res|ins|pdb|ent|xyz|mol|sdf|smi)$/i, ZIP_EXT = /\.zip$/i;
+var MAX_ENTRIES = 5000, MAX_BYTES = 400*1024*1024;
+/* a quick look whether a file really holds a structure of its kind */
+function looksLikeStructure(path, text){
+  var ext = (/\.([a-z]+)$/i.exec(path) || [, ""])[1].toLowerCase();
+  if (ext === "cif") return /_atom_site_(fract|cartn)_x/i.test(text);
+  if (ext === "res" || ext === "ins") return /^\s*CELL\s/mi.test(text);
+  if (ext === "pdb" || ext === "ent") return /^(ATOM  |HETATM)/m.test(text);
+  if (ext === "xyz") return /^\s*\d+\s*$/m.test(text.split("\n")[0] || "");
+  if (ext === "mol" || ext === "sdf") return /V2000|V3000|M  END/.test(text);
+  if (ext === "smi") return text.trim().length > 0;
+  return false;
+}
+function u16(dv, o){ return dv.getUint16(o, true); }
+function u32(dv, o){ return dv.getUint32(o, true); }
+/* the files of a ZIP archive: stored or deflated entries (deflate through the browser's own
+   DecompressionStream), nested archives opened too; returns [{ path, text }] */
+async function readZip(buf, prefix, budget){
+  var dv = new DataView(buf), n = buf.byteLength, eocd = -1;
+  for (var p = n - 22; p >= Math.max(0, n - 65557); p--) if (u32(dv, p) === 0x06054b50){ eocd = p; break; }
+  if (eocd < 0) throw new Error("not a ZIP file (or a damaged one)");
+  var count = u16(dv, eocd + 10), cd = u32(dv, eocd + 16), out = [];
+  var dec = new TextDecoder("utf-8");
+  for (var k = 0; k < count && cd + 46 <= n; k++){
+    if (u32(dv, cd) !== 0x02014b50) break;
+    var flags = u16(dv, cd + 8), method = u16(dv, cd + 10), csize = u32(dv, cd + 20), usize = u32(dv, cd + 24);
+    var nlen = u16(dv, cd + 28), xlen = u16(dv, cd + 30), clen = u16(dv, cd + 32), lho = u32(dv, cd + 42);
+    /* some archivers (Windows PowerShell 5) write backslashes */
+    var name = dec.decode(new Uint8Array(buf, cd + 46, nlen)).split(String.fromCharCode(92)).join("/");
+    cd += 46 + nlen + xlen + clen;
+    var base = name.split("/").pop();
+    if (/\/$/.test(name) || /(^|\/)__MACOSX\//.test(name) || /^\._/.test(base)) continue;
+    var isZip = ZIP_EXT.test(name);
+    if (!STRUCT_EXT.test(name) && !isZip) continue;
+    if (flags & 1){ budget.skipped.push(prefix + name + " (encrypted)"); continue; }
+    if (out.length + budget.count >= MAX_ENTRIES || budget.bytes + usize > MAX_BYTES){ budget.truncated = true; break; }
+    if (u32(dv, lho) !== 0x04034b50) continue;
+    var start = lho + 30 + u16(dv, lho + 26) + u16(dv, lho + 28), raw = new Uint8Array(buf, start, csize), bytes;
+    try {
+      if (method === 0) bytes = raw;
+      else if (method === 8){
+        if (typeof DecompressionStream !== "function") throw new Error("this browser cannot unpack compressed ZIP entries");
+        bytes = new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer());
+      } else { budget.skipped.push(prefix + name + " (compression method " + method + ")"); continue; }
+    } catch(e){ budget.skipped.push(prefix + name + " (" + e.message + ")"); continue; }
+    budget.bytes += bytes.length;
+    if (isZip){
+      try { (await readZip(bytes.slice().buffer, prefix + name + "/", budget)).forEach(function(x){ out.push(x); }); } catch(e){ budget.skipped.push(prefix + name + " (" + e.message + ")"); }
+    } else out.push({ path: prefix + name, text: dec.decode(bytes) });
+  }
+  return out;
+}
+/* all files under dropped items (folders walked recursively): [{ path, file }] */
+function walkEntry(entry, path){
+  return new Promise(function(resolve){
+    if (entry.isFile){ entry.file(function(f){ resolve([{ path: path + entry.name, file:f }]); }, function(){ resolve([]); }); return; }
+    if (!entry.isDirectory){ resolve([]); return; }
+    var reader = entry.createReader(), all = [];
+    (function more(){
+      reader.readEntries(function(batch){
+        if (!batch.length){
+          Promise.all(all.map(function(e){ return walkEntry(e, path + entry.name + "/"); })).then(function(lists){ resolve([].concat.apply([], lists)); });
+          return;
+        }
+        all = all.concat(Array.prototype.slice.call(batch));
+        more();
+      }, function(){ resolve([]); });
+    })();
+  });
+}
+/* read the files (and ZIPs among them) into [{ path, text }] */
+async function readFileList(list){
+  var budget = { count:0, bytes:0, skipped:[], truncated:false }, out = [];
+  list.sort(function(p, q){ return p.path.localeCompare(q.path, undefined, { numeric:true, sensitivity:"base" }); });
+  for (var i = 0; i < list.length; i++){
+    var it = list[i];
+    if (out.length >= MAX_ENTRIES || budget.bytes > MAX_BYTES){ budget.truncated = true; break; }
+    try {
+      if (ZIP_EXT.test(it.path)){
+        var zs = await readZip(await it.file.arrayBuffer(), it.path + "/", budget);
+        zs.forEach(function(x){ out.push(x); });
+      } else if (STRUCT_EXT.test(it.path)){
+        budget.bytes += it.file.size;
+        out.push({ path: it.path, text: await it.file.text() });
+      }
+    } catch(e){ budget.skipped.push(it.path + " (" + e.message + ")"); }
+    budget.count = out.length;
+  }
+  return { files: out, budget: budget };
+}
+/* navigator entries from the files found: one per structure */
+function entriesFromFiles(files){
+  var entries = [], bad = 0;
+  files.forEach(function(f){
+    if (!looksLikeStructure(f.path, f.text)){ bad++; return; }
+    var blocks = /\.cif$/i.test(f.path) ? splitCifBlocks(f.text) : null;
+    if (blocks) blocks.forEach(function(b){ entries.push({ label:b.label, path: f.path + " › " + b.label, text:b.text }); });
+    else entries.push({ label: f.path.split("/").pop().replace(/\.[^.]+$/, ""), path: f.path, text: f.text });
+  });
+  /* the same name twice (two folders): show the path for those */
+  var seen = {};
+  entries.forEach(function(e){ seen[e.label] = (seen[e.label] || 0) + 1; });
+  entries.forEach(function(e){ if (seen[e.label] > 1) e.label = e.path.replace(/\.[^.\/›]+(?= ›|$)/, ""); });
+  return { entries: entries, bad: bad };
+}
+/* open a collection (folder, several files, ZIP) in the navigator */
+async function openCollection(list, kind, name){
+  if (!list.length){ toast("No files found"); return; }
+  toast("Reading " + (kind === "zip" ? name : list.length + " file" + (list.length > 1 ? "s" : "")) + "…");
+  var r;
+  try { r = await readFileList(list); } catch(e){ toast("Could not read " + (name || "the files") + ": " + e.message); return; }
+  var ex = entriesFromFiles(r.files), entries = ex.entries;
+  var notes = [];
+  if (ex.bad) notes.push(ex.bad + " file" + (ex.bad > 1 ? "s" : "") + " without a usable structure skipped");
+  if (r.budget.skipped.length) notes.push(r.budget.skipped.length + " unreadable: " + r.budget.skipped.slice(0, 3).join(", ") + (r.budget.skipped.length > 3 ? "…" : ""));
+  if (r.budget.truncated) notes.push("only the first " + entries.length + " were read (limit " + MAX_ENTRIES + " files or " + (MAX_BYTES >> 20) + " MB)");
+  if (!entries.length){ toast("No structure files (CIF, RES, INS, PDB, XYZ, MOL, SDF, SMI) found in " + (name || "what was dropped") + (notes.length ? " · " + notes.join(" · ") : "")); return; }
+  if (entries.length === 1){
+    closeCifNav();
+    try { insertParsed(parseAnyStructure(entries[0].text), replaceOnOpen()); } catch(e){ toast(entries[0].label + ": could not read this structure (" + e.message + ")"); }
+    return;
+  }
+  cifNav = { blocks:entries, index:0, name:name || "", kind:kind, stamp:String(Date.now()) };
+  cifNavGo(0);
+  toast((name ? name + ": " : "") + entries.length + " structures found. Choose one in the navigator at the top; each replaces the drawing." + (notes.length ? " · " + notes.join(" · ") : ""));
+}
+/* dropped items: one ordinary file opens as before; folders, ZIPs or several files go to the navigator */
+function handleDrop(dt){
+  var items = dt.items ? Array.prototype.slice.call(dt.items) : [];
+  var entries = items.map(function(it){ return it.kind === "file" && it.webkitGetAsEntry ? it.webkitGetAsEntry() : null; }).filter(Boolean);
+  var files = dt.files ? Array.prototype.slice.call(dt.files) : [];
+  var single = files.length === 1 && !(entries[0] && entries[0].isDirectory) && !ZIP_EXT.test(files[0].name);
+  if (single){ var f = files[0], rd = new FileReader(); rd.onload = function(ev){ loadText(ev.target.result, f.name); }; rd.readAsText(f); return true; }
+  if (entries.length){
+    var dirName = entries.length === 1 ? entries[0].name : entries.length + " items";
+    var kind = entries.length === 1 && entries[0].isDirectory ? "folder" : entries.length === 1 && ZIP_EXT.test(entries[0].name) ? "zip" : "files";
+    Promise.all(entries.map(function(e){ return walkEntry(e, ""); })).then(function(lists){ openCollection([].concat.apply([], lists), kind, dirName); });
+    return true;
+  }
+  if (files.length){
+    openCollection(files.map(function(f){ return { path:f.webkitRelativePath || f.name, file:f }; }), files.length === 1 && ZIP_EXT.test(files[0].name) ? "zip" : "files", files.length === 1 ? files[0].name : files.length + " files");
+    return true;
+  }
+  return false;
+}
 function closeCifNav(){ cifNav = null; showCifNav(); }
 $("cn-prev").addEventListener("click", function(){ if (cifNav) cifNavGo(cifNav.index - 1); });
 $("cn-next").addEventListener("click", function(){ if (cifNav) cifNavGo(cifNav.index + 1); });
@@ -11594,7 +11747,7 @@ function replaceOnOpen(){ return !!opts.replaceOnOpen; }
 $("opt-replace").checked = replaceOnOpen();
 $("opt-replace").addEventListener("change", function(){ opts.replaceOnOpen = $("opt-replace").checked; saveOpts(); updateDropHint(); });
 function updateDropHint(){
-  $("drop-hint").textContent = (replaceOnOpen() ? "Drop to replace the drawing: " : "Drop to add to the drawing: ") + ".cif, .res/.ins, .pdb, .xyz, .mol, .sdf, .smi or drawing .json";
+  $("drop-hint").textContent = (replaceOnOpen() ? "Drop to replace the drawing: " : "Drop to add to the drawing: ") + ".cif, .res/.ins, .pdb, .xyz, .mol, .sdf, .smi or drawing .json, or a folder or .zip to browse";
 }
 updateDropHint();
 function loadText(text, name){
@@ -11618,12 +11771,24 @@ function loadText(text, name){
 }
 $("btn-open").addEventListener("click", function(){ $("file-input").click(); });
 $("file-input").addEventListener("change", function(e){
-  var f = e.target.files[0];
-  if (!f) return;
-  var rd = new FileReader();
+  var fs = Array.prototype.slice.call(e.target.files || []);
+  e.target.value = "";
+  if (!fs.length) return;
+  /* several files, or a ZIP: the navigator */
+  if (fs.length > 1 || ZIP_EXT.test(fs[0].name)){
+    openCollection(fs.map(function(f){ return { path:f.name, file:f }; }), fs.length === 1 ? "zip" : "files", fs.length === 1 ? fs[0].name : fs.length + " files");
+    return;
+  }
+  var f = fs[0], rd = new FileReader();
   rd.onload = function(ev){ loadText(ev.target.result, f.name); };
   rd.readAsText(f);
+});
+$("folder-input").addEventListener("change", function(e){
+  var fs = Array.prototype.slice.call(e.target.files || []);
   e.target.value = "";
+  if (!fs.length) return;
+  var top = (fs[0].webkitRelativePath || "").split("/")[0] || "folder";
+  openCollection(fs.map(function(f){ return { path:f.webkitRelativePath || f.name, file:f }; }), "folder", top);
 });
 $("btn-save").addEventListener("click", function(){ exportAs("json"); });
 $("btn-new").addEventListener("click", function(){
@@ -11641,8 +11806,7 @@ wrapEl.addEventListener("dragleave", function(e){ if (!wrapEl.contains(e.related
 wrapEl.addEventListener("drop", function(e){
   e.preventDefault();
   $("drop-hint").classList.remove("show");
-  var f = e.dataTransfer.files && e.dataTransfer.files[0];
-  if (f){ var rd = new FileReader(); rd.onload = function(ev){ loadText(ev.target.result, f.name); }; rd.readAsText(f); return; }
+  if (handleDrop(e.dataTransfer)) return;
   var t = e.dataTransfer.getData("text/plain");
   if (t) loadText(t, "");
 });
@@ -11671,7 +11835,7 @@ function paletteCommands(){
   Object.keys(TOOL_NAMES).forEach(function(t){ add("tool", TOOL_NAMES[t], function(){ setTool(t); }, "", tk[t]); });
   ELEMENTS_FLY.forEach(function(e){ add("tool", "Atom " + e, function(){ setTool("el-" + e); }); });
   ABBREVS.forEach(function(l){ add("tool", "Label " + l, function(){ setTool("el-" + l); }, "abbreviation"); });
-  [["New drawing", function(){ $("btn-new").click(); }], ["Open file…", function(){ $("file-input").click(); }], ["Save drawing", function(){ exportAs("json"); }, "Ctrl S"],
+  [["New drawing", function(){ $("btn-new").click(); }], ["Open file…", function(){ $("file-input").click(); }], ["Open folder… (browse every structure file in it)", function(){ $("folder-input").click(); }], ["Save drawing", function(){ exportAs("json"); }, "Ctrl S"],
    ["Undo", undo, "Ctrl Z"], ["Redo", redo, "Ctrl Y"], ["Copy image to clipboard", function(){ $("btn-copy").click(); }],
    ["Export PNG", function(){ exportAs("png"); }], ["Export SVG", function(){ exportAs("svg"); }], ["Export Molfile", function(){ exportAs("mol"); }],
    ["Export SMILES", function(){ exportAs("smi"); }], ["Export spectra report", function(){ exportAs("report"); }],
