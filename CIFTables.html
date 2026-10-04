@@ -90,8 +90,15 @@ input[type=file]{display:none}
 .block-name{font-family:var(--mono);font-size:12px;color:var(--ink-mid);font-weight:500}
 
 /* -- Tabs: a segmented control with live counts -- */
-.tab-bar{display:flex;gap:3px;flex-wrap:wrap;margin-bottom:14px;padding:3px;background:var(--paper2);border-radius:11px}
-.tab-btn{font-family:var(--mono);font-size:10.5px;letter-spacing:.3px;padding:6px 11px;background:transparent;
+/* all tabs stay on ONE line: tighter spacing, short names (Atoms, Bonds, Angles…) when the room runs out,
+   and as a last resort (a very narrow window) the row scrolls sideways instead of wrapping */
+.tab-wrap{container-type:inline-size;margin-bottom:14px}
+.tab-bar{display:flex;gap:2px;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding:3px;background:var(--paper2);border-radius:11px}
+.tab-bar::-webkit-scrollbar{display:none}
+.tl-short{display:none}
+@container (max-width:920px){.tl-long{display:none}.tl-short{display:inline}}
+.tab-btn{flex:0 0 auto;white-space:nowrap}
+.tab-btn{font-family:var(--mono);font-size:10.5px;letter-spacing:.2px;padding:6px 9px;background:transparent;
   border:0;border-radius:8px;color:var(--ink-mid);cursor:pointer;display:inline-flex;align-items:center;gap:6px;
   transition:background .15s,color .15s,box-shadow .15s}
 .tab-btn:hover{color:var(--accent)}
@@ -1288,13 +1295,13 @@ function renderReportPage(block,uid){
 const $=id=>document.getElementById(id);
 const PAGE_DEFS=[
   ['summary','Summary',renderSummaryPage],
-  ['atoms','Atomic Coordinates',renderAtomsTable],
-  ['bonds','Bond Distances',renderBondsTable],
-  ['angles','Bond Angles',renderAnglesTable],
-  ['hbonds','Hydrogen Bonds',renderHBondsTable],
-  ['torsions','Torsion Angles',renderTorsionsTable],
-  ['table1','Table 1',renderTable1Page],
-  ['report','Report Text',renderReportPage],
+  ['atoms','Atomic Coordinates',renderAtomsTable,'Atoms'],
+  ['bonds','Bond Distances',renderBondsTable,'Bonds'],
+  ['angles','Bond Angles',renderAnglesTable,'Angles'],
+  ['hbonds','Hydrogen Bonds',renderHBondsTable,'H-bonds'],
+  ['torsions','Torsion Angles',renderTorsionsTable,'Torsions'],
+  ['table1','Table',renderTable1Page],
+  ['report','Report',renderReportPage],
 ];
 let CUR=null;            // {block, uid, cell} of the structure on screen
 let LAST_TAB='summary';  // tab kept while stepping through the navigator
@@ -1517,10 +1524,10 @@ function renderEntry(entry,idx){
   const active=PAGE_DEFS.some(d=>d[0]===LAST_TAB)?LAST_TAB:'summary';
   const tabs=PAGE_DEFS.map(d=>{
     const n=counts[d[0]];
-    return '<button class="tab-btn'+(d[0]===active?' active':'')+(n===0?' empty':'')+'" data-tab="'+d[0]+'" onclick="switchTab(this)">'+esc(d[1])+(n!==undefined?'<span class="tb-n">'+n+'</span>':'')+'</button>';
+    return '<button class="tab-btn'+(d[0]===active?' active':'')+(n===0?' empty':'')+'" data-tab="'+d[0]+'" onclick="switchTab(this)">'+(d[3]?'<span class="tl-long">'+esc(d[1])+'</span><span class="tl-short">'+esc(d[3])+'</span>':esc(d[1]))+(n!==undefined?'<span class="tb-n">'+n+'</span>':'')+'</button>';
   }).join('');
   const pages=PAGE_DEFS.map(d=>'<div class="page'+(d[0]===active?' active':'')+'" data-tab="'+d[0]+'"></div>').join('');
-  out.innerHTML=head+'<div class="block-wrap">'+heroHtml(block,cell)+'<div class="tab-bar">'+tabs+'</div><div class="pages">'+pages+'</div></div></div>';
+  out.innerHTML=head+'<div class="block-wrap">'+heroHtml(block,cell)+'<div class="tab-wrap"><div class="tab-bar">'+tabs+'</div></div><div class="pages">'+pages+'</div></div></div>';
   drawCell();bindCellFig();
   ensurePage(out.querySelector('.block-wrap'),active);
 }
