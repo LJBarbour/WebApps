@@ -260,7 +260,21 @@ table.data-table tbody tr:nth-child(even) td{background:rgba(120,100,60,.045)}
 table.data-table tbody tr:hover td{background:rgba(74,111,165,.1)}
 .data-table td.gl-td,.data-table th.gl-td{width:34px;padding-left:0;padding-right:8px}
 .gl{display:block;color:var(--ink)}
-.tbl-tools{display:flex;gap:6px;align-items:center}
+.tbl-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.chk{display:inline-flex;align-items:center;gap:5px;font:500 10px var(--mono);color:var(--ink-mid);cursor:pointer;user-select:none}
+.chk input{accent-color:var(--accent);margin:0}
+.rows-wrap{position:relative}
+.rows-pop{position:absolute;top:100%;left:0;z-index:30;margin-top:6px;width:min(340px,86vw);background:var(--paper);border:1px solid var(--border);
+  border-radius:10px;box-shadow:0 14px 34px -10px rgba(30,20,5,.45);padding:8px 10px}
+.rows-pop[hidden]{display:none}
+.rp-head{display:flex;justify-content:space-between;align-items:center;font:600 10px var(--mono);letter-spacing:.5px;text-transform:uppercase;color:var(--ink-mid);margin-bottom:6px}
+.rp-act{border:1px solid var(--border);border-radius:5px;background:transparent;color:var(--ink-mid);font:500 10px var(--mono);padding:1px 7px;margin-left:4px;cursor:pointer}
+.rp-act:hover{border-color:var(--accent);color:var(--accent)}
+.rp-list{max-height:300px;overflow:auto;display:flex;flex-direction:column}
+.rp-list label{display:flex;align-items:baseline;gap:8px;padding:2px 2px;font:400 12px 'Times New Roman',Georgia,serif;color:var(--ink);cursor:pointer;border-radius:4px}
+.rp-list label:hover{background:var(--accent-soft)}
+.rp-list input{accent-color:var(--accent);margin:0}
+.rp-note{margin-top:6px;font:500 9.5px/1.4 var(--mono);color:var(--ink-faint)}
 .tbl-filter{height:24px;width:150px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font:500 11.5px var(--mono);padding:0 8px;outline:none}
 .tbl-filter:focus{border-color:var(--accent)}
 .te-mark{font:600 30px var(--display);color:var(--ink-faint);opacity:.55;margin-bottom:2px}
@@ -540,7 +554,7 @@ function catCollection(block){
     {label:'θ range (°)',value:thetaRange},
     {label:'Reflections collected',value:nColl?tv(nColl):null},
     {label:'Independent reflections',value:nIndep?tv(nIndep):null},
-    {label:'Observed refl. [I&gt;2σ(I)]',value:nObs?tv(nObs):null},
+    {label:'Observed refl. [I &gt; 2σ(I)]',value:nObs?tv(nObs):null},
     {label:'R(int)',value:rint?tv(rint):null},
     {label:'Completeness to θmax',value:comp},
   ];
@@ -566,7 +580,7 @@ function catRefinement(block){
     {label:'Refinement method',value:method?tv(method):null,optional:true},
     {label:'Data / restraints / parameters',value:drp},
     {label:'Goodness-of-fit on F²',value:goof?tv(goof):null},
-    {label:'Final R indices [I&gt;2σ(I)]',value:finalR},
+    {label:'Final R indices [I &gt; 2σ(I)]',value:finalR},
     {label:'R indices (all data)',value:allR},
     {label:'Extinction coefficient',value:ext?tv(ext):null,optional:true},
     {label:'Flack parameter',value:flack?tv(flack):null,optional:true},
@@ -796,11 +810,14 @@ function formulaRuns(s){
 // ═══════════════════════════════════════════════════════
 //  TABLE 1  (Crystal data and structure refinement)
 // ═══════════════════════════════════════════════════════
-function buildTable1Rows(block){
+// full=true keeps EVERY row for every structure (a blank cell where a value is absent), so that a left column copied
+// from one structure always lines up row-for-row with a right column copied from another
+function buildTable1Rows(block,full){
   const rows=[];
   const push=(label,value,optional)=>{
-    if(optional&&(!value||!value.length))return;
-    rows.push({label:label||[],value:(value&&value.length)?value:[PLAIN('not reported')]});
+    const has=value&&value.length;
+    if(!has&&optional&&!full)return;
+    rows.push({label:label||[],value:has?value:(full?[]:[PLAIN('not reported')])});
   };
 
   push([PLAIN('Identification code')],[PLAIN(block.name)]);
@@ -859,22 +876,20 @@ function buildTable1Rows(block){
   const hMin=gi(block,'_diffrn_reflns_limit_h_min'),hMax=gi(block,'_diffrn_reflns_limit_h_max');
   const kMin=gi(block,'_diffrn_reflns_limit_k_min'),kMax=gi(block,'_diffrn_reflns_limit_k_max');
   const lMin=gi(block,'_diffrn_reflns_limit_l_min'),lMax=gi(block,'_diffrn_reflns_limit_l_max');
-  if(hMin&&hMax&&kMin&&kMax&&lMin&&lMax){
-    push([PLAIN('Miller index ranges')],[
-      PLAIN(hMin+'\u2264'),IT('h'),PLAIN('\u2264'+hMax+', '+kMin+'\u2264'),IT('k'),PLAIN('\u2264'+kMax+', '+lMin+'\u2264'),IT('l'),PLAIN('\u2264'+lMax)
-    ]);
-  }
+  // three rows: the label once on the first, blank labels below, and h, k and l each on a line of their own.
+  // All three share one key, so the Rows picker treats them as a single item.
+  const rng=(lo,hi,ax)=>(lo&&hi)?[PLAIN(lo+' \u2264 '),IT(ax),PLAIN(' \u2264 '+hi)]:[];
+  const mil=[rng(hMin,hMax,'h'),rng(kMin,kMax,'k'),rng(lMin,lMax,'l')];
+  if(full||mil.some(m=>m.length))mil.forEach((m,i)=>rows.push({label:i?[]:[PLAIN('Miller index ranges')],value:m,key:'Miller index ranges'}));
 
   const nColl=gi(block,'_diffrn_reflns_number');
   push([PLAIN('Reflections collected')],nColl?[PLAIN(nColl)]:null,true);
 
   const nIndep=gi(block,'_reflns_number_total');
   const rint=gi(block,'_diffrn_reflns_av_r_equivalents');
-  if(nIndep){
-    const v=[PLAIN(nIndep)];
-    if(rint)v.push(PLAIN(' ['),IT('R'),SUB('int'),PLAIN(' = '+rint+']'));
-    push([PLAIN('Independent reflections')],v);
-  }
+  const vIndep=nIndep?[PLAIN(nIndep)]:null;
+  if(vIndep&&rint)vIndep.push(PLAIN(' ['),IT('R'),SUB('int'),PLAIN(' = '+rint+']'));
+  push([PLAIN('Independent reflections')],vIndep,true);
 
   const compV=gn(block,'_diffrn_measured_fraction_theta_max','_diffrn_measured_fraction_theta_full');
   push([PLAIN('Completeness to θ'),SUB('max')],compV!==null?[PLAIN((compV*100).toFixed(1)+'%')]:null,true);
@@ -894,15 +909,11 @@ function buildTable1Rows(block){
 
   const r1=gi(block,'_refine_ls_r_factor_gt','_refine_ls_r_factor_obs');
   const wr2=gi(block,'_refine_ls_wr_factor_gt')||gi(block,'_refine_ls_wr_factor_ref','_refine_ls_wr_factor_obs');
-  if(r1||wr2){
-    push([PLAIN('Final '),IT('R'),PLAIN(' indices ['),IT('I'),PLAIN('>2σ('),IT('I'),PLAIN(')]')],
-      [IT('R'),PLAIN('1 = '+(r1||'?')+', '),IT('wR'),PLAIN('2 = '+(wr2||'?'))]);
-  }
+  push([PLAIN('Final '),IT('R'),PLAIN(' indices ['),IT('I'),PLAIN(' > 2σ('),IT('I'),PLAIN(')]')],
+    (r1||wr2)?[IT('R'),PLAIN('1 = '+(r1||'?')+', '),IT('wR'),PLAIN('2 = '+(wr2||'?'))]:null,true);
   const r1all=gi(block,'_refine_ls_r_factor_all');
   const wr2all=gi(block,'_refine_ls_wr_factor_ref','_refine_ls_wr_factor_obs');
-  if(r1all||wr2all){
-    push([PLAIN('R indices (all data)')],[IT('R'),PLAIN('1 = '+(r1all||'?')+', '),IT('wR'),PLAIN('2 = '+(wr2all||'?'))]);
-  }
+  push([PLAIN('R indices (all data)')],(r1all||wr2all)?[IT('R'),PLAIN('1 = '+(r1all||'?')+', '),IT('wR'),PLAIN('2 = '+(wr2all||'?'))]:null,true);
 
   const peak=gi(block,'_refine_diff_density_max'),hole=gi(block,'_refine_diff_density_min');
   push([PLAIN('Largest diff. peak and hole (e Å'),SUP('-3'),PLAIN(')')],(peak&&hole)?[PLAIN(peak+' and '+hole)]:null,true);
@@ -1030,11 +1041,52 @@ function buildReportRuns(block){
 //  RTF EXPORT ASSEMBLY
 // ═══════════════════════════════════════════════════════
 let RTF_STORE={};
-function rtfDocHeader(){
+function rtfDocHeader(landscape){
   return '{\\rtf1\\ansi\\ansicpg1252\\deff0\\deflang1033'+
     '{\\fonttbl{\\f0\\froman\\fprq2\\fcharset0 Times New Roman;}{\\f1\\froman\\fprq2\\fcharset2 Symbol;}}'+
+    (landscape?'\\paperw15840\\paperh12240\\landscape\\margl1134\\margr1134\\margt1134\\margb1134':'')+
     '\\viewkind4\\uc1\\pard\\f0\\fs20 ';
 }
+// Table 1 as a real Word table: the labels once in the left column, then one column of values per structure.
+// rowSets = one array of rows per structure (all built with the fixed row list, so they line up row for row).
+function buildTable1CellsRTF(rowSets,title){
+  const n=rowSets[0].length,leftW=4300,colW=2400,xs=[leftW];
+  for(let k=0;k<rowSets.length;k++)xs.push(leftW+colW*(k+1));
+  let out=rtfDocHeader(rowSets.length>2)+'{\\b Table 1.} Crystal data and structure refinement'+(title?' for '+rtfEscapeText(title):'')+'.\\par\n';
+  for(let i=0;i<n;i++){
+    let row='\\trowd\\trgaph80\\trleft0';
+    xs.forEach(x=>{row+=(i===0?'\\clbrdrt\\brdrs\\brdrw20':'')+(i===n-1?'\\clbrdrb\\brdrs\\brdrw20':'')+'\\cellx'+x;});
+    row+='\n\\pard\\intbl\\f0\\fs20 '+runsToRTF(rowSets[0][i].label)+'\\cell ';
+    rowSets.forEach(rs=>{row+='\\pard\\intbl\\f0\\fs20 '+runsToRTF(rs[i].value)+'\\cell ';});
+    out+=row+'\\row\n';
+  }
+  return out+'\\pard\\par}';
+}
+const MAX_CELL_COLS=40;
+document.addEventListener('click',async e=>{
+  const btn=e.target.closest&&e.target.closest('.cells-btn');if(!btn)return;
+  const old=btn.dataset.label||(btn.dataset.label=btn.textContent);
+  const all=btn.closest('.page').querySelector('.all-structs');
+  const useAll=!!(all&&all.checked&&NAV&&NAV.entries.length>1);
+  try{
+    let sets,title,name;
+    if(useAll){
+      const entries=NAV.entries.slice(0,MAX_CELL_COLS);sets=[];
+      for(let i=0;i<entries.length;i++){
+        btn.textContent='Building '+(i+1)+'/'+entries.length+'…';
+        if(i%4===3)await new Promise(r=>setTimeout(r,0));
+        const blk=parseCIF(tokenise(entries[i].text))[0];
+        if(blk)sets.push(t1Rows(buildTable1Rows(blk,true)));
+      }
+      title=NAV.name||'';name=sanitizeFilename(NAV.name||'structures');
+    }else{
+      const st=RTF_STORE['copy-'+btn.dataset.key];sets=[t1Rows(st.full)];title=CUR.block.name;name=sanitizeFilename(CUR.block.name);
+    }
+    downloadBlob(name+'_Table1_cells.rtf',buildTable1CellsRTF(sets,useAll?'':title));
+    btn.textContent=(useAll&&NAV.entries.length>MAX_CELL_COLS)?'Saved (first '+MAX_CELL_COLS+')':'Saved ✓';
+  }catch(err){btn.textContent='Failed';}
+  setTimeout(()=>{btn.textContent=old;},1800);
+});
 function buildTable1RTF(block,rows){
   let body=rtfDocHeader()+'\\tx4300 ';
   body+='{\\b Table 1.} Crystal data and structure refinement for '+rtfEscapeText(block.name)+'.\\par\n';
@@ -1055,7 +1107,7 @@ function downloadBlob(filename,content){
 }
 document.addEventListener('click',e=>{
   const btn=e.target.closest('.export-btn');if(!btn)return;
-  const content=RTF_STORE[btn.dataset.key];
+  const stored=RTF_STORE[btn.dataset.key],content=typeof stored==='function'?stored():stored;
   if(content)downloadBlob(btn.dataset.filename,content);
 });
 
@@ -1115,13 +1167,92 @@ function renderSummaryPage(block){
   return (gs.length?'<div class="gauges">'+gs.map(gaugeHtml).join('')+'</div>':'')+
     '<div class="cat-grid">'+CATS.map(([t,r])=>renderCategory(t,r)).join('')+'</div>';
 }
+// One column of Table 1 as a one-cell-wide table: pasted into a Word table (select the destination cells first) it
+// fills the cells downwards, with italics and sub/superscripts kept; the plain-text version is one line per row.
+function columnClipboard(rows,col){
+  const st="font-family:'Times New Roman',Times,serif;font-size:10pt;color:#000;border:0;padding:0;margin:0;vertical-align:top";
+  const pick=r=>col==='left'?r.label:r.value;
+  const html='<table style="border-collapse:collapse;border:0"><tbody>'+rows.map(r=>'<tr><td style="'+st+'">'+runsToHTML(pick(r))+'</td></tr>').join('')+'</tbody></table>';
+  return{html,text:rows.map(r=>pick(r).map(x=>x.text).join('')).join('\r\n')};
+}
+function copyRich(html,text){
+  let done=false;
+  const ta=document.createElement('textarea');ta.value=' ';ta.style.cssText='position:fixed;left:-9999px;top:0;opacity:0';
+  document.body.appendChild(ta);ta.select();
+  const h=e=>{e.clipboardData.setData('text/html',html);e.clipboardData.setData('text/plain',text);e.preventDefault();done=true;};
+  document.addEventListener('copy',h,true);
+  try{document.execCommand('copy');}catch(e){}
+  document.removeEventListener('copy',h,true);document.body.removeChild(ta);
+  return done;
+}
+document.addEventListener('click',async e=>{
+  const btn=e.target.closest&&e.target.closest('.copycol-btn');if(!btn)return;
+  const st=RTF_STORE['copy-'+btn.dataset.key];if(!st)return;
+  const fixed=btn.closest('.page').querySelector('.fixed-rows');
+  const{html,text}=columnClipboard(t1Rows(fixed&&fixed.checked?st.full:st.display),btn.dataset.col);
+  let ok=copyRich(html,text);
+  if(!ok&&window.ClipboardItem&&navigator.clipboard&&navigator.clipboard.write){
+    try{await navigator.clipboard.write([new ClipboardItem({'text/html':new Blob([html],{type:'text/html'}),'text/plain':new Blob([text],{type:'text/plain'})})]);ok=true;}catch(err){}
+  }
+  const old=btn.dataset.label||(btn.dataset.label=btn.textContent);
+  btn.textContent=ok?'Copied ✓':'Copy failed';
+  setTimeout(()=>{btn.textContent=old;},1500);
+});
+document.addEventListener('click',async e=>{
+  const btn=e.target.closest&&e.target.closest('.copypara-btn');if(!btn)return;
+  const st=RTF_STORE['copy-'+btn.dataset.key];if(!st)return;
+  let ok=copyRich(st.html,st.text);
+  if(!ok&&window.ClipboardItem&&navigator.clipboard&&navigator.clipboard.write){
+    try{await navigator.clipboard.write([new ClipboardItem({'text/html':new Blob([st.html],{type:'text/html'}),'text/plain':new Blob([st.text],{type:'text/plain'})})]);ok=true;}catch(err){}
+  }
+  const old=btn.dataset.label||(btn.dataset.label=btn.textContent);
+  btn.textContent=ok?'Copied ✓':'Copy failed';
+  setTimeout(()=>{btn.textContent=old;},1500);
+});
+// Which Table 1 rows you want: unticked rows are left out of the table, both copy buttons and both exports.
+// Remembered in this browser, keyed by the row's label so it carries over from structure to structure.
+const T1_KEY='ciftables-t1-excluded';
+let T1_EXCL=new Set();
+try{T1_EXCL=new Set(JSON.parse(localStorage.getItem(T1_KEY)||'[]'));}catch(e){}
+function t1Save(){try{localStorage.setItem(T1_KEY,JSON.stringify([...T1_EXCL]));}catch(e){}}
+const t1Key=r=>r.key||r.label.map(x=>x.text).join('');
+const t1Rows=rows=>rows.filter(r=>!T1_EXCL.has(t1Key(r)));
+const attr=s=>esc(s).replace(/"/g,'&quot;');
+function t1Apply(page){page.querySelectorAll('.booktabs tr').forEach(tr=>{tr.hidden=T1_EXCL.has(tr.dataset.k);});}
+document.addEventListener('click',e=>{
+  const b=e.target.closest&&e.target.closest('.rows-btn');
+  if(b){const pop=b.parentElement.querySelector('.rows-pop');pop.hidden=!pop.hidden;return;}
+  const act=e.target.closest&&e.target.closest('.rp-act');
+  if(act){
+    const page=act.closest('.page'),boxes=page.querySelectorAll('.rows-pop input[type=checkbox]');
+    boxes.forEach(x=>{x.checked=act.dataset.act==='all';if(x.checked)T1_EXCL.delete(x.dataset.k);else T1_EXCL.add(x.dataset.k);});
+    t1Save();t1Apply(page);return;
+  }
+  if(!(e.target.closest&&e.target.closest('.rows-wrap')))document.querySelectorAll('.rows-pop').forEach(p=>{p.hidden=true;});
+});
+document.addEventListener('change',e=>{
+  const x=e.target.closest&&e.target.closest('.rows-pop input[type=checkbox]');if(!x)return;
+  if(x.checked)T1_EXCL.delete(x.dataset.k);else T1_EXCL.add(x.dataset.k);
+  t1Save();t1Apply(x.closest('.page'));
+});
 function renderTable1Page(block,uid){
-  const rows=buildTable1Rows(block);
-  const html=rows.map(r=>'<tr><td class="lbl">'+runsToHTML(r.label)+'</td><td class="val">'+runsToHTML(r.value)+'</td></tr>').join('');
+  const rows=buildTable1Rows(block),full=buildTable1Rows(block,true);
+  const html=rows.map(r=>'<tr data-k="'+attr(t1Key(r))+'"'+(T1_EXCL.has(t1Key(r))?' hidden':'')+'><td class="lbl">'+runsToHTML(r.label)+'</td><td class="val">'+runsToHTML(r.value)+'</td></tr>').join('');
   const key='table1-'+uid,fname=sanitizeFilename(block.name)+'_Table1.rtf';
-  RTF_STORE[key]=buildTable1RTF(block,rows);
-  return '<div class="table-toolbar"><span class="pub-title">Manuscript-ready · opens in Word</span>'+
-    '<button class="btn export-btn" data-key="'+key+'" data-filename="'+esc(fname)+'">Export RTF</button></div>'+
+  RTF_STORE[key]=()=>buildTable1RTF(block,t1Rows(rows));
+  RTF_STORE['copy-'+key]={display:rows,full};
+  const picker='<span class="rows-wrap"><button class="btn rows-btn" type="button" title="Choose which rows of Table 1 are included">Rows ▾</button>'+
+    '<div class="rows-pop" hidden><div class="rp-head"><span>Rows in Table 1</span><span><button class="rp-act" type="button" data-act="all">all</button><button class="rp-act" type="button" data-act="none">none</button></span></div>'+
+    '<div class="rp-list">'+full.filter((r,i,a)=>a.findIndex(x=>t1Key(x)===t1Key(r))===i).map(r=>'<label><input type="checkbox" data-k="'+attr(t1Key(r))+'"'+(T1_EXCL.has(t1Key(r))?'':' checked')+'><span>'+runsToHTML(r.label)+'</span></label>').join('')+'</div>'+
+    '<div class="rp-note">Unticked rows are left out of the table, the copied columns and both exports. Remembered in this browser.</div></div></span>';
+  return '<div class="table-toolbar"><span class="pub-title">Manuscript-ready · opens in Word</span><span class="tbl-tools">'+picker+
+    '<button class="btn copycol-btn" type="button" data-key="'+key+'" data-col="left" title="Copy the labels as one column, for pasting into a Word table">Copy left column</button>'+
+    '<button class="btn copycol-btn" type="button" data-key="'+key+'" data-col="right" title="Copy this structure\'s values as one column, for pasting into a Word table">Copy right column</button>'+
+    '<label class="chk" title="Include every row of Table 1 in the copied columns, leaving a blank cell where a value is absent, so columns copied from different structures always line up"><input type="checkbox" class="fixed-rows" checked>same rows for every structure</label>'+
+    '<button class="btn export-btn" data-key="'+key+'" data-filename="'+esc(fname)+'">Export RTF</button>'+
+    '<button class="btn cells-btn" type="button" data-key="'+key+'" title="Save a Word table with real cells: the labels once, then a column of values for each structure. Copy columns from it in Word, or paste with Insert as New Columns">Export table with cells</button>'+
+    (NAV&&NAV.entries.length>1?'<label class="chk" title="Make one column per structure in the navigator list (up to '+MAX_CELL_COLS+'). Untick for this structure only."><input type="checkbox" class="all-structs" checked>all '+NAV.entries.length+' structures as columns</label>':'')+
+    '</span></div>'+
     '<div class="paper"><div class="paper-cap"><b>Table 1.</b> Crystal data and structure refinement for '+esc(block.name)+'.</div>'+
     '<table class="booktabs"><tbody>'+html+'</tbody></table></div>';
 }
@@ -1129,8 +1260,10 @@ function renderReportPage(block,uid){
   const runs=buildReportRuns(block);
   const key='report-'+uid,fname=sanitizeFilename(block.name)+'_Report.rtf';
   RTF_STORE[key]=buildReportRTF(runs);
-  return '<div class="table-toolbar"><span class="pub-title">Experimental-section paragraph · opens in Word</span>'+
-    '<button class="btn export-btn" data-key="'+key+'" data-filename="'+esc(fname)+'">Export RTF</button></div>'+
+  RTF_STORE['copy-'+key]={html:'<p style="font-family:\'Times New Roman\',Times,serif;font-size:10pt;color:#000;margin:0">'+runsToHTML(runs)+'</p>',text:runs.map(x=>x.text).join('')};
+  return '<div class="table-toolbar"><span class="pub-title">Experimental-section paragraph · opens in Word</span><span class="tbl-tools">'+
+    '<button class="btn copypara-btn" type="button" data-key="'+key+'" title="Copy the paragraph, with its italics and sub/superscripts, for pasting into Word">Copy</button>'+
+    '<button class="btn export-btn" data-key="'+key+'" data-filename="'+esc(fname)+'">Export RTF</button></span></div>'+
     '<div class="paper report">'+runsToHTML(runs)+'</div>';
 }
 
