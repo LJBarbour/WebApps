@@ -749,7 +749,7 @@ document.addEventListener('click',e=>{
 });
 
 // ═══════════════════════════════════════════════════════
-//  RICH-TEXT MODEL  (shared by on-screen Table 1 / Report and RTF export)
+//  RICH-TEXT MODEL  (shared by on-screen Table / Report and the DOCX export)
 // ═══════════════════════════════════════════════════════
 function R(text,opts){return Object.assign({text:String(text)},opts||{});}
 function IT(t){return R(t,{i:true});}
@@ -767,28 +767,6 @@ function runsToHTML(runs){
     if(r.i)s='<i>'+s+'</i>';
     if(r.b)s='<b>'+s+'</b>';
     return s;
-  }).join('');
-}
-function rtfEscapeText(s){
-  return String(s).split('').map(ch=>{
-    const code=ch.codePointAt(0);
-    if(ch==='\\'||ch==='{'||ch==='}')return '\\'+ch;
-    if(code<128)return ch;
-    if(code<=255)return "\\'"+code.toString(16).padStart(2,'0');
-    return '\\u'+code+'?';
-  }).join('');
-}
-function runsToRTF(runs){
-  if(!runs)return '';
-  return runs.map(r=>{
-    let body=rtfEscapeText(r.text);
-    // overbar: Word's own EQ box field with a top border; readers that ignore fields show the plain character
-    if(r.bar)body='{\\field{\\*\\fldinst{ EQ \\\\x \\\\to('+body+') }}{\\fldrslt '+body+'}}';
-    if(r.sub)body='{\\sub '+body+'}';
-    if(r.sup)body='{\\super '+body+'}';
-    if(r.i)body='{\\i '+body+'}';
-    if(r.b)body='{\\b '+body+'}';
-    return body;
   }).join('');
 }
 // Hermann–Mauguin symbol with screw axes written properly: "P 42/n" → P4₂/n, "P 21 21 21" → P2₁2₁2₁.
@@ -1045,10 +1023,8 @@ function buildReportRuns(block){
   add(PLAIN((nrestr||'0')+' restraints.  '));
 
   const absCorr=gi(block,'_exptl_absorpt_correction_type');
-  if(absCorr&&!/^none$/i.test(absCorr))add(PLAIN('Lp and absorption corrections applied, '));
-  else add(PLAIN('Lorentz and polarization corrections applied, '));
-
   const mu=gi(block,'_exptl_absorpt_coefficient_mu');
+  add(PLAIN((absCorr&&!/^none$/i.test(absCorr)?'Lp and absorption corrections applied':'Lorentz and polarization corrections applied')+(mu?', ':'.  ')));
   if(mu)add(PLAIN('μ = '+mu+' mm'),SUP('-1'),PLAIN('.  '));
 
   const flack=gi(block,'_refine_ls_abs_structure_flack');
@@ -1060,35 +1036,88 @@ function buildReportRuns(block){
 }
 
 // ═══════════════════════════════════════════════════════
-//  RTF EXPORT ASSEMBLY
+//  DOCX EXPORT  (hand-written WordprocessingML in an uncompressed ZIP; no libraries)
 // ═══════════════════════════════════════════════════════
-let RTF_STORE={};
-function rtfDocHeader(landscape){
-  return '{\\rtf1\\ansi\\ansicpg1252\\deff0\\deflang1033'+
-    '{\\fonttbl{\\f0\\froman\\fprq2\\fcharset0 Times New Roman;}{\\f1\\froman\\fprq2\\fcharset2 Symbol;}}'+
-    (landscape?'\\paperw15840\\paperh12240\\landscape\\margl1134\\margr1134\\margt1134\\margb1134':'')+
-    '\\viewkind4\\uc1\\pard\\f0\\fs20 ';
-}
-// Table 1 as a real Word table: the labels once in the left column, then one column of values per structure.
-// rowSets = one array of rows per structure (all built with the fixed row list, so they line up row for row).
-function buildTable1CellsRTF(rowSets,title){
-  const n=rowSets[0].length,leftW=4300,colW=2400,xs=[leftW];
-  for(let k=0;k<rowSets.length;k++)xs.push(leftW+colW*(k+1));
-  let out=rtfDocHeader(rowSets.length>2)+'{\\b Table 1.} Crystal data and structure refinement'+(title?' for '+rtfEscapeText(title):'')+'.\\par\n';
-  for(let i=0;i<n;i++){
-    let row='\\trowd\\trgaph80\\trleft0';
-    xs.forEach(x=>{row+=(i===0?'\\clbrdrt\\brdrs\\brdrw20':'')+(i===n-1?'\\clbrdrb\\brdrs\\brdrw20':'')+'\\cellx'+x;});
-    row+='\n\\pard\\intbl\\f0\\fs20 '+runsToRTF(rowSets[0][i].label)+'\\cell ';
-    rowSets.forEach(rs=>{row+='\\pard\\intbl\\f0\\fs20 '+runsToRTF(rs[i].value)+'\\cell ';});
-    out+=row+'\\row\n';
+let DOC_STORE={};
+const CRC_TABLE=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);t[n]=c>>>0;}return t;})();
+function crc32(b){let c=0xFFFFFFFF;for(let i=0;i<b.length;i++)c=CRC_TABLE[(c^b[i])&0xFF]^(c>>>8);return(c^0xFFFFFFFF)>>>0;}
+function zipStore(files){   // files: [{name,text}], every entry stored uncompressed
+  const enc=new TextEncoder(),parts=[],central=[];let off=0;
+  const d=new Date(),dt=((d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()>>1))&0xFFFF,dd=(((d.getFullYear()-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate())&0xFFFF;
+  const u16=n=>[n&255,(n>>>8)&255],u32=n=>[n&255,(n>>>8)&255,(n>>>16)&255,(n>>>24)&255];
+  for(const f of files){
+    const name=enc.encode(f.name),data=enc.encode(f.text),crc=crc32(data);
+    const local=new Uint8Array([...u32(0x04034b50),...u16(20),...u16(0x0800),...u16(0),...u16(dt),...u16(dd),...u32(crc),...u32(data.length),...u32(data.length),...u16(name.length),...u16(0)]);
+    parts.push(local,name,data);
+    central.push(new Uint8Array([...u32(0x02014b50),...u16(20),...u16(20),...u16(0x0800),...u16(0),...u16(dt),...u16(dd),...u32(crc),...u32(data.length),...u32(data.length),...u16(name.length),...u16(0),...u16(0),...u16(0),...u16(0),...u32(0),...u32(off)]),name);
+    off+=local.length+name.length+data.length;
   }
-  return out+'\\pard\\par}';
+  let csize=0;central.forEach(c=>{csize+=c.length;});
+  const end=new Uint8Array([...u32(0x06054b50),...u16(0),...u16(0),...u16(files.length),...u16(files.length),...u32(csize),...u32(off),...u16(0)]);
+  return new Blob([...parts,...central,end],{type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
+}
+const W_NS='xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"';
+const xe=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const W_FONT='<w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman" w:eastAsia="Times New Roman"/>';
+function wRPr(r){return '<w:rPr>'+W_FONT+(r.b?'<w:b/>':'')+(r.i?'<w:i/>':'')+'<w:sz w:val="20"/><w:szCs w:val="20"/>'+(r.sub?'<w:vertAlign w:val="subscript"/>':r.sup?'<w:vertAlign w:val="superscript"/>':'')+'</w:rPr>';}
+function runsToDocx(runs){
+  return (runs||[]).map(r=>r.bar
+    // overbar (inversion axes): a native Word equation accent, upright text
+    ?'<m:oMath><m:bar><m:barPr><m:pos m:val="top"/></m:barPr><m:e><m:r><m:rPr><m:nor/></m:rPr>'+wRPr(r)+'<m:t>'+xe(r.text)+'</m:t></m:r></m:e></m:bar></m:oMath>'
+    :'<w:r>'+wRPr(r)+'<w:t xml:space="preserve">'+xe(r.text)+'</w:t></w:r>').join('');
+}
+function wPara(inner,after){return '<w:p><w:pPr><w:spacing w:before="0" w:after="'+(after||0)+'" w:line="240" w:lineRule="auto"/></w:pPr>'+inner+'</w:p>';}
+// Table 1 as a real Word table: the labels once in the left column, then one column of values per structure.
+// rowSets = one array of rows per structure (built with the fixed row list, so they line up row for row).
+function docxTable(rowSets,landscape){
+  const n=rowSets[0].length,leftW=4200,usable=landscape?14570:9638;
+  const colW=Math.max(1500,Math.min(2600,Math.floor((usable-leftW)/rowSets.length)));
+  const cols=[leftW,...rowSets.map(()=>colW)],total=cols.reduce((a,b)=>a+b,0);
+  const rule='w:val="single" w:sz="12" w:space="0" w:color="000000"';
+  const cell=(w,runs,top,bottom)=>'<w:tc><w:tcPr><w:tcW w:w="'+w+'" w:type="dxa"/>'+
+    ((top||bottom)?'<w:tcBorders>'+(top?'<w:top '+rule+'/>':'')+(bottom?'<w:bottom '+rule+'/>':'')+'</w:tcBorders>':'')+'</w:tcPr>'+wPara(runsToDocx(runs))+'</w:tc>';
+  let out='<w:tbl><w:tblPr><w:tblW w:w="'+total+'" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblCellMar><w:left w:w="80" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tblCellMar></w:tblPr>'+
+    '<w:tblGrid>'+cols.map(w=>'<w:gridCol w:w="'+w+'"/>').join('')+'</w:tblGrid>';
+  for(let i=0;i<n;i++){
+    const top=i===0,bottom=i===n-1;
+    out+='<w:tr><w:trPr><w:cantSplit/></w:trPr>'+cell(cols[0],rowSets[0][i].label,top,bottom)+rowSets.map((rs,k)=>cell(cols[k+1],rs[i].value,top,bottom)).join('')+'</w:tr>';
+  }
+  return out+'</w:tbl>';
+}
+function buildDocxBlob(bodyXml,landscape){
+  const pg=landscape?'<w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/>':'<w:pgSz w:w="11906" w:h="16838"/>';
+  const head='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+  const rel='http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  return zipStore([
+    {name:'[Content_Types].xml',text:head+'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>'+
+      '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'+
+      '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>'},
+    {name:'_rels/.rels',text:head+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="'+rel+'/officeDocument" Target="word/document.xml"/></Relationships>'},
+    {name:'word/_rels/document.xml.rels',text:head+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="'+rel+'/styles" Target="styles.xml"/></Relationships>'},
+    {name:'word/styles.xml',text:head+'<w:styles '+W_NS+'><w:docDefaults><w:rPrDefault><w:rPr>'+W_FONT+'<w:sz w:val="20"/><w:szCs w:val="20"/><w:lang w:val="en-GB"/></w:rPr></w:rPrDefault>'+
+      '<w:pPrDefault><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>'+
+      '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style></w:styles>'},
+    {name:'word/document.xml',text:head+'<w:document '+W_NS+'><w:body>'+bodyXml+'<w:sectPr>'+pg+'<w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr></w:body></w:document>'},
+  ]);
+}
+function buildTable1Docx(rowSets,title){
+  const landscape=rowSets.length>2;
+  const cap=wPara('<w:r>'+wRPr({b:true})+'<w:t xml:space="preserve">Table 1.</w:t></w:r><w:r>'+wRPr({})+'<w:t xml:space="preserve"> Crystal data and structure refinement'+(title?' for '+xe(title):'')+'.</w:t></w:r>',120);
+  return buildDocxBlob(cap+docxTable(rowSets,landscape)+'<w:p/>',landscape);
+}
+function buildReportDocx(runs){return buildDocxBlob(wPara(runsToDocx(runs))+'<w:p/>',false);}
+function downloadBlob(filename,content){
+  const blob=content instanceof Blob?content:new Blob([content],{type:'application/octet-stream'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url),2000);
 }
 const MAX_CELL_COLS=40;
+// Table: this structure, or one column per structure in the navigator list
 document.addEventListener('click',async e=>{
-  const btn=e.target.closest&&e.target.closest('.cells-btn');if(!btn)return;
+  const btn=e.target.closest&&e.target.closest('.docx-btn');if(!btn)return;
   const old=btn.dataset.label||(btn.dataset.label=btn.textContent);
-  const all=btn.closest('.page').querySelector('.all-structs');
+  const page=btn.closest('.page'),all=page.querySelector('.all-structs'),fixed=page.querySelector('.fixed-rows');
   const useAll=!!(all&&all.checked&&NAV&&NAV.entries.length>1);
   try{
     let sets,title,name;
@@ -1100,37 +1129,21 @@ document.addEventListener('click',async e=>{
         const blk=parseCIF(tokenise(entries[i].text))[0];
         if(blk)sets.push(t1Rows(buildTable1Rows(blk,true)));
       }
-      title=NAV.name||'';name=sanitizeFilename(NAV.name||'structures');
+      title='';name=sanitizeFilename(NAV.name||'structures');
     }else{
-      const st=RTF_STORE['copy-'+btn.dataset.key];sets=[t1Rows(st.full)];title=CUR.block.name;name=sanitizeFilename(CUR.block.name);
+      const st=DOC_STORE['copy-'+btn.dataset.key];
+      sets=[t1Rows(fixed&&!fixed.checked?st.display:st.full)];title=CUR.block.name;name=sanitizeFilename(CUR.block.name);
     }
-    downloadBlob(name+'_Table1_cells.rtf',buildTable1CellsRTF(sets,useAll?'':title));
+    downloadBlob(name+'_Table1.docx',buildTable1Docx(sets,title));
     btn.textContent=(useAll&&NAV.entries.length>MAX_CELL_COLS)?'Saved (first '+MAX_CELL_COLS+')':'Saved ✓';
   }catch(err){btn.textContent='Failed';}
   setTimeout(()=>{btn.textContent=old;},1800);
 });
-function buildTable1RTF(block,rows){
-  let body=rtfDocHeader()+'\\tx4300 ';
-  body+='{\\b Table 1.} Crystal data and structure refinement for '+rtfEscapeText(block.name)+'.\\par\n';
-  for(const r of rows){
-    body+=(r.label.length?runsToRTF(r.label):'')+'\\tab '+runsToRTF(r.value)+'\\par\n';
-  }
-  body+='}';
-  return body;
-}
-function buildReportRTF(runs){
-  return rtfDocHeader()+runsToRTF(runs)+'\\par\n}';
-}
-function downloadBlob(filename,content){
-  const blob=new Blob([content],{type:'application/rtf'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();document.body.removeChild(a);
-  setTimeout(()=>URL.revokeObjectURL(url),2000);
-}
+// Report paragraph
 document.addEventListener('click',e=>{
-  const btn=e.target.closest('.export-btn');if(!btn)return;
-  const stored=RTF_STORE[btn.dataset.key],content=typeof stored==='function'?stored():stored;
-  if(content)downloadBlob(btn.dataset.filename,content);
+  const btn=e.target.closest&&e.target.closest('.export-btn');if(!btn)return;
+  const f=DOC_STORE[btn.dataset.key];
+  if(f)downloadBlob(btn.dataset.filename,f());
 });
 
 // ═══════════════════════════════════════════════════════
@@ -1209,7 +1222,7 @@ function copyRich(html,text){
 }
 document.addEventListener('click',async e=>{
   const btn=e.target.closest&&e.target.closest('.copycol-btn');if(!btn)return;
-  const st=RTF_STORE['copy-'+btn.dataset.key];if(!st)return;
+  const st=DOC_STORE['copy-'+btn.dataset.key];if(!st)return;
   const fixed=btn.closest('.page').querySelector('.fixed-rows');
   const{html,text}=columnClipboard(t1Rows(fixed&&fixed.checked?st.full:st.display),btn.dataset.col);
   let ok=copyRich(html,text);
@@ -1222,7 +1235,7 @@ document.addEventListener('click',async e=>{
 });
 document.addEventListener('click',async e=>{
   const btn=e.target.closest&&e.target.closest('.copypara-btn');if(!btn)return;
-  const st=RTF_STORE['copy-'+btn.dataset.key];if(!st)return;
+  const st=DOC_STORE['copy-'+btn.dataset.key];if(!st)return;
   let ok=copyRich(st.html,st.text);
   if(!ok&&window.ClipboardItem&&navigator.clipboard&&navigator.clipboard.write){
     try{await navigator.clipboard.write([new ClipboardItem({'text/html':new Blob([st.html],{type:'text/html'}),'text/plain':new Blob([st.text],{type:'text/plain'})})]);ok=true;}catch(err){}
@@ -1260,19 +1273,17 @@ document.addEventListener('change',e=>{
 function renderTable1Page(block,uid){
   const rows=buildTable1Rows(block),full=buildTable1Rows(block,true);
   const html=rows.map(r=>'<tr data-k="'+attr(t1Key(r))+'"'+(T1_EXCL.has(t1Key(r))?' hidden':'')+'><td class="lbl">'+runsToHTML(r.label)+'</td><td class="val">'+runsToHTML(r.value)+'</td></tr>').join('');
-  const key='table1-'+uid,fname=sanitizeFilename(block.name)+'_Table1.rtf';
-  RTF_STORE[key]=()=>buildTable1RTF(block,t1Rows(rows));
-  RTF_STORE['copy-'+key]={display:rows,full};
+  const key='table1-'+uid;
+  DOC_STORE['copy-'+key]={display:rows,full};
   const picker='<span class="rows-wrap"><button class="btn rows-btn" type="button" title="Choose which rows of Table 1 are included">Rows ▾</button>'+
     '<div class="rows-pop" hidden><div class="rp-head"><span>Rows in Table 1</span><span><button class="rp-act" type="button" data-act="all">all</button><button class="rp-act" type="button" data-act="none">none</button></span></div>'+
     '<div class="rp-list">'+full.filter((r,i,a)=>a.findIndex(x=>t1Key(x)===t1Key(r))===i).map(r=>'<label><input type="checkbox" data-k="'+attr(t1Key(r))+'"'+(T1_EXCL.has(t1Key(r))?'':' checked')+'><span>'+runsToHTML(r.label)+'</span></label>').join('')+'</div>'+
-    '<div class="rp-note">Unticked rows are left out of the table, the copied columns and both exports. Remembered in this browser.</div></div></span>';
+    '<div class="rp-note">Unticked rows are left out of the table, the copied columns and the DOCX export. Remembered in this browser.</div></div></span>';
   return '<div class="table-toolbar"><span class="pub-title">Manuscript-ready · opens in Word</span><span class="tbl-tools">'+picker+
     '<button class="btn copycol-btn" type="button" data-key="'+key+'" data-col="left" title="Copy the labels as one column, for pasting into a Word table">Copy left column</button>'+
     '<button class="btn copycol-btn" type="button" data-key="'+key+'" data-col="right" title="Copy this structure\'s values as one column, for pasting into a Word table">Copy right column</button>'+
     '<label class="chk" title="Include every row of Table 1 in the copied columns, leaving a blank cell where a value is absent, so columns copied from different structures always line up"><input type="checkbox" class="fixed-rows" checked>same rows for every structure</label>'+
-    '<button class="btn export-btn" data-key="'+key+'" data-filename="'+esc(fname)+'">Export RTF</button>'+
-    '<button class="btn cells-btn" type="button" data-key="'+key+'" title="Save a Word table with real cells: the labels once, then a column of values for each structure. Copy columns from it in Word, or paste with Insert as New Columns">Export table with cells</button>'+
+    '<button class="btn docx-btn" type="button" data-key="'+key+'" title="Save Table 1 as a Word table with real cells: the labels once, then a column of values for each structure">Export DOCX</button>'+
     (NAV&&NAV.entries.length>1?'<label class="chk" title="Make one column per structure in the navigator list (up to '+MAX_CELL_COLS+'). Untick for this structure only."><input type="checkbox" class="all-structs" checked>all '+NAV.entries.length+' structures as columns</label>':'')+
     '</span></div>'+
     '<div class="paper"><div class="paper-cap"><b>Table 1.</b> Crystal data and structure refinement for '+esc(block.name)+'.</div>'+
@@ -1280,12 +1291,12 @@ function renderTable1Page(block,uid){
 }
 function renderReportPage(block,uid){
   const runs=buildReportRuns(block);
-  const key='report-'+uid,fname=sanitizeFilename(block.name)+'_Report.rtf';
-  RTF_STORE[key]=buildReportRTF(runs);
-  RTF_STORE['copy-'+key]={html:'<p style="font-family:\'Times New Roman\',Times,serif;font-size:10pt;color:#000;margin:0">'+runsToHTML(runs)+'</p>',text:runs.map(x=>x.text).join('')};
+  const key='report-'+uid,fname=sanitizeFilename(block.name)+'_Report.docx';
+  DOC_STORE[key]=()=>buildReportDocx(runs);
+  DOC_STORE['copy-'+key]={html:'<p style="font-family:\'Times New Roman\',Times,serif;font-size:10pt;color:#000;margin:0">'+runsToHTML(runs)+'</p>',text:runs.map(x=>x.text).join('')};
   return '<div class="table-toolbar"><span class="pub-title">Experimental-section paragraph · opens in Word</span><span class="tbl-tools">'+
     '<button class="btn copypara-btn" type="button" data-key="'+key+'" title="Copy the paragraph, with its italics and sub/superscripts, for pasting into Word">Copy</button>'+
-    '<button class="btn export-btn" data-key="'+key+'" data-filename="'+esc(fname)+'">Export RTF</button></span></div>'+
+    '<button class="btn export-btn" data-key="'+key+'" data-filename="'+esc(fname)+'">Export DOCX</button></span></div>'+
     '<div class="paper report">'+runsToHTML(runs)+'</div>';
 }
 
@@ -1512,7 +1523,7 @@ function crumbs(path){
   return parts.map((p,i)=>(i?'<i>›</i>':'')+'<span'+(i===parts.length-1?' class="last"':'')+'>'+esc(p)+'</span>').join('');
 }
 function renderEntry(entry,idx){
-  RTF_STORE={};
+  DOC_STORE={};
   const out=$('output');
   const block=parseCIF(tokenise(entry.text))[0];
   const head='<div class="file-card fade-in"><div class="file-hdr"><span class="file-name" title="'+esc(entry.path)+'">'+crumbs(entry.path)+'</span>'+
@@ -1775,7 +1786,7 @@ document.addEventListener('keydown',e=>{
 })();
 
 function clearResults(){
-  NAV=null;CUR=null;RTF_STORE={};
+  NAV=null;CUR=null;DOC_STORE={};
   $('output').innerHTML='';
   $('topbar').classList.remove('show');
   $('cif-nav').classList.remove('show');
