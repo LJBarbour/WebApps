@@ -470,7 +470,7 @@ function unmarkup(s){
   return String(s).replace(/\\([a-zA-Z])/g,(m,ch)=>{const g=CIF_GREEK[ch.toLowerCase()];return g!==undefined?g:m;});
 }
 function tv(s){return s?esc(unmarkup(s)):null;}
-function fmtFormula(s){if(!s)return null;return esc(unmarkup(s)).replace(/(\d+(?:\.\d+)?)/g,'<sub>$1</sub>');}
+function fmtFormula(s,compact){if(!s)return null;return esc(compact?unmarkup(s).replace(/\s+/g,''):unmarkup(s)).replace(/(\d+(?:\.\d+)?)/g,'<sub>$1</sub>');}
 function fmtSz(b){return b<1024?b+' B':b<1048576?(b/1024).toFixed(1)+' KB':(b/1048576).toFixed(2)+' MB';}
 function sanitizeFilename(s){return (String(s).replace(/[^A-Za-z0-9_-]+/g,'_').replace(/^_+|_+$/g,''))||'structure';}
 const MAX_TABLE_ROWS=2000;
@@ -486,7 +486,7 @@ function catIdentity(block){
   const ccdc=gi(block,'_database_code_depnum_ccdc_archive');
   return[
     {label:'Compound name',value:name?tv(name):null},
-    {label:'Empirical formula',value:fmtFormula(formula)},
+    {label:'Empirical formula',value:fmtFormula(formula,true)},
     {label:'Moiety formula',value:fmtFormula(moiety),optional:true},
     {label:'Formula weight (g/mol)',value:mw?tv(mw):null},
     {label:'CCDC deposition number',value:ccdc?tv(ccdc):null,optional:true},
@@ -812,7 +812,7 @@ function formulaRuns(s,compact){
 // ═══════════════════════════════════════════════════════
 // full=true keeps EVERY row for every structure (a blank cell where a value is absent), so that a left column copied
 // from one structure always lines up row-for-row with a right column copied from another
-function buildTable1Rows(block,full){
+function buildTable1Rows(block,full,split){
   const rows=[];
   const push=(label,value,optional)=>{
     const has=value&&value.length;
@@ -822,7 +822,7 @@ function buildTable1Rows(block,full){
 
   push([PLAIN('Identification code')],[PLAIN(block.name)]);
 
-  push([PLAIN('Empirical formula')],formulaRuns(gi(block,'_chemical_formula_sum')));
+  push([PLAIN('Empirical formula')],formulaRuns(gi(block,'_chemical_formula_sum'),true));
 
   const mw=gi(block,'_chemical_formula_weight');
   push([PLAIN('Formula weight')],mw?[PLAIN(mw)]:null,true);
@@ -909,11 +909,18 @@ function buildTable1Rows(block,full){
 
   const r1=gi(block,'_refine_ls_r_factor_gt','_refine_ls_r_factor_obs');
   const wr2=gi(block,'_refine_ls_wr_factor_gt')||gi(block,'_refine_ls_wr_factor_ref','_refine_ls_wr_factor_obs');
-  push([PLAIN('Final '),IT('R'),PLAIN(' indices ['),IT('I'),PLAIN(' > 2σ('),IT('I'),PLAIN(')]')],
-    (r1||wr2)?[IT('R'),PLAIN('1 = '+(r1||'?')+', '),IT('wR'),PLAIN('2 = '+(wr2||'?'))]:null,true);
+  // R1 and wR2 on one line, or (split, for a table with several structures) each on a line of its own
+  const rPair=(label,key,a,b)=>{
+    if(!split){push(label,(a||b)?[IT('R'),PLAIN('1 = '+(a||'?')+', '),IT('wR'),PLAIN('2 = '+(b||'?'))]:null,true);return;}
+    if(full||a||b){
+      rows.push({label,value:a?[IT('R'),PLAIN('1 = '+a)]:[],key});
+      rows.push({label:[],value:b?[IT('wR'),PLAIN('2 = '+b)]:[],key});
+    }
+  };
+  rPair([PLAIN('Final '),IT('R'),PLAIN(' indices ['),IT('I'),PLAIN(' > 2σ('),IT('I'),PLAIN(')]')],'Final R indices [I > 2σ(I)]',r1,wr2);
   const r1all=gi(block,'_refine_ls_r_factor_all');
   const wr2all=gi(block,'_refine_ls_wr_factor_ref','_refine_ls_wr_factor_obs');
-  push([PLAIN('R indices (all data)')],(r1all||wr2all)?[IT('R'),PLAIN('1 = '+(r1all||'?')+', '),IT('wR'),PLAIN('2 = '+(wr2all||'?'))]:null,true);
+  rPair([PLAIN('R indices (all data)')],'R indices (all data)',r1all,wr2all);
 
   const peak=gi(block,'_refine_diff_density_max'),hole=gi(block,'_refine_diff_density_min');
   push([PLAIN('Largest diff. peak and hole (e Å'),SUP('-3'),PLAIN(')')],(peak&&hole)?[PLAIN(peak+' and '+hole)]:null,true);
@@ -1059,30 +1066,45 @@ function zipStore(files){   // files: [{name,text}], every entry stored uncompre
 const W_NS='xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"';
 const xe=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 const W_FONT='<w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman" w:eastAsia="Times New Roman"/>';
-function wRPr(r){return '<w:rPr>'+W_FONT+(r.b?'<w:b/>':'')+(r.i?'<w:i/>':'')+'<w:sz w:val="20"/><w:szCs w:val="20"/>'+(r.sub?'<w:vertAlign w:val="subscript"/>':r.sup?'<w:vertAlign w:val="superscript"/>':'')+'</w:rPr>';}
+let DOCX_SZ=20;   // half-points: 10 pt for a single structure, 9 pt for multi-structure landscape tables (so each page fits)
+function wRPr(r){return '<w:rPr>'+W_FONT+(r.b?'<w:b/>':'')+(r.i?'<w:i/>':'')+'<w:sz w:val="'+DOCX_SZ+'"/><w:szCs w:val="'+DOCX_SZ+'"/>'+(r.sub?'<w:vertAlign w:val="subscript"/>':r.sup?'<w:vertAlign w:val="superscript"/>':'')+'</w:rPr>';}
 function runsToDocx(runs){
   return (runs||[]).map(r=>r.bar
     // overbar (inversion axes): a native Word equation accent, upright text
     ?'<m:oMath><m:bar><m:barPr><m:pos m:val="top"/></m:barPr><m:e><m:r><m:rPr><m:nor/></m:rPr>'+wRPr(r)+'<m:t>'+xe(r.text)+'</m:t></m:r></m:e></m:bar></m:oMath>'
     :'<w:r>'+wRPr(r)+'<w:t xml:space="preserve">'+xe(r.text)+'</w:t></w:r>').join('');
 }
-function wPara(inner,after){return '<w:p><w:pPr><w:spacing w:before="0" w:after="'+(after||0)+'" w:line="240" w:lineRule="auto"/></w:pPr>'+inner+'</w:p>';}
-// Table 1 as a real Word table: the labels once in the left column, then one column of values per structure.
-// rowSets = one array of rows per structure (built with the fixed row list, so they line up row for row).
-function docxTable(rowSets,landscape){
-  const n=rowSets[0].length,leftW=4200,usable=landscape?14570:9638;
-  const colW=Math.max(1500,Math.min(2600,Math.floor((usable-leftW)/rowSets.length)));
+function wPara(inner,after,opts){
+  opts=opts||{};
+  return '<w:p><w:pPr>'+(opts.pageBreak?'<w:pageBreakBefore/>':'')+'<w:spacing w:before="0" w:after="'+(after||0)+'" w:line="240" w:lineRule="auto"/>'+(opts.center?'<w:jc w:val="center"/>':'')+'</w:pPr>'+inner+'</w:p>';
+}
+// One page of Table 1: the labels once in the left column, then one column of values per structure (rowSets).
+// All sets are built with the fixed row list, so they line up row for row. When every structure on the page has the same
+// refinement method, that row is a single cell across all the structure columns.
+const DOCX_PER_PAGE=5;
+function docxTable(rowSets,multi){
+  const n=rowSets[0].length,k=rowSets.length,leftW=multi?3800:4200,colW=multi?2154:2600;
   const cols=[leftW,...rowSets.map(()=>colW)],total=cols.reduce((a,b)=>a+b,0);
   const rule='w:val="single" w:sz="12" w:space="0" w:color="000000"';
-  const cell=(w,runs,top,bottom)=>'<w:tc><w:tcPr><w:tcW w:w="'+w+'" w:type="dxa"/>'+
-    ((top||bottom)?'<w:tcBorders>'+(top?'<w:top '+rule+'/>':'')+(bottom?'<w:bottom '+rule+'/>':'')+'</w:tcBorders>':'')+'</w:tcPr>'+wPara(runsToDocx(runs))+'</w:tc>';
+  const cell=(w,runs,top,bottom,span,center)=>'<w:tc><w:tcPr><w:tcW w:w="'+w+'" w:type="dxa"/>'+(span>1?'<w:gridSpan w:val="'+span+'"/>':'')+
+    ((top||bottom)?'<w:tcBorders>'+(top?'<w:top '+rule+'/>':'')+(bottom?'<w:bottom '+rule+'/>':'')+'</w:tcBorders>':'')+'</w:tcPr>'+wPara(runsToDocx(runs),0,{center})+'</w:tc>';
+  const sig=runs=>runs.map(x=>x.text+(x.sup?'^':'')+(x.sub?'_':'')+(x.i?'i':'')).join('|');
   let out='<w:tbl><w:tblPr><w:tblW w:w="'+total+'" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblCellMar><w:left w:w="80" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tblCellMar></w:tblPr>'+
     '<w:tblGrid>'+cols.map(w=>'<w:gridCol w:w="'+w+'"/>').join('')+'</w:tblGrid>';
   for(let i=0;i<n;i++){
     const top=i===0,bottom=i===n-1;
-    out+='<w:tr><w:trPr><w:cantSplit/></w:trPr>'+cell(cols[0],rowSets[0][i].label,top,bottom)+rowSets.map((rs,k)=>cell(cols[k+1],rs[i].value,top,bottom)).join('')+'</w:tr>';
+    const same=multi&&k>1&&t1Key(rowSets[0][i])==='Refinement method'&&rowSets.every(rs=>sig(rs[i].value)===sig(rowSets[0][i].value));
+    out+='<w:tr><w:trPr><w:cantSplit/></w:trPr>'+cell(cols[0],rowSets[0][i].label,top,bottom,1,false)+
+      (same?cell(colW*k,rowSets[0][i].value,top,bottom,k,true):rowSets.map((rs,j)=>cell(cols[j+1],rs[i].value,top,bottom,1,false)).join(''))+'</w:tr>';
   }
   return out+'</w:tbl>';
+}
+// rows (or row groups, e.g. the three Miller index lines) that are empty for every structure on the page are left out
+function dropEmptyRows(sets){
+  const n=sets[0].length,keep=new Array(n).fill(true),groups={};
+  for(let i=0;i<n;i++){const k=t1Key(sets[0][i]);(groups[k]=groups[k]||[]).push(i);}
+  for(const k in groups){const idx=groups[k];if(idx.every(i=>sets.every(rs=>!rs[i].value.length)))idx.forEach(i=>{keep[i]=false;});}
+  return sets.map(rs=>rs.filter((_,i)=>keep[i]));
 }
 function buildDocxBlob(bodyXml,landscape){
   const pg=landscape?'<w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/>':'<w:pgSz w:w="11906" w:h="16838"/>';
@@ -1094,18 +1116,27 @@ function buildDocxBlob(bodyXml,landscape){
       '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>'},
     {name:'_rels/.rels',text:head+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="'+rel+'/officeDocument" Target="word/document.xml"/></Relationships>'},
     {name:'word/_rels/document.xml.rels',text:head+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="'+rel+'/styles" Target="styles.xml"/></Relationships>'},
-    {name:'word/styles.xml',text:head+'<w:styles '+W_NS+'><w:docDefaults><w:rPrDefault><w:rPr>'+W_FONT+'<w:sz w:val="20"/><w:szCs w:val="20"/><w:lang w:val="en-GB"/></w:rPr></w:rPrDefault>'+
+    {name:'word/styles.xml',text:head+'<w:styles '+W_NS+'><w:docDefaults><w:rPrDefault><w:rPr>'+W_FONT+'<w:sz w:val="'+DOCX_SZ+'"/><w:szCs w:val="'+DOCX_SZ+'"/><w:lang w:val="en-GB"/></w:rPr></w:rPrDefault>'+
       '<w:pPrDefault><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>'+
       '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style></w:styles>'},
     {name:'word/document.xml',text:head+'<w:document '+W_NS+'><w:body>'+bodyXml+'<w:sectPr>'+pg+'<w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr></w:body></w:document>'},
   ]);
 }
+// A single structure: portrait, 10 pt. Several: landscape A4, 9 pt, at most five structure columns per page; more structures
+// continue on further pages, each page repeating the labels so that it stands alone.
 function buildTable1Docx(rowSets,title){
-  const landscape=rowSets.length>2;
-  const cap=wPara('<w:r>'+wRPr({b:true})+'<w:t xml:space="preserve">Table 1.</w:t></w:r><w:r>'+wRPr({})+'<w:t xml:space="preserve"> Crystal data and structure refinement'+(title?' for '+xe(title):'')+'.</w:t></w:r>',120);
-  return buildDocxBlob(cap+docxTable(rowSets,landscape)+'<w:p/>',landscape);
+  const multi=rowSets.length>1;
+  DOCX_SZ=multi?18:20;
+  try{
+    const chunks=[];for(let i=0;i<rowSets.length;i+=DOCX_PER_PAGE)chunks.push(rowSets.slice(i,i+DOCX_PER_PAGE));
+    let body='';
+    chunks.forEach((ch,ci)=>{
+      body+=wPara('<w:r>'+wRPr({b:true})+'<w:t xml:space="preserve">Table 1.</w:t></w:r><w:r>'+wRPr({})+'<w:t xml:space="preserve"> Crystal data and structure refinement'+(title?' for '+xe(title):'')+(ci?' (continued)':'')+'.</w:t></w:r>',120,{pageBreak:ci>0})+docxTable(dropEmptyRows(ch),multi);
+    });
+    return buildDocxBlob(body+'<w:p/>',multi);
+  }finally{DOCX_SZ=20;}
 }
-function buildReportDocx(runs){return buildDocxBlob(wPara(runsToDocx(runs))+'<w:p/>',false);}
+function buildReportDocx(runs){DOCX_SZ=20;return buildDocxBlob(wPara(runsToDocx(runs))+'<w:p/>',false);}
 function downloadBlob(filename,content){
   const blob=content instanceof Blob?content:new Blob([content],{type:'application/octet-stream'});
   const url=URL.createObjectURL(blob);
@@ -1127,12 +1158,12 @@ document.addEventListener('click',async e=>{
         btn.textContent='Building '+(i+1)+'/'+entries.length+'…';
         if(i%4===3)await new Promise(r=>setTimeout(r,0));
         const blk=parseCIF(tokenise(entries[i].text))[0];
-        if(blk)sets.push(t1Rows(buildTable1Rows(blk,true)));
+        if(blk)sets.push(t1Rows(buildTable1Rows(blk,true,true)));
       }
       title='';name=sanitizeFilename(NAV.name||'structures');
     }else{
       const st=DOC_STORE['copy-'+btn.dataset.key];
-      sets=[t1Rows(fixed&&!fixed.checked?st.display:st.full)];title=CUR.block.name;name=sanitizeFilename(CUR.block.name);
+      sets=[t1Rows(fixed&&!fixed.checked?st.display:buildTable1Rows(CUR.block,true,false))];title=CUR.block.name;name=sanitizeFilename(CUR.block.name);
     }
     downloadBlob(name+'_Table1.docx',buildTable1Docx(sets,title));
     btn.textContent=(useAll&&NAV.entries.length>MAX_CELL_COLS)?'Saved (first '+MAX_CELL_COLS+')':'Saved ✓';
@@ -1271,7 +1302,7 @@ document.addEventListener('change',e=>{
   t1Save();t1Apply(x.closest('.page'));
 });
 function renderTable1Page(block,uid){
-  const rows=buildTable1Rows(block),full=buildTable1Rows(block,true);
+  const rows=buildTable1Rows(block),full=buildTable1Rows(block,true,true);
   const html=rows.map(r=>'<tr data-k="'+attr(t1Key(r))+'"'+(T1_EXCL.has(t1Key(r))?' hidden':'')+'><td class="lbl">'+runsToHTML(r.label)+'</td><td class="val">'+runsToHTML(r.value)+'</td></tr>').join('');
   const key='table1-'+uid;
   DOC_STORE['copy-'+key]={display:rows,full};
@@ -1487,7 +1518,7 @@ document.addEventListener('click',e=>{
 // ── hero: formula, key facts, cell ──
 function chip(label,html){return '<span class="chip"><em>'+label+'</em>'+html+'</span>';}
 function heroHtml(block,cell){
-  const formula=fmtFormula(gi(block,'_chemical_formula_sum'));
+  const formula=fmtFormula(gi(block,'_chemical_formula_sum'),true);
   const name=gi(block,'_chemical_name_common')||gi(block,'_chemical_name_systematic');
   const itStr=gi(block,'_space_group_it_number','_symmetry_int_tables_number'),itN=itStr?parseInt(itStr):null;
   const sys=itN?crystalSystem(itN):null;
