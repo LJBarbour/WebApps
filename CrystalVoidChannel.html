@@ -2768,7 +2768,7 @@ select.sel:focus{border-color:var(--accent)}
        project) -- always re-clamped to the CURRENT window size on every
        read, so neither a later resize nor a project file saved on a
        different screen can ever strand it off-screen. */
-    showAxisKey: false, axisKeyZoom: 1.0, axisKeyOffsetX: null, axisKeyOffsetY: null, axisKeyProportional: true,
+    showAxisKey: false, axisKeyZoom: 1.0, axisKeyOffsetX: null, axisKeyOffsetY: null, axisKeyProportional: true, axisKeyLabels: true,
     /* Grow > Molecular neighbourhood -- see setMolNeighborMode()'s own
        comment for the mutual-exclusion contract shared with the other
        click-hijacking modes, and computeMolecularNeighborhood()'s for what
@@ -2922,6 +2922,16 @@ select.sel:focus{border-color:var(--accent)}
    * mouse does.
    */
   var camTarget = new THREE.Vector3(0, 0, 0);
+  /* Ctrl-drag pan: a lateral shift of the VIEW in the screen plane (x = along
+     the camera's right axis, y = along its up axis, in world units), applied
+     in applyController() on top of the orbit position. The orbit pivot
+     (camTarget, the model's own centre of rotation) stays exactly where it
+     is relative to the model, so the model AND its rotation centre appear
+     displaced on screen together, and rotating still pivots about the
+     model's own centre, now sitting off the middle of the panel. Because the
+     shift is expressed in the camera's own axes it stays at the same place
+     on screen however the model is rotated. */
+  var camPan = new THREE.Vector2(0, 0);
   var camOrient = new THREE.Quaternion();
   var camDist = 1;
   /* Walk mode (Display > Walk mode) -- a FOURTH camera, independent of the
@@ -3122,11 +3132,16 @@ select.sel:focus{border-color:var(--accent)}
   }
   function applyController() {
     var dir = new THREE.Vector3(0, 0, 1).applyQuaternion(camOrient);
-    var pos = camTarget.clone().addScaledVector(dir, camDist);
+    /* the pan: a parallel shift of the camera in its own right/up plane, so
+       orientation and distance (and so everything about how the model
+       rotates and zooms about camTarget) are untouched */
+    var panVec = new THREE.Vector3(1, 0, 0).applyQuaternion(camOrient).multiplyScalar(camPan.x)
+      .addScaledVector(new THREE.Vector3(0, 1, 0).applyQuaternion(camOrient), camPan.y);
+    var pos = camTarget.clone().addScaledVector(dir, camDist).add(panVec);
     camera.position.copy(pos); camera.quaternion.copy(camOrient);
     if (trueOrthoCam) { trueOrthoCam.position.copy(pos); trueOrthoCam.quaternion.copy(camOrient); }
     if (pseudoOrthoCam) {
-      var orthoPos = camTarget.clone().addScaledVector(dir, camDist * orthoDistMultFor(activeOrthoFovDeg()));
+      var orthoPos = camTarget.clone().addScaledVector(dir, camDist * orthoDistMultFor(activeOrthoFovDeg())).add(panVec);
       pseudoOrthoCam.position.copy(orthoPos); pseudoOrthoCam.quaternion.copy(camOrient);
     }
     updateOrthoFrustum();
@@ -3134,6 +3149,41 @@ select.sel:focus{border-color:var(--accent)}
     updateLabelScales();
     updateScaleDisplay();
     updateClipPlane();
+  }
+  /* Ctrl+left-drag: pans the whole view across the panel -- the model AND its
+     centre of rotation move on screen together, so e.g. a model rotating
+     about its centroid has that centroid carried off the middle of the
+     panel and still rotates about it there. Implemented as a lateral camera
+     shift (camPan, see its declaration), not by moving the orbit pivot
+     (camTarget) and not by shifting state.viewOffset: the camera is the one
+     thing every component (atoms, bonds, unit cell, voids, channels,
+     molecular surfaces, coordination polyhedra, L.S. planes, labels,
+     selection highlights, anything added in future) is drawn through, so
+     all of them follow by construction with nothing re-rendered per mouse
+     move. The shift is clamped to a few scene radii so the model can't be
+     flung out of reach. */
+  function panView(dx, dy) {
+    var vp = document.getElementById("viewport");
+    if (!vp || !vp.clientHeight) return;
+    var visibleH = (activeCam === trueOrthoCam)
+      ? (trueOrthoCam.top - trueOrthoCam.bottom)
+      : 2 * camDist * orthoDistMultFor(activeOrthoFovDeg()) * Math.tan(activeCam.fov * Math.PI / 360);
+    var worldPerPx = visibleH / vp.clientHeight;
+    camPan.x -= dx * worldPerPx; camPan.y += dy * worldPerPx; /* the model follows the cursor, i.e. the camera moves the opposite way */
+    var lim = Math.max(sceneBoundRadius * 3, 10);
+    if (camPan.length() > lim) camPan.setLength(lim);
+    applyController();
+  }
+  /* Puts the model's centre of rotation back at the middle of the panel
+     (undoes any Ctrl-drag pan) -- called whenever something re-centres the
+     model on purpose (loading a structure, Display > Centering, Recenter) so
+     the freshly centred model actually appears centred rather than offset by
+     an old pan. */
+  function resetPan() {
+    if (camPan.lengthSq() === 0) return;
+    camPan.set(0, 0);
+    applyController();
+    repositionLabels();
   }
   /* Display > Clipping Plane: a single cutaway plane. Two reference modes
      (state.clipPlaneMode):
@@ -3523,7 +3573,12 @@ select.sel:focus{border-color:var(--accent)}
              smooth 1:1 follow after that. */
           draggedLabelGrabOffset = draggedLabel.position.clone().sub(ndcToWorldAtDepth(e.clientX, e.clientY, draggedLabelDepth));
         } else {
-          dragMode = e.shiftKey ? "roll" : "rotate";
+          /* Ctrl+left-drag pans (moves the rotation centre across the model);
+             a Ctrl+click that never actually drags still falls through to
+             handleLeftClick in onWindowPointerUp, so Ctrl+click's
+             select-the-whole-fragment meaning is untouched. Shift+Ctrl is
+             left as roll, exactly as before. */
+          dragMode = e.shiftKey ? "roll" : (e.ctrlKey ? "pan" : "rotate");
         }
       }
     }
@@ -3639,6 +3694,18 @@ select.sel:focus{border-color:var(--accent)}
     if (dragMode === "walkLook") { walkLook(dx, dy); return; }
     if (dragMode === "walkPan") { walkPan(dx, dy); return; }
     if (dragMode === "walkRoll") { walkRoll(prevX, prevY, e.clientX, e.clientY); return; }
+    if (dragMode === "pan") {
+      /* nothing moves until the pointer has travelled a few pixels, so a
+         plain Ctrl+click (select fragment) can't nudge the view; once it
+         has, the whole distance since the press is applied in one go so no
+         movement is lost to the dead zone */
+      if (!pickMoved) {
+        if (Math.abs(e.clientX - pickDownX) <= 4 && Math.abs(e.clientY - pickDownY) <= 4) return;
+        pickMoved = true; dx = e.clientX - pickDownX; dy = e.clientY - pickDownY;
+      }
+      panView(dx, dy);
+      return;
+    }
     if ((dragMode === "rotate" || dragMode === "roll") &&
       (Math.abs(e.clientX - pickDownX) > 4 || Math.abs(e.clientY - pickDownY) > 4)) pickMoved = true;
     if (dragMode === "rotate") {
@@ -3671,7 +3738,7 @@ select.sel:focus{border-color:var(--accent)}
       showLassoOverlay(false);
       if (pickMoved) finishLasso(); else handleLeftClick(e.clientX, e.clientY, clickMods);
       lassoPoints = [];
-    } else if ((dragMode === "rotate" || dragMode === "roll") && !pickMoved) {
+    } else if ((dragMode === "rotate" || dragMode === "roll" || dragMode === "pan") && !pickMoved) {
       handleLeftClick(e.clientX, e.clientY, clickMods);
     } else if (dragMode === "label") {
       finalizeLabelDrag();
@@ -3699,6 +3766,8 @@ select.sel:focus{border-color:var(--accent)}
       draggedGuestAtoms = null; draggedGuestCentroid = null; draggedGuestLastWorld = null; draggedGuestLinked = false;
     }
     if ((dragMode === "rotate" || dragMode === "roll") && pickMoved) { updateViewDirectionReadout(); repositionLabels(); }
+    if (dragMode === "pan" && pickMoved) repositionLabels();
+    if (dragMode === "axisKey") persistPreferences(); /* remember where the key was left */
     dragMode = null;
   }
 
@@ -5629,6 +5698,7 @@ select.sel:focus{border-color:var(--accent)}
     for (var i = 0; i < sel.length; i++) { x += sel[i].x; y += sel[i].y; z += sel[i].z; }
     state.viewOffset = [-x / sel.length, -y / sel.length, -z / sel.length];
     clearSelection();
+    resetPan();
     renderStructure(); renderSurface(); renderVoidMeshes(); renderUnitCell(); renderMolSurfaceMeshes(); renderLsPlaneMeshes();
     recordMacroCommand("CENTER_SELECTED");
     setStatus("Centred on " + sel.length + " selected atom" + (sel.length === 1 ? "" : "s") + ".", false);
@@ -5638,6 +5708,7 @@ select.sel:focus{border-color:var(--accent)}
     if (!isFinite(fx) || !isFinite(fy) || !isFinite(fz)) { setStatus("Enter numeric x, y, z fractional coordinates.", true); return; }
     var cc = K.fracToCart(state.cifFracToCart, [fx, fy, fz]);
     state.viewOffset = [-cc[0], -cc[1], -cc[2]];
+    resetPan();
     renderStructure(); renderSurface(); renderVoidMeshes(); renderUnitCell(); renderMolSurfaceMeshes(); renderLsPlaneMeshes();
     recordMacroCommand("CENTER " + fx + "," + fy + "," + fz);
     setStatus("Centred on fractional coordinates (" + fx + ", " + fy + ", " + fz + ").", false);
@@ -6141,7 +6212,7 @@ select.sel:focus{border-color:var(--accent)}
     r = r || 8;
     var dist = r / Math.tan(camera.fov * Math.PI / 360) * 1.6;
     camera.position.set(dist * 0.55, dist * 0.42, dist * 0.78);
-    camTarget.set(0, 0, 0); syncControllerFromCamera(); applyController();
+    camTarget.set(0, 0, 0); camPan.set(0, 0); syncControllerFromCamera(); applyController();
     repositionLabels();
   }
 
@@ -6566,9 +6637,30 @@ select.sel:focus{border-color:var(--accent)}
   function toggleLabelDisplay() {
     state.showLabels = !state.showLabels;
     renderLabels();
-    var cb = document.getElementById("showLabelsTg"); if (cb) cb.checked = state.showLabels;
+    syncShowToggleUIs();
     setStatus(state.showLabels ? "Showing atom labels." : "Hiding atom labels.", false);
   }
+  /* "Show unit cell", "Show axis key" and "Show atom labels" each have TWO
+     checkboxes (one in Display, one in the matching Style submenu), which
+     must always agree with each other and with the c/k/l hotkeys, macro
+     playback and project restore. Every such checkbox carries a
+     data-sync-key naming the state field it mirrors; any code path that
+     changes one of those fields just calls this once afterwards, rather than
+     each path having to know every checkbox that echoes the field. */
+  function syncShowToggleUIs() {
+    var vals = { showUnitCell: state.showUnitCell, showAxisKey: state.showAxisKey, showLabels: state.showLabels };
+    var els = document.querySelectorAll("input[data-sync-key]");
+    for (var i = 0; i < els.length; i++) {
+      var k = els[i].getAttribute("data-sync-key");
+      if (k in vals) els[i].checked = !!vals[k];
+    }
+  }
+  /* The single change-handler behind each pair of echoing checkboxes -- the
+     Display one and the Style one both call straight into these, so the two
+     can never drift apart in what they do (macro recording included). */
+  function setShowUnitCell(b) { state.showUnitCell = b; renderUnitCell(); syncShowToggleUIs(); persistPreferences(); recordMacroCommand(b ? "UNIT_CELL_ON" : "UNIT_CELL_OFF"); }
+  function setShowAxisKey(b) { state.showAxisKey = b; syncShowToggleUIs(); persistPreferences(); recordMacroCommand(b ? "AXIS_KEY_ON" : "AXIS_KEY_OFF"); }
+  function setShowLabels(b) { state.showLabels = b; renderLabels(); syncShowToggleUIs(); }
 
   /* ---------------- void/channel analysis: input construction ----------------
    * Two modes share the exact same VoidNet.buildRegularTriangulation /
@@ -12230,11 +12322,11 @@ select.sel:focus{border-color:var(--accent)}
       case "UNIT_CELL_ON": case "UNIT_CELL_OFF":
         state.showUnitCell = cmd === "UNIT_CELL_ON";
         renderUnitCell();
-        el = document.getElementById("showUnitCellTg"); if (el) el.checked = state.showUnitCell;
+        syncShowToggleUIs();
         return true;
       case "AXIS_KEY_ON": case "AXIS_KEY_OFF":
         state.showAxisKey = cmd === "AXIS_KEY_ON";
-        el = document.getElementById("showAxisKeyTg"); if (el) el.checked = state.showAxisKey;
+        syncShowToggleUIs();
         return true;
       case "ASU_ONLY_ON": case "ASU_ONLY_OFF":
         state.showOnlyAsu = cmd === "ASU_ONLY_ON";
@@ -13831,11 +13923,36 @@ select.sel:focus{border-color:var(--accent)}
        identical to a freshly loaded atom. "Current style" snapshots
        whatever Style > Atoms' pending brush currently holds -- colour mode,
        and either the Non-H/H vdW multipliers or the Fixed radius, whichever
-       is checked -- onto every newly grown atom in that layer. */
+       is checked -- onto every newly grown atom in that layer. "Same as
+       ASU" instead copies each new atom's own look (colour mode/colour,
+       radius mode/value, sphere-vs-ellipsoid) from its asymmetric unit
+       parent -- the identity-operator, cell 0,0,0 atom sharing its auIndex,
+       looked up in host AND guest lists since the parent may have been
+       moved to a guest -- so a symmetry copy always matches whatever the
+       user has already styled its ASU atom as. An atom with no findable
+       parent (e.g. a centroid, or one whose parent was deleted) falls back
+       to the "default" treatment. */
     if (!atoms.length) return;
+    var asuParent = null;
+    if (growStyle === "asu") {
+      asuParent = {};
+      var pools = [state.atoms || [], state.guestAtoms || []];
+      for (var pi = 0; pi < pools.length; pi++) for (var pj = 0; pj < pools[pi].length; pj++) {
+        var pa = pools[pi][pj];
+        if (pa.auIndex !== undefined && pa.opIndex === 0 && pa.cellI === 0 && pa.cellJ === 0 && pa.cellK === 0 && !(pa.auIndex in asuParent)) asuParent[pa.auIndex] = pa;
+      }
+    }
     for (var i = 0; i < atoms.length; i++) {
       var a = atoms[i];
-      if (growStyle === "current") {
+      if (growStyle === "asu") {
+        var par = (a.auIndex !== undefined) ? asuParent[a.auIndex] : null;
+        delete a.dispRadiusMode; delete a.dispRadiusValue; delete a.dispColorMode; delete a.dispColor; a.ellipsoidOn = false;
+        if (par) {
+          if (par.dispRadiusMode !== undefined) { a.dispRadiusMode = par.dispRadiusMode; a.dispRadiusValue = par.dispRadiusValue; }
+          if (par.dispColorMode !== undefined) { a.dispColorMode = par.dispColorMode; if (par.dispColor !== undefined) a.dispColor = par.dispColor; }
+          a.ellipsoidOn = !!par.ellipsoidOn && !!a.adp;
+        }
+      } else if (growStyle === "current") {
         if (atomDispEllipsoid && a.adp) { a.ellipsoidOn = true; }
         else {
           a.ellipsoidOn = false;
@@ -14450,6 +14567,43 @@ select.sel:focus{border-color:var(--accent)}
    * grab/grabbing hand, per explicit user preference. */
   var axisKeyScene = null, axisKeyCamera = null, axisKeyCanvasEl = null, axisKeyRenderer = null;
   var axisKeyCylGeo = null, axisKeyConeGeo = null, axisKeyMeshes = null, axisKeyLastSize = 0;
+  /* a/b/c letter sprites at each arrow tip (Style > Unit cell > "Axis key:
+     show labels a, b, c"). Styled after MOF Topology Studio's own key: upright
+     regular-weight DM Sans letters in a muted red/green/blue on a fully transparent
+     background (no halo or backing). Pixel size
+     and gap are constants; the world-space values derived from them scale
+     with the key's own zoom so labels never grow or shrink on screen. The
+     canvas gets AXIS_KEY_LABEL_PAD extra pixels of margin on every side
+     while labels are on, so a label beyond an arrow tip can never be clipped
+     by the canvas edge. */
+  var axisKeyLabelSprites = null, axisKeyTips = {}, axisKeyLabelBg = null, axisKeyLastHalf = 0;
+  var AXIS_KEY_LABEL_COL = { a: "#ff0000", b: "#00ff00", c: "#0000ff" }; /* same pure red/green/blue as the arrows themselves */
+  /* all three are per-1.0x-zoom pixel values: the on-screen size, gap and
+     margin are multiplied by the key's zoom, so the letters grow and shrink
+     together with the key (see renderAxisKey/axisKeyLayout) */
+  var AXIS_KEY_LABEL_PAD = 16, AXIS_KEY_LABEL_SIDE_PX = 26, AXIS_KEY_LABEL_GAP_PX = 14;
+  function makeAxisKeyLabelTexture(ch, colour, haloCss) {
+    var cv = document.createElement("canvas"); cv.width = cv.height = 128;
+    var ctx = cv.getContext("2d");
+    ctx.font = '400 84px "DM Sans", system-ui, sans-serif'; /* regular weight, not bold */
+    ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
+    /* plain letter on a fully transparent canvas -- no halo/background of any
+       kind (haloCss is deliberately unused: an outline in the background
+       colour read as a filled backing behind each letter) */
+    ctx.fillStyle = colour; ctx.fillText(ch, 64, 68);
+    return new THREE.CanvasTexture(cv);
+  }
+  function refreshAxisKeyLabelTextures() {
+    if (!axisKeyLabelSprites) return;
+    var halo = hexToCss(state.bgColor);
+    ["a", "b", "c"].forEach(function (k) {
+      var sp = axisKeyLabelSprites[k];
+      if (sp.material.map) sp.material.map.dispose();
+      sp.material.map = makeAxisKeyLabelTexture(k, AXIS_KEY_LABEL_COL[k], halo);
+      sp.material.needsUpdate = true;
+    });
+    axisKeyLabelBg = state.bgColor;
+  }
   var axisKeyExportCanvas = null; /* lazily-created scratch 2D canvas renderExportBlob() composites onto -- see its own comment */
   var AXIS_KEY_PX = 160; /* base CSS-pixel box size at zoom 1.0x -- see axisKeyBoxSize(), which scales the actual box by state.axisKeyZoom so the box always grows/shrinks together with the key instead of ever clipping it */
   function initAxisKey() {
@@ -14472,6 +14626,16 @@ select.sel:focus{border-color:var(--accent)}
       axisKeyScene.add(shaft); axisKeyScene.add(cone);
       axisKeyMeshes[k] = { shaft: shaft, cone: cone };
     });
+    axisKeyLabelSprites = {};
+    ["a", "b", "c"].forEach(function (k) {
+      var sp = new THREE.Sprite(new THREE.SpriteMaterial({ depthTest: false, transparent: true }));
+      sp.renderOrder = 10; sp.visible = false;
+      axisKeyScene.add(sp); axisKeyLabelSprites[k] = sp;
+    });
+    refreshAxisKeyLabelTextures();
+    /* the webfont may not have finished loading when the textures above were
+       first drawn (canvas falls back silently) -- redraw once it has */
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { axisKeyLabelBg = null; });
     axisKeyCanvasEl = document.createElement("canvas");
     axisKeyCanvasEl.id = "axisKeyCanvas";
     axisKeyCanvasEl.style.position = "fixed";
@@ -14508,21 +14672,11 @@ select.sel:focus{border-color:var(--accent)}
     };
     var maxLen = Math.max(vecs.a.length(), vecs.b.length(), vecs.c.length());
     if (!(maxLen > 1e-8)) return false;
-    /* Zoom grows the BOX (see axisKeyBoxSize()), which on its own would
-       magnify everything inside it uniformly -- length AND thickness alike,
-       reading as a plain "zoom in/out" rather than "the lines got longer".
-       Dividing the radii (and the arrowhead's own length) by zoom exactly
-       cancels the box's own magnification for THOSE dimensions, so the
-       rendered pixel THICKNESS and arrowhead SIZE stay constant across
-       zoom levels; totalLen is deliberately left alone (never divided or
-       multiplied by zoom) so the shaft's own world-space reach is fixed too
-       -- all of the "things got bigger" a user actually sees at a higher
-       zoom comes from the box's own pixel growth, applied uniformly to a
-       shape that (other than the shaft claiming back whatever length the
-       now-smaller arrowhead needs less of) doesn't itself change, which is
-       exactly "longer lines, same thickness" rather than "everything
-       scaled up together". */
-    var zoom = (isFinite(state.axisKeyZoom) && state.axisKeyZoom > 0) ? state.axisKeyZoom : 1;
+    /* Zoom grows the BOX (see axisKeyLayout()), and everything in the key is
+       a fixed world-space size drawn into it, so shaft thickness, arrowhead
+       size and length -- like the letters -- all scale together with the key
+       (an earlier version deliberately held thickness/arrowhead constant in
+       pixels; the user wanted the whole key to scale). */
     var proportional = state.axisKeyProportional !== false; /* default true -- an old project saved before this setting existed has no field for it at all */
     ["a", "b", "c"].forEach(function (k) {
       var v = vecs[k], len = v.length();
@@ -14532,10 +14686,11 @@ select.sel:focus{border-color:var(--accent)}
          information at all, for a cell so anisotropic that the shortest
          axis would otherwise be too small to read. */
       var totalLen = (proportional ? (len / maxLen) : 1) * AXIS_KEY_REACH;
-      var coneLen = Math.min(AXIS_KEY_CONE_LEN / zoom, totalLen * 0.6);
+      var coneLen = Math.min(AXIS_KEY_CONE_LEN, totalLen * 0.6);
       var shaftLen = Math.max(totalLen - coneLen, 0.001);
-      var shaftR = AXIS_KEY_SHAFT_R / zoom, coneR = AXIS_KEY_CONE_R / zoom;
+      var shaftR = AXIS_KEY_SHAFT_R, coneR = AXIS_KEY_CONE_R;
       var q = new THREE.Quaternion().setFromUnitVectors(YAXIS, dir);
+      axisKeyTips[k] = { dir: dir, totalLen: totalLen };
       var m = axisKeyMeshes[k];
       m.shaft.quaternion.copy(q);
       m.shaft.scale.set(shaftR, shaftLen, shaftR);
@@ -14552,11 +14707,16 @@ select.sel:focus{border-color:var(--accent)}
      past its own edge -- capped at 70% of the smaller WINDOW dimension so an
      extreme zoom still leaves a sensible box rather than swallowing the
      whole screen. */
-  function axisKeyBoxSize() {
+  function axisKeyLayout() {
     var zoom = (isFinite(state.axisKeyZoom) && state.axisKeyZoom > 0) ? state.axisKeyZoom : 1;
-    var size = Math.min(Math.round(AXIS_KEY_PX * zoom), Math.floor(Math.min(window.innerWidth, window.innerHeight) * 0.7));
-    return Math.max(size, 24);
+    var pad = state.axisKeyLabels !== false ? Math.round(AXIS_KEY_LABEL_PAD * zoom) : 0;
+    var area = Math.min(Math.round(AXIS_KEY_PX * zoom), Math.floor(Math.min(window.innerWidth, window.innerHeight) * 0.7) - 2 * pad);
+    area = Math.max(area, 24);
+    /* "area" is the part of the canvas the arrows themselves live in (the
+       pre-labels box); "pad" is the extra margin around it for labels */
+    return { area: area, pad: pad, size: area + 2 * pad, zoom: zoom };
   }
+  function axisKeyBoxSize() { return axisKeyLayout().size; }
   /* Shared clamp for both axisKeyPosition() (initial placement) and
      dragAxisKeyTo() (live dragging): the box may hang up to HALF its own
      size past any window edge -- "can overlap the edge of it" applied
@@ -14606,7 +14766,7 @@ select.sel:focus{border-color:var(--accent)}
     if (!axisKeyScene) initAxisKey();
     if (!updateAxisKeyGeometry()) { axisKeyCanvasEl.style.display = "none"; return; }
     axisKeyCanvasEl.style.display = "block";
-    var size = axisKeyBoxSize();
+    var lay = axisKeyLayout(), size = lay.size;
     var pos = axisKeyPosition(size);
     axisKeyCanvasEl.style.left = pos.x + "px"; axisKeyCanvasEl.style.top = pos.y + "px";
     if (size !== axisKeyLastSize) {
@@ -14614,9 +14774,42 @@ select.sel:focus{border-color:var(--accent)}
       axisKeyCanvasEl.style.width = size + "px"; axisKeyCanvasEl.style.height = size + "px";
       axisKeyRenderer.setSize(size, size, false);
     }
+    /* the inner "area" always spans -1.5..+1.5 world units (so arrow pixel
+       sizes are identical with labels on or off); the label margin is just
+       extra frustum beyond that */
+    var half = 1.5 * size / lay.area;
+    if (half !== axisKeyLastHalf) {
+      axisKeyLastHalf = half;
+      axisKeyCamera.left = -half; axisKeyCamera.right = half; axisKeyCamera.top = half; axisKeyCamera.bottom = -half;
+      axisKeyCamera.updateProjectionMatrix();
+    }
     var quat = state.walkMode ? walkQuat : camOrient;
     axisKeyCamera.position.copy(new THREE.Vector3(0, 0, 6).applyQuaternion(quat));
     axisKeyCamera.quaternion.copy(quat);
+    axisKeyCamera.updateMatrixWorld();
+    if (axisKeyLabelBg !== state.bgColor) refreshAxisKeyLabelTextures();
+    var showLabels = state.axisKeyLabels !== false;
+    var wpp = 3 / lay.area; /* world units per pixel */
+    var rightV = new THREE.Vector3(1, 0, 0).applyQuaternion(quat), upV = new THREE.Vector3(0, 1, 0).applyQuaternion(quat);
+    ["a", "b", "c"].forEach(function (k) {
+      var sp = axisKeyLabelSprites[k], tip = axisKeyTips[k];
+      if (!showLabels || !tip) { sp.visible = false; return; }
+      /* offset along the arrow's own direction AS SEEN ON SCREEN (not in 3D),
+         so the letter sits beside the visible tip. Must vary CONTINUOUSLY
+         with rotation: normalising the on-screen direction (or switching to
+         a fallback below some length) makes the letter flip to the other
+         side of the tip the instant an arrow passes end-on. Instead the
+         raw projected direction (length L, 0 when end-on) is blended with a
+         fixed up-right bias weighted by (1-L), and only capped -- never
+         re-normalised upward -- so there is no discontinuity anywhere. */
+      var sx = tip.dir.dot(rightV), sy = tip.dir.dot(upV), L = Math.sqrt(sx * sx + sy * sy);
+      sx += (1 - L) * 0.7071; sy += (1 - L) * 0.7071;
+      var m = Math.sqrt(sx * sx + sy * sy);
+      if (m > 1) { sx /= m; sy /= m; }
+      var gap = AXIS_KEY_LABEL_GAP_PX * lay.zoom * wpp, side = AXIS_KEY_LABEL_SIDE_PX * lay.zoom * wpp;
+      sp.position.copy(tip.dir).multiplyScalar(tip.totalLen).addScaledVector(rightV, sx * gap).addScaledVector(upV, sy * gap);
+      sp.scale.set(side, side, 1); sp.visible = true;
+    });
     axisKeyRenderer.render(axisKeyScene, axisKeyCamera);
   }
   /* Hit-tests a mousedown (called from axisKeyCanvasEl's own "mousedown"
@@ -15091,6 +15284,7 @@ select.sel:focus{border-color:var(--accent)}
       state.guestAtoms = null; state.guestName = ""; state.guestBatch = 0; state.guestGroups = [];
       clearGroup(surfaceGroup);
     }
+    resetPan(); /* a freshly loaded structure is centred at the origin -- drop any pan left over from the previous one */
     recomputeViewOffset();
     applyRadii(atoms);
     refreshHostAtomColors(atoms);
@@ -15955,7 +16149,9 @@ select.sel:focus{border-color:var(--accent)}
         molSurfaceOpacity: state.molSurfaceOpacity,
         compressModelAsZip: state.compressModelAsZip,
         showUnitCellLabels: state.showUnitCellLabels,
-        axisKeyZoom: state.axisKeyZoom, axisKeyProportional: state.axisKeyProportional
+        axisKeyZoom: state.axisKeyZoom, axisKeyProportional: state.axisKeyProportional, axisKeyLabels: state.axisKeyLabels,
+        showAxisKey: state.showAxisKey, axisKeyOffsetX: state.axisKeyOffsetX, axisKeyOffsetY: state.axisKeyOffsetY,
+        showUnitCell: state.showUnitCell, unitCellColor: state.unitCellColor, unitCellThickness: state.unitCellThickness, unitCellAxisColors: state.unitCellAxisColors
         /* clipPlaneEnabled deliberately NOT persisted -- starting a fresh
            session with part of the structure invisible for no visible
            reason (until the user finds the toggle) is worse than just
@@ -16060,6 +16256,16 @@ select.sel:focus{border-color:var(--accent)}
       if (typeof data.showUnitCellLabels === "boolean") state.showUnitCellLabels = data.showUnitCellLabels;
       if (data.hasOwnProperty("axisKeyZoom")) state.axisKeyZoom = clamp(data.axisKeyZoom, 0.4, 3, state.axisKeyZoom);
       if (typeof data.axisKeyProportional === "boolean") state.axisKeyProportional = data.axisKeyProportional;
+      if (typeof data.axisKeyLabels === "boolean") state.axisKeyLabels = data.axisKeyLabels;
+      /* the key's on/off state and where it was left are remembered too, so
+         it comes back exactly as it was for the next structure/session
+         (position is re-clamped to the window on every use) */
+      if (typeof data.showUnitCell === "boolean") state.showUnitCell = data.showUnitCell;
+      if (typeof data.unitCellColor === "number") state.unitCellColor = data.unitCellColor;
+      if (data.hasOwnProperty("unitCellThickness")) state.unitCellThickness = clamp(data.unitCellThickness, 0.01, 0.15, state.unitCellThickness);
+      if (typeof data.unitCellAxisColors === "boolean") state.unitCellAxisColors = data.unitCellAxisColors;
+      if (typeof data.showAxisKey === "boolean") state.showAxisKey = data.showAxisKey;
+      if (typeof data.axisKeyOffsetX === "number" && isFinite(data.axisKeyOffsetX) && typeof data.axisKeyOffsetY === "number" && isFinite(data.axisKeyOffsetY)) { state.axisKeyOffsetX = data.axisKeyOffsetX; state.axisKeyOffsetY = data.axisKeyOffsetY; }
       /* every light effectively off would leave only the fixed 0.6-intensity
          hemisphere light -- not literally invisible, but dim enough on some
          monitors to look like nothing loaded. Force at least one real light
@@ -16961,7 +17167,7 @@ select.sel:focus{border-color:var(--accent)}
       unitCellThickness: state.unitCellThickness, unitCellAxisColors: state.unitCellAxisColors,
       showAxisKey: state.showAxisKey, axisKeyZoom: state.axisKeyZoom,
       axisKeyOffsetX: state.axisKeyOffsetX, axisKeyOffsetY: state.axisKeyOffsetY,
-      axisKeyProportional: state.axisKeyProportional,
+      axisKeyProportional: state.axisKeyProportional, axisKeyLabels: state.axisKeyLabels,
       showCoordPolyhedra: state.showCoordPolyhedra,
       coordPolyOpacity: state.coordPolyOpacity, coordPolyColorMode: state.coordPolyColorMode, coordPolyColor: state.coordPolyColor,
       coordPolyEdgeThickness: state.coordPolyEdgeThickness,
@@ -16988,7 +17194,7 @@ select.sel:focus{border-color:var(--accent)}
       lsPlanes: state.lsPlanes, lsPlaneColorLinkAll: state.lsPlaneColorLinkAll, lsPlaneLinkedColor: state.lsPlaneLinkedColor,
       lsPlaneOpacity: state.lsPlaneOpacity, nextLsPlaneId: nextLsPlaneId, showLsPlanes: state.showLsPlanes,
       voidComponentMeshes: voidComponentMeshesForSave,
-      camera: { camDist: camDist, camOrient: [camOrient.x, camOrient.y, camOrient.z, camOrient.w], camTarget: [camTarget.x, camTarget.y, camTarget.z] },
+      camera: { camDist: camDist, camOrient: [camOrient.x, camOrient.y, camOrient.z, camOrient.w], camTarget: [camTarget.x, camTarget.y, camTarget.z], camPan: [camPan.x, camPan.y] },
       bgColor: state.bgColor, cameraMode: state.cameraMode, depthScalingAngle: state.depthScalingAngle, highDetail: state.highDetail,
       fogOn: state.fogOn, fogDensity: state.fogDensity,
       atomRoughness: state.atomRoughness, atomMetalness: state.atomMetalness, atomReflectivity: state.atomReflectivity,
@@ -17202,6 +17408,7 @@ select.sel:focus{border-color:var(--accent)}
     if (typeof data.axisKeyOffsetX === "number" && isFinite(data.axisKeyOffsetX)) state.axisKeyOffsetX = data.axisKeyOffsetX;
     if (typeof data.axisKeyOffsetY === "number" && isFinite(data.axisKeyOffsetY)) state.axisKeyOffsetY = data.axisKeyOffsetY;
     if (typeof data.axisKeyProportional === "boolean") state.axisKeyProportional = data.axisKeyProportional;
+    if (typeof data.axisKeyLabels === "boolean") state.axisKeyLabels = data.axisKeyLabels;
     if (typeof data.showCoordPolyhedra === "boolean") state.showCoordPolyhedra = data.showCoordPolyhedra;
     if (typeof data.coordPolyOpacity === "number") state.coordPolyOpacity = data.coordPolyOpacity;
     if (typeof data.coordPolyEdgeThickness === "number") state.coordPolyEdgeThickness = data.coordPolyEdgeThickness;
@@ -17224,17 +17431,17 @@ select.sel:focus{border-color:var(--accent)}
        already carried along verbatim inside data.atoms/data.guestAtoms --
        ARE project-specific, and are restored. */
     if (typeof data.showLabels === "boolean") state.showLabels = data.showLabels;
-    var showLabelsTgEl = document.getElementById("showLabelsTg"); if (showLabelsTgEl) showLabelsTgEl.checked = state.showLabels;
+    syncShowToggleUIs(); /* showUnitCell/showAxisKey/showLabels were all just restored above -- refresh every checkbox that echoes them */
 
     if (typeof data.bgColor === "number") { state.bgColor = data.bgColor; scene.background = new THREE.Color(state.bgColor); }
-    /* cameraMode replaces the old boolean pseudoOrtho -- see
-       loadPersistedPreferences()'s own comment for why the migration is a
-       lossless 1:1 mapping, not a guess. A project file predating
-       depthScalingAngle just keeps whatever's already in state (the current
-       session's value, or DISPLAY_DEFAULTS' on a fresh load). */
-    if (typeof data.cameraMode === "string") setCameraMode(data.cameraMode);
-    else if (typeof data.pseudoOrtho === "boolean") setCameraMode(data.pseudoOrtho ? "pseudo" : "ortho");
-    if (typeof data.depthScalingAngle === "number") setDepthScalingAngle(Math.max(ORTHO_MIN_FOV_DEG, Math.min(ORTHO_MAX_FOV_DEG, data.depthScalingAngle)));
+    /* The camera mode (orthographic / pseudo-orthographic / depth scaling)
+       and depth-scaling angle are deliberately NOT restored from a project
+       file any more: like the label font/size they are a personal viewing
+       preference (remembered between sessions, see persistPreferences()),
+       and having every loaded project silently switch it back to whatever
+       it happened to be when that file was saved meant re-choosing it again
+       and again. The fields are still written to project files, so older
+       builds reading them are unaffected. */
     syncDisplayControlsUI();
     if (typeof data.highDetail === "boolean") setHighDetail(data.highDetail);
     if (typeof data.fogOn === "boolean") state.fogOn = data.fogOn;
@@ -17255,7 +17462,15 @@ select.sel:focus{border-color:var(--accent)}
     if (data.camera) {
       if (typeof data.camera.camDist === "number") camDist = data.camera.camDist;
       if (data.camera.camOrient) camOrient.set(data.camera.camOrient[0], data.camera.camOrient[1], data.camera.camOrient[2], data.camera.camOrient[3]);
-      if (data.camera.camTarget) camTarget.set(data.camera.camTarget[0], data.camera.camTarget[1], data.camera.camTarget[2]);
+      /* a project file restores its own saved pan; one that saved none
+         (older files, other apps' imports) must not inherit whatever pan the
+         PREVIOUS structure was left at, so it falls back to the default.
+         (A very short-lived earlier pan design moved camTarget itself, so a
+         file saved during that window could carry a nonzero camTarget --
+         ignored: the orbit pivot is always the model's own centre now.) */
+      camTarget.set(0, 0, 0);
+      if (data.camera.camPan) camPan.set(data.camera.camPan[0], data.camera.camPan[1]);
+      else camPan.set(0, 0);
       applyController();
       updateViewDirectionReadout();
     }
@@ -17682,25 +17897,34 @@ select.sel:focus{border-color:var(--accent)}
     var styleAtomsTab = subsection(styleC, "Atoms", false);
     var styleBondsTab = subsection(styleC, "Bonds", false);
     var unitCellBody = subsection(styleC, "Unit cell", false);
+    /* "Show unit cell" and "Show axis key" each exist twice -- here and in
+       Display -- as echoes of one another (see syncShowToggleUIs()), so the
+       cell/key can be switched without leaving the panel where its own
+       appearance settings live. */
+    var ucStyleShowTg = toggle(unitCellBody, "Show unit cell", state.showUnitCell, setShowUnitCell);
+    ucStyleShowTg.id = "showUnitCellStyleTg"; ucStyleShowTg.setAttribute("data-sync-key", "showUnitCell");
     var ucRow = el("div", "ctl-inline");
     ucRow.style.justifyContent = "space-between";
     var labelAxesTg = toggle(ucRow, "Label axes", state.showUnitCellLabels, function (b) { state.showUnitCellLabels = b; renderUnitCell(); persistPreferences(); });
-    var rgbTg = toggle(ucRow, "RGB axes", state.unitCellAxisColors, function (b) { state.unitCellAxisColors = b; renderUnitCell(); });
+    var rgbTg = toggle(ucRow, "RGB axes", state.unitCellAxisColors, function (b) { state.unitCellAxisColors = b; renderUnitCell(); persistPreferences(); });
     var ucColorWrap = el("div", "ctl-color");
     ucColorWrap.appendChild(el("label", null, "Cell colour"));
-    var ucColorSw = colorSwatch(state.unitCellColor, function (hex) { state.unitCellColor = hex; renderUnitCell(); });
+    var ucColorSw = colorSwatch(state.unitCellColor, function (hex) { state.unitCellColor = hex; renderUnitCell(); persistPreferences(); });
     ucColorWrap.appendChild(ucColorSw);
     ucRow.appendChild(ucColorWrap);
     unitCellBody.appendChild(ucRow);
-    slider(unitCellBody, "Line thickness", 0.01, 0.15, 0.005, state.unitCellThickness, U.ang, function (v) { state.unitCellThickness = v; renderUnitCell(); });
-    /* The show/hide checkbox itself lives in Display, next to "Show unit
-       cell" (matching every other show/hide toggle's own home) -- this is
-       just the appearance-tuning slider, same split as Line thickness/Cell
-       colour/RGB axes just above being Style concerns while the toggle
-       itself is a Display one. */
+    slider(unitCellBody, "Line thickness", 0.01, 0.15, 0.005, state.unitCellThickness, U.ang, function (v) { state.unitCellThickness = v; renderUnitCell(); persistPreferences(); });
+    /* everything below the divider is the axis KEY's own settings, not the
+       unit cell's */
+    unitCellBody.appendChild(el("hr", "divider"));
+    var akStyleShowTg = toggle(unitCellBody, "Show axis key", state.showAxisKey, setShowAxisKey);
+    akStyleShowTg.id = "showAxisKeyStyleTg"; akStyleShowTg.setAttribute("data-sync-key", "showAxisKey");
+    akStyleShowTg.title = "Echoes Display > Show axis key (and the k key).";
     slider(unitCellBody, "Axis key zoom", 0.4, 3, 0.1, state.axisKeyZoom, "×", function (v) { state.axisKeyZoom = v; persistPreferences(); });
     toggle(unitCellBody, "Axis key: proportional lengths", state.axisKeyProportional, function (b) { state.axisKeyProportional = b; persistPreferences(); }).title =
       "On (default): each arrow's length reflects the real a/b/c cell edge length. Off: all three arrows are drawn the same length -- orientation only, no length information.";
+    toggle(unitCellBody, "Axis key: show labels a, b, c", state.axisKeyLabels, function (b) { state.axisKeyLabels = b; persistPreferences(); }).title =
+      "Letter at the tip of each arrow, in that arrow's colour.";
     /* A dragged-away key can end up anywhere (including, deliberately, slid
        out of sight behind the sidebar/header -- see axisKeyClamp()'s own
        comment) with no visible arrow left to grab it back by -- this is the
@@ -17710,8 +17934,50 @@ select.sel:focus{border-color:var(--accent)}
        resolve logic, so this button and a brand-new key's first-ever
        appearance land in exactly the same place by construction. */
     button(unitCellBody, "Reset key position", "ghost mini", function () {
-      state.axisKeyOffsetX = null; state.axisKeyOffsetY = null;
+      state.axisKeyOffsetX = null; state.axisKeyOffsetY = null; persistPreferences();
     }).title = "Bring the axis key back to the bottom-left corner of the model panel (useful if it's been dragged out of view).";
+
+    /* ---- Atomic labels ----
+       Moved here from Display (and renamed from "Labels") -- the appearance
+       controls for atom labels belong with the rest of Style. "Show atom
+       labels" at the top echoes Display's own checkbox of the same name and
+       the l key (see syncShowToggleUIs()). */
+    var labelsBody = subsection(styleC, "Atomic labels", false);
+    var lblStyleShowTg = toggle(labelsBody, "Show atom labels", state.showLabels, setShowLabels);
+    lblStyleShowTg.id = "showLabelsStyleTg"; lblStyleShowTg.setAttribute("data-sync-key", "showLabels");
+    lblStyleShowTg.title = "Echoes Display > Show atom labels (and the l key).";
+    toggle(labelsBody, "Contrasting outline", state.labelHalo, function (v) {
+      state.labelHalo = v; labelTexCache = {}; renderLabels(); persistPreferences();
+    });
+    var labelFontColorRow = el("div", "ctl-inline");
+    labelFontColorRow.appendChild(el("label", "plain", "Font"));
+    var labelFontSel = document.createElement("select"); labelFontSel.className = "sel";
+    FONT_OPTIONS.forEach(function (opt) {
+      var o = document.createElement("option"); o.value = opt[0]; o.textContent = opt[1];
+      if (String(opt[0]) === String(state.labelFont)) o.selected = true;
+      labelFontSel.appendChild(o);
+    });
+    labelFontSel.addEventListener("change", function () {
+      state.labelFont = labelFontSel.value; labelTexCache = {}; renderLabels(); persistPreferences();
+    });
+    labelFontColorRow.appendChild(labelFontSel);
+    var labelColorLbl = el("label", "plain", "Colour"); labelColorLbl.style.marginLeft = "10px";
+    labelFontColorRow.appendChild(labelColorLbl);
+    labelFontColorRow.appendChild(colorSwatch(state.labelColor, function (c) {
+      state.labelColor = c; labelTexCache = {}; renderLabels(); persistPreferences();
+    }));
+    labelsBody.appendChild(labelFontColorRow);
+    labelSlider(labelsBody, "Size", 1.0, 6.0, 0.1, state.labelSize, function (v) {
+      state.labelSize = v; updateLabelScales(); persistPreferences();
+    });
+    var labelBtnRow = el("div", "btnrow");
+    button(labelBtnRow, "Label selected", "ghost", function () { setLabelVisibilityForSelected(true); });
+    button(labelBtnRow, "Unlabel selected", "ghost", function () { setLabelVisibilityForSelected(false); });
+    labelsBody.appendChild(labelBtnRow);
+    var labelUnfixBtnRow = el("div", "btnrow");
+    button(labelUnfixBtnRow, "Unfix all labels", "ghost", function () { unfixAllLabels(); });
+    button(labelUnfixBtnRow, "Unfix selected", "ghost", function () { unfixSelectedLabels(); });
+    labelsBody.appendChild(labelUnfixBtnRow);
 
     /* ---- Coordination polyhedra ----
        Triangulates the FULL, symmetry-derived ligand set of every currently-
@@ -18269,17 +18535,17 @@ select.sel:focus{border-color:var(--accent)}
     var showRow1 = el("div", "toggle-row2");
     var asuTg = toggle(showRow1, "Show ASU only", state.showOnlyAsu, function (b) { state.showOnlyAsu = b; clearUnselectableSelections(); renderStructure(); updateSelectionInfo(); recordMacroCommand(b ? "ASU_ONLY_ON" : "ASU_ONLY_OFF"); });
     asuTg.id = "showOnlyAsuTg";
-    var showLabelsTg = toggle(showRow1, "Show atom labels", state.showLabels, function (b) { state.showLabels = b; renderLabels(); });
-    showLabelsTg.id = "showLabelsTg";
+    var showLabelsTg = toggle(showRow1, "Show atom labels", state.showLabels, setShowLabels);
+    showLabelsTg.id = "showLabelsTg"; showLabelsTg.setAttribute("data-sync-key", "showLabels");
     cifDispC.appendChild(showRow1);
     /* same .toggle-row2 grid as showRow1 above (not .ctl-inline, which sizes
        each column to its own content) so "Show axis key" -- second column
        here -- lines up under "Show atom labels", also second column. */
     var ucShowRow = el("div", "toggle-row2");
-    var ucShowTg = toggle(ucShowRow, "Show unit cell", state.showUnitCell, function (b) { state.showUnitCell = b; renderUnitCell(); recordMacroCommand(b ? "UNIT_CELL_ON" : "UNIT_CELL_OFF"); });
-    ucShowTg.id = "showUnitCellTg";
-    var axisKeyDispTg = toggle(ucShowRow, "Show axis key", state.showAxisKey, function (b) { state.showAxisKey = b; recordMacroCommand(b ? "AXIS_KEY_ON" : "AXIS_KEY_OFF"); });
-    axisKeyDispTg.id = "showAxisKeyTg";
+    var ucShowTg = toggle(ucShowRow, "Show unit cell", state.showUnitCell, setShowUnitCell);
+    ucShowTg.id = "showUnitCellTg"; ucShowTg.setAttribute("data-sync-key", "showUnitCell");
+    var axisKeyDispTg = toggle(ucShowRow, "Show axis key", state.showAxisKey, setShowAxisKey);
+    axisKeyDispTg.id = "showAxisKeyTg"; axisKeyDispTg.setAttribute("data-sync-key", "showAxisKey");
     axisKeyDispTg.title = "A small a/b/c orientation indicator (red/green/blue arrows, lengths proportional to the real a/b/c cell edge lengths) -- drag it anywhere in the 3D view, or press k to show/hide it. Size and zoom: Style > Unit cell.";
     cifDispC.appendChild(ucShowRow);
     var hRow = el("div", "toggle-row2");
@@ -18363,40 +18629,6 @@ select.sel:focus{border-color:var(--accent)}
     var viewVecBtn = button(directionBody, "View along vector", "ghost", viewAlongTwoAtoms); viewVecBtn.id = "viewVecBtn"; viewVecBtn.disabled = true;
     var viewPlaneBtn = button(directionBody, "View perpendicular to plane", "ghost", viewPerpendicularToPlane); viewPlaneBtn.id = "viewPlaneBtn"; viewPlaneBtn.disabled = true;
 
-    var labelsBody = subsection(cifDispC, "Labels", false);
-    toggle(labelsBody, "Contrasting outline", state.labelHalo, function (v) {
-      state.labelHalo = v; labelTexCache = {}; renderLabels(); persistPreferences();
-    });
-    var labelFontColorRow = el("div", "ctl-inline");
-    labelFontColorRow.appendChild(el("label", "plain", "Font"));
-    var labelFontSel = document.createElement("select"); labelFontSel.className = "sel";
-    FONT_OPTIONS.forEach(function (opt) {
-      var o = document.createElement("option"); o.value = opt[0]; o.textContent = opt[1];
-      if (String(opt[0]) === String(state.labelFont)) o.selected = true;
-      labelFontSel.appendChild(o);
-    });
-    labelFontSel.addEventListener("change", function () {
-      state.labelFont = labelFontSel.value; labelTexCache = {}; renderLabels(); persistPreferences();
-    });
-    labelFontColorRow.appendChild(labelFontSel);
-    var labelColorLbl = el("label", "plain", "Colour"); labelColorLbl.style.marginLeft = "10px";
-    labelFontColorRow.appendChild(labelColorLbl);
-    labelFontColorRow.appendChild(colorSwatch(state.labelColor, function (c) {
-      state.labelColor = c; labelTexCache = {}; renderLabels(); persistPreferences();
-    }));
-    labelsBody.appendChild(labelFontColorRow);
-    labelSlider(labelsBody, "Size", 1.0, 6.0, 0.1, state.labelSize, function (v) {
-      state.labelSize = v; updateLabelScales(); persistPreferences();
-    });
-    var labelBtnRow = el("div", "btnrow");
-    button(labelBtnRow, "Label selected", "ghost", function () { setLabelVisibilityForSelected(true); });
-    button(labelBtnRow, "Unlabel selected", "ghost", function () { setLabelVisibilityForSelected(false); });
-    labelsBody.appendChild(labelBtnRow);
-    var labelUnfixBtnRow = el("div", "btnrow");
-    button(labelUnfixBtnRow, "Unfix all labels", "ghost", function () { unfixAllLabels(); });
-    button(labelUnfixBtnRow, "Unfix selected", "ghost", function () { unfixSelectedLabels(); });
-    labelsBody.appendChild(labelUnfixBtnRow);
-
     var centeringBody = subsection(cifDispC, "Centering", false);
     var centeringRow = el("div", "ctl-inline");
     centeringRow.appendChild(el("label", "plain", "Centering"));
@@ -18433,6 +18665,10 @@ select.sel:focus{border-color:var(--accent)}
     centeringFracRow.appendChild(centeringFracApplyBtn);
     centeringFracWrap.appendChild(centeringFracRow);
     centeringBody.appendChild(centeringFracWrap);
+    var recenterRow = el("div", "btnrow");
+    var recenterBtn = button(recenterRow, "Recenter", "ghost", function () { resetPan(); setStatus("Recentered -- the rotation centre is back at the default (centred) position.", false); });
+    recenterBtn.title = "Undo any Ctrl+left-drag panning: the rotation centre returns to its default position, in the middle of the view.";
+    centeringBody.appendChild(recenterRow);
 
     centeringSel.addEventListener("change", function () {
       if (centeringSel.value === "unitcell" && (!state.isCif || !state.cifFracToCart)) {
@@ -18450,7 +18686,7 @@ select.sel:focus{border-color:var(--accent)}
       } else {
         centeringApplyBtn.style.display = "none";
         if (state.centeringMode !== "fractional") {
-          recomputeViewOffset(); renderStructure();
+          resetPan(); recomputeViewOffset(); renderStructure();
           recordMacroCommand(state.centeringMode === "all" ? "CENTER_ALL" : state.centeringMode === "visible" ? "CENTER_VISIBLE" : "CENTER_UNITCELL");
         }
       }
@@ -18610,7 +18846,7 @@ select.sel:focus{border-color:var(--accent)}
        all) or Current style (snapshots whatever Style > Atoms' pending
        brush -- colour mode and either the Non-H/H vdW multipliers or the
        Fixed radius, whichever is checked -- onto every newly grown atom). */
-    var growStyleOptions = [["default", "Default"], ["current", "Current style"]];
+    var growStyleOptions = [["default", "Default"], ["current", "Current style"], ["asu", "Same as ASU"]];
     var hostGrowSel = select(symC, "Settings for new host atoms", growStyleOptions, state.hostGrowStyle, function (v) { state.hostGrowStyle = v; }); hostGrowSel.id = "hostGrowStyleSelect";
     var guestGrowSel = select(symC, "Settings for new guest atoms", growStyleOptions, state.guestGrowStyle, function (v) { state.guestGrowStyle = v; }); guestGrowSel.id = "guestGrowStyleSelect";
     /* the two labels differ by one word ("host" vs "guest"), so their
@@ -19208,14 +19444,14 @@ select.sel:focus{border-color:var(--accent)}
     if (!state.isCif) { setStatus("This only applies to a CIF-based structure.", true); return; }
     state.showUnitCell = !state.showUnitCell;
     renderUnitCell();
-    var cb = document.getElementById("showUnitCellTg"); if (cb) cb.checked = state.showUnitCell;
+    syncShowToggleUIs(); persistPreferences();
     recordMacroCommand(state.showUnitCell ? "UNIT_CELL_ON" : "UNIT_CELL_OFF");
     setStatus(state.showUnitCell ? "Showing unit cell." : "Hiding unit cell.", false);
   }
   function toggleAxisKeyDisplay() {
     if (!state.isCif) { setStatus("This only applies to a CIF-based structure.", true); return; }
     state.showAxisKey = !state.showAxisKey;
-    var cb = document.getElementById("showAxisKeyTg"); if (cb) cb.checked = state.showAxisKey;
+    syncShowToggleUIs(); persistPreferences();
     recordMacroCommand(state.showAxisKey ? "AXIS_KEY_ON" : "AXIS_KEY_OFF");
     setStatus(state.showAxisKey ? "Showing axis key." : "Hiding axis key.", false);
   }
@@ -19371,6 +19607,11 @@ select.sel:focus{border-color:var(--accent)}
       if (!e.ctrlKey && !e.altKey && !e.metaKey && e.code === "KeyK") { e.preventDefault(); toggleAxisKeyDisplay(); return; }
       if (!e.ctrlKey && !e.altKey && !e.metaKey && e.code === "KeyH") { e.preventDefault(); toggleHydrogenDisplay(); return; }
       if (!e.ctrlKey && !e.altKey && !e.metaKey && e.code === "KeyL") { e.preventDefault(); toggleLabelDisplay(); return; }
+      /* p: same as Style > L.S. Planes > "New plane" -- fits a plane through
+         the current selection (3+ atoms) and clears the selection;
+         createLsPlane() itself reports "Select at least 3 atoms first." when
+         there aren't enough. */
+      if (!e.ctrlKey && !e.altKey && !e.metaKey && e.code === "KeyP") { e.preventDefault(); createLsPlane(); return; }
       if (!state.walkMode && !e.ctrlKey && !e.altKey && !e.metaKey && (e.key === "-" || e.key === "=" || e.key === "+")) {
         e.preventDefault();
         var curScale = Math.round(SCALE_REF / Math.max(camDist, 1e-6));
@@ -19508,12 +19749,13 @@ select.sel:focus{border-color:var(--accent)}
       "<ul>" +
       "<li><b>Left drag</b> &mdash; rotate. Free rotation about the camera's own axes; there is no limit, and it stops the instant the mouse does. \"Rotation sensitivity\" (Visual Effects panel, Scene tab) can slow this down for lining up a precise view -- it only ever slows down, never speeds up past the default, and resets to full speed the next time the file is opened rather than being remembered.</li>" +
       "<li><b>Shift + left drag</b> &mdash; roll (rotate in the screen plane), for straightening a figure without changing what you're looking at.</li>" +
+      "<li><b>Ctrl + left drag</b> &mdash; pan: the whole model and its centre of rotation move across the panel together, following the cursor. The model still rotates and zooms about its own centre (e.g. its centroid), which now simply sits off the middle of the panel, and stays where you put it on screen as you rotate. Everything moves together -- atoms, bonds, unit cell, voids, channels, molecular surfaces, coordination polyhedra, L.S. planes, labels -- because the whole view is shifted, not any one component. A Ctrl + click that doesn't drag still selects a whole fragment, as before. <b>Display &gt; Centering &gt; Recenter</b> puts the rotation centre back in the middle; loading a structure, or applying any Centering choice, does the same.</li>" +
       "<li><b>Alt + left drag</b> &mdash; lasso select: draw a freeform outline and every atom projected inside it (host and guest together, whichever are currently shown) is added to the selection.</li>" +
       "<li><b>Ctrl + Alt + left drag</b> &mdash; lasso select whole fragments: the same outline, but each atom it touches brings its entire bonded fragment into the selection, the same rule ctrl-click uses for a single atom.</li>" +
       "<li>Lasso selection works on screen position only, not true depth: an atom behind another one, as long as its projected position falls inside the outline, is selected too, even though it's obscured from view by whatever's in front of it. Rotating to a clearer angle before lassoing avoids surprises in a dense structure. This is separate from an atom that's actually hidden (individually hidden, a hydrogen with display switched off, or excluded by \"Show ASU only\") -- those are never selected by lasso, or by any other selection method, while they're not displayed.</li>" +
       "<li><b>Right drag, vertical</b> &mdash; zoom (up = in, down = out). The mouse wheel is disabled.</li>" +
-      "<li><b>Arrow keys</b> &mdash; rotate in fixed 5&deg; steps: left/right about the vertical axis, up/down about the horizontal axis. <b>Page Up / Page Down</b> roll in 5&deg; steps. Holding <b>Shift</b> with any of the six turns that same 5&deg; nudge into an exact 90&deg; turn instead -- handy for snapping to a face-on view along whichever axis the key already rotates about (Ctrl was tried for this first, but Ctrl+Page Up/Page Down are already claimed by the browser's own previous/next-tab shortcut, so Shift is used instead throughout). <b>-</b> and <b>=</b>/<b>+</b> zoom out and in, one fixed step at a time, the same as dragging the Set scale number down or up (Display panel). <b>Delete</b> (or Backspace) deletes the selected atoms, or cuts the selected bond(s) if no atoms are selected. <b>Ctrl-C</b> generates a centroid from the selected atoms. <b>Escape</b> clears the whole selection; plain <b>spacebar</b> selects everything if nothing is selected, or clears it if anything is. <b>Shift+spacebar</b> inverts the atom selection; <b>Ctrl+spacebar</b> inverts the bond selection. <b>Ctrl-Z</b> hides the selected atoms (Structure &gt; Edit atoms' \"Hide selected\"); <b>Ctrl-U</b> unhides everything. For a CIF-based structure: <b>a</b> toggles between showing only the asymmetric unit and showing everything currently grown; <b>c</b> toggles the unit cell; <b>h</b> toggles hydrogen display; <b>l</b> toggles atom labels. These only respond while focus isn't in a text box, dropdown, or button.</li>" +
-      "<li><b>Orthographic / Pseudo-orthographic / Depth scaling</b> (Visual Effects panel, Scene tab) &mdash; three mutually exclusive camera modes. <b>Orthographic</b> (default) is a true orthographic projection: exact parallel projection, so e.g. unit cell edges viewed straight down an axis overlay exactly, at the cost of a known artifact where zooming in close enough can clip through the middle of a solid atom (an inherent property of orthographic projection, not a bug -- a true orthographic camera has no single eye point for the near/far clipping planes to be tuned around). <b>Pseudo-orthographic</b> and <b>Depth scaling</b> both trade that off the other way, using the exact same mechanism -- a genuine perspective camera at a narrow angle, parked correspondingly far away, which eliminates the clipping entirely at the cost of some perspective convergence (near/far cell edges no longer overlay exactly edge-on-edge) -- the only difference between them is the angle: Pseudo-orthographic fixes it at a very small, usually-imperceptible value, while Depth scaling exposes it as its own slider (from that same small value up to 25&deg;), for a deliberately stronger, adjustable sense of depth -- useful for judging a large structure's own 3D shape at a glance, where a true orthographic view can read as flat. The slider stays disabled, at whatever it was last set to, unless Depth scaling is the selected mode.</li>" +
+      "<li><b>Arrow keys</b> &mdash; rotate in fixed 5&deg; steps: left/right about the vertical axis, up/down about the horizontal axis. <b>Page Up / Page Down</b> roll in 5&deg; steps. Holding <b>Shift</b> with any of the six turns that same 5&deg; nudge into an exact 90&deg; turn instead -- handy for snapping to a face-on view along whichever axis the key already rotates about (Ctrl was tried for this first, but Ctrl+Page Up/Page Down are already claimed by the browser's own previous/next-tab shortcut, so Shift is used instead throughout). <b>-</b> and <b>=</b>/<b>+</b> zoom out and in, one fixed step at a time, the same as dragging the Set scale number down or up (Display panel). <b>Delete</b> (or Backspace) deletes the selected atoms, or cuts the selected bond(s) if no atoms are selected. <b>Ctrl-C</b> generates a centroid from the selected atoms. <b>Escape</b> clears the whole selection; plain <b>spacebar</b> selects everything if nothing is selected, or clears it if anything is. <b>Shift+spacebar</b> inverts the atom selection; <b>Ctrl+spacebar</b> inverts the bond selection. <b>Ctrl-Z</b> hides the selected atoms (Structure &gt; Edit atoms' \"Hide selected\"); <b>Ctrl-U</b> unhides everything. For a CIF-based structure: <b>a</b> toggles between showing only the asymmetric unit and showing everything currently grown; <b>c</b> toggles the unit cell; <b>k</b> toggles the axis key; <b>h</b> toggles hydrogen display; <b>l</b> toggles atom labels. <b>p</b> creates a least-squares plane through the selected atoms (3 or more) and clears the selection -- the same as Style &gt; L.S. Planes' \"New plane\". The checkboxes for the unit cell, axis key and atom labels each exist twice (in Display and in the matching Style submenu) and always agree with one another and with these keys. These only respond while focus isn't in a text box, dropdown, or button.</li>" +
+      "<li><b>Orthographic / Pseudo-orthographic / Depth scaling</b> (Visual Effects panel, Scene tab) &mdash; three mutually exclusive camera modes. <b>Orthographic</b> (default) is a true orthographic projection: exact parallel projection, so e.g. unit cell edges viewed straight down an axis overlay exactly, at the cost of a known artifact where zooming in close enough can clip through the middle of a solid atom (an inherent property of orthographic projection, not a bug -- a true orthographic camera has no single eye point for the near/far clipping planes to be tuned around). <b>Pseudo-orthographic</b> and <b>Depth scaling</b> both trade that off the other way, using the exact same mechanism -- a genuine perspective camera at a narrow angle, parked correspondingly far away, which eliminates the clipping entirely at the cost of some perspective convergence (near/far cell edges no longer overlay exactly edge-on-edge) -- the only difference between them is the angle: Pseudo-orthographic fixes it at a very small, usually-imperceptible value, while Depth scaling exposes it as its own slider (from that same small value up to 25&deg;), for a deliberately stronger, adjustable sense of depth -- useful for judging a large structure's own 3D shape at a glance, where a true orthographic view can read as flat. The slider stays disabled, at whatever it was last set to, unless Depth scaling is the selected mode. The chosen mode and angle are remembered between structures and when the app is closed and reopened, and loading a saved project file does not change them.</li>" +
       "</ul>" +
       "<h3>Visual Effects and Export</h3>" +
       "<p><b>Visual Effects</b> gathers everything about how the scene looks into one panel, split into three tabs: <b>Scene</b> (background, projection, detail level, fog, rotation sensitivity), <b>Material</b> (how atoms respond to light), and <b>Lighting</b> (the three light sources). <b>Export</b> covers producing an image and isn't a look-and-feel setting in the same sense as the other three, so it has no \"retain\" box of its own -- export resolution and transparent background are export-time choices, always starting fresh (current size, opaque) each time this file is reopened. Each of the three Visual Effects tabs has its own \"restore defaults\" button, scoped to just that tab, and its own \"retain these settings\" box. With that box checked (the default), the tab's settings are remembered and restored the next time this file is opened, the same way element radii and colours already are. Unchecked, that tab quietly goes back to using the built-in defaults every time the file is opened instead, and whatever was saved for it before is forgotten immediately -- there's no partial memory of it lying around to reappear if the box is checked again later. Several sliders here (fog, rotation sensitivity, material, light angle and intensity) show no number -- the slider position is the control, without a readout to fuss over.</p>" +
@@ -19536,7 +19778,7 @@ select.sel:focus{border-color:var(--accent)}
       "<p>All of this only ever adds atoms; nothing is removed automatically, and everything added this way can be deleted, selected, or undone exactly like any other atom in the app. <b>Extend fragment(s)</b>, visible above the tabs regardless of which one is open, applies the Mouse tab's Bonds+Frag behaviour all at once: it snapshots every atom currently displayed and grows the connected fragment attached to each one that has a new symmetry-connected neighbour, in a single step. Only atoms present at the moment it's pressed are used as starting points -- atoms it adds during that same pass are never themselves used to grow further, which is what keeps something like a polymer or chain from running away indefinitely. \"Delete all symmetry-generated atoms\", just below it, removes everything growth has added in one step back to just the original asymmetric unit -- a guest designation on an asymmetric unit atom survives this, only the grown copies are removed.</p>" +
       "<p><b>Complete molecule(s)</b>, next to Extend fragment(s), fills out any fragment that's only partly present into a whole discrete molecule by symmetry -- e.g. an inversion centre or a rotation axis relating one asymmetric-unit piece to the rest of the molecule. It tests each fragment first (a real molecule never needs the same asymmetric-unit-atom-plus-operator pair twice; a polymer or framework always does eventually), so it never runs away trying to complete something that's genuinely infinite -- a fragment that's fully polymeric is left alone with a note to use Extend fragment(s) for it instead, and one that's partly molecular and partly extended is completed as far as it can be, with the rest reported as continuing like a polymer. For a coordination polymer or MOF specifically, it also tops up any bridging ligand (e.g. a pyrazine ring) left truncated by ordinary growth, stopping cleanly at the metal it coordinates to rather than adding that metal itself -- so a ligand cut in half at a Pack box boundary comes back whole without also pulling in a new metal centre.</p>" +
       "<p><b>Generate whole molecules</b>, the checkbox just above those two buttons, makes this automatic: whenever Mouse-click growth, Pack, Extend fragment(s), or Sphere of inclusion would otherwise leave a partial molecule or a truncated ligand, the same completion runs immediately afterward, silently, with its own follow-up status message only appearing when it actually added something. Off by default -- growth then leaves fragments exactly as it finds them, same as if this checkbox didn't exist.</p>" +
-      "<p>The <b>Grow</b> section has a <b>Settings for new host atoms</b> and a <b>Settings for new guest atoms</b> dropdown (just under Forget symmetry), which decides the radius and colour a newly grown atom starts with in that layer. <b>Default</b> leaves no override at all -- a newly grown atom renders with the plain ball-and-stick default, exactly like a freshly loaded one. <b>Current style</b> snapshots whatever Style &gt; Atoms' Colour and Radii checkboxes are currently set to (defaulting to ball-and-stick radius and CPK colour if neither Radii option is ticked) and gives every newly grown atom in that layer exactly that look. Whichever option is chosen, this only ever sets an override at the moment an atom is grown -- it never revisits atoms already present when the dropdown is changed.</p>" +
+      "<p>The <b>Grow</b> section has a <b>Settings for new host atoms</b> and a <b>Settings for new guest atoms</b> dropdown (just under Forget symmetry), which decides the radius and colour a newly grown atom starts with in that layer. <b>Default</b> leaves no override at all -- a newly grown atom renders with the plain ball-and-stick default, exactly like a freshly loaded one. <b>Current style</b> snapshots whatever Style &gt; Atoms' Colour and Radii checkboxes are currently set to (defaulting to ball-and-stick radius and CPK colour if neither Radii option is ticked) and gives every newly grown atom in that layer exactly that look. <b>Same as ASU</b> instead gives each newly grown atom the look of its own asymmetric-unit parent atom -- its colour (CPK or custom), radius setting, and sphere-or-ellipsoid choice -- so a symmetry copy always matches however its parent has been styled (a parent that has since been moved to the guest layer is still found; an atom with no parent to copy from just gets the Default look). Whichever option is chosen, this only ever sets an override at the moment an atom is grown -- it never revisits atoms already present when the dropdown is changed.</p>" +
       "<p>Guests inherit their host or guest membership from the asymmetric unit position they came from, which normally makes sense -- but there are times a guest that's currently linked to others this way needs to move independently, or join the host, without dragging its symmetry-related copies along. \"Forget symmetry\", below that, makes this possible: it permanently discards this structure's symmetry information. Afterwards, every atom present -- asymmetric unit and grown copies alike -- stays exactly where it is, but each one can be edited, deleted, reassigned, or moved between host and guest completely independently, with no symmetry tracking. Growth, ASU only, and the automatic symmetry-linked cascades (an element or host/guest change spreading to related atoms, a cut bond applying to its symmetry images) all stop -- the entire Grow panel disappears, since none of it applies any more. The Display panel's Unit cell tab is unaffected and stays fully controllable, since it doesn't depend on any of this. This cannot be undone, and asks for confirmation before doing anything.</p>" +
       "<p>Ctrl-Alt-click selects every currently-displayed atom that shares the same asymmetric unit origin as the one clicked -- every symmetry copy of that specific atom, across host and guest alike -- which is otherwise not something to find by hand once a structure has been grown out. This takes priority over grow mode, so it works the same way whether or not grow mode happens to be switched on.</p>" +
       "<p>If part of the asymmetric unit has been moved to a guest (e.g. an included CO<sub>2</sub>, moved there via \"Move selection to\" in Structure &gt; Edit atoms, the same way as in Mode 1), growth remembers that: every future symmetry-generated copy of that same asymmetric unit atom is added as a guest too, not host, from then on -- joining the same guest component it was already part of, rather than starting a new one each time. Clicking a guest atom in grow mode works exactly like clicking a host atom; there's no distinction between them for growth purposes.</p>" +
@@ -19544,7 +19786,10 @@ select.sel:focus{border-color:var(--accent)}
       "<h3>Molecular neighbourhood</h3>" +
       "<p>A different way of growing: rather than adding atoms outright, it previews what's nearby first, so a direction can be chosen before committing to it -- useful for a framework or polymer that could otherwise be extended in several different directions at once. Enter a <b>Sphere of inclusion</b> radius, then press the button below it (solid red while active, exactly like Mouse's own grow-mode button). Every symmetry-generated atom not currently displayed, but within that radius of at least one atom that already is (host or guest, whichever layer it would belong to), is shown as a small unbonded sphere, joined by a dotted line to each real atom it's close enough to -- these are a preview only, never added to the model, and cost nothing to leave on screen since they're recomputed only when the mode is turned on, the radius changes, or a fragment is added, not on every frame. <b>Black nodes</b> (ticked by default) shows every one of these preview spheres in plain black, keeping them visually distinct from anything already in the model; unticking it instead colours each one the same as the real atom it represents (its usual CPK or custom colour), which makes it far easier to judge what a given preview position actually is -- e.g. picking out a lone counter-ion's own colour among a crowd of hydrogens -- at the cost of that “obviously still just a preview” distinctness black gives. Either way, the dotted contact lines themselves stay black, and the preview spheres' own radii still scale with each atom's own display radius, exactly like a real atom would.</p>" +
       "<p>Clicking one of these black spheres adds the whole connected fragment it belongs to -- the same Fragment-unit growth Mouse's own grow mode uses -- and the preview then refreshes around the newly-larger structure: any black sphere the new fragment happened to reach simply stops being previewed (it's a real atom now), and a fresh ring of black spheres appears around whatever's now the edge of the structure. Repeating this lets a structure be built out one fragment at a time, following whichever direction actually looks interesting, rather than growing everything within reach at once. Leaving Molecular neighbourhood -- pressing its button again, closing its own tab, switching to Mouse/Pack/Symmetry, or opening a different section entirely -- discards whatever black spheres are still on screen; nothing about them is ever kept. Like grow mode, it needs a CIF that still has its symmetry information.</p>" +
-      "<p>The <b>Display</b> section, just below Grow, is always available. Its own general settings hold <b>Show hydrogen atoms</b> and <b>ASU only</b> as one paired row, then <b>Show unit cell</b> paired with <b>Show H bonds</b>; a <b>Background colour</b> swatch; <b>Centering</b> (All/Visible/Selected atoms, with an Apply button that only appears for \"Selected atoms\", since that mode is otherwise frozen at whatever it was last applied to); <b>Set scale</b>, an arbitrary whole-number reference for the current zoom level -- bigger means more zoomed in, updates live as you zoom, and can be typed into directly (it carries no physical unit; its purpose is matching the same apparent zoom between different structures rather than measuring anything); and duplicate <b>Select all</b> / <b>Clear selection</b> / <b>Hide selection</b> / <b>Unhide all</b> buttons for convenience, identical to the ones in Structure &gt; Edit atoms. Nested inside Display: <b>Direction</b>, a <b>View direction</b> set of crystallographic view shortcuts -- buttons for looking straight down each cell axis (a, b, c) and perpendicular to each pair-wise plane (bc, ac, ab), a general <b>[hkl]</b> field for viewing along any specific direction entered as its own three numbers, and <b>View along vector</b> / <b>View perpendicular to plane</b> (see \"Viewing along a vector or a plane\" below), which orient the camera from a selection of atoms instead. <b>Unit cell</b> holds a <b>Label axes</b> toggle for the a/b/c corner labels, a <b>RGB axes</b> option to colour the a/b/c edges red/green/blue, the cell's own <b>Cell colour</b>, and <b>line thickness</b> -- the show/hide toggle itself lives in Display's general settings above, not here. Each corner label sits genuinely at that corner in 3D and is occluded normally by anything nearer the camera (an atom, an L.S. plane, ...), not painted on top of everything regardless of what's actually in front of it.</p>" +
+      "<p>The <b>Display</b> section, just below Grow, is always available. Its own general settings hold <b>Show ASU only</b> paired with <b>Show atom labels</b>, then <b>Show unit cell</b> paired with <b>Show axis key</b>, then <b>Show hydrogen atoms</b> paired with <b>Show H bonds</b>; a <b>Background colour</b> swatch; <b>Centering</b> (All/Visible/Selected atoms, with an Apply button that only appears for \"Selected atoms\", since that mode is otherwise frozen at whatever it was last applied to, plus a <b>Recenter</b> button that returns the rotation centre to its default position after any Ctrl + left-drag panning); <b>Set scale</b>, an arbitrary whole-number reference for the current zoom level -- bigger means more zoomed in, updates live as you zoom, and can be typed into directly (it carries no physical unit; its purpose is matching the same apparent zoom between different structures rather than measuring anything); and duplicate <b>Select all</b> / <b>Clear selection</b> / <b>Hide selection</b> / <b>Unhide all</b> buttons for convenience, identical to the ones in Structure &gt; Edit atoms. Nested inside Display: <b>Direction</b>, a <b>View direction</b> set of crystallographic view shortcuts -- buttons for looking straight down each cell axis (a, b, c) and perpendicular to each pair-wise plane (bc, ac, ab), a general <b>[hkl]</b> field for viewing along any specific direction entered as its own three numbers, and <b>View along vector</b> / <b>View perpendicular to plane</b> (see \"Viewing along a vector or a plane\" below), which orient the camera from a selection of atoms instead. The appearance of the unit cell, the axis key and the atom labels lives in Style (see \"Unit cell, axis key and atomic labels (Style)\" below).</p>" +
+      "<h3>Unit cell, axis key and atomic labels (Style)</h3>" +
+      "<p><b>Style &gt; Unit cell</b> starts with a <b>Show unit cell</b> checkbox that echoes Display's checkbox of the same name and the <b>c</b> key -- change any one and the others follow. Below it: a <b>Label axes</b> toggle for the a/b/c corner labels, a <b>RGB axes</b> option to colour the a/b/c edges red/green/blue, the cell's own <b>Cell colour</b>, and <b>line thickness</b> -- all of these, plus whether the cell is shown, are remembered between structures and when the app is closed and reopened. Each corner label sits genuinely at that corner in 3D and is occluded normally by anything nearer the camera (an atom, an L.S. plane, ...), not painted on top of everything regardless of what's actually in front of it. A divider then separates the cell's settings from the <b>axis key's</b> own: a <b>Show axis key</b> checkbox (echoing Display's, and the <b>k</b> key), the key's <b>zoom</b> (scales the whole key -- arrow length and thickness, arrowheads and letters alike), <b>proportional lengths</b> (arrow lengths follow the real a/b/c edge lengths, or all equal when off), <b>show labels a, b, c</b> (a letter beside each arrow tip, in the arrow's own red/green/blue on a transparent background, scaling with the key's zoom and positioned smoothly so it never jumps as the model rotates; on by default, remembered between sessions, and included in exported images along with the key itself), and <b>Reset key position</b>. All of the key's settings -- whether it is shown, where you dragged it, its zoom, proportional lengths and labels -- are remembered between structures and when the app is closed and reopened (a saved project file still restores its own).</p>" +
+      "<p><b>Style &gt; Atomic labels</b> (moved here from Display, where it was called Labels) holds <b>Show atom labels</b> -- again echoing Display's checkbox of the same name and the <b>l</b> key -- plus <b>Contrasting outline</b>, <b>Font</b>, <b>Colour</b>, <b>Size</b>, and the buttons that label or unlabel the selected atoms and unfix dragged labels.</p>" +
       "<p>Growing by clicking (atom or fragment), by sphere of inclusion, by an explicit packing range (Pack), and by a specific chosen symmetry operation or translation (Symmetry) are all implemented, as described above. Only CIFs with an explicit list of symmetry operators are supported -- one that gives only a space group name or number, with no operator list, is read as P1 (no symmetry) since looking up operators from thousands of possible space group settings isn't implemented.</p>" +
       "<h3>Host and guest are independent layers</h3>" +
       "<p>Loading a new host CIF starts fresh, clearing any guest along with the old host. Within one loaded structure, though, host and guest stay independent: deleting or hiding atoms in one layer (Structure &gt; Edit atoms) never affects the other. \"Remove host\" and \"Remove all guests\" each ask for confirmation first, since for a CIF-based structure they permanently delete the relevant asymmetric unit atoms along with everything grown from them by symmetry, not just what happens to be currently displayed. Each only ever clears its own layer.</p>" +
@@ -19583,7 +19828,7 @@ select.sel:focus{border-color:var(--accent)}
       "<h3>Viewing along a vector or a plane</h3>" +
       "<p>Select exactly two atoms and \"View along vector\" (Display &gt; Direction) becomes available, orienting the camera to look straight along the line through them. Select exactly three and \"View perpendicular to plane\" becomes available instead, orienting the camera face-on to the plane they define. Both only ever rotate the view -- they never move the zoom level or what the camera is centred on -- and each is disabled again the moment the selection count isn't exactly right for it.</p>" +
       "<h3>L.S. planes (Style)</h3>" +
-      "<p><b>Show planes</b>, the first control in Style &gt; L.S. Planes, is a single master on/off (on by default) that hides every plane at once without deleting any of them or disturbing each one's own individual show/hide checkbox in the list below -- turn it back on and every plane reappears exactly as it was left. Select three or more atoms and <b>New plane</b> becomes available, fitting and adding a <b>least-squares mean plane</b> through them -- the plane through their centroid whose orientation minimizes the summed squared perpendicular distance to every one of them, the same \"best-fit plane\" reported by Mercury, PLATON, or SHELXL, not simply a plane fixed by picking any three of the atoms. The rendered shape is a polygon through each atom's own position projected onto the plane, not a generic rectangle -- select the six atoms of a ring and the plane reads as a hexagon with its own vertices sitting right where the atoms are (exactly there if they're perfectly planar, very close otherwise). The selection is cleared automatically once the plane is added, so a second, different group of atoms can be selected straight away for another one. Every plane made this way accumulates in a list rather than replacing the last one -- each row shows its own atom count and <b>rms deviation</b> (how far, on average, the fitted atoms actually sit off their own best-fit plane -- 0 would mean perfectly flat), with its own show/hide checkbox and colour swatch, or tick <b>Same colour for all</b> to colour every plane at once instead; a single <b>Plane opacity</b> slider applies to all of them. <b>Clear all</b> removes every plane in one step. A plane is a one-time snapshot of the fit at the moment it's created -- like a molecular surface, it does not follow the atoms it was fitted from if they are later moved, grown further, or deleted.</p>" +
+      "<p><b>Show planes</b>, the first control in Style &gt; L.S. Planes, is a single master on/off (on by default) that hides every plane at once without deleting any of them or disturbing each one's own individual show/hide checkbox in the list below -- turn it back on and every plane reappears exactly as it was left. Select three or more atoms and <b>New plane</b> becomes available (or simply press the <b>p</b> key -- the same action, with the selection cleared afterwards just the same), fitting and adding a <b>least-squares mean plane</b> through them -- the plane through their centroid whose orientation minimizes the summed squared perpendicular distance to every one of them, the same \"best-fit plane\" reported by Mercury, PLATON, or SHELXL, not simply a plane fixed by picking any three of the atoms. The rendered shape is a polygon through each atom's own position projected onto the plane, not a generic rectangle -- select the six atoms of a ring and the plane reads as a hexagon with its own vertices sitting right where the atoms are (exactly there if they're perfectly planar, very close otherwise). The selection is cleared automatically once the plane is added, so a second, different group of atoms can be selected straight away for another one. Every plane made this way accumulates in a list rather than replacing the last one -- each row shows its own atom count and <b>rms deviation</b> (how far, on average, the fitted atoms actually sit off their own best-fit plane -- 0 would mean perfectly flat), with its own show/hide checkbox and colour swatch, or tick <b>Same colour for all</b> to colour every plane at once instead; a single <b>Plane opacity</b> slider applies to all of them. <b>Clear all</b> removes every plane in one step. A plane is a one-time snapshot of the fit at the moment it's created -- like a molecular surface, it does not follow the atoms it was fitted from if they are later moved, grown further, or deleted.</p>" +
       "<h3>Walk mode</h3>" +
       "<p>Display &gt; Walk mode is a separate, free-fly first-person view for exploring the inside of a void or channel -- a completely different way of looking at the structure from the usual orbit view (Orthographic/Pseudo-orthographic/Depth scaling, Visual Effects &gt; Scene), rather than a variation on it. Turning it on drops the camera into the scene at exactly wherever the orbit view was last looking, facing the same direction; turning it off (the same button, closing the Walk mode submenu, or collapsing the whole Display section) returns instantly to that orbit view exactly as it was left -- nothing about the ordinary view is disturbed by walking around in here.</p>" +
       "<p>Controls while walking: <b>mouse wheel</b> moves forward and backward along whichever way the camera is currently facing (scrolling up/away means forward, matching how right-drag zoom already treats \"up\" as closer everywhere else in the app); <b>left-drag</b> turns the look direction -- rotating purely on the spot around your own current position (nothing here orbits around the structure or any point within it, the way the ordinary view does), with no limit at all on how far up or down you can look, since there's no \"ground\" to keep upright against; <b>right-drag</b> pans/strafes purely in the plane of the screen -- sideways and up/down as the screen shows them, never forward/backward -- without turning, for sliding past something without having to look away from it first; <b>shift-left-drag</b> rolls -- tilts the horizon, rotating around the direction you're currently facing -- using the exact same \"grab a wheel centred on the viewport\" gesture as the ordinary orbit view's own shift-drag roll. Both plain drags use a \"grab and drag the scene\" convention -- drag right and the view moves as if you'd pushed the structure itself to the right -- matching the ordinary orbit view's own rotate-drag rather than a first-person-shooter's \"push the mouse to turn your head\" convention; <b>Reverse drag directions</b> flips that convention for looking around (not panning) for whoever finds it backwards the other way. Because looking around has no clamp, enough mixed dragging can accumulate a bit of roll (the horizon can end up tilted) -- <b>Recenter view</b> snaps straight back to the exact view you had when you turned walk mode on, undoing any drift or disorientation in one click. Three independent sliders control how fast each of the three actions above responds -- speeding up one never affects another: <b>Walk speed</b> scales one wheel-step's forward/backward distance; <b>Pan sensitivity</b> scales how far one pixel of right-drag slides you sideways/up/down; <b>Swivel/roll sensitivity</b> scales both how far one pixel of left-drag turns the view and how far a shift-left-drag rolls it (the same slider covers both, since they're really the same action -- turning). <b>Headlamp</b> is a light that travels with you, independent of Visual Effects &gt; Lighting's own setup -- handy for seeing what's actually nearby inside an otherwise dark or dim structure, and switches off the instant you leave Walk mode so it never lingers into the ordinary view; its own intensity slider sits right underneath. Every setting in this Walk mode panel -- the three sliders above, Headlamp on/off and intensity, Reverse drag directions, and Collision detection with its own checklist below -- is remembered the next time the file is opened, the same as any other Display/Lighting/Material preference.</p>" +
