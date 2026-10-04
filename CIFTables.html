@@ -942,7 +942,9 @@ function nonTrivialAngles(al,be,ga){
   if(check(ga))out.push(['γ',ga]);
   return out;
 }
-function buildReportRuns(block){
+// cite=false leaves out the Flack literature reference (used for the 2nd and later structures of a combined document)
+function buildReportRuns(block,cite){
+  if(cite===undefined)cite=true;
   const runs=[];
   const add=(...rs)=>runs.push(...rs);
 
@@ -953,6 +955,14 @@ function buildReportRuns(block){
 
   const mw=gi(block,'_chemical_formula_weight');
   if(mw)add(IT('M'),PLAIN(' = '+mw+', '));
+
+  // crystal description, between M and the crystal system: "yellow rod, 0.320 × 0.211 × 0.194 mm³, " (whatever is known)
+  const colour=gi(block,'_exptl_crystal_colour','_exptl_crystal_colour_primary'),habit=gi(block,'_exptl_crystal_description');
+  const look=[colour,habit].filter(Boolean).map(t=>unmarkup(t).trim().toLowerCase()).filter(Boolean).join(' ');
+  const smax=gi(block,'_exptl_crystal_size_max'),smid=gi(block,'_exptl_crystal_size_mid'),smin=gi(block,'_exptl_crystal_size_min');
+  const hasSize=!!(smax&&smid&&smin);
+  if(look)add(PLAIN(look+(hasSize?', ':', ')));
+  if(hasSize)add(PLAIN(smax+' × '+smid+' × '+smin+' mm'),SUP('3'),PLAIN(', '));
 
   const itStr=gi(block,'_space_group_it_number','_symmetry_int_tables_number');
   const itN=itStr?parseInt(itStr):null;
@@ -1027,7 +1037,7 @@ function buildReportRuns(block){
   const nparam=gi(block,'_refine_ls_number_parameters');
   if(nparam)add(PLAIN(nparam+' parameters, '));
   const nrestr=gi(block,'_refine_ls_number_restraints');
-  add(PLAIN((nrestr||'0')+' restraints.  '));
+  add(PLAIN((nrestr||'0')+(parseInt(nrestr||'0',10)===1?' restraint.  ':' restraints.  ')));
 
   const absCorr=gi(block,'_exptl_absorpt_correction_type');
   const mu=gi(block,'_exptl_absorpt_coefficient_mu');
@@ -1036,7 +1046,8 @@ function buildReportRuns(block){
 
   const flack=gi(block,'_refine_ls_abs_structure_flack');
   if(flack){
-    add(PLAIN('Absolute structure parameter = '+flack+' (Flack, H. D. '),IT('Acta Cryst.'),PLAIN(' 1983, '),IT('A39'),PLAIN(', 876-881).'));
+    if(cite)add(PLAIN('Absolute structure parameter = '+flack+' (Flack, H. D. '),IT('Acta Cryst.'),PLAIN(' 1983, '),IT('A39'),PLAIN(', 876-881).'));
+    else add(PLAIN('Absolute structure parameter = '+flack+'.'));
   }
 
   return runs;
@@ -1136,7 +1147,8 @@ function buildTable1Docx(rowSets,title){
     return buildDocxBlob(body+'<w:p/>',multi);
   }finally{DOCX_SZ=20;}
 }
-function buildReportDocx(runs){DOCX_SZ=20;return buildDocxBlob(wPara(runsToDocx(runs))+'<w:p/>',false);}
+// Report text: portrait A4, 10 pt, one paragraph per structure (several structures: one document, a small gap between paragraphs)
+function buildReportDocx(runsList){DOCX_SZ=20;const multi=runsList.length>1;return buildDocxBlob(runsList.map(r=>wPara(runsToDocx(r),multi?160:0)).join('')+'<w:p/>',false);}
 function downloadBlob(filename,content){
   const blob=content instanceof Blob?content:new Blob([content],{type:'application/octet-stream'});
   const url=URL.createObjectURL(blob);
@@ -1170,11 +1182,31 @@ document.addEventListener('click',async e=>{
   }catch(err){btn.textContent='Failed';}
   setTimeout(()=>{btn.textContent=old;},1800);
 });
-// Report paragraph
-document.addEventListener('click',e=>{
-  const btn=e.target.closest&&e.target.closest('.export-btn');if(!btn)return;
-  const f=DOC_STORE[btn.dataset.key];
-  if(f)downloadBlob(btn.dataset.filename,f());
+// Report text: this structure's paragraph, or one document with the paragraph of every structure in the navigator list
+const MAX_REPORTS=500;
+document.addEventListener('click',async e=>{
+  const btn=e.target.closest&&e.target.closest('.docxrep-btn');if(!btn)return;
+  const old=btn.dataset.label||(btn.dataset.label=btn.textContent);
+  const all=btn.closest('.page').querySelector('.all-reports');
+  const useAll=!!(all&&all.checked&&NAV&&NAV.entries.length>1);
+  try{
+    let list,name;
+    if(useAll){
+      const entries=NAV.entries.slice(0,MAX_REPORTS);list=[];let cited=false;   // the Flack reference is given once, at the first structure that has a Flack parameter
+      for(let i=0;i<entries.length;i++){
+        btn.textContent='Building '+(i+1)+'/'+entries.length+'…';
+        if(i%4===3)await new Promise(r=>setTimeout(r,0));
+        const blk=parseCIF(tokenise(entries[i].text))[0];
+        if(blk){list.push(buildReportRuns(blk,!cited));if(gi(blk,'_refine_ls_abs_structure_flack'))cited=true;}
+      }
+      name=sanitizeFilename(NAV.name||'structures');
+    }else{
+      list=[DOC_STORE['copy-'+btn.dataset.key].runs];name=sanitizeFilename(CUR.block.name);
+    }
+    downloadBlob(name+'_Report.docx',buildReportDocx(list));
+    btn.textContent=(useAll&&NAV.entries.length>MAX_REPORTS)?'Saved (first '+MAX_REPORTS+')':'Saved ✓';
+  }catch(err){btn.textContent='Failed';}
+  setTimeout(()=>{btn.textContent=old;},1800);
 });
 
 // ═══════════════════════════════════════════════════════
@@ -1322,12 +1354,13 @@ function renderTable1Page(block,uid){
 }
 function renderReportPage(block,uid){
   const runs=buildReportRuns(block);
-  const key='report-'+uid,fname=sanitizeFilename(block.name)+'_Report.docx';
-  DOC_STORE[key]=()=>buildReportDocx(runs);
-  DOC_STORE['copy-'+key]={html:'<p style="font-family:\'Times New Roman\',Times,serif;font-size:10pt;color:#000;margin:0">'+runsToHTML(runs)+'</p>',text:runs.map(x=>x.text).join('')};
+  const key='report-'+uid;
+  DOC_STORE['copy-'+key]={runs,html:'<p style="font-family:\'Times New Roman\',Times,serif;font-size:10pt;color:#000;margin:0">'+runsToHTML(runs)+'</p>',text:runs.map(x=>x.text).join('')};
   return '<div class="table-toolbar"><span class="pub-title">Experimental-section paragraph · opens in Word</span><span class="tbl-tools">'+
     '<button class="btn copypara-btn" type="button" data-key="'+key+'" title="Copy the paragraph, with its italics and sub/superscripts, for pasting into Word">Copy</button>'+
-    '<button class="btn export-btn" data-key="'+key+'" data-filename="'+esc(fname)+'">Export DOCX</button></span></div>'+
+    '<button class="btn docxrep-btn" type="button" data-key="'+key+'" title="Save the report text as a portrait Word document">Export DOCX</button>'+
+    (NAV&&NAV.entries.length>1?'<label class="chk" title="One document containing the report paragraph of every structure in the navigator list (up to '+MAX_REPORTS+'). The Flack reference is given once, at the first structure that has a Flack parameter. Untick for this structure only."><input type="checkbox" class="all-reports" checked>all '+NAV.entries.length+' structures in one document</label>':'')+
+    '</span></div>'+
     '<div class="paper report">'+runsToHTML(runs)+'</div>';
 }
 
