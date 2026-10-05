@@ -798,8 +798,8 @@
         <h4>Drawing polymers and brackets yourself</h4>
         <p>The <b>Brackets</b> button on the tool rail (below the arrows) has three tools:</p>
         <ul>
-          <li><b>Polymer bond.</b> Draw the repeat unit with a short bond leading out at each end, as in ChemDraw (for polyethylene, a CH<sub>2</sub>–CH<sub>2</sub> with one more bond at each end). Click each of those end bonds, or its free end: the bond then crosses a square bracket into the next unit, the end atom disappears, one bracket carries the <i>n</i> and the formula and mass become those of the repeat unit, shown as (…)<sub><i>n</i></sub>. Click again to undo it. Selecting the bond and choosing <b>Polymer end</b> on the selection toolbar does the same. A bracketed end that loses its bond, or is given a second one, turns back into an ordinary atom. In SMILES the ends are written as <code>*</code>.</li>
-          <li><b>Square brackets</b> and <b>Round brackets.</b> Drag a box for a pair of free-standing brackets, or click a molecule to put them round the whole of it. With atoms selected, the bracket button on the selection toolbar puts square brackets round the selection. A new pair carries the subscript <i>n</i>: double-click it to change it (<i>m</i>, <i>x</i>, 2, 1–3…, or nothing at all). Select a pair and drag a corner handle to resize it, drag a bracket to move it, press Delete to remove it. Clicking an existing pair with the other tool switches it between square and round. Free-standing brackets are drawing marks only; they do not change the formula.</li>
+          <li><b>Polymer bond.</b> Draw the repeat unit with a short bond leading out at each end, as in ChemDraw (for polyethylene, a CH<sub>2</sub>–CH<sub>2</sub> with one more bond at each end). Click each of those end bonds, or its free end: the bond then crosses a square bracket into the next unit, the end atom disappears, one bracket carries the <i>n</i> and the formula and mass become those of the repeat unit, shown as (…)<sub><i>n</i></sub>. Click again to undo it. Selecting the bond and choosing <b>Polymer end</b> on the selection toolbar does the same. To make the brackets longer or shorter, select the bond (or the whole molecule) and drag one of the small handles at the ends of a bracket: the brackets of one repeat unit change together, as a pair; hold Shift to change just that one. The bracket's direction follows the bond, so drag the hidden end atom (at the tip of the bond) to turn it. A bracketed end that loses its bond, or is given a second one, turns back into an ordinary atom. In SMILES the ends are written as <code>*</code>.</li>
+          <li><b>Square brackets</b> and <b>Round brackets.</b> Drag a box for a pair of free-standing brackets, or click a molecule to put them round the whole of it. With atoms selected, the bracket button on the selection toolbar puts square brackets round the selection. A new pair carries the subscript <i>n</i>: double-click it to change it (<i>m</i>, <i>x</i>, 2, 1–3…, or nothing at all). Select a pair and drag a corner handle to resize it, drag a bracket to move it, press Delete to remove it. Clicking an existing pair with the other tool switches it between square and round. A pair goes with the atoms inside it: when everything it encloses is moved, rotated (with the handle, the 15° buttons, an exact angle or Align) or flipped, the brackets move, turn or flip too, even if they were not selected; the subscript stays upright. Free-standing brackets are drawing marks only; they do not change the formula.</li>
         </ul>
       </section>
       <section class="gsec" data-g="keys">
@@ -7871,18 +7871,26 @@ function alignBond(b){
   var ang = Math.atan2(q.y - p.y, q.x - p.x), quarter = Math.PI/2;
   var target = Math.round(ang/quarter)*quarter;
   if (Math.abs(target - ang) < 0.5*Math.PI/180) target += quarter;
-  var rot = target - ang, c = selectionCentroid(list);
+  var rot = target - ang, c = selectionCentroid(list), brs = bracketsEnclosing(list);
   list.forEach(function(a){ var np = rotatePointAround(a, c, rot); a.x = np.x; a.y = np.y; });
+  brs.forEach(function(t){ rotateBracket(t, c, rot); });
   var vertical = Math.abs(Math.round(target/quarter)) % 2 === 1;
   commit();
   var deg = Math.round(-rot*180/Math.PI*10)/10;
   toast("Bond now " + (vertical ? "vertical" : "horizontal") + " (turned " + (deg > 0 ? "+" : "") + deg + "°); again (A or Align) for " + (vertical ? "horizontal" : "vertical"));
 }
+/* the brackets that go with these atoms: those selected, and those enclosing only them */
+function bracketsWith(list){
+  var out = texts.filter(function(t){ return isBracket(t) && t.selected; });
+  bracketsEnclosing(list).forEach(function(t){ if (out.indexOf(t) < 0) out.push(t); });
+  return out;
+}
 function rotateSelectionBy(ang){
   var sel = selectedAtomsList();
   if (sel.length < 2) return;
-  var c = selectionCentroid(sel);
+  var c = selectionCentroid(sel), brs = bracketsWith(sel);
   sel.forEach(function(a){ var np = rotatePointAround(a, c, ang); a.x = np.x; a.y = np.y; });
+  brs.forEach(function(t){ rotateBracket(t, c, ang); });
   commit();
 }
 /* Mirror the selection (or the whole drawing) about a vertical or horizontal
@@ -7895,9 +7903,10 @@ function flipSelection(horizontal){
   var sel = selectedAtomsList(), whole = !sel.length && !arrows.some(function(a){ return a.selected; }) && !texts.some(function(t){ return t.selected; });
   var list = whole ? atoms.slice() : sel;
   var arr = arrows.filter(function(a){ return whole || a.selected; }), txt = texts.filter(function(t){ return whole || t.selected; });
+  if (!whole) bracketsEnclosing(list).forEach(function(t){ if (txt.indexOf(t) < 0) txt.push(t); });
   var pts = list.map(function(a){ return { x:a.x, y:a.y }; });
   arr.forEach(function(a){ pts.push({ x:a.x1, y:a.y1 }, { x:a.x2, y:a.y2 }); });
-  txt.forEach(function(t){ pts.push({ x:t.x, y:t.y }); });
+  txt.forEach(function(t){ pts.push(isBracket(t) ? bracketCentre(t) : { x:t.x, y:t.y }); });
   if (!pts.length) return;
   var bb = contentBounds(pts), cx = (bb.x0 + bb.x1)/2, cy = (bb.y0 + bb.y1)/2;
   function fx(x){ return horizontal ? 2*cx - x : x; }
@@ -7908,6 +7917,13 @@ function flipSelection(horizontal){
     if (a.cx !== undefined){ a.cx = fx(a.cx); a.cy = fy(a.cy); }
   });
   txt.forEach(function(t){
+    /* a pair of brackets is symmetric: mirroring moves its centre and reverses its tilt */
+    if (isBracket(t)){
+      var bc = bracketCentre(t);
+      t.x = fx(bc.x) - t.w/2; t.y = fy(bc.y) - t.h/2;
+      if (t.a) t.a = -t.a;
+      return;
+    }
     /* text stays readable: only its position is mirrored */
     if (horizontal) t.x = 2*cx - t.x - textW(t.content, 14); else t.y = 2*cy - t.y + 10;
   });
@@ -8030,7 +8046,7 @@ function zoomBy(f, cx, cy){
 function fitToContent(){
   var pts = atoms.map(function(a){ return { x:a.x, y:a.y }; });
   arrows.forEach(function(a){ pts.push({ x:a.x1, y:a.y1 }, { x:a.x2, y:a.y2 }); });
-  texts.forEach(function(t){ pts.push({ x:t.x, y:t.y }); if (isBracket(t)) pts.push({ x:t.x + t.w, y:t.y + t.h }); });
+  texts.forEach(function(t){ if (isBracket(t)){ var q = bracketBounds(t); pts.push({ x:q.x0, y:q.y0 }, { x:q.x1, y:q.y1 }); } else pts.push({ x:t.x, y:t.y }); });
   var rect = svg.getBoundingClientRect();
   if (!pts.length){ view = { panX: rect.width/2, panY: rect.height/2, zoom:1 }; applyViewTransform(); return; }
   var bb = contentBounds(pts), pad = 70;
@@ -8403,16 +8419,26 @@ function computePolyN(){
   });
   Object.keys(best).forEach(function(r){ POLY_N[best[r].id] = true; });
 }
+/* where a polymer bond's bracket sits: A the unit's atom, P the link atom, (bx, by) the bracket's
+   centre on the bond, (px, py) along the bracket, hl its half-length (b.phl if resized by hand) */
+function polyBracketGeom(b){
+  var a1 = findAtom(b.a1), a2 = findAtom(b.a2);
+  if (!a1 || !a2 || !(a1.poly || a2.poly) || (a1.poly && a2.poly)) return null;
+  var A = a1.poly ? a2 : a1, P = a1.poly ? a1 : a2;
+  var ux = P.x - A.x, uy = P.y - A.y, ul = Math.hypot(ux, uy) || 1;
+  ux /= ul; uy /= ul;
+  /* a smaller bracket where several links leave one atom, so neighbouring brackets stay apart */
+  var many = bondsAt(A.id).filter(function(o){ var x = findAtom(o.a1 === A.id ? o.a2 : o.a1); return x && x.poly; }).length > 1;
+  var hl = b.phl || BOND_LEN*(many ? 0.28 : 0.4);
+  return { A:A, P:P, ux:ux, uy:uy, ul:ul, bx:A.x + ux*ul*0.58, by:A.y + uy*ul*0.58, px:-uy, py:ux, hl:hl };
+}
 function renderPolyBond(b, a1, a2, tp, col){
   var A = a1.poly ? a2 : a1, P = a1.poly ? a1 : a2;
   if (A.poly) return lineSvg(tp.p1, tp.p2, col);
-  var q0 = A === a1 ? tp.p1 : tp.p2;
-  var ux = P.x - A.x, uy = P.y - A.y, ul = Math.hypot(ux, uy) || 1;
-  ux /= ul; uy /= ul;
+  var q0 = A === a1 ? tp.p1 : tp.p2, g = polyBracketGeom(b);
+  var ux = g.ux, uy = g.uy, ul = g.ul;
   var out = lineSvg(q0, { x:A.x + ux*ul*0.85, y:A.y + uy*ul*0.85 }, col);
-  /* a smaller bracket where several links leave one atom, so neighbouring brackets stay apart */
-  var many = bondsAt(A.id).filter(function(o){ var x = findAtom(o.a1 === A.id ? o.a2 : o.a1); return x && x.poly; }).length > 1;
-  var bx = A.x + ux*ul*0.58, by = A.y + uy*ul*0.58, px = -uy, py = ux, hl = BOND_LEN*(many ? 0.28 : 0.4), sf = BOND_LEN*0.12;
+  var bx = g.bx, by = g.by, px = g.px, py = g.py, hl = g.hl, sf = BOND_LEN*0.12;
   var e1 = { x:bx + px*hl, y:by + py*hl }, e2 = { x:bx - px*hl, y:by - py*hl };
   out += '<polyline points="' + [[e1.x - ux*sf, e1.y - uy*sf], [e1.x, e1.y], [e2.x, e2.y], [e2.x - ux*sf, e2.y - uy*sf]].map(function(p){ return r2(p[0]) + "," + r2(p[1]); }).join(" ") +
     '" fill="none" stroke="' + col + '" stroke-width="1.6" stroke-linejoin="miter" stroke-linecap="butt"/>';
@@ -8504,14 +8530,44 @@ function renderArrowSvg(ar, mono){
    subscript: n, m, x, 2…) }, so they save, undo, copy, move and delete like text. */
 function isBracket(t){ return t && t.kind === "bracket"; }
 function bracketArm(t){ return Math.max(4, Math.min(9, t.w*0.12, t.h*0.18)); }
-function bracketLabelPos(t){ return { x: t.x + t.w + 3, y: t.y + t.h + 5 }; }
+/* a pair may be turned by t.a (radians) about its centre; x, y, w, h describe it unturned */
+function bracketCentre(t){ return { x: t.x + t.w/2, y: t.y + t.h/2 }; }
+function bracketToWorld(t, p){ return t.a ? rotatePointAround(p, bracketCentre(t), t.a) : { x:p.x, y:p.y }; }
+function bracketToLocal(t, p){ return t.a ? rotatePointAround(p, bracketCentre(t), -t.a) : { x:p.x, y:p.y }; }
+function bracketLabelPos(t){ var c = bracketToWorld(t, { x: t.x + t.w, y: t.y + t.h }); return { x: c.x + 3, y: c.y + 5 }; }
 function bracketBounds(t){
-  var lp = bracketLabelPos(t), lw = t.content ? textW(t.content, 13) : 0;
-  return { x0: t.x - 7, y0: t.y - 2, x1: Math.max(t.x + t.w + 7, lp.x + lw + 2), y1: Math.max(t.y + t.h + 2, lp.y + 4) };
+  var lp = bracketLabelPos(t), lw = t.content ? textW(t.content, 13) : 0, pad = 7;
+  var cs = [[t.x - pad, t.y], [t.x + t.w + pad, t.y], [t.x - pad, t.y + t.h], [t.x + t.w + pad, t.y + t.h]].map(function(q){ return bracketToWorld(t, { x:q[0], y:q[1] }); });
+  var bb = contentBounds(cs);
+  return { x0: bb.x0 - 2, y0: bb.y0 - 2, x1: Math.max(bb.x1 + 2, lp.x + lw + 2), y1: Math.max(bb.y1 + 2, lp.y + 4) };
+}
+/* turn a pair about c by ang, moving its centre and adding to its own angle */
+function rotateBracket(t, c, ang){
+  var m = rotatePointAround(bracketCentre(t), c, ang);
+  t.x = m.x - t.w/2; t.y = m.y - t.h/2;
+  t.a = (t.a || 0) + ang;
+  if (Math.abs(t.a) < 1e-9) delete t.a;
+}
+/* the pairs that enclose some of these atoms and no others: they go with them when moved, turned or flipped */
+function bracketsEnclosing(list){
+  if (!list.length || !texts.some(isBracket)) return [];
+  var inSet = {}; list.forEach(function(a){ inSet[a.id] = true; });
+  return texts.filter(function(t){
+    if (!isBracket(t)) return false;
+    var any = false;
+    for (var i = 0; i < atoms.length; i++){
+      var a = atoms[i], p = bracketToLocal(t, a);
+      if (p.x < t.x || p.x > t.x + t.w || p.y < t.y || p.y > t.y + t.h) continue;
+      if (!inSet[a.id]) return false;
+      any = true;
+    }
+    return any;
+  });
 }
 function renderBracketSvg(t, mono){
   var col = mono ? "#000" : (t.selected ? "var(--sel)" : "var(--stroke)");
   var x0 = t.x, x1 = t.x + t.w, y0 = t.y, y1 = t.y + t.h, s = bracketArm(t), out = "";
+  if (t.a){ var bc = bracketCentre(t); out += '<g transform="rotate(' + r2(t.a*180/Math.PI) + ' ' + r2(bc.x) + ' ' + r2(bc.y) + ')">'; }
   var st = '" fill="none" stroke="' + col + '" stroke-width="1.6" stroke-linejoin="miter" stroke-linecap="butt"/>';
   if (t.shape === "round"){
     var bow = Math.min(10, t.h*0.12 + 3);
@@ -8521,6 +8577,8 @@ function renderBracketSvg(t, mono){
     out += '<polyline points="' + r2(x0 + s) + ',' + r2(y0) + ' ' + r2(x0) + ',' + r2(y0) + ' ' + r2(x0) + ',' + r2(y1) + ' ' + r2(x0 + s) + ',' + r2(y1) + st;
     out += '<polyline points="' + r2(x1 - s) + ',' + r2(y0) + ' ' + r2(x1) + ',' + r2(y0) + ' ' + r2(x1) + ',' + r2(y1) + ' ' + r2(x1 - s) + ',' + r2(y1) + st;
   }
+  if (t.a) out += '</g>';
+  /* the subscript stays upright, by the lower end of the right-hand bracket */
   if (t.content){
     var lp = bracketLabelPos(t), ital = /^[A-Za-z]$/.test(t.content);
     out += '<text x="' + r2(lp.x) + '" y="' + r2(lp.y) + '" font-family="' + FONT + '" font-size="13"' + (ital ? ' font-style="italic"' : "") + ' fill="' + col + '">' + esc(t.content) + '</text>';
@@ -8596,6 +8654,22 @@ function renderArrowHandles(){
   out += '<circle data-arrow-handle="bend" cx="' + r2(m.x) + '" cy="' + r2(m.y) + '" r="' + r2(6.5/z) + '" fill="var(--sel)" stroke="var(--raised)" stroke-width="' + (1.5/z) + '" style="cursor:grab"><title>Drag to change the curvature (Shift: no snapping to a symmetric arc)</title></circle>';
   return out;
 }
+/* a handle at each end of the bracket of a selected polymer bond, to make it longer or shorter */
+function renderPolyHandles(){
+  if (pointer.mode && pointer.mode !== "polyHandle") return "";
+  var z = view.zoom, s = 4.5/z, out = "";
+  bonds.forEach(function(b){
+    var a1 = findAtom(b.a1), a2 = findAtom(b.a2);
+    if (!a1 || !a2 || !(b.selected || (a1.selected && a2.selected))) return;
+    var g = polyBracketGeom(b);
+    if (!g) return;
+    [1, -1].forEach(function(sg){
+      var x = g.bx + g.px*g.hl*sg, y = g.by + g.py*g.hl*sg;
+      out += '<rect data-poly-handle="' + b.id + '" x="' + r2(x - s) + '" y="' + r2(y - s) + '" width="' + r2(2*s) + '" height="' + r2(2*s) + '" rx="' + r2(1.5/z) + '" fill="var(--raised)" stroke="var(--sel)" stroke-width="' + (1.5/z) + '" style="cursor:ew-resize"><title>Drag to make the brackets longer or shorter (Shift: this bracket only)</title></rect>';
+    });
+  });
+  return out;
+}
 /* corner handles of a selected bracket (to resize it), and the bracket being drawn */
 function renderBracketHandles(){
   if (pointer.mode === "drawBracket" && pointer.box) return renderBracketSvg(Object.assign({}, pointer.box, { selected:true }), false);
@@ -8604,6 +8678,7 @@ function renderBracketHandles(){
   if (sel.length !== 1 || !isBracket(sel[0]) || selectedAtomsList().length) return "";
   var t = sel[0], z = view.zoom, s = 5/z, out = "";
   [["tl", t.x, t.y], ["br", t.x + t.w, t.y + t.h]].forEach(function(h){
+    var q = bracketToWorld(t, { x:h[1], y:h[2] }); h[1] = q.x; h[2] = q.y;
     out += '<rect data-bracket-handle="' + h[0] + '" x="' + r2(h[1] - s) + '" y="' + r2(h[2] - s) + '" width="' + r2(2*s) + '" height="' + r2(2*s) + '" rx="' + r2(1.5/z) + '" fill="var(--raised)" stroke="var(--sel)" stroke-width="' + (1.5/z) + '" style="cursor:nwse-resize"><title>Drag to resize the brackets</title></rect>';
   });
   return out;
@@ -8748,6 +8823,7 @@ function render(){
   h += renderRotateHandle();
   h += renderArrowHandles();
   h += renderBracketHandles();
+  h += renderPolyHandles();
   world.innerHTML = h;
   gridRect.style.display = opts.grid ? "" : "none";
   positionOverlays();
@@ -8767,7 +8843,13 @@ function buildCleanSvgString(onlyIds){
   function grow(x0, y0, x1, y1){ bb.x0 = Math.min(bb.x0, x0); bb.y0 = Math.min(bb.y0, y0); bb.x1 = Math.max(bb.x1, x1); bb.y1 = Math.max(bb.y1, y1); }
   useAtoms.forEach(function(a){
     grow(a.x - 4, a.y - 4, a.x + 4, a.y + 4);
-    if (a.poly) grow(a.x - BOND_LEN*0.6, a.y - BOND_LEN*0.6, a.x + BOND_LEN*0.6, a.y + BOND_LEN*0.6);
+    if (a.poly){
+      grow(a.x - 6, a.y - 6, a.x + 6, a.y + 6);
+      bondsAt(a.id).forEach(function(b){
+        var g = polyBracketGeom(b);
+        if (g) [1, -1].forEach(function(sg){ var x = g.bx + g.px*g.hl*sg, y = g.by + g.py*g.hl*sg; grow(x - 12, y - 12, x + 12, y + 18); });
+      });
+    }
     var L = labelCache[a.id];
     if (L) L.rects.forEach(function(r){ grow(r[0], r[1] - 2, r[2] + (a.charge ? 9 : 0), r[3]); });
     if (a.charge || a.radical) grow(a.x - 18, a.y - 18, a.x + 18, a.y + 18);
@@ -9238,11 +9320,13 @@ function hitTest(pt, excludeAtomId){
 }
 
 /* a click on either bracket of a pair, or on its subscript */
-function bracketHit(t, pt){
+function bracketHit(t, pw){
+  var pt = bracketToLocal(t, pw);
   var tol = 6/view.zoom + 2, s = bracketArm(t) + tol, inY = pt.y >= t.y - tol && pt.y <= t.y + t.h + tol;
   if (inY && (Math.abs(pt.x - t.x) < tol + 3 || Math.abs(pt.x - t.x - t.w) < tol + 3)) return true;
   if ((Math.abs(pt.y - t.y) < tol || Math.abs(pt.y - t.y - t.h) < tol) && ((pt.x > t.x - tol && pt.x < t.x + s) || (pt.x < t.x + t.w + tol && pt.x > t.x + t.w - s))) return true;
   var lp = bracketLabelPos(t);
+  pt = pw;
   return !!t.content && pt.x >= lp.x - 2 && pt.x <= lp.x + textW(t.content, 13) + 2 && pt.y >= lp.y - 13 && pt.y <= lp.y + 3;
 }
 function editBracketLabel(t){
@@ -9583,6 +9667,17 @@ svg.addEventListener("pointerdown", function(e){
       return;
     }
   }
+  var ph = e.target.closest && e.target.closest("[data-poly-handle]");
+  if (ph){
+    var pbid = ph.getAttribute("data-poly-handle"), pb = bonds.filter(function(b){ return String(b.id) === pbid; })[0];
+    if (pb){
+      /* the brackets of one repeat unit are a pair and resize together; Shift: just this one */
+      var comp = {}; connectedComponent(pb.a1).forEach(function(id){ comp[id] = true; });
+      var grp = e.shiftKey ? [pb] : bonds.filter(function(b){ return comp[b.a1] && comp[b.a2] && polyBracketGeom(b); });
+      pointer = { mode:"polyHandle", bond:pb, group:grp, moved:false };
+      return;
+    }
+  }
   var bh = e.target.closest && e.target.closest("[data-bracket-handle]");
   if (bh){
     var sb = texts.filter(function(t){ return t.selected && isBracket(t); })[0];
@@ -9590,7 +9685,8 @@ svg.addEventListener("pointerdown", function(e){
   }
   if (e.target.closest && e.target.closest("[data-rotate-handle]")){
     var rs = selectedAtomsList(), rc = selectionCentroid(rs);
-    pointer = { mode:"rotate", center:rc, startAngle:angleOf(rc, pt), initial:rs.map(function(a){ return { id:a.id, x:a.x, y:a.y }; }) };
+    pointer = { mode:"rotate", center:rc, startAngle:angleOf(rc, pt), initial:rs.map(function(a){ return { id:a.id, x:a.x, y:a.y }; }),
+                brs:bracketsWith(rs).map(function(t){ return { t:t, x:t.x, y:t.y, a:t.a || 0 }; }) };
     return;
   }
   var hit = hitTest(pt);
@@ -9753,6 +9849,10 @@ window.addEventListener("pointermove", function(e){
           arrows: arrows.filter(function(a){ return a.selected; }).map(function(a){ return { a:a, x1:a.x1, y1:a.y1, x2:a.x2, y2:a.y2, cx:a.cx, cy:a.cy }; }),
           texts: texts.filter(function(t){ return t.selected; }).map(function(t){ return { t:t, x:t.x, y:t.y }; })
         };
+        /* brackets round the atoms being dragged go with them */
+        bracketsEnclosing(pointer.orig.atoms.map(function(r){ return r.a; })).forEach(function(t){
+          if (!t.selected) pointer.orig.texts.push({ t:t, x:t.x, y:t.y });
+        });
         pointer.movingIds = pointer.orig.atoms.map(function(r){ return r.a.id; });
       }
       var O = pointer.orig, tx = dx, ty = dy;
@@ -9818,6 +9918,7 @@ window.addEventListener("pointermove", function(e){
     }
     pointer.angle = snapped;
     pointer.initial.forEach(function(rec){ var a = findAtom(rec.id); if (!a) return; var np = rotatePointAround(rec, pointer.center, snapped); a.x = np.x; a.y = np.y; });
+    (pointer.brs || []).forEach(function(r){ r.t.x = r.x; r.t.y = r.y; r.t.a = r.a; rotateBracket(r.t, pointer.center, snapped); });
     render();
     return;
   }
@@ -9829,11 +9930,26 @@ window.addEventListener("pointermove", function(e){
     }
     return;
   }
+  if (pointer.mode === "polyHandle"){
+    var pg = polyBracketGeom(pointer.bond);
+    if (pg){
+      var phl = clamp(Math.abs((pt.x - pg.bx)*pg.px + (pt.y - pg.by)*pg.py), 6, BOND_LEN*4);
+      pointer.group.forEach(function(b){ b.phl = phl; });
+      pointer.moved = true;
+      render();
+    }
+    return;
+  }
   if (pointer.mode === "bracketHandle"){
-    var bt = pointer.t, o = pointer.o;
+    /* worked in the pair's own (unturned) frame, keeping the opposite corner where it is */
+    var bt = pointer.t, o = pointer.o, oc = { x:o.x + o.w/2, y:o.y + o.h/2 }, ang = bt.a || 0;
+    var lp = ang ? rotatePointAround(pt, oc, -ang) : pt, nb = { x:o.x, y:o.y, w:o.w, h:o.h };
     pointer.moved = true;
-    if (pointer.which === "tl"){ var nx = Math.min(pt.x, o.x + o.w - 12), ny = Math.min(pt.y, o.y + o.h - 12); bt.w = o.x + o.w - nx; bt.h = o.y + o.h - ny; bt.x = nx; bt.y = ny; }
-    else { bt.w = Math.max(12, pt.x - o.x); bt.h = Math.max(12, pt.y - o.y); }
+    if (pointer.which === "tl"){ var nx = Math.min(lp.x, o.x + o.w - 12), ny = Math.min(lp.y, o.y + o.h - 12); nb.w = o.x + o.w - nx; nb.h = o.y + o.h - ny; nb.x = nx; nb.y = ny; }
+    else { nb.w = Math.max(12, lp.x - o.x); nb.h = Math.max(12, lp.y - o.y); }
+    var wc = { x:nb.x + nb.w/2, y:nb.y + nb.h/2 };
+    if (ang) wc = rotatePointAround(wc, oc, ang);
+    bt.w = nb.w; bt.h = nb.h; bt.x = wc.x - nb.w/2; bt.y = wc.y - nb.h/2;
     render();
     return;
   }
@@ -9918,7 +10034,7 @@ window.addEventListener("pointerup", function(e){
     return;
   }
   if (mode === "rotate"){ commit(); return; }
-  if (mode === "bracketHandle"){ if (P.moved) commit(); else render(); return; }
+  if (mode === "bracketHandle" || mode === "polyHandle"){ if (P.moved) commit(); else render(); return; }
   if (mode === "drawBracket"){
     if (P.box){
       var nb = Object.assign({ id:uid(), selected:false }, P.box);
