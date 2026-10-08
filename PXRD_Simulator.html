@@ -603,8 +603,8 @@ input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;}
 
     <h3>Quick start</h3>
     <ul>
-      <li>Drop one or more <strong>CIF</strong>, <strong>SHELX (.res/.ins)</strong>, <strong>.xy</strong>, <strong>.xye</strong> or <strong>.xrdml</strong> files anywhere on the page. Each structure file becomes a simulated pattern with its own colour.</li>
-      <li>Optionally drop an <strong>experimental file</strong> (.xy, .xye, .dat, .csv -- two columns, 2&theta; &amp; intensity; comment lines and a single-number wavelength header line are skipped).</li>
+      <li>Drop one or more <strong>CIF</strong>, <strong>SHELX (.res/.ins)</strong>, <strong>.xy</strong>, <strong>.xye</strong>, <strong>.xrdml</strong> or <strong>.raw</strong> files anywhere on the page. Each structure file becomes a simulated pattern with its own colour.</li>
+      <li>Optionally drop an <strong>experimental file</strong> (.xy, .xye, .dat, .csv -- two columns, 2&theta; &amp; intensity; comment lines and a single-number wavelength header line are skipped). Bruker <strong>.raw</strong> files in the binary RAW 4.00 format (DIFFRAC.SUITE, single scan range) are read directly; other binary RAW versions and multi-range files are rejected with a message, and a plain-text .raw export is read as two columns.</li>
       <li>Click a pattern card on the left to select it -- <strong>Save .xy of selected</strong> (under Output) exports that one pattern's data.</li>
       <li>Adjust, then export as <strong>PNG</strong> or <strong>.xy</strong> data.</li>
     </ul>
@@ -1336,6 +1336,37 @@ function parseXY(text){
   for(let i=0;i<ys.length;i++)ys[i]*=100/m;
   return{ex:xs,ey:ys};
 }
+// Bruker RAW 4.00 (DIFFRAC.SUITE), single range. Tagged records [u32 type][u32 length] run from
+// 0x3D to the range record (type 30); the fixed scan block after it holds the point count (+4),
+// start angle (+0x48) and step (+0x50) as doubles; float32 counts fill the end of the file.
+function parseBrukerRaw(buf){
+  const dv=new DataView(buf),len=buf.byteLength;
+  const magic=String.fromCharCode(...new Uint8Array(buf,0,Math.min(8,len))).replace(/\0[\s\S]*$/,'');
+  if(magic!=='RAW4.00'){
+    if(/^RAW/.test(magic))throw new Error('Bruker '+magic.trim()+' binary format is not supported (only RAW4.00)');
+    return parseXY(new TextDecoder().decode(buf));
+  }
+  if(len<0x100||Math.max(dv.getUint32(0x24,true),dv.getUint32(0x28,true),dv.getUint32(0x2C,true))>1)
+    throw new Error('multi-range RAW4.00 files are not supported yet');
+  let p=0x3D;
+  while(p+8<=len){
+    const t=dv.getUint32(p,true),l=dv.getUint32(p+4,true);
+    if(l<8||p+l>len)throw new Error('unexpected RAW4.00 record structure');
+    if(t===30)break;
+    p+=l;
+  }
+  if(p+8>len)throw new Error('no scan range found in RAW4.00 file');
+  const E=p+dv.getUint32(p+4,true);
+  if(E+0x58>len)throw new Error('truncated RAW4.00 file');
+  const n=dv.getUint32(E+4,true),start=dv.getFloat64(E+0x48,true),step=dv.getFloat64(E+0x50,true);
+  const dataStart=len-n*4;
+  if(!(n>=5)||!(step>0)||!isFinite(start)||dataStart<E+0x58)throw new Error('could not locate the scan header in RAW4.00 file');
+  const xs=new Array(n),ys=new Array(n);
+  for(let i=0;i<n;i++){xs[i]=start+i*step;const v=dv.getFloat32(dataStart+4*i,true);ys[i]=isFinite(v)?v:0;}
+  const m=arrMax(ys)||1;
+  for(let i=0;i<n;i++)ys[i]*=100/m;
+  return{ex:xs,ey:ys};
+}
 function addSimDataset(parsed,name,format){
   const ds={id:uid++,type:'sim',name,format:format||'CIF',color:nextColor(),visible:true,parsed,refs:null,y:null};
   datasets.push(ds);selId=ds.id;
@@ -1355,10 +1386,12 @@ function handleFiles(files){
   for(const f of files){
     const r=new FileReader();
     r.onerror=()=>showError('Could not read '+f.name);
+    const isRaw=/\.raw$/i.test(f.name);
     r.onload=e=>{
-      const text=e.target.result;
       const base=f.name.replace(/\.[^.]+$/,'');
       try{
+        if(isRaw){addExpDataset(parseBrukerRaw(e.target.result),base);return;}
+        const text=e.target.result;
         if(/\.cif$/i.test(f.name)||looksLikeCIF(text)){
           const parsed=parseCIF(text);
           if(!parsed.atoms.length)throw new Error('No atom coordinates found in '+f.name);
@@ -1378,7 +1411,7 @@ function handleFiles(files){
         }
       }catch(err){showError('Parse error ('+f.name+'): '+err.message);$('statusEl').textContent='Error';}
     };
-    r.readAsText(f);
+    if(isRaw)r.readAsArrayBuffer(f);else r.readAsText(f);
   }
 }
 const DEMO_CIF=`data_NaCl_example
