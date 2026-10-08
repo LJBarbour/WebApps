@@ -558,6 +558,10 @@ input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;}
         <span class="cp-label">Scale to visible peaks</span>
         <input type="checkbox" id="scaleVisible">
       </div>
+      <div class="cp-row">
+        <span class="cp-label">Reverse pattern order</span>
+        <input type="checkbox" id="reverseOrder">
+      </div>
     </div>
   </div>
 
@@ -611,7 +615,7 @@ input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;}
 
     <h3>Comparing patterns</h3>
     <ul>
-      <li><strong>Stack offset</strong> turns overlaid patterns into a waterfall -- ideal for polymorph or variable-temperature series.</li>
+      <li><strong>Stack offset</strong> turns overlaid patterns into a waterfall -- ideal for polymorph or variable-temperature series. The pattern list on the left plots from the bottom upwards; tick <strong>Reverse pattern order</strong> (under Display) to plot from the top downwards instead, so the plot reads in the same order as the list.</li>
       <li><strong>Difference curve</strong> appears below the pattern when exactly one simulated and one experimental pattern are visible (linear scale).</li>
       <li><strong>Reflection markers</strong> add Rietveld-style tick rows, one per simulated pattern.</li>
       <li>Click a pattern card to select it -- hkl labels and .xy export follow the selection.</li>
@@ -1206,7 +1210,7 @@ function getSettings(){
     stackOffset:parseFloat($('stackOffset').value)||0,
     baseOffset:parseFloat($('baseOffset').value)||0,
     expPoints:$('expPoints').checked, showDiff:$('showDiff').checked,
-    scaleVisible:$('scaleVisible').checked,
+    scaleVisible:$('scaleVisible').checked, reverseOrder:$('reverseOrder').checked,
     legendOn:$('legendOn').checked,
     legendAlign:($('legendAlign')?$('legendAlign').value:'left'),
     showTicksRow:$('showTicksRow').checked,
@@ -1561,7 +1565,9 @@ function drawFigure(be,cw,ch,forScreen,skipLegends){
   const numericY=S.yScale==='lin'&&S.stackOffset===0;
 
   // stacking offsets in display units (order = list order)
-  const offs=new Map();vis.forEach((d,i)=>offs.set(d.id,i*S.stackOffset));
+  // slot 0 is the bottom of the plot; list order runs bottom-to-top unless reversed
+  const slotOf=new Map();vis.forEach((d,i)=>slotOf.set(d.id,S.reverseOrder?vis.length-1-i:i));
+  const offs=new Map();vis.forEach(d=>offs.set(d.id,slotOf.get(d.id)*S.stackOffset));
   const inView=t=>t>=vt[0]-1e-9&&t<=vt[1]+1e-9;
 
   // -- per-dataset view multiplier: 1 normally (each pattern is already normalized to
@@ -1763,10 +1769,10 @@ function drawFigure(be,cw,ch,forScreen,skipLegends){
 
   // -- per-dataset band pixel boundaries (for legend drag clamping) --
   // Each dataset's band runs from its baseline up to just below the next dataset's baseline.
-  // vis[0] is the bottom dataset (off=0), vis[N-1] is the top.
-  const bands=vis.map((d,i)=>{
+  // slot 0 is the bottom dataset (off=0), slot N-1 is the top.
+  const bands=vis.map(d=>{
     const off=offs.get(d.id);
-    const nextOff=i<vis.length-1?offs.get(vis[i+1].id):off+100+S.stackOffset;
+    const nextOff=slotOf.get(d.id)<vis.length-1?(slotOf.get(d.id)+1)*S.stackOffset:off+100+S.stackOffset;
     const yBot=Math.min(Y(off)+floorPx, pt+patH);            // baseline pixel
     const yTop=Math.max(Y(nextOff), pt);                      // top of this band
     return{id:d.id,yTop,yBot};
@@ -2029,7 +2035,7 @@ const IDS_VAL=['wlPreset','customWl','ka2Ratio','tthMin','tthMaxIn','fwhm','eta'
   'xLabel','yLabel','fontFace','tickFont','tickSize','labelSize','annotSize','lineWeight','fillOpacity',
   'axisWeight','tickLen','tickDir','xLblOff','yLblOff','xTickStep','gridColor','gridWeight','gridStyle','sizePreset','figW','figH'];
 const IDS_CHK=['ka2On','poOn','expPoints','showDiff','showTicksRow','hklOn','hklVert',
-  'showStems','showGridV','legendOn','scaleVisible'];
+  'showStems','showGridV','legendOn','scaleVisible','reverseOrder'];
 function collectSettings(){
   const out={_version:'2.0'};
   for(const id of IDS_VAL){const el=$(id);if(el)out[id]=el.value;}
@@ -2141,7 +2147,7 @@ $('ka2On').addEventListener('change',()=>{syncDerivedUI();rebuildPatterns();});
 // display / appearance \u2192 redraw only
 ['xUnit','yScale','expPoints','showDiff','legendOn','legendAlign','showTicksRow','hklOn','hklVert',
  'showStems','xLabel','yLabel','showGridV','fontFace','tickFont','annotFont',
- 'gridColor','tickDir','gridStyle','sizePreset','figW','figH','xTickStep','scaleVisible'].forEach(id=>{
+ 'gridColor','tickDir','gridStyle','sizePreset','figW','figH','xTickStep','scaleVisible','reverseOrder'].forEach(id=>{
   const el=$(id);
   el.addEventListener('change',()=>{
     if(id==='xUnit'){const XL={tth:'2\u03B8 (\u00B0)',q:'Q (\u00C5\u207B\u00B9)',d:'d (\u00C5)'};$('xLabel').value=XL[$('xUnit').value];
