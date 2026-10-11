@@ -395,6 +395,12 @@ select:focus{border-color:var(--accent)}
           <div class="fi-label">Unrecognised rows passed through from file</div>
           <div id="metaPassthrough" style="font-family:var(--mono);font-size:9px;color:#888;background:var(--cream);border:1.5px solid var(--pale);padding:5px 7px;line-height:1.8;max-height:80px;overflow-y:auto;white-space:pre-wrap;word-break:break-all"></div>
         </div>
+
+        <!-- Extra descriptors written by Export AIF; filled from the input file where it supplied them -->
+        <div id="aifFieldsWrap" style="margin-top:14px">
+          <div class="fi-label" style="margin-top:0">AIF export fields <span style="color:#aaa">(used by <b>Export AIF</b> in the Output menu — fill in whatever the input file did not supply; sorptive, temperature and sample mass come from the Metadata panel)</span></div>
+          <div id="aifFields" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:4px 12px;margin-top:4px"></div>
+        </div>
       </div>
 
       <div class="modal-veil" id="guideVeil">
@@ -489,6 +495,7 @@ select:focus{border-color:var(--accent)}
 
         <div class="g-sec">Exporting converted data</div>
         <p>After conversion, click <b>Export Converted CSV</b> in the right-hand panel (Output section). The file includes a comment header recording the units and conversion applied.</p>
+        <p><b>Export AIF</b> (same menu) writes the converted data as an Adsorption Information File: the converted pressure and uptake in the output units (declared in <span class="g-code">_units_pressure</span> / <span class="g-code">_units_loading</span>), the adsorption and desorption loops (as selected under Export branch), and the descriptors. Sorptive, temperature and sample mass come from the Metadata panel (temperature is written in K, mass in g); an AIF needs at least the sorptive and temperature. The remaining descriptors are the <b>AIF export fields</b> at the bottom of the Summary tab: operator, instrument, date, method, isotherm type, sample ID, material name and the DOI of the source article. They are filled from the input file when it supplied them (<span class="g-code">&#10003; from file</span>) and are otherwise yours to type; operator, instrument, method and DOI are kept as you step through the navigator, the others are reset for each isotherm. If the input was an AIF, any other tags it carried are written back unchanged. If Excess &rarr; Absolute is on, the isotherm type is written as <i>absolute</i> and the correction is recorded in a comment. Output pressure <i>p/p&#x2080;</i> cannot be stored as such: the AIF then holds absolute pressure in bar plus the saturation pressure <span class="g-code">p0</span>. The same descriptors are also written to the CSV export when filled in.</p>
 
         <div class="g-sec">Shared metadata vocabulary</div>
         <p>This app is part of a suite of sorption tools for (1) unit conversion, (2) isotherm fitting, (3) IAST calculations, and (4) sorption enthalpy calculations. Metadata keywords are passed through from the input file to the output CSV, ensuring data continuity through the pipeline.</p>
@@ -696,6 +703,7 @@ select:focus{border-color:var(--accent)}
         </select>
       </div>
       <button class="btn2 ghost" id="btnExport" disabled>Export Converted CSV</button>
+      <button class="btn2 ghost" id="btnExportAif" disabled title="Adsorption Information File (.aif)">Export AIF</button>
     </div>
   </div>
 
@@ -2026,6 +2034,7 @@ function parseAIFBlock(blk){
   if(pass.length) meta.passthrough=pass;
   meta._aifType=it['_exptl_isotherm_type']||null;
   meta._isAIF=true;
+  meta._aifItems=it;
   meta._aifBad=nBadRows;
   return meta;
 }
@@ -2482,6 +2491,9 @@ function finishLoad(meta,name,opts){
     (meta._aifWarn||[]).forEach(m=>notes.push({ok:false, msg:m}));
   }
   populateMetadataPanel(meta);
+  populateAifFields(meta,!!opts.keep);
+  parsedMeta._aifItems=meta._aifItems||null;
+  parsedMeta._srcName=name;
   showMetaNotes(notes);
 
   // Expand all three left-sidebar menus so the user sees units + metadata at a glance —
@@ -2676,7 +2688,7 @@ function tryConvert(silent){
       qC=convertQty(qM+rho*vPore,'mmol/g',qOut,prm);
     } else qC=convertQty(pt.q,qIn,qOut,prm);
     if(qC===null){bad++;continue;}
-    convData.push({p:pC,q:qC,branch:pt.branch});
+    convData.push({p:pC,q:qC,branch:pt.branch,pBar:pB,p0Bar:(pt.p0&&pIn!=='p/p0')?pToBar(pt.p0,pIn):undefined});
   }
   if(!silent){
     if(bad) st('Done — '+bad+' points skipped.','err');
@@ -2690,9 +2702,11 @@ function updateResults(){
   if(!convData.length){
     document.getElementById('resContent').innerHTML='<div class="ph">No converted data.</div>';
     document.getElementById('btnExport').disabled=true;
+    document.getElementById('btnExportAif').disabled=true;
     return;
   }
   document.getElementById('btnExport').disabled=false;
+  document.getElementById('btnExportAif').disabled=false;
   // Update branch selector based on available data
   const hasDes2=convData.some(r=>r.branch==='des');
   const branchSel=document.getElementById('exportBranch');
@@ -3200,6 +3214,16 @@ document.getElementById('btnExport').addEventListener('click',()=>{
       lines.push(row);
     });
   }
+  // AIF descriptors the user filled in (Summary tab) that no passthrough row already carries
+  {
+    const have=new Set((metaOut.passthrough||[]).map(r=>r.split(',')[0].toLowerCase().replace(/[\s_\-]/g,'')));
+    const csvKey={operator:'Operator',instrument:'Instrument',date:'Date',method:'Method',type:'Isotherm_Type',sample:'Sample_ID',material:'Material',doi:'DOI'};
+    for(const f of AIF_FIELDS){
+      if(f.id==='type'&&exOut) continue;
+      const v=aifFieldVal(f.id).replace(/,/g,';');
+      if(v && !f.aliases.some(a=>have.has(a))) lines.push(csvKey[f.id]+','+v);
+    }
+  }
   lines.push('# Input units: Pressure='+pIn+', Uptake='+qIn);
   lines.push('# Output units: Pressure='+pOut+', Uptake='+qOut);
 
@@ -3232,6 +3256,185 @@ document.getElementById('btnExport').addEventListener('click',()=>{
     a.download=defaultName; a.click();
     st('CSV downloaded — '+nPts+' point'+(nPts!==1?'s':'')+'. (Use Chrome/Edge for a save dialog.)','ok');
   }
+});
+
+// ── AIF export ───────────────────────────────────────────────────────────────
+// Descriptors that cannot be derived from the Metadata panel. `aliases` are the normalised
+// (lower-case, no space/underscore/hyphen) passthrough keys that pre-fill the field — AIF tags
+// from an AIF input and plain CSV keys alike. `session` fields (the same for a whole batch)
+// survive stepping through the navigator when the next file doesn't supply them.
+const AIF_FIELDS=[
+  {id:'operator',  tag:'_exptl_operator',       label:'Operator',                  session:true, aliases:['operator','exptloperator']},
+  {id:'instrument',tag:'_exptl_instrument',     label:'Instrument',                session:true, aliases:['instrument','exptlinstrument']},
+  {id:'date',      tag:'_exptl_date',           label:'Date / time (ISO 8601)',    ph:'2021-06-20T10:42:00', aliases:['date','exptldate']},
+  {id:'method',    tag:'_exptl_method',         label:'Method', select:['volumetric','gravimetric','other'], session:true, aliases:['method','exptlmethod']},
+  {id:'type',      tag:'_exptl_isotherm_type',  label:'Isotherm type', select:['excess','absolute','total'], aliases:['isothermtype','exptlisothermtype']},
+  {id:'sample',    tag:'_adsnt_sample_id',      label:'Sample ID',                 aliases:['sampleid','sample','adsntsampleid']},
+  {id:'material',  tag:'_adsnt_material_id',    label:'Material name / ID',        aliases:['material','materialname','materialid','adsntmaterialid','samplematerialname']},
+  {id:'doi',       tag:'_audit_block_doi',      label:'DOI of source article',     session:true, ph:'10.xxxx/xxxxx', aliases:['doi','auditblockdoi']},
+];
+(function buildAifFields(){
+  const host=document.getElementById('aifFields');
+  const base='width:100%;height:26px;background:var(--cream);border:1.5px solid var(--rule);padding:2px 6px;font-family:var(--mono);font-size:11px;color:var(--ink);outline:none;box-sizing:border-box';
+  for(const f of AIF_FIELDS){
+    const d=document.createElement('div');
+    d.innerHTML='<div class="fi-label" style="margin-top:3px">'+f.label+' <span id="aifSrc_'+f.id+'" style="color:#2a7a3b"></span></div>'+
+      (f.select
+        ? '<select id="aif_'+f.id+'" style="'+base+';appearance:none"><option value="">— not set —</option>'+f.select.map(o=>'<option>'+o+'</option>').join('')+'</select>'
+        : '<input type="text" id="aif_'+f.id+'" placeholder="'+(f.ph||'')+'" style="'+base+'">');
+    host.appendChild(d);
+    d.querySelector('#aif_'+f.id).addEventListener('input',e=>{ e.target.dataset.user='1'; });
+    d.querySelector('#aif_'+f.id).addEventListener('change',e=>{ e.target.dataset.user='1'; });
+  }
+  const hint=document.createElement('div');
+  hint.className='hint'; hint.style.cssText='grid-column:1/-1;font-size:9.5px;color:#aaa';
+  hint.textContent='Isotherm type is written as "absolute" automatically while Excess → Absolute is on.';
+  host.appendChild(hint);
+})();
+
+// Fill the fields from the loaded file's passthrough rows; keep=true (stepping through the
+// navigator) leaves session fields the user typed in place when the new file has none.
+function populateAifFields(meta,keep){
+  const found={};
+  for(const row of (meta.passthrough||[])){
+    const i=row.indexOf(','); if(i<0) continue;
+    const key=row.slice(0,i).toLowerCase().replace(/[\s_\-]/g,''), val=row.slice(i+1).trim();
+    if(!val) continue;
+    for(const f of AIF_FIELDS) if(f.aliases.includes(key)) found[f.id]=val;
+  }
+  for(const f of AIF_FIELDS){
+    const el=document.getElementById('aif_'+f.id), src=document.getElementById('aifSrc_'+f.id);
+    if(found[f.id]!==undefined){
+      let v=found[f.id];
+      if(f.select){
+        const m=f.select.find(o=>o.toLowerCase()===v.toLowerCase());
+        if(m) v=m; else if(![...el.options].some(o=>o.value===v)){ const o=document.createElement('option'); o.textContent=v; el.appendChild(o); }
+      }
+      el.value=v; el.dataset.user=''; src.textContent='✓ from file';
+    } else if(!(keep&&f.session&&el.dataset.user)){ el.value=''; el.dataset.user=''; src.textContent=''; }
+    else if(el.value) src.textContent='(your entry, kept)';
+  }
+}
+function aifFieldVal(id){ const e=document.getElementById('aif_'+id); return e?e.value.trim():''; }
+
+// Quote a string value the CIF/STAR way
+function aifQuote(v){ const s=String(v).replace(/[\r\n]+/g,' '); return s.indexOf("'")<0 ? "'"+s+"'" : '"'+s+'"'; }
+function aifNum(v){ return parseFloat(Number(v).toPrecision(10)).toString(); }
+
+const AIF_LOADING_UNIT={'mmol/g':'mmol/g','mol/kg':'mol/kg','cc(STP)/g':'cm3(STP)/g','g/g':'g/g','wt%':'wt%','mg/g':'mg/g','ug/g':'ug/g','mol/mol':'mol/mol',
+  'mmol':'mmol','mg_abs':'mg','ug_abs':'ug','g_abs':'g','cm3_abs':'cm3(STP)'};
+
+// Build the .aif text for the current converted data. Returns {text,name,nPts} or {error}.
+function buildAIF(){
+  const pIn=gv('pUnitsIn'), pOut=gv('pUnitsOut'), qIn=gv('qUnitsIn'), qOut=gv('qUnitsOut');
+  const branch=gv('exportBranch')||'both';
+  const metaOut=collectMetadataPanel();
+  const missing=[];
+  if(!metaOut.sorptive) missing.push('sorptive (Metadata panel)');
+  if(metaOut.tempK===undefined) missing.push('temperature (Metadata panel)');
+  setMissing(['metaSorptive','mdSorptive'],!metaOut.sorptive);
+  setMissing(['metaTempK','mdTempK'],metaOut.tempK===undefined);
+  if(missing.length) return {error:'An AIF needs at least the sorptive and the temperature — missing: '+missing.join(', ')+'.'};
+
+  const pU = pOut==='p/p0' ? 'bar' : pOut;          // AIF stores absolute pressure; p0 goes in its own column
+  const exOn=gb('excessChk');
+  const it=parsedMeta._aifItems||null;
+  const used=new Set(['_units_pressure','_units_loading','_units_mass','_units_temperature','_audit_aif_version','_exptl_temperature',
+    '_exptl_adsorptive','_exptl_sample_mass','_adsnt_sample_mass','_exptl_isotherm_type','_adsorptive_id','_adsorbate']);
+  AIF_FIELDS.forEach(f=>used.add(f.tag));
+  ['_sample_id','_sample_material_name','_adsnt_material_name'].forEach(t=>used.add(t));
+
+  const L=[];
+  const label=(nav.entries.length>1?nav.entries[nav.idx].label:(parsedMeta._srcName||metaOut.sorptive||'isotherm')).replace(/\.(csv|txt|tsv|dat|aif)$/i,'');
+  const blockName=String(label).replace(/[^A-Za-z0-9_.\-]+/g,'_').replace(/^_+|_+$/g,'')||'isotherm';
+  L.push('# Adsorption Information File (AIF) — written by Sorption Unit Converter, '+new Date().toISOString().slice(0,10));
+  L.push('# Format: Evans et al., Langmuir 2021, 37, 4222-4226. Data converted from '+fmtUnit(pIn)+' / '+fmtUnit(qIn)+' to '+fmtUnit(pU)+' / '+fmtUnit(qOut)+'.');
+  if(pOut==='p/p0') L.push('# Pressure is absolute (the output unit p/p0 cannot be stored in the pressure column); p0 is given alongside.');
+  if(exOn){
+    L.push('# Excess converted to absolute: n_abs = n_exc + rho_gas(T,p)*V_pore (Peng-Robinson density), V_pore = '+gn('vPore')+' cm3/g'+(vPoreSrcText?' ('+vPoreSrcText+')':'')+'.');
+  }
+  L.push('data_'+blockName);
+  const kv=(tag,val)=>{ if(val!==''&&val!==undefined&&val!==null) L.push(tag+' '+val); };
+  const txt=(tag,v)=>{ if(v) kv(tag,aifQuote(v)); };
+  txt('_exptl_operator',aifFieldVal('operator'));
+  txt('_exptl_instrument',aifFieldVal('instrument'));
+  txt('_exptl_date',aifFieldVal('date'));
+  txt('_exptl_isotherm_type',exOn?'absolute':aifFieldVal('type'));
+  // sorptive: keep the file's own spelling if it names the same gas
+  const origGas=it&&it['_exptl_adsorptive']?String(it['_exptl_adsorptive']):'';
+  const gasName=(origGas&&detectGas(origGas)===detectGas(metaOut.sorptive))?origGas:metaOut.sorptive;
+  txt('_exptl_adsorptive',gasName);
+  kv('_exptl_temperature',aifNum(metaOut.tempK));
+  txt('_exptl_method',aifFieldVal('method'));
+  txt('_adsnt_sample_id',aifFieldVal('sample'));
+  txt('_adsnt_material_id',aifFieldVal('material'));
+  if(metaOut.hostMass!==undefined) kv('_adsnt_sample_mass',aifNum(metaOut.hostMass/1000));
+  txt('_audit_block_doi',aifFieldVal('doi'));
+  // any other tags the input AIF carried (digitizer, …) go back verbatim
+  if(it) for(const [k,v] of Object.entries(it)){
+    if(used.has(k)||v===null||v==='') continue;
+    kv(k, /^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(String(v)) ? v : aifQuote(v));
+  }
+  kv('_units_pressure',aifQuote(pU));
+  kv('_units_loading',aifQuote(AIF_LOADING_UNIT[qOut]||qOut));
+  kv('_units_mass',"'g'");
+  kv('_units_temperature',"'K'");
+  kv('_audit_aif_version','0.01');
+  // pass-through rows from a CSV input (not AIF tags) as comments, so nothing is silently dropped
+  if(!it) (metaOut.passthrough||[]).forEach(r=>{
+    if(/^#/.test(r)) return;
+    const key=r.split(',')[0].toLowerCase().replace(/[\s_\-]/g,'');
+    if(AIF_FIELDS.some(f=>f.aliases.includes(key))) return;
+    L.push('# '+r.replace(',',': '));
+  });
+  if(metaOut.hostFormula) L.push('# Host formula: '+metaOut.hostFormula+(metaOut.hostMW!==undefined?' (MW '+metaOut.hostMW+' g/mol)':''));
+
+  // p0 column: per-point values from an AIF input, else a P_sat the user/file supplied —
+  // never the Antoine estimate, which is not a measured quantity
+  const pSatBar=document.getElementById('metaPSat').dataset.manual==='true' ? gn('pSat') : undefined;
+  let nPts=0;
+  for(const [br,tag,lbl] of [['ads','adsorp','adsorption'],['des','desorp','desorption']]){
+    if(branch!=='both'&&branch!==br) continue;
+    const rows=convData.filter(r=>r.branch===br);
+    if(!rows.length) continue;
+    const p0s=rows.map(r=>r.p0Bar!==undefined?r.p0Bar:(pSatBar>0?pSatBar:undefined));
+    const hasP0=p0s.every(v=>v!==undefined&&isFinite(v));
+    L.push('');
+    L.push('loop_');
+    L.push('_'+tag+'_pressure');
+    if(hasP0) L.push('_'+tag+'_p0');
+    L.push('_'+tag+'_amount');
+    rows.forEach((r,i)=>{
+      const cells=[aifNum(pFromBar(r.pBar,pU))];
+      if(hasP0) cells.push(aifNum(pFromBar(p0s[i],pU)));
+      cells.push(aifNum(r.q));
+      L.push(cells.join(' '));
+    });
+    nPts+=rows.length;
+  }
+  if(!nPts) return {error:'No data points for the selected branch.'};
+  return {text:L.join('\r\n')+'\r\n', name:blockName+'.aif', nPts};
+}
+
+function saveTextFile(text,defaultName,desc,mime,ext,okMsg){
+  const blob=new Blob([text],{type:mime});
+  if(window.showSaveFilePicker){
+    const opts={suggestedName:defaultName,types:[{description:desc,accept:{[mime]:[ext]}}]};
+    if(sourceFileHandle) opts.startIn=sourceFileHandle;
+    window.showSaveFilePicker(opts)
+      .then(fh=>fh.createWritable()).then(w=>w.write(text).then(()=>w.close()))
+      .then(()=>st(okMsg,'ok'))
+      .catch(e=>{ if(e.name!=='AbortError') st('Save failed: '+e.message,'err'); });
+  } else {
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=defaultName; a.click();
+    st(okMsg+' (downloaded — use Chrome/Edge for a save dialog.)','ok');
+  }
+}
+document.getElementById('btnExportAif').addEventListener('click',()=>{
+  if(!convData.length) return;
+  const r=buildAIF();
+  if(r.error){ st('⚠ '+r.error,'err'); return; }
+  saveTextFile(r.text,r.name,'Adsorption Information File','text/plain','.aif','Saved AIF — '+r.nPts+' point'+(r.nPts!==1?'s':'')+' exported.');
 });
 
 function savePlot(){
