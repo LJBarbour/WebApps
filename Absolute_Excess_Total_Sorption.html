@@ -1,0 +1,873 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Absolute, Excess &amp; Total Sorption</title>
+<style>
+:root{
+  --bg:#f3f5f9; --card:#ffffff; --ink:#16202c; --mute:#445263; --line:#d3dbe5; --acc:#1f4e8c; --accbg:#e8f0fb;
+  --abs:#0072B2; --exc:#C25400; --tot:#00836a;
+  --c-ex:#D55E00; --c-lg:#E8B100; --c-free:#6b7f99;
+  --warn:#8a4b00; --warnbg:#fff3df;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif}
+header{padding:18px 24px 6px}
+h1{margin:0;font-size:24px;letter-spacing:-.01em}
+header p{margin:4px 0 0;color:var(--mute);max-width:900px}
+.tabs{display:flex;gap:6px;padding:12px 24px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tab{border:1px solid var(--line);border-bottom:none;background:#e6ebf2;color:var(--ink);padding:8px 16px;border-radius:10px 10px 0 0;cursor:pointer;font:inherit;font-weight:600}
+.tab[aria-selected=true]{background:var(--card);color:var(--acc);box-shadow:0 2px 0 var(--card)}
+.layout{display:grid;grid-template-columns:270px minmax(0,1fr);gap:16px;padding:14px 20px 40px;max-width:1700px;margin:auto}
+@media(max-width:960px){.layout{grid-template-columns:1fr;padding:14px 16px 40px}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.card h2{margin:0 0 8px;font-size:16px}
+.card h3{margin:0 0 6px;font-size:14px}
+aside .card{margin-bottom:14px}
+.row{display:flex;flex-direction:column;gap:2px;margin:10px 0}
+.row label{display:flex;justify-content:space-between;font-size:13px;font-weight:600;color:var(--mute)}
+.row label b{color:var(--ink);font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--acc)}
+select,input[type=number],textarea{font:inherit;border:1px solid #aab6c4;border-radius:8px;padding:6px 8px;background:#fff;color:var(--ink);width:100%}
+textarea{font-family:Consolas,monospace;font-size:13px;resize:vertical}
+button{font:inherit;cursor:pointer}
+.btn{border:1px solid var(--acc);background:#fff;color:var(--acc);padding:6px 12px;border-radius:8px;font-weight:600}
+.btn:hover{background:var(--accbg)}
+.btn.primary{background:var(--acc);color:#fff}
+.btn.primary:hover{background:#173d6f}
+.seg{display:inline-flex;border:1px solid var(--acc);border-radius:10px;overflow:hidden;flex-wrap:wrap}
+.seg button{border:none;background:#fff;color:var(--acc);padding:8px 14px;font-weight:600;border-right:1px solid #b8c8e0}
+.seg button:last-child{border-right:none}
+.seg button[aria-pressed=true]{background:var(--acc);color:#fff}
+.main{display:flex;flex-direction:column;gap:16px;min-width:0}
+.two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+@media(max-width:1000px){.two{grid-template-columns:1fr!important}}
+.sticky{position:sticky;top:0;z-index:5;box-shadow:0 4px 10px rgba(22,32,44,.08)}
+canvas{width:100%;display:block;border-radius:10px;background:#fbfcfe;border:1px solid var(--line)}
+svg.chart{width:100%;height:auto;display:block;touch-action:none;cursor:crosshair}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin:8px 0 0;font-size:13px;color:var(--mute)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.dot{width:12px;height:12px;border-radius:50%;display:inline-block;border:1px solid rgba(0,0,0,.25)}
+.eq{background:var(--accbg);border-radius:10px;padding:10px 12px;font-size:14px;margin-top:10px}
+.eq div{margin:2px 0}
+.q{display:inline-block;padding:1px 8px;border-radius:999px;color:#fff;font-weight:700;font-size:12px}
+.q.abs{background:var(--abs)}.q.ex{background:var(--exc)}.q.tot{background:var(--tot)}
+.bars{display:flex;flex-direction:column;gap:10px;margin-top:8px}
+.bar{display:grid;grid-template-columns:92px 1fr 118px;gap:8px;align-items:center;font-size:13px}
+.bar .track{display:flex;height:26px;background:#eef1f6;border-radius:6px;overflow:hidden}
+.bar .track i{display:block;height:100%}
+.bar .val{font-variant-numeric:tabular-nums;font-weight:600}
+.story{border-left:4px solid var(--acc);padding:2px 0 2px 12px}
+.story p{margin:6px 0}
+.warn{background:var(--warnbg);color:var(--warn);border:1px solid #e8c48c;border-radius:8px;padding:6px 10px;font-size:13px;margin:8px 0}
+.chk{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;align-items:center}
+.chk label{display:inline-flex;align-items:center;gap:5px;font-weight:600}
+.cards3{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}
+.cards3 .card h3{margin-bottom:4px}
+.cards3 p{margin:5px 0;font-size:14px}
+table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
+th,td{border-bottom:1px solid var(--line);padding:5px 8px;text-align:right}
+th{background:#eef2f8;position:sticky;top:0}
+.tablewrap{max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+.small{font-size:13px;color:var(--mute)}
+.hdr{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px}
+code{background:#eef2f8;padding:0 4px;border-radius:4px}
+.hidden{display:none!important}
+.fig{margin:0;background:#fbfcfe;border:1px solid var(--line);border-radius:10px;padding:8px}
+.fig svg{width:100%;height:auto;display:block}
+.fig figcaption{font-size:13px;color:var(--mute);padding:4px 6px 2px}
+.tbl th{text-align:left;position:static}.tbl td{text-align:left;vertical-align:top}
+.card ul{margin:6px 0;padding-left:20px}.card li{margin:3px 0}
+.qq{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0}
+.qq p{margin:0 0 8px;font-weight:600}
+.qq .opts{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.qq .opts button{border:1px solid #aab6c4;background:#fff;border-radius:8px;padding:6px 12px;text-align:left}
+.qq .opts button:hover{background:var(--accbg)}
+.qq .opts button.ok{background:#dff3e9;border-color:#00836a}
+.qq .opts button.bad{background:#fde7e4;border-color:#b3261e}
+.qq .fb{margin-top:8px;font-size:14px}
+.worked li{margin:6px 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>Absolute, excess and total sorption</h1>
+  <p>Three ways of counting the same gas in a porous solid. Move the pressure, change the adsorbent and the gas, and watch which molecules each definition counts.</p>
+</header>
+<div class="tabs" role="tablist">
+  <button class="tab" role="tab" id="tabExplore" aria-selected="true">Explore</button>
+  <button class="tab" role="tab" id="tabLearn" aria-selected="false">Learn</button>
+  <button class="tab" role="tab" id="tabConvert" aria-selected="false">Convert your data</button>
+</div>
+
+<div class="layout">
+<aside>
+  <div class="card">
+    <h2>Example systems</h2>
+    <select id="preset">
+      <option value="ch4ac">CH₄ on activated carbon, 298 K</option>
+      <option value="h2mof">H₂ on a MOF, 77 K</option>
+      <option value="co2zeo">CO₂ on zeolite 13X, 298 K</option>
+      <option value="weak">CH₄, weak-binding open framework</option>
+      <option value="neg">Negative excess (low-density layer)</option>
+    </select>
+  </div>
+  <div class="card">
+    <h2>Gas and adsorbent</h2>
+    <div class="row"><label for="gas">Gas</label>
+      <select id="gas"><option value="H2">H₂</option><option value="CH4">CH₄</option><option value="CO2">CO₂</option><option value="N2">N₂</option><option value="Ar">Ar</option></select></div>
+    <div id="sharedSliders"></div>
+  </div>
+  <div class="card" id="modelCard">
+    <h2>Model isotherm</h2>
+    <p class="small" style="margin:0">Absolute uptake follows a Langmuir isotherm.</p>
+    <div id="modelSliders"></div>
+    <div class="row"><label for="pmax">Maximum pressure (bar)</label><input type="number" id="pmax" min="1" max="2000" step="1"></div>
+  </div>
+</aside>
+
+<section class="main" id="exploreView">
+  <div class="card sticky">
+    <div class="hdr">
+      <div class="seg" id="concept" role="group" aria-label="Concept">
+        <button data-c="overview" aria-pressed="true">Overview</button>
+        <button data-c="abs" aria-pressed="false">Absolute</button>
+        <button data-c="ex" aria-pressed="false">Excess</button>
+        <button data-c="tot" aria-pressed="false">Total</button>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <label class="small" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="freeze"> Freeze motion</label>
+      </div>
+    </div>
+    <div class="row" style="margin:6px 0 0"><label for="pslider">Pressure <b id="pval"></b></label>
+      <div style="display:flex;gap:10px;align-items:center">
+        <button class="btn" id="sweep" style="min-width:92px">▶ Sweep</button>
+        <input type="range" id="pslider" min="0" max="1000" step="1" style="flex:1">
+      </div>
+    </div>
+  </div>
+
+  <div class="two">
+    <div class="card">
+      <h2>Inside a slit pore</h2>
+      <canvas id="pore" height="300"></canvas>
+      <div class="legend">
+        <span><i class="dot" style="background:var(--c-ex)"></i> Excess molecules</span>
+        <span><i class="dot" style="background:var(--c-lg)"></i> Gas that would fill the layer volume anyway (ρ<sub>g</sub>·V<sub>a</sub>)</span>
+        <span><i class="dot" style="background:var(--c-free)"></i> Free gas in the rest of the pore</span>
+      </div>
+    </div>
+    <div class="card">
+    <div class="hdr">
+      <h2 style="margin:0">Isotherms <span class="small">(click or drag to set pressure)</span></h2>
+      <div class="chk">
+        <label><input type="checkbox" data-show="abs" checked> <span style="color:var(--abs)">Absolute</span></label>
+        <label><input type="checkbox" data-show="ex" checked> <span style="color:var(--exc)">Excess</span></label>
+        <label><input type="checkbox" data-show="tot" checked> <span style="color:var(--tot)">Total</span></label>
+        <select id="unit" style="width:auto">
+          <option value="mmol">mmol/g</option><option value="mg">mg/g</option><option value="stp">cm³(STP)/g</option><option value="wt">wt %</option>
+        </select>
+        <label><input type="checkbox" id="xlog"> log pressure</label>
+      </div>
+    </div>
+    <div id="warns"></div>
+    <svg class="chart" id="chart" viewBox="0 0 760 400"></svg>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>What the numbers say at this pressure</h2>
+    <div class="two" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start">
+      <div>
+        <div class="story" id="story"></div>
+        <div class="eq">
+          <div><span class="q abs">Absolute</span> = excess + gas in layer volume</div>
+          <div><span class="q ex">Excess</span> = absolute − ρ<sub>g</sub>·V<sub>a</sub></div>
+          <div><span class="q tot">Total</span> = excess + ρ<sub>g</sub>·V<sub>p</sub></div>
+        </div>
+      </div>
+      <div class="bars" id="bars"></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="cards3">
+      <div class="card"><h3><span class="q abs">Absolute</span> what is physically in the adsorbed layer</h3>
+        <p>Every molecule sitting in the volume next to the surface where the solid's field has raised the density. Needs a model for that volume (or density), so it cannot be measured directly.</p>
+        <p>Use it for thermodynamics (heats, entropies), isotherm model fitting and comparison with simulation of the adsorbed phase.</p></div>
+      <div class="card"><h3><span class="q ex">Excess</span> what the balance or manometer reports</h3>
+        <p>The adsorbed molecules minus the gas that would have occupied the same volume with no attraction. Needs no model, only a reference volume (usually from helium).</p>
+        <p>It rises, peaks and falls at high pressure because the bulk gas density keeps growing while the layer saturates.</p></div>
+      <div class="card"><h3><span class="q tot">Total</span> everything inside the pores</h3>
+        <p>Adsorbed layer plus compressed gas filling the remaining pore volume: excess + ρ<sub>g</sub>·V<sub>p</sub>. It never falls with pressure.</p>
+        <p>This is the amount a filled storage tank actually holds. It needs the pore volume V<sub>p</sub>.</p></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Common pitfalls to watch for</h2>
+    <div class="cards3">
+      <div><h3>Same word, different meaning</h3><p class="small" style="color:var(--ink)">In molecular simulation (GCMC) “absolute” usually means every molecule in the pore, which is the <b>total</b> here. Simulators then compute excess = N − ρ<sub>g</sub>·V<sub>He</sub>. State which convention you use.</p></div>
+      <div><h3>Excess depends on the reference volume</h3><p class="small" style="color:var(--ink)">The helium (or skeleton) volume defines the zero. A different volume shifts the whole excess isotherm by ρ<sub>g</sub>·ΔV, which grows with pressure.</p></div>
+      <div><h3>A falling excess is not desorption</h3><p class="small" style="color:var(--ink)">The absolute amount can still be rising or flat while the excess declines. Do not fit Langmuir or Toth to excess data above the maximum without correcting it first.</p></div>
+      <div><h3>Absolute needs an assumption</h3><p class="small" style="color:var(--ink)">Converting excess to absolute requires the adsorbed-phase density or volume. Liquid density at the boiling point is common but crude, so quote it. Use the Convert tab to see the effect.</p></div>
+      <div><h3>Total needs a pore volume</h3><p class="small" style="color:var(--ink)">V<sub>p</sub> from N₂ at 77 K or CO₂ at 273 K can differ from the volume the working gas reaches. Gas between crystallites in a powder or pellet adds still more.</p></div>
+      <div><h3>Near saturation</h3><p class="small" style="color:var(--ink)">Below the critical temperature the model is only meaningful under the saturation pressure, since the bulk gas would condense. A warning appears if you go beyond it.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="main hidden" id="learnView">
+  <div class="card sticky">
+    <div class="row" style="margin:0"><label for="pslider2">Pressure for the live figures <b id="pval2"></b> <span class="small" style="font-weight:400">· figures follow the gas and adsorbent in the left panel, so try changing them</span></label>
+      <input type="range" id="pslider2" min="0" max="1000" step="1"></div>
+  </div>
+
+  <div class="card">
+    <h2>1 · Why are there three numbers?</h2>
+    <div class="two">
+      <div>
+        <p>Put a porous solid in a gas and it takes some up. The question “how much?” is really “how much <i>compared with what</i>?”. Inside a pore there are two kinds of molecule:</p>
+        <ul>
+          <li><b>Near the wall</b>, the solid's attraction packs molecules into a dense <b>adsorbed layer</b> of volume V<sub>a</sub>.</li>
+          <li><b>In the middle</b>, the gas is just ordinary gas at the bulk density ρ<sub>g</sub>.</li>
+        </ul>
+        <p>The pore also holds gas that is not adsorbed at all, and the gas density ρ<sub>g</sub> rises steeply with pressure. So you can count:</p>
+        <ul>
+          <li><span class="q abs">Absolute</span> every molecule in the adsorbed layer,</li>
+          <li><span class="q ex">Excess</span> only the molecules <i>beyond</i> what plain gas would put in that same volume,</li>
+          <li><span class="q tot">Total</span> every molecule anywhere in the pore.</li>
+        </ul>
+        <p class="small">In reality the layer has no sharp edge. Defining V<sub>a</sub> is a modelling choice, and that is exactly why the three numbers differ in how well they can be measured.</p>
+      </div>
+      <figure class="fig"><svg id="dg1" viewBox="0 0 780 290" role="img" aria-label="Slit pore with adsorbed layers, free gas and volume labels"></svg>
+        <figcaption>A slit pore between two walls. Orange and yellow molecules form the adsorbed layer (volume V<sub>a</sub>). Grey molecules are free gas. Together everything in the gap is the pore volume V<sub>p</sub>.</figcaption></figure>
+    </div>
+    <div class="eq" style="margin-top:12px">
+      <div><span class="q ex">Excess</span> counts the <b style="color:var(--c-ex)">orange</b> molecules only.</div>
+      <div><span class="q abs">Absolute</span> counts <b style="color:var(--c-ex)">orange</b> + <b style="color:#8a6d00">yellow</b> molecules (the whole layer).</div>
+      <div><span class="q tot">Total</span> counts <b style="color:var(--c-ex)">orange</b> + <b style="color:#8a6d00">yellow</b> + <b style="color:var(--c-free)">grey</b> molecules (everything in the pore).</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>2 · The three definitions side by side</h2>
+    <div class="tablewrap" style="max-height:none"><table class="tbl">
+      <thead><tr><th>Quantity</th><th>What it counts</th><th>Formula</th><th>Measured directly?</th><th>Needs</th><th>Typical use</th></tr></thead>
+      <tbody>
+        <tr><td><span class="q abs">Absolute</span><br>n<sub>abs</sub></td><td>Molecules in the adsorbed layer</td><td>ρ<sub>a</sub>·V<sub>a</sub> = n<sub>ex</sub> + ρ<sub>g</sub>·V<sub>a</sub></td><td>No</td><td>V<sub>a</sub> or ρ<sub>a</sub> (a model)</td><td>Isotherm models, heats of adsorption, adsorbed-phase thermodynamics</td></tr>
+        <tr><td><span class="q ex">Excess</span><br>n<sub>ex</sub></td><td>Molecules beyond bulk density in V<sub>a</sub></td><td>n<sub>abs</sub> − ρ<sub>g</sub>·V<sub>a</sub></td><td>Yes</td><td>Reference volume (He) and ρ<sub>g</sub></td><td>Reporting experiments, comparing labs</td></tr>
+        <tr><td><span class="q tot">Total</span><br>n<sub>tot</sub></td><td>All molecules in the pores</td><td>n<sub>ex</sub> + ρ<sub>g</sub>·V<sub>p</sub></td><td>Indirectly</td><td>Pore volume V<sub>p</sub></td><td>Storage capacity of a filled container</td></tr>
+      </tbody></table></div>
+    <p class="small">Symbols: ρ<sub>g</sub> bulk gas density (mol/L, from an equation of state) · ρ<sub>a</sub> density of the adsorbed layer · V<sub>a</sub> volume of the adsorbed layer · V<sub>p</sub> pore volume · V<sub>He</sub> helium (skeleton) volume used as the reference. Because 1 mol/L = 1 mmol/cm³, ρ·V in mol/L × cm³/g gives mmol/g directly.</p>
+  </div>
+
+  <div class="card">
+    <h2>3 · Excess is a subtraction</h2>
+    <div class="two">
+      <div>
+        <p>Imagine the surface is switched off and the layer volume V<sub>a</sub> is simply filled with bulk gas. It would contain ρ<sub>g</sub>·V<sub>a</sub> molecules. The real layer contains n<sub>abs</sub>. Excess is the difference, the molecules the surface really added.</p>
+        <figure class="fig"><svg viewBox="0 0 720 230" role="img" aria-label="Same volume without and with attraction">
+          <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#16202c"/></marker></defs>
+          <text x="40" y="22" font-size="13" font-weight="700" fill="#16202c">Surface switched off</text>
+          <text x="40" y="38" font-size="12" fill="#445263">volume V<tspan font-size="9" dy="3">a</tspan><tspan dy="-3"> holds bulk gas only</tspan></text>
+          <rect x="40" y="50" width="250" height="110" rx="6" fill="#fff8e1" stroke="#9a7a00" stroke-dasharray="6 4"/>
+          <g fill="#E8B100" stroke="#fff" stroke-width="1">
+            <circle cx="80" cy="80" r="8"/><circle cx="180" cy="125" r="8"/><circle cx="250" cy="75" r="8"/><circle cx="120" cy="140" r="8"/></g>
+          <text x="165" y="185" text-anchor="middle" font-size="14" font-weight="700" fill="#16202c">ρg·Va = 4 molecules</text>
+          <text x="420" y="22" font-size="13" font-weight="700" fill="#16202c">Surface switched on</text>
+          <text x="420" y="38" font-size="12" fill="#445263">same volume, molecules drawn in</text>
+          <rect x="420" y="50" width="250" height="110" rx="6" fill="#fff8e1" stroke="#9a7a00" stroke-dasharray="6 4"/>
+          <g stroke="#fff" stroke-width="1">
+            <g fill="#E8B100"><circle cx="460" cy="80" r="8"/><circle cx="560" cy="125" r="8"/><circle cx="630" cy="75" r="8"/><circle cx="500" cy="140" r="8"/></g>
+            <g fill="#D55E00"><circle cx="485" cy="105" r="8"/><circle cx="520" cy="72" r="8"/><circle cx="545" cy="95" r="8"/><circle cx="585" cy="70" r="8"/><circle cx="600" cy="108" r="8"/><circle cx="640" cy="130" r="8"/><circle cx="470" cy="128" r="8"/><circle cx="590" cy="145" r="8"/></g></g>
+          <text x="545" y="185" text-anchor="middle" font-size="14" font-weight="700" fill="#16202c">nabs = 12 molecules</text>
+          <path d="M300 105 H410" stroke="#16202c" stroke-width="2" marker-end="url(#arr)"/>
+          <text x="355" y="97" text-anchor="middle" font-size="12" fill="#445263">attraction</text>
+          <text x="360" y="218" text-anchor="middle" font-size="15" font-weight="700" fill="#C25400">excess = 12 − 4 = 8 molecules</text>
+        </svg><figcaption>The yellow molecules would be there anyway. Only the 8 orange ones are “excess”.</figcaption></figure>
+      </div>
+      <div>
+        <svg class="chart" id="lc1" viewBox="0 0 760 400"></svg>
+        <p class="small">Live: absolute (blue) minus the gas that would fill V<sub>a</sub> anyway (dashed) gives excess (orange). The dashed line grows with pressure because ρ<sub>g</sub> does, so the subtraction eats into the absolute uptake.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>4 · Why does excess go through a maximum?</h2>
+    <div class="two">
+      <div>
+        <p>Differentiate n<sub>ex</sub> = n<sub>abs</sub> − ρ<sub>g</sub>·V<sub>a</sub> and the maximum occurs when</p>
+        <div class="eq"><div>dn<sub>abs</sub>/dP ≈ V<sub>a</sub> · dρ<sub>g</sub>/dP</div></div>
+        <ul>
+          <li><b>Low pressure:</b> n<sub>abs</sub> rises quickly and ρ<sub>g</sub> is tiny, so excess ≈ absolute.</li>
+          <li><b>Medium pressure:</b> the surface starts to saturate, so n<sub>abs</sub> flattens, but ρ<sub>g</sub> keeps climbing roughly linearly (more steeply still near the critical point).</li>
+          <li><b>High pressure:</b> the subtracted term wins and the excess <b>falls</b>. It can even go negative if the bulk gas becomes denser than the adsorbed layer (try the “negative excess” example).</li>
+        </ul>
+        <p>A falling excess does not mean molecules are leaving the pores. The <b>total</b> keeps rising, as the next figure shows. Stronger binding and lower temperature move the maximum to lower pressure, so try the temperature and half-filling sliders.</p>
+      </div>
+      <div>
+        <svg class="chart" id="lc2" viewBox="0 0 760 400"></svg>
+        <p class="small">Live: total (green) is the excess (orange) plus the gas that fills the whole pore (dashed grey), so it is monotonic.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>5 · Total is an addition</h2>
+    <p>Everything in the pore volume counts: the adsorbed layer plus the compressed gas in the rest of the pore.</p>
+    <div class="eq"><div>n<sub>tot</sub> = n<sub>abs</sub> + ρ<sub>g</sub>·(V<sub>p</sub> − V<sub>a</sub>) = n<sub>ex</sub> + ρ<sub>g</sub>·V<sub>p</sub></div></div>
+    <p>This is what a tank filled with the material actually holds, which is why storage targets (for H₂ and CH₄) are stated as total or deliverable amounts. Two cautions: at high pressure much of the total is just ordinary compressed gas, and in a real pellet or powder bed the gas between crystallites adds still more. The excess tells you how much the <i>material</i> contributes over an empty container of the same pore volume.</p>
+  </div>
+
+  <div class="card">
+    <h2>6 · What does the instrument actually measure?</h2>
+    <p>Both standard methods give the <b>excess</b>, and both need a reference volume from a helium measurement.</p>
+    <div class="two">
+      <figure class="fig"><svg viewBox="0 0 560 370" role="img" aria-label="Gravimetric balance with weight and buoyancy forces">
+        <defs><marker id="arrR" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#b3261e"/></marker><marker id="arrB" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#0b5cad"/></marker></defs>
+        <rect x="150" y="70" width="260" height="240" rx="14" fill="#eef5fb" stroke="#7b8794" stroke-width="2"/>
+        <g id="gasdots" fill="#6b7f99" opacity=".7"></g>
+        <rect x="200" y="14" width="160" height="36" rx="6" fill="#d3dbe5" stroke="#445263"/>
+        <text x="280" y="37" text-anchor="middle" font-size="13" font-weight="700" fill="#16202c">microbalance</text>
+        <line x1="280" y1="50" x2="280" y2="170" stroke="#16202c" stroke-width="2"/>
+        <path d="M245 170 H315 L305 215 H255 Z" fill="#fff" stroke="#16202c" stroke-width="2"/>
+        <ellipse cx="280" cy="200" rx="22" ry="12" fill="#8a94a1"/>
+        <g fill="#D55E00" stroke="#fff"><circle cx="262" cy="192" r="4"/><circle cx="276" cy="186" r="4"/><circle cx="292" cy="190" r="4"/><circle cx="299" cy="200" r="4"/><circle cx="266" cy="206" r="4"/><circle cx="284" cy="210" r="4"/></g>
+        <line x1="350" y1="190" x2="350" y2="260" stroke="#b3261e" stroke-width="3" marker-end="url(#arrR)"/>
+        <text x="358" y="238" font-size="12" font-weight="700" fill="#b3261e" stroke="#eef5fb" stroke-width="4" paint-order="stroke">weight of sample</text>
+        <text x="358" y="254" font-size="12" font-weight="700" fill="#b3261e" stroke="#eef5fb" stroke-width="4" paint-order="stroke">+ adsorbed gas</text>
+        <line x1="210" y1="190" x2="210" y2="120" stroke="#0b5cad" stroke-width="3" marker-end="url(#arrB)"/>
+        <text x="160" y="112" font-size="12" font-weight="700" fill="#0b5cad" stroke="#eef5fb" stroke-width="4" paint-order="stroke">buoyancy = ρg·V</text>
+        <text x="150" y="338" font-size="13" font-weight="700" fill="#16202c">reading: Δm = m_ads − ρg·V_He</text>
+        <text x="150" y="356" font-size="12" fill="#445263">(plus pan terms, taken from a blank run)</text>
+      </svg><figcaption>Gravimetric: the balance sees the weight of the sample plus adsorbed gas, minus the upthrust of the surrounding gas on the sample's skeleton volume.</figcaption></figure>
+      <figure class="fig"><svg viewBox="0 0 560 330" role="img" aria-label="Volumetric (Sieverts) apparatus">
+        <rect x="30" y="90" width="180" height="150" rx="10" fill="#eef5fb" stroke="#445263" stroke-width="2"/>
+        <text x="120" y="70" text-anchor="middle" font-size="13" font-weight="700" fill="#16202c">reference volume</text>
+        <text x="120" y="130" text-anchor="middle" font-size="12" fill="#16202c">known V, T, P₁</text>
+        <text x="120" y="152" text-anchor="middle" font-size="12" fill="#16202c">→ moles dosed</text>
+        <rect x="350" y="90" width="180" height="150" rx="10" fill="#eef5fb" stroke="#445263" stroke-width="2"/>
+        <text x="440" y="70" text-anchor="middle" font-size="13" font-weight="700" fill="#16202c">sample cell</text>
+        <ellipse cx="440" cy="215" rx="55" ry="18" fill="#8a94a1"/>
+        <g fill="#D55E00" stroke="#fff"><circle cx="410" cy="205" r="4"/><circle cx="430" cy="198" r="4"/><circle cx="455" cy="200" r="4"/><circle cx="472" cy="208" r="4"/></g>
+        <text x="440" y="132" text-anchor="middle" font-size="12" fill="#16202c">void volume (He), P₂</text>
+        <line x1="210" y1="165" x2="270" y2="165" stroke="#445263" stroke-width="5"/><line x1="290" y1="165" x2="350" y2="165" stroke="#445263" stroke-width="5"/>
+        <circle cx="280" cy="165" r="14" fill="#fff" stroke="#16202c" stroke-width="2.5"/><line x1="270" y1="155" x2="290" y2="175" stroke="#16202c" stroke-width="2.5"/><line x1="290" y1="155" x2="270" y2="175" stroke="#16202c" stroke-width="2.5"/>
+        <text x="280" y="142" text-anchor="middle" font-size="12" fill="#445263">valve</text>
+        <text x="10" y="285" font-size="12" fill="#16202c">n_ex = n_dosed − ρg(P₂)·V_void</text>
+        <text x="10" y="303" font-size="12" fill="#445263">moles that “went missing” from the gas phase</text>
+      </svg><figcaption>Volumetric (Sieverts): dose a known amount of gas into the cell. What is missing from the gas phase, judged against the helium void volume, is the excess.</figcaption></figure>
+    </div>
+    <p>In both cases the helium volume plays the role of the reference volume. In the language of Gibbs surface excess, the instrument counts molecules against a bulk-gas background filling V<sub>He</sub>. Helium is assumed to enter every pore the working gas can reach and not to adsorb itself. When these assumptions are imperfect the zero of the excess shifts, as the next section shows.</p>
+  </div>
+
+  <div class="card">
+    <h2>7 · What if the reference volume is wrong?</h2>
+    <div class="two">
+      <div>
+        <p>A mistake ΔV in the helium volume shifts the apparent excess by ρ<sub>g</sub>·ΔV. Since ρ<sub>g</sub> grows with pressure, the error is small at low pressure and large exactly where the excess maximum is.</p>
+        <div class="row"><label for="dV">Error in V<sub>He</sub> (+ = too large) <b id="dVval"></b></label>
+          <input type="range" id="dV" min="-0.1" max="0.1" step="0.005" value="0.03"></div>
+        <p class="small">A positive error can hide the maximum, while a negative error can make the excess fall too early, or even go negative. The same data look like a different isotherm, which is why V<sub>He</sub> and the way it was found must be reported, and why helium runs are best done at the measurement temperature or with a correction for any helium uptake.</p>
+      </div>
+      <div><svg class="chart" id="lc3" viewBox="0 0 760 400"></svg></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>8 · Worked conversion at the current pressure</h2>
+    <div id="worked"></div>
+  </div>
+
+  <div class="card">
+    <h2>9 · Which one should I report?</h2>
+    <div class="tablewrap" style="max-height:none"><table class="tbl">
+      <thead><tr><th>Your goal</th><th>Use</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>Publishing a measured isotherm</td><td><span class="q ex">Excess</span></td><td>It is what the instrument gives, with the fewest assumptions. State the gas, temperature, and how V<sub>He</sub> was determined. If you also report another quantity, state V<sub>p</sub> or ρ<sub>a</sub>.</td></tr>
+        <tr><td>Fitting Langmuir, Toth, dual-site or similar models</td><td><span class="q abs">Absolute</span></td><td>These models describe the adsorbed phase, which saturates. Fitting them to excess data gives wrong capacities above the maximum.</td></tr>
+        <tr><td>Isosteric heats, adsorbed-phase thermodynamics</td><td><span class="q abs">Absolute</span></td><td>Clausius–Clapeyron-type analysis needs the true amount adsorbed, otherwise the heat is badly wrong at high loading.</td></tr>
+        <tr><td>Sizing a storage tank; comparing with DOE-style targets</td><td><span class="q tot">Total</span></td><td>It is what the container holds. Report deliverable capacity as total(P<sub>high</sub>) − total(P<sub>low</sub>).</td></tr>
+        <tr><td>Comparing with molecular simulation (GCMC)</td><td>Check the convention</td><td>Simulations often report all molecules in the box (our <i>total</i>) and call it “absolute”. Convert both sides to excess to compare.</td></tr>
+      </tbody></table></div>
+    <p class="small">The Convert tab turns measured excess into absolute and total for a chosen gas, temperature, V<sub>p</sub> and ρ<sub>a</sub>.</p>
+  </div>
+
+  <div class="card">
+    <h2>10 · Check your understanding</h2>
+    <div id="quiz"></div>
+  </div>
+</section>
+
+<section class="main hidden" id="convertView">
+  <div class="card">
+    <h2>Convert measured excess isotherms to absolute and total</h2>
+    <p class="small" style="margin-top:0">Paste two columns: pressure in bar and measured excess uptake. Gas, temperature and pore volume come from the panel on the left. Lines that do not start with two numbers are ignored.</p>
+    <div class="two" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)">
+      <div>
+        <textarea id="cvIn" rows="12" placeholder="P(bar)  n_excess&#10;1   2.1&#10;5   6.8&#10;10  9.4"></textarea>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+          <button class="btn" id="cvExample">Fill with example</button>
+          <button class="btn" id="cvCopy">Copy results</button>
+          <button class="btn" id="cvCsv">Download CSV</button>
+        </div>
+      </div>
+      <div>
+        <div class="row"><label for="cvUnit">Unit of your excess data</label>
+          <select id="cvUnit"><option value="mmol">mmol/g</option><option value="mg">mg/g</option><option value="stp">cm³(STP)/g</option></select></div>
+        <div class="row"><label for="cvMode">Adsorbed layer defined by</label>
+          <select id="cvMode"><option value="rho">Adsorbed-phase density ρ<sub>a</sub> (from the panel)</option><option value="va">Layer volume V<sub>a</sub> (cm³/g)</option></select></div>
+        <div class="row hidden" id="cvVaRow"><label for="cvVa">V<sub>a</sub> (cm³/g)</label><input type="number" id="cvVa" value="0.4" min="0.001" step="0.01"></div>
+        <p class="small">Absolute = excess ÷ (1 − ρ<sub>g</sub>/ρ<sub>a</sub>), or excess + ρ<sub>g</sub>·V<sub>a</sub>.<br>Total = excess + ρ<sub>g</sub>·V<sub>p</sub>.<br>Gas density ρ<sub>g</sub> from the Peng–Robinson equation of state.</p>
+        <div id="cvWarn"></div>
+      </div>
+    </div>
+  </div>
+  <div class="card"><svg class="chart" id="cvChart" viewBox="0 0 760 400"></svg></div>
+  <div class="card"><div class="tablewrap"><table id="cvTable"></table></div></div>
+</section>
+</div>
+
+<script>
+"use strict";
+const R = 8.314462;
+const GAS = {
+  H2:{n:"H₂",Tc:33.19,Pc:13.13,w:-0.216,M:2.016,rhoL:35.1},
+  CH4:{n:"CH₄",Tc:190.56,Pc:45.99,w:0.011,M:16.043,rhoL:26.4},
+  CO2:{n:"CO₂",Tc:304.13,Pc:73.77,w:0.225,M:44.01,rhoL:26.0},
+  N2:{n:"N₂",Tc:126.2,Pc:33.98,w:0.037,M:28.013,rhoL:28.8},
+  Ar:{n:"Ar",Tc:150.69,Pc:48.63,w:-0.002,M:39.948,rhoL:35.0}
+};
+const PRESETS = {
+  ch4ac:{gas:"CH4",T:298,nmax:14,phalf:25,dH:15,Vp:0.9,rhoA:26.4,Pmax:150,P:60},
+  h2mof:{gas:"H2",T:77,nmax:40,phalf:8,dH:5,Vp:1.4,rhoA:35.1,Pmax:100,P:40},
+  co2zeo:{gas:"CO2",T:298,nmax:7,phalf:0.5,dH:35,Vp:0.3,rhoA:26,Pmax:50,P:10},
+  weak:{gas:"CH4",T:298,nmax:10,phalf:80,dH:12,Vp:2.0,rhoA:26.4,Pmax:200,P:100},
+  neg:{gas:"CH4",T:298,nmax:5,phalf:15,dH:15,Vp:1.0,rhoA:6,Pmax:300,P:120}
+};
+const state = Object.assign({concept:"overview",unit:"mmol",xlog:false,freeze:false,
+  show:{abs:true,ex:true,tot:true}}, PRESETS.ch4ac);
+if (window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches) state.freeze = true;
+
+/* ---------- physics ---------- */
+function cbrt(x){return x<0?-Math.cbrt(-x):Math.cbrt(x)}
+function zFactor(T,Pbar,g){
+  if (Pbar<=0) return 1;
+  const G=GAS[g], Tr=T/G.Tc, P=Pbar*1e5;
+  const k=0.37464+1.54226*G.w-0.26992*G.w*G.w;
+  const al=Math.pow(1+k*(1-Math.sqrt(Tr)),2);
+  const a=0.45724*R*R*G.Tc*G.Tc/(G.Pc*1e5)*al, b=0.0778*R*G.Tc/(G.Pc*1e5);
+  const A=a*P/(R*T)/(R*T), B=b*P/(R*T);
+  const c2=-(1-B), c1=A-3*B*B-2*B, c0=-(A*B-B*B-B*B*B);
+  const p=c1-c2*c2/3, q=2*c2*c2*c2/27-c2*c1/3+c0, d=q*q/4+p*p*p/27;
+  let roots=[];
+  if (d>0){const s=Math.sqrt(d);roots=[cbrt(-q/2+s)+cbrt(-q/2-s)-c2/3];}
+  else{const r=Math.sqrt(-p*p*p/27), ph=Math.acos(Math.max(-1,Math.min(1,-q/(2*r)))), m=2*cbrt(r);
+    for(let i=0;i<3;i++) roots.push(m*Math.cos((ph+2*Math.PI*i)/3)-c2/3);}
+  roots=roots.filter(z=>z>B);
+  return roots.length?Math.max(...roots):1;
+}
+function rhoGas(P,T,g){ return P*1e5/(zFactor(T,P,g)*R*T)/1000; }   // mol/L = mmol/cm3
+function nmaxEff(){ return Math.min(state.nmax, 0.98*state.rhoA*state.Vp); }
+function model(P){
+  const rho=rhoGas(P,state.T,state.gas), b=1/state.phalf;
+  const nabs=nmaxEff()*b*P/(1+b*P), Va=nabs/state.rhoA;
+  const nex=nabs-rho*Va, ntot=nex+rho*state.Vp;
+  return {P,rho,nabs,nex,ntot,Va,f:Va/state.Vp,lg:rho*Va,free:rho*(state.Vp-Va)};
+}
+function psat(T,g){ const G=GAS[g]; return T>=G.Tc?Infinity:G.Pc*Math.exp(5.373*(1+G.w)*(1-G.Tc/T)); }
+function toUnit(x,u,g){
+  const M=GAS[g||state.gas].M;
+  if(u==="mmol")return x; if(u==="mg")return x*M; if(u==="stp")return x*22.414;
+  const m=x*M/1000; return 100*m/(1+m);
+}
+const UNITLAB={mmol:"mmol/g",mg:"mg/g",stp:"cm³(STP)/g",wt:"wt %"};
+const tk=x=>x===0?"0":String(+x.toPrecision(6));
+const fx=(x,d=2)=>isFinite(x)?x.toFixed(d):"—";
+function sig(x){ if(!isFinite(x))return"—"; const a=Math.abs(x); return a>=100?x.toFixed(0):a>=10?x.toFixed(1):a>=1?x.toFixed(2):x.toFixed(3); }
+
+/* ---------- sliders ---------- */
+const SL=[
+  {k:"T",lab:"Temperature",min:20,max:600,step:1,unit:"K",grp:"shared"},
+  {k:"Vp",lab:"Pore volume V<sub>p</sub>",min:0.05,max:3,step:0.01,unit:"cm³/g",grp:"shared"},
+  {k:"rhoA",lab:"Adsorbed-phase density ρ<sub>a</sub>",min:3,max:60,step:0.1,unit:"mol/L",grp:"shared"},
+  {k:"nmax",lab:"Saturation capacity",min:0.5,max:80,step:0.1,unit:"mmol/g",grp:"model"},
+  {k:"phalf",lab:"Half-filling pressure",min:0.01,max:500,log:true,unit:"bar",grp:"model"},
+  {k:"dH",lab:"Heat of adsorption (sets how affinity shifts with T)",min:1,max:50,step:0.5,unit:"kJ/mol",grp:"model"}
+];
+function buildSliders(){
+  for(const s of SL){
+    const d=document.createElement("div"); d.className="row";
+    d.innerHTML=`<label for="s_${s.k}"><span>${s.lab}</span><b id="v_${s.k}"></b></label><input type="range" id="s_${s.k}" min="${s.log?0:s.min}" max="${s.log?1000:s.max}" step="${s.log?1:s.step}">`;
+    document.getElementById(s.grp==="shared"?"sharedSliders":"modelSliders").appendChild(d);
+    d.querySelector("input").addEventListener("input",e=>{
+      const raw=+e.target.value;
+      const v=s.log?s.min*Math.pow(s.max/s.min,raw/1000):raw;
+      if(s.k==="T"){
+        const Tn=v,To=state.T;
+        state.phalf=Math.min(500,Math.max(0.01,state.phalf*Math.exp(-state.dH*1000/R*(1/Tn-1/To))));
+      }
+      state[s.k]=v; syncControls(); render();
+    });
+  }
+}
+function syncControls(){
+  for(const s of SL){
+    const inp=document.getElementById("s_"+s.k), v=state[s.k];
+    inp.value=s.log?1000*Math.log(v/s.min)/Math.log(s.max/s.min):v;
+    document.getElementById("v_"+s.k).textContent=(s.k==="phalf"?sig(v):s.k==="T"?v.toFixed(0):v.toFixed(s.step<0.1?2:1))+" "+s.unit;
+  }
+  document.getElementById("gas").value=state.gas;
+  document.getElementById("pmax").value=Math.round(state.Pmax);
+  document.getElementById("preset").value=state.preset||"";
+  state.P=Math.min(state.P,state.Pmax);
+  const ps=document.getElementById("pslider"); ps.value=1000*state.P/state.Pmax;
+  document.getElementById("pval").textContent=sig(state.P)+" bar";
+  document.getElementById("unit").value=state.unit;
+}
+
+/* ---------- generic chart ---------- */
+const NS="http://www.w3.org/2000/svg";
+function niceTicks(lo,hi,n){
+  const span=hi-lo||1, raw=span/n, mag=Math.pow(10,Math.floor(Math.log10(raw))), r=raw/mag;
+  const st=(r<1.5?1:r<3?2:r<7?5:10)*mag, out=[];
+  for(let v=Math.ceil(lo/st-1e-9)*st;v<=hi+st*1e-6;v+=st) out.push(+v.toPrecision(12));
+  return out;
+}
+function drawChart(svg,c){
+  const W=760,H=400,m={l:68,r:92,t:14,b:50},pw=W-m.l-m.r,ph=H-m.t-m.b;
+  let ymin=0,ymax=-Infinity;
+  for(const s of c.series){ if(!s.visible)continue; for(const y of s.y){ if(isFinite(y)){ymin=Math.min(ymin,y);ymax=Math.max(ymax,y);} } }
+  if(!isFinite(ymax)||ymax<=0)ymax=1; ymax*=1.08; if(ymin<0)ymin*=1.1;
+  const yt=niceTicks(ymin,ymax,6), y0=Math.min(ymin,yt[0]), y1=Math.max(ymax,yt[yt.length-1]);
+  const lg=c.xlog, xmin=c.xmin, xmax=c.xmax;
+  const sx=x=>{ if(lg){x=Math.max(x,xmin);return m.l+pw*Math.log(x/xmin)/Math.log(xmax/xmin);} return m.l+pw*(x-xmin)/(xmax-xmin); };
+  const sy=y=>m.t+ph*(1-(y-y0)/(y1-y0));
+  let xt;
+  if(lg){xt=[];for(let e=Math.floor(Math.log10(xmin));e<=Math.ceil(Math.log10(xmax));e++)for(const k of[1,2,5]){const v=k*Math.pow(10,e);if(v>=xmin*0.999&&v<=xmax*1.001)xt.push(v);}}
+  else xt=niceTicks(xmin,xmax,7);
+  let h=`<rect x="0" y="0" width="${W}" height="${H}" fill="#fff"/>`;
+  for(const t of yt){const y=sy(t);h+=`<line x1="${m.l}" x2="${m.l+pw}" y1="${y}" y2="${y}" stroke="${t===0?'#7b8794':'#e1e6ed'}" stroke-width="${t===0?1.4:1}"/><text x="${m.l-8}" y="${y+4}" text-anchor="end" font-size="12" fill="#445263">${tk(t)}</text>`;}
+  for(const t of xt){const x=sx(t);h+=`<line x1="${x}" x2="${x}" y1="${m.t}" y2="${m.t+ph}" stroke="#eef1f5"/><text x="${x}" y="${m.t+ph+18}" text-anchor="middle" font-size="12" fill="#445263">${tk(t)}</text>`;}
+  h+=`<text x="${m.l+pw/2}" y="${H-8}" text-anchor="middle" font-size="13" fill="#16202c">Pressure (bar)</text>`;
+  h+=`<text transform="translate(16 ${m.t+ph/2}) rotate(-90)" text-anchor="middle" font-size="13" fill="#16202c">${c.yTitle}</text>`;
+  h+=`<rect x="${m.l}" y="${m.t}" width="${pw}" height="${ph}" fill="none" stroke="#aab6c4"/>`;
+  const labs=[];
+  for(const s of c.series){
+    if(!s.visible)continue;
+    let d="",pen=false;
+    for(let i=0;i<s.x.length;i++){ if(!isFinite(s.y[i])){pen=false;continue;} d+=(pen?"L":"M")+sx(s.x[i]).toFixed(1)+" "+sy(s.y[i]).toFixed(1); pen=true; }
+    if(s.line!==false) h+=`<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.w||2.5}" opacity="${s.op??1}" stroke-linejoin="round"${s.dash?` stroke-dasharray="${s.dash}"`:""}/>`;
+    if(s.markers) for(let i=0;i<s.x.length;i++) if(isFinite(s.y[i])) h+=`<circle cx="${sx(s.x[i])}" cy="${sy(s.y[i])}" r="4" fill="#fff" stroke="${s.color}" stroke-width="2"/>`;
+    let j=s.y.length-1; while(j>=0&&!isFinite(s.y[j]))j--;
+    if(j>=0) labs.push({y:sy(s.y[j]),t:s.label,color:s.color,op:s.op??1});
+  }
+  labs.sort((a,b)=>a.y-b.y); for(let i=1;i<labs.length;i++) if(labs[i].y-labs[i-1].y<16) labs[i].y=labs[i-1].y+16;
+  for(const l of labs) h+=`<text x="${m.l+pw+8}" y="${l.y+4}" font-size="13" font-weight="700" fill="${l.color}" opacity="${Math.max(l.op,.6)}">${l.t}</text>`;
+  if(c.peak){const px=sx(c.peak.x),py=sy(c.peak.y);
+    h+=`<path d="M${px} ${py-8} L${px+7} ${py} L${px} ${py+8} L${px-7} ${py} Z" fill="#fff" stroke="${c.peak.color}" stroke-width="2"/>`;
+    const right=px>m.l+pw*0.7; h+=`<text x="${right?px-12:px+12}" y="${py-12}" text-anchor="${right?'end':'start'}" font-size="12" font-weight="600" fill="${c.peak.color}">${c.peak.label}</text>`;}
+  if(c.cursor){const cx=sx(c.cursor.x);
+    h+=`<line x1="${cx}" x2="${cx}" y1="${m.t}" y2="${m.t+ph}" stroke="#16202c" stroke-dasharray="5 4" stroke-width="1.3"/>`;
+    for(const p of c.cursor.pts) h+=`<circle cx="${cx}" cy="${sy(p.y)}" r="5.5" fill="${p.color}" stroke="#fff" stroke-width="2"/>`;}
+  svg.innerHTML=h;
+  svg._inv=px=>{ const t=Math.max(0,Math.min(1,(px-m.l)/pw)); return lg?xmin*Math.pow(xmax/xmin,t):xmin+t*(xmax-xmin); };
+}
+
+/* ---------- explore view ---------- */
+const COLORS={abs:"#0072B2",ex:"#C25400",tot:"#00836a"};
+function renderChart(){
+  const N=240, Pmax=state.Pmax, lg=state.xlog, Pmin=Pmax/1000, xs=[];
+  for(let i=0;i<=N;i++) xs.push(lg?Pmin*Math.pow(Pmax/Pmin,i/N):Pmax*i/N);
+  const ms=xs.map(model), u=state.unit, g=state.gas;
+  const emph=k=>state.concept==="overview"||state.concept===k||(state.concept==="abs"&&false);
+  const mk=(key,label,field)=>({label,color:COLORS[key],x:xs,y:ms.map(m=>toUnit(m[field],u,g)),visible:state.show[key],
+     w:state.concept===key?4.5:2.5,op:(state.concept==="overview"||state.concept===key)?1:0.3});
+  const series=[mk("tot","Total","ntot"),mk("abs","Absolute","nabs"),mk("ex","Excess","nex")];
+  let pi=0; for(let i=1;i<=N;i++) if(ms[i].nex>ms[pi].nex) pi=i;
+  const c={xmin:lg?Pmin:0,xmax:Pmax,xlog:lg,yTitle:"Uptake ("+UNITLAB[u]+")",series};
+  if(state.show.ex&&pi>2&&pi<N-3) c.peak={x:xs[pi],y:toUnit(ms[pi].nex,u,g),color:COLORS.ex,label:"excess maximum, "+sig(xs[pi])+" bar"};
+  const cur=model(state.P);
+  c.cursor={x:Math.max(state.P,c.xmin),pts:[]};
+  for(const k of["tot","abs","ex"]) if(state.show[k]) c.cursor.pts.push({y:toUnit(cur[{tot:"ntot",abs:"nabs",ex:"nex"}[k]],u,g),color:COLORS[k]});
+  drawChart(document.getElementById("chart"),c);
+}
+function renderInfo(){
+  const m=model(state.P), u=state.unit, g=state.gas, L=UNITLAB[u], T=x=>sig(toUnit(x,u,g));
+  const cap=0.98*state.rhoA*state.Vp, ratio=m.rho/state.rhoA;
+  let html="";
+  const P=sig(state.P);
+  if(state.concept==="overview") html=`<p>At <b>${P} bar</b> the pore holds <b>${T(m.ntot)} ${L}</b> of ${GAS[g].n} in total. Only part of that is “adsorbed”, and the balance reports less still: <b>${T(m.nex)} ${L}</b>.</p>
+    <p>Pick a concept above to highlight which molecules it counts, and sweep the pressure to see how the three diverge.</p>`;
+  if(state.concept==="abs") html=`<p><span class="q abs">Absolute</span> counts every molecule in the adsorbed layer: the dark orange and yellow ones, volume V<sub>a</sub> = ${fx(m.Va,3)} cm³/g (${fx(100*m.f,0)} % of the pore).</p>
+    <p>n<sub>abs</sub> = ρ<sub>a</sub>·V<sub>a</sub> = ${fx(state.rhoA,1)} × ${fx(m.Va,3)} = <b>${T(m.nabs)} ${L}</b></p>
+    <p>It rises smoothly and saturates, but you can only get it by assuming ρ<sub>a</sub> or V<sub>a</sub>.</p>`;
+  if(state.concept==="ex") html=`<p><span class="q ex">Excess</span> counts only the molecules the surface adds. The yellow ones would be there anyway as bulk gas (ρ<sub>g</sub> = ${fx(m.rho,2)} mol/L).</p>
+    <p>n<sub>ex</sub> = n<sub>abs</sub> − ρ<sub>g</sub>·V<sub>a</sub> = ${T(m.nabs)} − ${fx(m.rho,2)} × ${fx(m.Va,3)} = <b>${T(m.nex)} ${L}</b></p>
+    <p>${ratio>=1?"Here the bulk gas is denser than the adsorbed layer, so the excess is <b>negative</b>.":"As ρ<sub>g</sub> climbs toward ρ<sub>a</sub> the subtracted term grows, which is why excess peaks and then falls."}</p>`;
+  if(state.concept==="tot") html=`<p><span class="q tot">Total</span> counts everything inside the pore volume V<sub>p</sub> = ${fx(state.Vp,2)} cm³/g, including the free gas (grey).</p>
+    <p>n<sub>tot</sub> = n<sub>ex</sub> + ρ<sub>g</sub>·V<sub>p</sub> = ${T(m.nex)} + ${fx(m.rho,2)} × ${fx(state.Vp,2)} = <b>${T(m.ntot)} ${L}</b></p>
+    <p>${fx(100*m.free/Math.max(m.ntot,1e-12),0)} % of it is just compressed gas that needs no adsorbent. Excess tells you how much the solid improves on that.</p>`;
+  document.getElementById("story").innerHTML=html;
+
+  const tot=Math.max(m.ntot,1e-12), ex=Math.max(m.nex,0), lg=Math.max(m.nabs-ex,0), fr=Math.max(m.ntot-ex-lg,0);
+  const row=(cls,label,segs,val)=>`<div class="bar"><span class="q ${cls}" style="text-align:center">${label}</span><div class="track">${segs.map(s=>`<i style="width:${100*s[0]/tot}%;background:${s[1]}"></i>`).join("")}</div><span class="val">${val}</span></div>`;
+  document.getElementById("bars").innerHTML=
+    row("ex","Excess",[[ex,"var(--c-ex)"]],T(m.nex)+" "+L)+
+    row("abs","Absolute",[[ex,"var(--c-ex)"],[lg,"var(--c-lg)"]],T(m.nabs)+" "+L)+
+    row("tot","Total",[[ex,"var(--c-ex)"],[lg,"var(--c-lg)"],[fr,"var(--c-free)"]],T(m.ntot)+" "+L);
+
+  let w="";
+  const ps=psat(state.T,g);
+  if(state.Pmax>ps*0.95) w+=`<div class="warn">Maximum pressure exceeds the estimated saturation pressure of ${GAS[g].n} at ${state.T.toFixed(0)} K (≈ ${sig(ps)} bar). The gas would condense there, so the curves above that pressure are not physical.</div>`;
+  if(state.nmax>cap) w+=`<div class="warn">The saturation capacity is limited to ${sig(cap)} mmol/g, the amount that fills the whole pore at density ρ<sub>a</sub>.</div>`;
+  document.getElementById("warns").innerHTML=w;
+}
+
+/* ---------- pore canvas ---------- */
+const cv=document.getElementById("pore"), cx=cv.getContext("2d");
+const NP=720, pool=[]; for(let i=0;i<NP;i++) pool.push({u:Math.random(),v:Math.random(),x:null,y:null});
+let cur=model(state.P), cvW=600, cvH=300;
+function sizeCanvas(){
+  const dpr=window.devicePixelRatio||1, r=cv.getBoundingClientRect();
+  cvW=Math.max(300,r.width); cvH=300;
+  cv.width=Math.round(cvW*dpr); cv.height=Math.round(cvH*dpr); cx.setTransform(dpr,0,0,dpr,0,0);
+}
+function drawPore(){
+  const m=cur, NM=420, ratio=Math.min(1.6,m.rho/state.rhoA), f=Math.min(1,m.f);
+  const nl=Math.round(NM*f), nex=Math.max(0,Math.round(NM*f*(1-ratio))), nlg=nl-nex, nfr=Math.min(NP-nl,Math.round(NM*(1-f)*ratio));
+  const total=nl+nfr, Lx=12, Rx=cvW-120, top=30, bot=cvH-30, Hh=bot-top, hl=f*Hh/2, wallH=22;
+  cx.clearRect(0,0,cvW,cvH);
+  // walls
+  for(const y0 of[top-wallH,bot]){
+    cx.save(); cx.beginPath(); cx.rect(Lx,y0,Rx-Lx,wallH); cx.clip(); cx.fillStyle="#b9c2cd"; cx.fillRect(Lx,y0,Rx-Lx,wallH);
+    cx.strokeStyle="#98a3b0"; cx.lineWidth=1.2; for(let x=Lx-wallH;x<Rx;x+=9){cx.beginPath();cx.moveTo(x,y0+wallH);cx.lineTo(x+wallH,y0);cx.stroke();} cx.restore();
+  }
+  // layer strips
+  cx.fillStyle="rgba(232,177,0,.16)"; cx.fillRect(Lx,top,Rx-Lx,hl); cx.fillRect(Lx,bot-hl,Rx-Lx,hl);
+  cx.strokeStyle="#9a7a00"; cx.setLineDash([5,4]); cx.lineWidth=1.2;
+  for(const y of[top+hl,bot-hl]){cx.beginPath();cx.moveTo(Lx,y);cx.lineTo(Rx,y);cx.stroke();} cx.setLineDash([]);
+  // molecules
+  const al=state.concept==="abs"?[1,1,.18]:state.concept==="ex"?[1,.18,.18]:[1,1,1];
+  const cols=["#D55E00","#E8B100","#6b7f99"];
+  for(let i=0;i<total;i++){
+    const p=pool[i], cls=i<nex?0:i<nl?1:2;
+    if(!state.freeze){
+      p.u+=(Math.random()-.5)*.012; p.v+=(Math.random()-.5)*.012;
+      if(p.u<0)p.u=-p.u; if(p.u>1)p.u=2-p.u; if(p.v<0)p.v=-p.v; if(p.v>1)p.v=2-p.v;
+    }
+    const tx=Lx+6+p.u*(Rx-Lx-12); let ty;
+    if(cls<2) ty=p.v<.5?top+(p.v/.5)*hl:bot-((p.v-.5)/.5)*hl; else ty=top+hl+p.v*(Hh-2*hl);
+    ty=Math.max(top+5,Math.min(bot-5,ty));
+    if(p.x===null){p.x=tx;p.y=ty;} p.x+=(tx-p.x)*.2; p.y+=(ty-p.y)*.2;
+    cx.beginPath(); cx.arc(p.x,p.y,4.4,0,6.2832);
+    cx.globalAlpha=al[cls]; cx.fillStyle=cols[cls]; cx.fill();
+    cx.lineWidth=.8; cx.strokeStyle="rgba(255,255,255,.9)"; cx.stroke();
+  }
+  cx.globalAlpha=1;
+  // brackets and labels
+  cx.font="600 12px Segoe UI, sans-serif"; cx.fillStyle="#16202c"; cx.strokeStyle="#16202c"; cx.lineWidth=1.3;
+  const br=(x,ya,yb,txt)=>{cx.beginPath();cx.moveTo(x-4,ya);cx.lineTo(x,ya);cx.lineTo(x,yb);cx.lineTo(x-4,yb);cx.stroke();cx.textBaseline="middle";cx.fillText(txt,x+6,(ya+yb)/2);};
+  br(Rx+10,top,Math.max(top+1,top+hl),"Va");
+  br(Rx+10,Math.min(bot-1,bot-hl),bot,"Va");
+  br(Rx+60,top,bot,"Vp (pore)");
+  cx.textBaseline="alphabetic"; cx.fillStyle="#445263"; cx.font="12px Segoe UI, sans-serif";
+  cx.fillText("solid wall",Lx+4,top-wallH-5<10?10:top-wallH+15);
+  cx.fillText("ρg = "+m.rho.toFixed(2)+" mol/L   ·   ρa = "+state.rhoA.toFixed(1)+" mol/L",Lx+4,cvH-4);
+}
+let last=0;
+function frame(t){
+  if(state.sweeping){
+    state.P+=state.Pmax*Math.min(.1,(t-last)/1000)/6; if(state.P>=state.Pmax)state.P=0;
+    document.getElementById("pslider").value=1000*state.P/state.Pmax;
+    document.getElementById("pval").textContent=sig(state.P)+" bar";
+    render(true);
+  }
+  last=t; drawPore(); requestAnimationFrame(frame);
+}
+
+/* ---------- convert view ---------- */
+let cvRows=[];
+function parseIn(){
+  const out=[];
+  for(const line of document.getElementById("cvIn").value.split(/\r?\n/)){
+    const t=line.trim().split(/[\s,;]+/).map(Number);
+    if(t.length>=2&&isFinite(t[0])&&isFinite(t[1])&&line.trim()!=="") out.push([t[0],t[1]]);
+  }
+  return out;
+}
+function renderConvert(){
+  const u=document.getElementById("cvUnit").value, mode=document.getElementById("cvMode").value, M=GAS[state.gas].M;
+  const toM=v=>u==="mmol"?v:u==="mg"?v/M:v/22.414, fromM=v=>u==="mmol"?v:u==="mg"?v*M:v*22.414;
+  const Va=+document.getElementById("cvVa").value||0;
+  document.getElementById("cvVaRow").classList.toggle("hidden",mode!=="va");
+  const pts=parseIn(); cvRows=[]; let warn="";
+  for(const [P,v] of pts){
+    const rho=rhoGas(P,state.T,state.gas), nex=toM(v);
+    let nabs; if(mode==="rho"){const d=1-rho/state.rhoA; nabs=d>0.02?nex/d:NaN;} else nabs=nex+rho*Va;
+    cvRows.push({P,rho,nex:v,nabs:isFinite(nabs)?fromM(nabs):NaN,ntot:fromM(nex+rho*state.Vp)});
+  }
+  if(cvRows.some(r=>!isFinite(r.nabs))) warn+=`<div class="warn">Where ρ<sub>g</sub> approaches ρ<sub>a</sub> the conversion is undefined (shown as —).</div>`;
+  if(mode==="va"&&Va>state.Vp) warn+=`<div class="warn">V<sub>a</sub> is larger than the pore volume.</div>`;
+  const ps=psat(state.T,state.gas); if(cvRows.some(r=>r.P>ps)) warn+=`<div class="warn">Some pressures exceed the saturation pressure of ${GAS[state.gas].n} at ${state.T.toFixed(0)} K (≈ ${sig(ps)} bar).</div>`;
+  document.getElementById("cvWarn").innerHTML=warn;
+  const L=UNITLAB[u];
+  document.getElementById("cvTable").innerHTML=`<thead><tr><th>P (bar)</th><th>ρg (mol/L)</th><th>Excess (${L})</th><th>Absolute (${L})</th><th>Total (${L})</th></tr></thead><tbody>`+
+    cvRows.map(r=>`<tr><td>${sig(r.P)}</td><td>${fx(r.rho,3)}</td><td>${sig(r.nex)}</td><td>${sig(r.nabs)}</td><td>${sig(r.ntot)}</td></tr>`).join("")+"</tbody>";
+  const xs=cvRows.map(r=>r.P), mx=Math.max(1,...xs);
+  drawChart(document.getElementById("cvChart"),{xmin:0,xmax:mx*1.02,xlog:false,yTitle:"Uptake ("+L+")",series:[
+    {label:"Total",color:COLORS.tot,x:xs,y:cvRows.map(r=>r.ntot),visible:true,markers:true},
+    {label:"Absolute",color:COLORS.abs,x:xs,y:cvRows.map(r=>r.nabs),visible:true,markers:true},
+    {label:"Excess",color:COLORS.ex,x:xs,y:cvRows.map(r=>r.nex),visible:true,markers:true}]});
+}
+function tsv(){ const u=UNITLAB[document.getElementById("cvUnit").value];
+  return ["P_bar\trho_g_mol_per_L\texcess_"+u+"\tabsolute_"+u+"\ttotal_"+u].concat(cvRows.map(r=>[r.P,r.rho.toFixed(4),r.nex,fx(r.nabs,4),fx(r.ntot,4)].join("\t"))).join("\n"); }
+
+/* ---------- wiring ---------- */
+function visible(id){ return !document.getElementById(id).classList.contains("hidden"); }
+function render(light){
+  cur=model(state.P);
+  document.getElementById("pval").textContent=sig(state.P)+" bar";
+  document.getElementById("pval2").textContent=sig(state.P)+" bar";
+  document.getElementById("pslider2").value=1000*state.P/state.Pmax;
+  if(visible("exploreView")){ renderChart(); renderInfo(); }
+  if(visible("learnView")) renderLearn();
+  if(!light&&visible("convertView")) renderConvert();
+}
+
+/* ---------- learn view ---------- */
+let dV=0.03;
+function renderLearn(){
+  const N=160, xs=[]; for(let i=0;i<=N;i++) xs.push(state.Pmax*i/N);
+  const ms=xs.map(model), c=model(state.P), g="mmol";
+  const base={xmin:0,xmax:state.Pmax,xlog:false,yTitle:"Uptake (mmol/g)"};
+  const cursor=(pts)=>({x:state.P,pts});
+  const S=(label,color,y,extra)=>Object.assign({label,color,x:xs,y,visible:true},extra||{});
+  drawChart(document.getElementById("lc1"),Object.assign({},base,{series:[
+    S("Absolute",COLORS.abs,ms.map(m=>m.nabs)),
+    S("ρg·Va","#8a6d00",ms.map(m=>m.lg),{dash:"6 4"}),
+    S("Excess",COLORS.ex,ms.map(m=>m.nex),{w:3.5})],
+    cursor:cursor([{y:c.nabs,color:COLORS.abs},{y:c.lg,color:"#8a6d00"},{y:c.nex,color:COLORS.ex}])}));
+  drawChart(document.getElementById("lc2"),Object.assign({},base,{series:[
+    S("Total",COLORS.tot,ms.map(m=>m.ntot),{w:3.5}),
+    S("ρg·Vp","#5b6d85",ms.map(m=>m.rho*state.Vp),{dash:"6 4"}),
+    S("Excess",COLORS.ex,ms.map(m=>m.nex))],
+    cursor:cursor([{y:c.ntot,color:COLORS.tot},{y:c.rho*state.Vp,color:"#5b6d85"},{y:c.nex,color:COLORS.ex}])}));
+  document.getElementById("dVval").textContent=(dV>0?"+":"")+dV.toFixed(3)+" cm³/g";
+  drawChart(document.getElementById("lc3"),Object.assign({},base,{series:[
+    S("True excess",COLORS.ex,ms.map(m=>m.nex),{w:3}),
+    S("Apparent",  "#7b3fa0",ms.map(m=>m.nex+m.rho*dV),{dash:"6 4",w:3})],
+    cursor:cursor([{y:c.nex,color:COLORS.ex},{y:c.nex+c.rho*dV,color:"#7b3fa0"}])}));
+  const M=GAS[state.gas].M, d=1-c.rho/state.rhoA;
+  document.getElementById("worked").innerHTML=`<p class="small" style="margin-top:0">Suppose your instrument reports an excess of <b>${fx(c.nex,2)} mmol/g</b> (${fx(c.nex*M,1)} mg/g of ${GAS[state.gas].n}) at <b>${sig(state.P)} bar</b> and <b>${state.T.toFixed(0)} K</b>. This is the true excess of the model in the left panel. How do you get to the other two?</p>
+  <ol class="worked">
+   <li><b>Gas density.</b> From an equation of state (here Peng–Robinson), ρ<sub>g</sub> = <b>${fx(c.rho,3)} mol/L</b>. This is not ideal-gas: Z = ${fx(c.P*1e5/(c.rho*1000*R*state.T),3)}.</li>
+   <li><b>Absolute.</b> Assume the layer has density ρ<sub>a</sub> = ${fx(state.rhoA,1)} mol/L. Then n<sub>abs</sub> = n<sub>ex</sub> ÷ (1 − ρ<sub>g</sub>/ρ<sub>a</sub>) = ${fx(c.nex,2)} ÷ (1 − ${fx(c.rho,2)}/${fx(state.rhoA,1)}) = <b>${d>0.02?fx(c.nex/d,2):"undefined"} mmol/g</b>.<br><span class="small">Equivalently, V<sub>a</sub> = ${fx(c.Va,3)} cm³/g and n<sub>abs</sub> = n<sub>ex</sub> + ρ<sub>g</sub>·V<sub>a</sub>.</span></li>
+   <li><b>Total.</b> With V<sub>p</sub> = ${fx(state.Vp,2)} cm³/g: n<sub>tot</sub> = n<sub>ex</sub> + ρ<sub>g</sub>·V<sub>p</sub> = ${fx(c.nex,2)} + ${fx(c.rho,2)} × ${fx(state.Vp,2)} = <b>${fx(c.ntot,2)} mmol/g</b>.</li>
+   <li><b>Sensitivity.</b> If ρ<sub>a</sub> were 20 % lower, the absolute would change to ${(1-c.rho/(state.rhoA*0.8))>0.02?fx(c.nex/(1-c.rho/(state.rhoA*0.8)),2):"undefined"} mmol/g. The excess and total do not depend on ρ<sub>a</sub>, which is a good reason to report them.</li>
+  </ol>`;
+}
+function buildDiagrams(){
+  // diagram 1: slit pore with seeded molecules
+  let seed=7; const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647;
+  const x0=30,x1=520,top=44,bot=236,hl=46;
+  let s=`<rect x="${x0}" y="14" width="${x1-x0}" height="30" fill="#b9c2cd"/><rect x="${x0}" y="${bot}" width="${x1-x0}" height="30" fill="#b9c2cd"/>
+   <text x="${(x0+x1)/2}" y="34" text-anchor="middle" font-size="12" font-weight="700" fill="#16202c">solid wall (skeleton)</text>
+   <text x="${(x0+x1)/2}" y="256" text-anchor="middle" font-size="12" font-weight="700" fill="#16202c">solid wall (skeleton)</text>
+   <rect x="${x0}" y="${top}" width="${x1-x0}" height="${hl}" fill="rgba(232,177,0,.16)"/><rect x="${x0}" y="${bot-hl}" width="${x1-x0}" height="${hl}" fill="rgba(232,177,0,.16)"/>
+   <line x1="${x0}" x2="${x1}" y1="${top+hl}" y2="${top+hl}" stroke="#9a7a00" stroke-dasharray="6 4"/><line x1="${x0}" x2="${x1}" y1="${bot-hl}" y2="${bot-hl}" stroke="#9a7a00" stroke-dasharray="6 4"/>`;
+  const placed=[]; const put=(ya,yb,n,col)=>{let tries=0,k=0;
+    while(k<n&&tries<4000){tries++;const x=x0+10+rnd()*(x1-x0-20),y=ya+8+rnd()*(yb-ya-16);
+      if(placed.every(p=>(p[0]-x)**2+(p[1]-y)**2>15*15)){placed.push([x,y]);s+=`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="6" fill="${col}" stroke="#fff"/>`;k++;}}};
+  put(top,top+hl,19,"#D55E00"); put(top,top+hl,6,"#E8B100");
+  put(bot-hl,bot,19,"#D55E00"); put(bot-hl,bot,6,"#E8B100");
+  put(top+hl,bot-hl,11,"#6b7f99");
+  const br=(x,ya,yb,t,col)=>`<path d="M${x-6} ${ya} H${x} V${yb} H${x-6}" fill="none" stroke="${col}" stroke-width="2"/><text x="${x+8}" y="${(ya+yb)/2+4}" font-size="13" font-weight="700" fill="${col}">${t}</text>`;
+  s+=br(536,top,top+hl,"Va","#8a6d00")+br(536,bot-hl,bot,"Va","#8a6d00");
+  s+=br(600,top,bot,"Vp = pore volume","#16202c");
+  s+=`<text x="536" y="${(top+bot)/2+4}" font-size="12" fill="#6b7f99" font-weight="700">free gas,</text><text x="536" y="${(top+bot)/2+19}" font-size="12" fill="#6b7f99" font-weight="700">density ρg</text>`;
+  document.getElementById("dg1").innerHTML=s;
+  // gas dots in the balance chamber
+  let g="",sd=11; const r2=()=>(sd=(sd*16807)%2147483647)/2147483647;
+  for(let i=0;i<70;i++){const x=160+r2()*240,y=80+r2()*220; if(!(x>240&&x<320&&y>160&&y<230)) g+=`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.6"/>`;}
+  document.getElementById("gasdots").innerHTML=g;
+  // quiz
+  const Q=[
+   {q:"The excess uptake falls from 9.2 to 8.6 mmol/g as the pressure rises from 90 to 140 bar. What has happened to the total uptake?",o:["It has fallen too","It has kept rising","It must be constant"],a:1,e:"Total = excess + ρg·Vp. The excess fell a little, but ρg·Vp rose by much more, so the total went up. A falling excess is not desorption."},
+   {q:"Which quantity tells you how much gas a tank filled with the material holds?",o:["Excess","Absolute","Total"],a:2,e:"The tank holds everything in its pores, adsorbed or not: the total. Excess understates it by ρg·Vp."},
+   {q:"A simulation reports the number of molecules in the whole pore as “absolute uptake”. Which of this app's quantities is that?",o:["Excess","Absolute","Total"],a:2,e:"Simulation conventions often call all molecules in the box “absolute”. In adsorption theory that is the total. Always check the definition."},
+   {q:"Which of the three can the balance or manometer give you with no assumption about the adsorbed layer?",o:["Excess","Absolute","Total"],a:0,e:"Excess needs only the reference (helium) volume. Absolute needs ρa or Va, and total needs Vp."},
+   {q:"You fit a Langmuir isotherm to excess data that peak at 80 bar. What is the likely problem?",o:["Nothing, Langmuir fits any isotherm","The fitted capacity is too low and the shape is wrong at high P","The fit will overestimate the capacity"],a:1,e:"Langmuir saturates, so it cannot follow a peak. Convert to absolute first, then fit."}
+  ];
+  document.getElementById("quiz").innerHTML=Q.map((x,i)=>`<div class="qq" data-i="${i}"><p>${i+1}. ${x.q}</p><div class="opts">${x.o.map((t,j)=>`<button data-j="${j}">${t}</button>`).join("")}</div><div class="fb"></div></div>`).join("");
+  document.querySelectorAll(".qq").forEach(el=>{const x=Q[+el.dataset.i];
+    el.querySelectorAll("button").forEach(b=>b.onclick=()=>{const j=+b.dataset.j,ok=j===x.a;
+      el.querySelectorAll("button").forEach(bb=>bb.classList.remove("ok","bad")); b.classList.add(ok?"ok":"bad");
+      el.querySelector(".fb").innerHTML=(ok?"<b style='color:#00694f'>Correct.</b> ":"<b style='color:#b3261e'>Not quite.</b> ")+x.e;});});
+}
+function applyPreset(k){
+  Object.assign(state,PRESETS[k]); state.preset=k; state.sweeping=false; document.getElementById("sweep").textContent="▶ Sweep";
+  syncControls(); render();
+}
+function setPFromChart(e){
+  const svg=document.getElementById("chart"), r=svg.getBoundingClientRect();
+  let P=svg._inv((e.clientX-r.left)/r.width*760); P=Math.max(0,Math.min(state.Pmax,P));
+  state.P=P; state.sweeping=false; document.getElementById("sweep").textContent="▶ Sweep";
+  document.getElementById("pslider").value=1000*P/state.Pmax; render();
+}
+function init(){
+  buildSliders();
+  document.getElementById("preset").addEventListener("change",e=>applyPreset(e.target.value));
+  document.getElementById("gas").addEventListener("change",e=>{state.gas=e.target.value;state.rhoA=GAS[state.gas].rhoL;state.preset="";syncControls();render();});
+  document.getElementById("pmax").addEventListener("change",e=>{state.Pmax=Math.max(1,+e.target.value||100);syncControls();render();});
+  document.getElementById("pslider").addEventListener("input",e=>{state.P=state.Pmax*e.target.value/1000;state.sweeping=false;document.getElementById("sweep").textContent="▶ Sweep";render();});
+  document.getElementById("sweep").addEventListener("click",e=>{state.sweeping=!state.sweeping;e.target.textContent=state.sweeping?"⏸ Pause":"▶ Sweep";});
+  document.getElementById("unit").addEventListener("change",e=>{state.unit=e.target.value;render();});
+  document.getElementById("xlog").addEventListener("change",e=>{state.xlog=e.target.checked;render();});
+  document.getElementById("freeze").addEventListener("change",e=>{state.freeze=e.target.checked;});
+  document.getElementById("freeze").checked=state.freeze;
+  document.querySelectorAll("[data-show]").forEach(c=>c.addEventListener("change",()=>{state.show[c.dataset.show]=c.checked;render();}));
+  document.querySelectorAll("#concept button").forEach(b=>b.addEventListener("click",()=>{
+    state.concept=b.dataset.c; document.querySelectorAll("#concept button").forEach(x=>x.setAttribute("aria-pressed",x===b)); render();}));
+  const ch=document.getElementById("chart"); let drag=false;
+  ch.addEventListener("pointerdown",e=>{drag=true;ch.setPointerCapture(e.pointerId);setPFromChart(e);});
+  ch.addEventListener("pointermove",e=>{if(drag)setPFromChart(e);});
+  ch.addEventListener("pointerup",()=>drag=false);
+  // tabs
+  const showTab=t=>{
+    for(const k of["explore","learn","convert"]){
+      document.getElementById(k+"View").classList.toggle("hidden",k!==t);
+      document.getElementById("tab"+k[0].toUpperCase()+k.slice(1)).setAttribute("aria-selected",k===t);
+    }
+    document.getElementById("modelCard").classList.toggle("hidden",t==="convert");
+    window.scrollTo(0,0);
+    if(t==="explore"){sizeCanvas();render();}else if(t==="learn")render();else renderConvert();
+  };
+  document.getElementById("tabLearn").onclick=()=>showTab("learn");
+  document.getElementById("pslider2").addEventListener("input",e=>{state.P=state.Pmax*e.target.value/1000;state.sweeping=false;document.getElementById("sweep").textContent="▶ Sweep";document.getElementById("pslider").value=e.target.value;render();});
+  document.getElementById("dV").addEventListener("input",e=>{dV=+e.target.value;renderLearn();});
+  buildDiagrams();
+  document.getElementById("tabExplore").onclick=()=>showTab("explore");
+  document.getElementById("tabConvert").onclick=()=>showTab("convert");
+  ["cvIn","cvUnit","cvMode","cvVa"].forEach(id=>document.getElementById(id).addEventListener("input",renderConvert));
+  // sidebar edits also refresh convert (render handles it)
+  document.getElementById("cvExample").onclick=()=>{
+    const u=document.getElementById("cvUnit").value, M=GAS[state.gas].M, lines=["P(bar)\tn_excess"];
+    for(let i=1;i<=12;i++){const P=state.Pmax*i/12, v=model(P).nex, o=u==="mmol"?v:u==="mg"?v*M:v*22.414; lines.push(P.toPrecision(3)+"\t"+o.toPrecision(4));}
+    document.getElementById("cvIn").value=lines.join("\n"); renderConvert();
+  };
+  document.getElementById("cvCopy").onclick=async e=>{try{await navigator.clipboard.writeText(tsv());e.target.textContent="Copied";}catch{e.target.textContent="Copy failed";} setTimeout(()=>e.target.textContent="Copy results",1500);};
+  document.getElementById("cvCsv").onclick=()=>{
+    const blob=new Blob([tsv().replace(/\t/g,",")],{type:"text/csv"}), a=document.createElement("a");
+    a.href=URL.createObjectURL(blob); a.download="sorption_conversion.csv"; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  };
+  window.addEventListener("resize",sizeCanvas);
+  state.preset="ch4ac"; sizeCanvas(); syncControls(); render(); requestAnimationFrame(frame);
+}
+init();
+</script>
+</body>
+</html>
