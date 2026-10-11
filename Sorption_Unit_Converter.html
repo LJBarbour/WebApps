@@ -160,7 +160,7 @@ select:focus{border-color:var(--accent)}
 </head>
 <body>
 <header>
-  <h1>Sorption Unit Converter</h1>
+  <h1>Sorption Unit Converter <span style="font-size:10px;font-weight:400;opacity:.55;letter-spacing:.04em">AIF + navigator build 2026-10-11</span></h1>
   <span class="spacer"></span>
   <button class="hbtn" id="guideBtn">Guide</button>
 </header>
@@ -168,6 +168,20 @@ select:focus{border-color:var(--accent)}
 
 <!-- LEFT SIDEBAR -->
 <aside class="sidebar side-panel">
+  <!-- Isotherm navigator: shown only when a file/folder/ZIP holds several isotherms -->
+  <div class="section open" id="sec-nav" style="display:none">
+    <div class="sechead" onclick="tog(this)"><span id="navTitle">Isotherm Navigator</span><span class="tri">&#8250;</span></div>
+    <div class="sbody">
+      <div class="hint" id="navCount"></div>
+      <div style="display:flex;gap:5px;align-items:stretch">
+        <button type="button" class="btn2 ghost" id="navPrev" title="Previous isotherm" style="width:34px;padding:4px 0;margin:0" onclick="navStep(-1)">&#8249;</button>
+        <select class="sel" id="navSelect" onchange="navGo(parseInt(this.value,10))"></select>
+        <button type="button" class="btn2 ghost" id="navNext" title="Next isotherm" style="width:34px;padding:4px 0;margin:0" onclick="navStep(1)">&#8250;</button>
+      </div>
+      <div class="hint">Output units, excess&#8594;absolute settings and the chosen tab are kept while you step through.</div>
+    </div>
+  </div>
+
   <div class="section" id="sec-inunits">
     <div class="sechead" onclick="tog(this)">Input Units<span class="tri">&#8250;</span></div>
     <div class="sbody">
@@ -259,6 +273,29 @@ select:focus{border-color:var(--accent)}
         <div class="hint" id="mdHostMassNote"></div>
       </div>
 
+    </div>
+  </div>
+
+  <div class="section" id="sec-excess">
+    <div class="sechead" onclick="tog(this)">Excess &#8594; Absolute<span class="tri">&#8250;</span></div>
+    <div class="sbody">
+      <label class="toggle"><input type="checkbox" id="excessChk" onchange="onParamChange()"> Convert excess to absolute uptake</label>
+      <div class="ctl-block">
+        <label>Pore volume V<sub>pore</sub> (cm³ g⁻¹)</label>
+        <input type="number" id="vPore" placeholder="e.g. 0.85" min="0" step="any" oninput="onVPoreManual()">
+        <div class="hint" id="vPoreNote">n<sub>abs</sub> = n<sub>exc</sub> + &rho;<sub>gas</sub>(T,p)&middot;V<sub>pore</sub>, with &rho;<sub>gas</sub> from the Peng&ndash;Robinson equation of state. Needs sorptive, temperature and V<sub>pore</sub>.</div>
+      </div>
+      <hr class="divider">
+      <div class="ctl-block">
+        <label>Estimate V<sub>pore</sub> from N₂ 77 K (Gurvich)</label>
+        <select class="sel" id="vpSrc"><option value="auto">Auto — matching N₂ 77 K isotherm</option></select>
+        <div style="display:flex;gap:6px;align-items:center">
+          <span class="hint" style="white-space:nowrap">at p/p₀ =</span>
+          <input type="number" id="vpRel" value="0.95" min="0.5" max="0.99" step="0.01" style="width:64px">
+          <button type="button" class="btn2 ghost" id="vpBtn" onclick="estimateVPore(false)" style="margin:0;flex:1" disabled>Estimate</button>
+        </div>
+        <div class="hint" id="vpMsg"></div>
+      </div>
     </div>
   </div>
 
@@ -371,6 +408,7 @@ select:focus{border-color:var(--accent)}
 
         <div class="g-sec">Loading data</div>
         <p>Drop a CSV (or delimited text) file anywhere on the app. Column&nbsp;1 should be pressure, column&nbsp;2 uptake, separated by commas, tabs, or semicolons.</p>
+        <p><b>AIF files:</b> files in the Adsorption Information File format (<span class="g-code">.aif</span>; Evans et al., <i>Langmuir</i> 2021, 37, 4222) can be dropped in the same way. Pressure, uptake, temperature and mass units are read from the file&rsquo;s <span class="g-code">_units_*</span> tags; sorptive, temperature, sample mass and (if present) the per-point saturation pressure <span class="g-code">p0</span> are filled in automatically, and the adsorption and desorption loops are loaded as the two branches. Other metadata (instrument, operator, date, isotherm type, sample ID&hellip;) is carried through to the exported CSV. A file with several data blocks, or several files / a folder / a ZIP dropped together, opens in the Isotherm Navigator (see below).</p>
         <p><b>Adsorption / desorption:</b> two blocks of data separated by one or more blank lines (or lines containing only delimiters) are treated as adsorption followed by desorption. Adsorption is plotted with filled circles, desorption with open circles.</p>
         <p><b>Header row:</b> a non-numeric first row is parsed for units — for example <span class="g-code">Pressure (mbar)</span> sets the pressure unit to mbar, and <span class="g-code">Uptake (mmol/g)</span> sets the uptake unit. If no header is detected, bar and mmol&nbsp;g&#x207b;&#x00b9; are assumed.</p>
 
@@ -431,6 +469,14 @@ select:focus{border-color:var(--accent)}
           <tr><td>cm³(STP)</td><td>cc(STP), cm3_abs, cm3(STP)</td><td>Gas identity + host mass (mg)</td></tr>
         </table>
         <p style="font-size:11px;color:#666">The app only ever asks for what your specific input→output pair actually needs, which is often less than this table's per-unit list would suggest — it's written against the mmol/g baseline. For example, converting between two absolute mass units (µg ⇄ mg ⇄ g) needs neither gas MW nor host mass, since both cancel out; converting between two relative mass units (e.g. g/g ⇄ wt%) needs neither either. Gas MW is only asked for when the amount kind actually changes (mass ⇄ moles), and host mass only when relative and absolute amounts are actually being converted between each other.</p>
+
+        <div class="g-sec">Excess &rarr; absolute uptake</div>
+        <p>Instruments report <b>excess</b> uptake (the gas actually adsorbed minus the gas that would fill the adsorbed-phase volume anyway). AIF files say so in <span class="g-code">_exptl_isotherm_type</span>. To convert to <b>absolute</b> uptake, open <b>Excess &rarr; Absolute</b> in the left panel, tick the box and enter the pore volume V<sub>pore</sub> (cm³ per gram of host). The app then adds back the gas that fills that volume: n<sub>abs</sub> = n<sub>exc</sub> + &rho;<sub>gas</sub>(T,p)&middot;V<sub>pore</sub>, where &rho;<sub>gas</sub> is the real-gas density from the Peng&ndash;Robinson equation of state (critical constants built in for every gas in the list). It needs the sorptive and the temperature in Metadata. Every point is corrected before the units are converted, so it works with any output unit.</p>
+        <p>The result depends directly on V<sub>pore</sub>, which is not in the file: use the total pore volume from the 77&nbsp;K N<sub>2</sub> isotherm (Gurvich), or the geometric pore volume from the crystal structure. The Summary tab reports the largest correction applied; it matters most at high pressure, and for H<sub>2</sub> and He (quantum gases) the Peng&ndash;Robinson density is only approximate. Near-saturation vapour data (e.g. N<sub>2</sub> at 77&nbsp;K close to p<sub>0</sub>) uses the gas-phase root, so the correction there is small. The exported CSV records <span class="g-code">Isotherm_Type,absolute</span> and the pore volume.</p>
+
+        <div class="g-sec">Isotherm navigator</div>
+        <p>When an AIF file holds <b>several isotherms</b> (several <span class="g-code">data_</span> blocks), or you drop <b>several files, a folder or a ZIP archive</b> of <span class="g-code">.aif</span> and/or <span class="g-code">.csv</span> files together (AIF and CSV can be mixed), an <b>Isotherm Navigator</b> appears at the top of the left panel. Use the &lsaquo; / &rsaquo; buttons or the list to move between isotherms; each one loads with its own units and metadata and is converted straight away. Your output units, Excess &rarr; Absolute settings and the selected tab are kept as you step, so you can compare a whole series in the same units. Export Converted CSV names the file after the isotherm shown. Each CSV is read exactly as if it had been dropped alone (its own header units and metadata rows).</p>
+        <p><b>Estimating V<sub>pore</sub> from an N₂ isotherm:</b> in the Excess &rarr; Absolute panel, <b>Estimate</b> applies the Gurvich rule to an N₂ 77&nbsp;K isotherm: the amount adsorbed at p/p₀ = 0.95 (editable; adsorption branch, interpolated) × the molar volume of liquid N₂ (34.67&nbsp;cm³&nbsp;mol&#x207b;&#x00b9;). Choose <i>Auto</i> to use the N₂ 77&nbsp;K isotherm of the same material in the navigator (matched on the first word of the sample ID or file name, e.g. <span class="g-code">Zn(BDP)</span>), or pick a specific one from the list, or use the isotherm currently loaded if it is N₂ at 77&nbsp;K. With Auto, V<sub>pore</sub> is re-estimated whenever you step to a different material, and cleared if no matching N₂ isotherm exists. Typing a value yourself switches this off. N₂ isotherms from CSV files can be used only when they are the isotherm currently shown.</p>
 
         <div class="g-sec">cm³(STP) and real-gas correction</div>
         <p>The ideal-gas molar volume at STP (0&nbsp;&#x00b0;C, 1&nbsp;atm) is 22.414&nbsp;mL&nbsp;mmol&#x207b;&#x00b9;. When a gas preset is selected, the van der Waals equation is solved iteratively at STP to give a more accurate molar volume — for example CO&#x2082; gives &#x2248;&nbsp;22.26&nbsp;mL&nbsp;mmol&#x207b;&#x00b9;. The value used is shown in the conversion summary.</p>
@@ -1165,6 +1211,14 @@ function metaRequirements(qIn,qOut){
   };
 }
 
+// With excess→absolute on, the uptake is routed through mmol/g (the PR density
+// correction is molar), so it needs whatever in→mmol/g and mmol/g→out need.
+function effReq(qIn,qOut){
+  if(!gb('excessChk')) return metaRequirements(qIn,qOut);
+  const a=metaRequirements(qIn,'mmol/g'), b=metaRequirements('mmol/g',qOut);
+  return {gas:a.gas||b.gas, mass:a.mass||b.mass, host:a.host||b.host};
+}
+
 // Direct conversion for any pair covered by UNIT_INFO — touches gas MW only
 // when the amount KIND changes, host mass only when the NORMALISATION
 // changes. Falls back to the qToMmolG/qFromMmolG pivot for mol/mol and the
@@ -1193,6 +1247,45 @@ function convertQty(v,qIn,qOut,prm){
     val = A.norm==='rel' ? val*(M/1000) : val/(M/1000);
   }
   return val/B.factor;
+}
+
+// ── Excess → absolute uptake (Peng–Robinson gas density) ─────────────────────
+// n_abs = n_exc + ρ_gas(T,p)·V_pore   (ρ in mmol cm⁻³, V_pore in cm³ per g of host)
+// Critical constants [Tc/K, Pc/bar, ω] — Poling, Prausnitz & O'Connell / NIST.
+const PR_CRIT = {
+  'Ar':[150.69,48.63,-0.002], 'C2H2':[308.3,61.14,0.187], 'C2H4':[282.35,50.41,0.087],
+  'C2H6':[305.32,48.72,0.099], 'C3H6':[364.9,46.0,0.142], 'C3H8':[369.83,42.48,0.152],
+  'C4H10':[425.12,37.96,0.200], 'n-C4H10':[425.12,37.96,0.200], 'i-C4H10':[407.8,36.4,0.186],
+  'C6H6':[562.05,48.95,0.210], 'CH4':[190.56,45.99,0.011], 'CO':[132.85,34.94,0.045],
+  'CO2':[304.13,73.77,0.224], 'COS':[378.8,63.5,0.097], 'CS2':[552.0,79.0,0.111],
+  'H2':[33.19,13.13,-0.216], 'H2O':[647.1,220.64,0.344], 'H2S':[373.4,89.63,0.094],
+  'He':[5.19,2.27,-0.390], 'Kr':[209.4,55.0,-0.001], 'N2':[126.2,33.98,0.037],
+  'N2O':[309.6,72.45,0.141], 'NH3':[405.4,113.5,0.253], 'NO':[180.0,64.8,0.583],
+  'NO2':[431.0,101.0,0.851], 'O2':[154.58,50.43,0.022], 'SO2':[430.8,78.84,0.245],
+  'Xe':[289.74,58.4,0.008], 'CH3OH':[512.6,80.97,0.565], 'CH3CH2OH':[513.9,61.48,0.645],
+  'CH3CN':[545.5,48.3,0.338], 'n-C5H12':[469.7,33.7,0.251], 'n-C6H14':[507.6,30.25,0.301]
+};
+const R_BAR = 83.14462;   // cm³ bar mol⁻¹ K⁻¹
+
+// Gas-phase compressibility factor Z (largest real root of the PR cubic); null if gas unknown
+function prZ(gasKey,T,P_bar){
+  const c=PR_CRIT[gasKey]; if(!c||!(T>0)||!(P_bar>=0)) return null;
+  const [Tc,Pc,w]=c;
+  const k=w<=0.491 ? 0.37464+1.54226*w-0.26992*w*w : 0.379642+1.48503*w-0.164423*w*w+0.016666*w*w*w;
+  const al=Math.pow(1+k*(1-Math.sqrt(T/Tc)),2);
+  const A=0.45724*al*(P_bar/Pc)/((T/Tc)*(T/Tc)), B=0.07780*(P_bar/Pc)/(T/Tc);
+  // Z³ − (1−B)Z² + (A−3B²−2B)Z − (AB−B²−B³) = 0
+  const a2=-(1-B), a1=A-3*B*B-2*B, a0=-(A*B-B*B-B*B*B);
+  const Q=(3*a1-a2*a2)/9, Rr=(9*a2*a1-27*a0-2*a2*a2*a2)/54, D=Q*Q*Q+Rr*Rr;
+  let Z;
+  if(D>=0){ const S=Math.cbrt(Rr+Math.sqrt(D)), Tt=Math.cbrt(Rr-Math.sqrt(D)); Z=S+Tt-a2/3; }
+  else { const th=Math.acos(Rr/Math.sqrt(-Q*Q*Q)); Z=2*Math.sqrt(-Q)*Math.cos(th/3)-a2/3; }   // three real roots: k=0 is the largest
+  return (isFinite(Z)&&Z>0)?Z:null;
+}
+// Gas density in mmol cm⁻³ (= mol L⁻¹); null if it cannot be computed
+function prRho(gasKey,T,P_bar){
+  const Z=prZ(gasKey,T,P_bar); if(Z===null) return null;
+  return P_bar/(Z*R_BAR*T)*1000;
 }
 
 let rawData=[],convData=[],chart=null,currentTab='raw',parsedMeta={};
@@ -1252,6 +1345,27 @@ document.addEventListener('dragleave',e=>{ if(e.relatedTarget===null) appEl.clas
 document.addEventListener('drop',async e=>{
   if(!isFileDrag(e)) return;
   e.preventDefault(); appEl.classList.remove('drag-active');
+  // Several files, a folder or a ZIP → open them together in the isotherm navigator.
+  // (DataTransfer items must be read synchronously, before the first await.)
+  const dtItems=[...e.dataTransfer.items].filter(it=>it.kind==='file');
+  const dtEntries=dtItems.map(it=>it.webkitGetAsEntry?it.webkitGetAsEntry():null);
+  const dtFiles=[...e.dataTransfer.files];
+  const isZip=dtFiles.length===1&&/\.zip$/i.test(dtFiles[0].name);
+  if(dtItems.length>1 || isZip || (dtEntries[0]&&dtEntries[0].isDirectory)){
+    sourceFileHandle=null;
+    st('Reading dropped items…','ok');
+    try{
+      let files=dtFiles;
+      if(dtEntries.every(Boolean)){
+        try{ files=await filesFromEntries(dtEntries); }
+        catch(err){ console.warn('Entry walk failed, using plain file list:',err); files=dtFiles; }
+      }
+      const first=dtEntries[0];
+      const source = dtItems.length===1 ? (first?first.name:dtFiles[0].name) : files.length+' dropped files';
+      await openCollection(files,source);
+    }catch(err){ st('Could not read dropped items: '+err.message,'err'); console.error(err); }
+    return;
+  }
   let handle=null, file=null;
   for(const it of [...e.dataTransfer.items]){
     if(it.kind!=='file') continue;
@@ -1772,11 +1886,437 @@ function parseHidenXemis(text){
   return meta;
 }
 
+// ── AIF (Adsorption Information File, Evans et al., Langmuir 2021, 37, 4222) ──
+// A STAR/CIF-syntax text format: "data_<name>" blocks holding _tag value pairs and
+// loop_ tables (_adsorp_pressure/_adsorp_amount[/_adsorp_p0], same for _desorp_).
+// Units are declared per file (_units_pressure, _units_loading, _units_temperature,
+// _units_mass), so — unlike the CSV path — nothing needs to be guessed.
+function isAIFFormat(text){
+  return /^\s*data_\S*/m.test(text) && /^\s*_(adsorp|desorp)_(pressure|amount)\b/im.test(text);
+}
+
+// CIF tokenizer: whitespace-separated tokens, '...' / "..." quoting, ;text; fields,
+// # comments. Returns [{v:string, q:boolean}] (q = quoted, so never a keyword/null).
+function aifTokenize(text){
+  const toks=[];
+  const lines=text.replace(/^﻿/,'').split(/\r?\n/);
+  for(let i=0;i<lines.length;i++){
+    let ln=lines[i];
+    if(ln[0]===';'){                         // multi-line text field
+      let buf=[ln.slice(1)];
+      while(++i<lines.length && lines[i][0]!==';') buf.push(lines[i]);
+      toks.push({v:buf.join('\n').trim(),q:true});
+      if(i<lines.length && lines[i].length>1) lines[i]=lines[i].slice(1), i--;   // text after the closing ';'
+      continue;
+    }
+    let p=0;
+    while(p<ln.length){
+      const c=ln[p];
+      if(c===' '||c==='\t'){p++;continue;}
+      if(c==='#') break;                     // comment to end of line
+      if(c==="'"||c==='"'){
+        let e=p+1;
+        while(e<ln.length && !(ln[e]===c && (e+1===ln.length||/\s/.test(ln[e+1])))) e++;
+        toks.push({v:ln.slice(p+1,e),q:true});
+        p=e+1; continue;
+      }
+      let e=p; while(e<ln.length && !/\s/.test(ln[e])) e++;
+      toks.push({v:ln.slice(p,e),q:false});
+      p=e;
+    }
+  }
+  return toks;
+}
+
+// Tokens → data blocks: [{name, items:{tag:value}, loops:[{tags:[], rows:[[...]]}]}]
+// Tags are lower-cased. Unquoted '?', '.', 'None' become null.
+function aifParseBlocks(text){
+  const toks=aifTokenize(text), blocks=[];
+  const isKw=t=>!t.q && (t.v[0]==='_'||/^(loop_|data_)/i.test(t.v)||/^(save_|global_|stop_)/i.test(t.v));
+  const val=t=>(!t.q && /^(\?|\.|none|null)$/i.test(t.v)) ? null : t.v;
+  let blk=null, i=0;
+  while(i<toks.length){
+    const t=toks[i];
+    if(!t.q && /^data_/i.test(t.v)){ blk={name:t.v.slice(5),items:{},loops:[]}; blocks.push(blk); i++; continue; }
+    if(!blk){ i++; continue; }
+    if(!t.q && /^loop_$/i.test(t.v)){
+      i++;
+      const tags=[]; while(i<toks.length && !toks[i].q && toks[i].v[0]==='_') tags.push(toks[i++].v.toLowerCase());
+      const flat=[]; while(i<toks.length && !isKw(toks[i])) flat.push(val(toks[i++]));
+      const rows=[]; for(let k=0;k+tags.length<=flat.length && tags.length;k+=tags.length) rows.push(flat.slice(k,k+tags.length));
+      blk.loops.push({tags,rows});
+      continue;
+    }
+    if(!t.q && t.v[0]==='_'){
+      const nxt=toks[i+1];
+      if(nxt && !isKw(nxt)){ blk.items[t.v.toLowerCase()]=val(nxt); i+=2; } else i++;
+      continue;
+    }
+    i++;
+  }
+  return blocks;
+}
+
+// The data blocks of an AIF text that actually hold isotherm loops (one isotherm each)
+function aifUsableBlocks(text){
+  return aifParseBlocks(text).filter(b=>b.loops.some(l=>l.tags.some(t=>/^_(adsorp|desorp)_/.test(t))));
+}
+
+// Fill rawData[] from one data block and return its metadata
+function parseAIFBlock(blk){
+  const it=blk.items;
+  const num=v=>{ if(v===null||v===undefined) return NaN; return parseFloat(String(v).replace(/[−‒–]/g,'-')); };
+  const meta={}, pass=[], used=new Set();
+  const get=(...tags)=>{ for(const t of tags){ if(it[t]!==undefined&&it[t]!==null){ used.add(t); return it[t]; } } return null; };
+
+  // Data loops
+  rawData=[];
+  let p0Sum=0,p0N=0, nBadRows=0;
+  for(const br of ['adsorp','desorp']){
+    const lp=blk.loops.find(l=>l.tags.includes('_'+br+'_pressure')&&l.tags.includes('_'+br+'_amount'));
+    if(!lp) continue;
+    const ip=lp.tags.indexOf('_'+br+'_pressure'), iq=lp.tags.indexOf('_'+br+'_amount'), i0=lp.tags.indexOf('_'+br+'_p0');
+    for(const r of lp.rows){
+      const p=num(r[ip]), q=num(r[iq]);
+      if(!isFinite(p)||!isFinite(q)){ nBadRows++; continue; }
+      const pt={p,q,branch:br==='adsorp'?'ads':'des'};
+      if(i0>=0){ const p0=num(r[i0]); if(isFinite(p0)&&p0>0){ p0Sum+=p0; p0N++; pt.p0=p0; } }
+      rawData.push(pt);
+    }
+  }
+
+  // Units
+  const pu=get('_units_pressure'), qu=get('_units_loading');
+  if(pu){ const u=detectPressureUnit(String(pu)); if(u) meta.pUnit=u; else meta._aifWarn=(meta._aifWarn||[]).concat('Pressure unit "'+pu+'" not recognised — check the input-units menu.'); }
+  if(qu){ const u=detectUptakeUnit(String(qu)); if(u) meta.qUnit=u; else meta._aifWarn=(meta._aifWarn||[]).concat('Loading unit "'+qu+'" not recognised — check the input-units menu.'); }
+
+  // Sorptive (single value in the core dictionary; a loop for mixtures is not supported)
+  const sorp=get('_exptl_adsorptive','_adsorptive_id','_adsorbate');
+  if(sorp) meta.sorptive=String(sorp);
+
+  // Temperature, honouring _units_temperature (default K)
+  const tv=num(get('_exptl_temperature')), tu=String(get('_units_temperature')||'K').replace(/[°º\s]/g,'').toLowerCase();
+  if(isFinite(tv)){
+    if(tu==='c'||tu==='degc'||tu==='celsius') meta.tempC=tv;
+    else if(tu==='f'||tu==='degf'||tu==='fahrenheit') meta.tempK=(tv-32)*5/9+273.15;
+    else meta.tempK=tv;
+  }
+
+  // Sample mass → mg (the app's Host_Mass unit)
+  const mv=num(get('_exptl_sample_mass','_adsnt_sample_mass')), mu=String(get('_units_mass')||'g').replace(/[\s]/g,'').toLowerCase();
+  if(isFinite(mv)){
+    const f={g:1000,mg:1,kg:1e6,'µg':1e-3,'ug':1e-3,'μg':1e-3}[mu];
+    if(f!==undefined) meta.hostMass=parseFloat((mv*f).toPrecision(8));
+    else meta._aifWarn=(meta._aifWarn||[]).concat('Mass unit "'+mu+'" not recognised — sample mass not set.');
+  }
+
+  // Saturation pressure recorded by the instrument (mean of the per-point p0 values), in bar
+  if(p0N && meta.pUnit && meta.pUnit!=='p/p0'){
+    const ps=pToBar(p0Sum/p0N,meta.pUnit);
+    if(isFinite(ps)&&ps>0){ meta.pSat=parseFloat(ps.toPrecision(6)); meta._aifP0=true; }
+  }
+
+  // Everything else → passthrough rows (keeps provenance in the exported CSV)
+  ['_units_pressure','_units_loading','_units_temperature','_units_mass'].forEach(t=>used.add(t));
+  for(const [k,v] of Object.entries(it)){
+    if(used.has(k)||v===null||v==='') continue;
+    pass.push(k.slice(1)+','+String(v).replace(/[\r\n]+/g,' ').replace(/,/g,';'));
+  }
+  if(blk.name) pass.unshift('aif_data_block,'+blk.name.replace(/,/g,';'));
+  if(pass.length) meta.passthrough=pass;
+  meta._aifType=it['_exptl_isotherm_type']||null;
+  meta._isAIF=true;
+  meta._aifBad=nBadRows;
+  return meta;
+}
+
+// ── Isotherm navigator ───────────────────────────────────────────────────────
+// One entry per isotherm: every data block of an AIF, across however many files
+// (several dropped files, a folder, or a ZIP) were opened together.
+// entry = { blk, label }
+let nav={entries:[],idx:0,source:''};
+
+function aifEntryLabel(blk,j,nBlocks,base){
+  const it=blk.items, bits=[];
+  if(it['_adsnt_sample_id']) bits.push(it['_adsnt_sample_id']);
+  else if(it['_sample_id']) bits.push(it['_sample_id']);
+  if(it['_exptl_adsorptive']) bits.push(it['_exptl_adsorptive']);
+  const tv=it['_exptl_temperature'];
+  if(tv!==undefined&&tv!==null) bits.push(String(tv).replace(/−/g,'-')+' '+String(it['_units_temperature']||'K'));
+  const name=blk.name&&blk.name!=='raw2aif' ? blk.name : '';
+  if(nBlocks===1) return base||name||bits.join(', ')||'isotherm';
+  const own=name||('block '+(j+1));
+  return (base?base+' · ':'')+own+(bits.length?' — '+bits.join(', '):'');
+}
+
+// files: [{path,text}] → navigator entries. Returns [] if none holds an isotherm.
+// Material key used to pair an isotherm with "its" N2 77 K isotherm: first word of the
+// sample id (or file name), e.g. 'Zn(BDP) N2 77K BET' and 'Zn(BDP)' → 'Zn(BDP)'.
+function materialKey(s){ return String(s||'').trim().split(/[\s_]/)[0].toLowerCase(); }
+function aifTempK(it){
+  const v=parseFloat(String(it['_exptl_temperature']).replace(/[−‒–]/g,'-'));
+  if(!isFinite(v)) return null;
+  const u=String(it['_units_temperature']||'K').replace(/[°º\s]/g,'').toLowerCase();
+  return u==='c'?v+273.15 : u==='f'?(v-32)*5/9+273.15 : v;
+}
+
+const DATA_EXT=/\.(aif|csv|txt|tsv|dat)$/i;
+// files: [{path,text}] → navigator entries: every data block of an AIF, or one entry per
+// CSV/text file. entry = {kind:'aif',blk,…} | {kind:'text',text,…}, all with label/mat.
+function entriesFromFiles(files){
+  const entries=[];
+  for(const f of files){
+    const base=f.path.split(/[\\/]/).pop().replace(/\.[^.]*$/,'');
+    if(isAIFFormat(f.text)){
+      const blocks=aifUsableBlocks(f.text);
+      blocks.forEach((b,j)=>{
+        const it=b.items, g=it['_exptl_adsorptive']?detectGas(String(it['_exptl_adsorptive'])):null;
+        entries.push({kind:'aif',blk:b,file:base,gas:g,tempK:aifTempK(it),
+          mat:materialKey(it['_adsnt_sample_id']||it['_sample_id']||base),
+          label:aifEntryLabel(b,j,blocks.length,files.length>1?base:'')});
+      });
+    } else if(DATA_EXT.test(f.path) && /\d/.test(f.text)){
+      entries.push({kind:'text',text:f.text,file:base,gas:null,tempK:null,mat:materialKey(base),label:base});
+    }
+  }
+  return entries;
+}
+
+function clearNav(){ nav={entries:[],idx:0,source:''}; vPoreAuto=null; navUI(); }
+
+function openEntries(entries,source){
+  if(!entries.length){ st('No isotherms found in "'+source+'".','err'); return; }
+  if(entries.length===1){ clearNav(); loadEntry(entries[0],entries[0].kind==='text'?entries[0].label:source,false); return; }
+  nav={entries,idx:0,source};
+  vPoreAuto=null;
+  navUI();
+  loadEntry(entries[0],entries[0].label,false);
+}
+
+function loadEntry(en,name,keep){
+  if(en.kind==='text'){ parseCSV(en.text,name,{keepNav:true,keep:keep}); return; }
+  rawData=[];
+  const meta=parseAIFBlock(en.blk);
+  finishLoad(meta,name,{keep:keep});
+}
+
+function navUI(){
+  const sec=document.getElementById('sec-nav'), n=nav.entries.length;
+  sec.style.display = n>1 ? '' : 'none';
+  if(n<=1) return;
+  const sel=document.getElementById('navSelect');
+  if(sel.options.length!==n || sel.dataset.src!==nav.source){
+    sel.innerHTML='';
+    nav.entries.forEach((en,i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=(i+1)+'. '+en.label; sel.appendChild(o); });
+    sel.dataset.src=nav.source;
+  }
+  sel.value=nav.idx;
+  document.getElementById('navCount').textContent='Isotherm '+(nav.idx+1)+' of '+n+' in "'+nav.source+'"';
+  document.getElementById('navPrev').disabled = nav.idx<=0;
+  document.getElementById('navNext').disabled = nav.idx>=n-1;
+}
+function navGo(i){
+  if(!(i>=0&&i<nav.entries.length)) return;
+  nav.idx=i; navUI();
+  const en=nav.entries[i];
+  try{ loadEntry(en,en.label,true); vPoreOnStep(en); }
+  catch(err){ st('Error loading isotherm: '+err.message,'err'); console.error(err); }
+}
+function navStep(d){ navGo(nav.idx+d); }
+
+// ── V_pore estimate from an N2 77 K isotherm (Gurvich rule) ──────────────────
+// Total pore volume = amount adsorbed near saturation (default p/p0 = 0.95, adsorption
+// branch, linear interpolation) × molar volume of liquid N2 at 77 K (34.67 cm³ mol⁻¹).
+const N2_VLIQ=34.67;
+let vPoreAuto=null;       // {mat} when V_pore came from the button in navigator mode → re-estimated if the material changes
+let vPoreSrcText='';      // provenance shown in the Summary
+
+function isN2at77(gas,T){ return gas==='N2' && T>=70 && T<=90; }
+
+// pts [{p,q,branch,p0?}] in pUnit/qUnit; pSatBar fallback when points carry no p0
+function gurvichVpore(pts,pUnit,qUnit,pSatBar,prm,target){
+  const rel=[];
+  for(const r of pts){
+    if(r.branch!=='ads') continue;
+    let x;
+    if(pUnit==='p/p0') x=r.p;
+    else {
+      const p0=r.p0?pToBar(r.p0,pUnit):pSatBar;
+      if(!(p0>0)) return {error:'no saturation pressure (p0) available for the N₂ isotherm'};
+      x=pToBar(r.p,pUnit)/p0;
+    }
+    const qm=convertQty(r.q,qUnit,'mmol/g',prm);
+    if(isFinite(x)&&qm!==null&&isFinite(qm)) rel.push({x,q:qm});
+  }
+  if(rel.length<3) return {error:'too few adsorption points in the N₂ isotherm'};
+  rel.sort((a,b)=>a.x-b.x);
+  const maxRel=rel[rel.length-1].x;
+  if(maxRel<0.8) return {error:'the N₂ isotherm only reaches p/p₀ = '+maxRel.toFixed(2)+' (need ≥ 0.8)'};
+  let q, xUsed=target;
+  if(target>=maxRel){ q=rel[rel.length-1].q; xUsed=maxRel; }
+  else {
+    let k=1; while(k<rel.length-1 && rel[k].x<target) k++;
+    const a=rel[k-1], b=rel[k]; q=a.q+(b.q-a.q)*(target-a.x)/(b.x-a.x||1);
+  }
+  return {v:q*N2_VLIQ/1000, q, xUsed, maxRel};
+}
+
+// Estimate from the isotherm currently loaded
+function vPoreFromCurrent(target){
+  const gas=gv('gasPreset'), T=gn('tempK');
+  const prm={mwGas:gn('mwGas'),massHost:gn('massHost'),mwHost:gn('mwHost'),gasKey:gas};
+  return gurvichVpore(rawData,gv('pUnitsIn'),gv('qUnitsIn'),gn('pSat'),prm,target);
+}
+// Estimate from an AIF navigator entry without loading it (rawData is restored afterwards)
+function vPoreFromEntry(en,target){
+  const saved=rawData; let meta,pts;
+  try{ meta=parseAIFBlock(en.blk); pts=rawData; } finally{ rawData=saved; }
+  const prm={mwGas:GAS_MW.N2,massHost:meta.hostMass,gasKey:'N2'};
+  const ps=meta.pSat||pSatFromAntoine('N2',meta.tempK!==undefined?meta.tempK:(meta.tempC+273.15)).psat_bar;
+  return gurvichVpore(pts,meta.pUnit||'bar',meta.qUnit||'mmol/g',ps,prm,target);
+}
+
+function vpCandidates(){   // N2 77 K isotherms among the navigator entries
+  const out=[]; nav.entries.forEach((en,i)=>{ if(en.kind==='aif'&&isN2at77(en.gas,en.tempK)) out.push(i); });
+  return out;
+}
+function currentIsN2(){ return rawData.length>0 && isN2at77(gv('gasPreset'),gn('tempK')); }
+
+// Keep the source list in the Excess → Absolute panel in step with what is loaded
+function vpRefreshSources(){
+  const sel=document.getElementById('vpSrc'); if(!sel) return;
+  const cands=vpCandidates(), keep=sel.value;
+  sel.innerHTML='';
+  const add=(v,t)=>{ const o=document.createElement('option'); o.value=v; o.textContent=t; sel.appendChild(o); };
+  add('auto','Auto — matching N₂ 77 K isotherm');
+  if(currentIsN2()) add('cur','This isotherm (N₂, '+gn('tempK')+' K)');
+  cands.forEach(i=>add('nav:'+i,nav.entries[i].label));
+  if([...sel.options].some(o=>o.value===keep)) sel.value=keep;
+  document.getElementById('vpBtn').disabled = !(currentIsN2()||cands.length);
+  const msg=document.getElementById('vpMsg');
+  if(!currentIsN2()&&!cands.length&&!vPoreSrcText) msg.textContent='Needs an N₂ 77 K isotherm: load one, or open it together with the others (several files / folder / ZIP).';
+}
+
+// auto=true: called when stepping to another material (silent, uses the matching entry only)
+function estimateVPore(auto){
+  const sel=document.getElementById('vpSrc'), msg=document.getElementById('vpMsg');
+  const target=Math.min(0.99,Math.max(0.5,parseFloat(document.getElementById('vpRel').value)||0.95));
+  const curEn=nav.entries[nav.idx]||null, cands=vpCandidates();
+  let choice=auto?'auto':sel.value, res=null, label='', how=null;
+  if(choice==='auto'){
+    if(currentIsN2()){ choice='cur'; }
+    else {
+      const match=cands.filter(i=>curEn&&nav.entries[i].mat===curEn.mat);
+      if(match.length) choice='nav:'+match[0];
+      else if(cands.length===1&&!auto) choice='nav:'+cands[0];
+      else { res={error:cands.length?'no N₂ 77 K isotherm for "'+(curEn?curEn.mat:'this material')+'" — pick one from the list':'no N₂ 77 K isotherm available'}; }
+    }
+  }
+  if(!res){
+    if(choice==='cur'){ res=vPoreFromCurrent(target); label='this isotherm'; }
+    else { const en=nav.entries[parseInt(choice.slice(4),10)]; res=vPoreFromEntry(en,target); label='"'+en.label+'"'; }
+  }
+  if(auto && curEn) vPoreAuto={mat:curEn.mat};
+  else if(!auto) vPoreAuto = (sel.value==='auto'&&curEn) ? {mat:curEn.mat} : null;
+  const vEl=document.getElementById('vPore');
+  if(res.error){
+    if(auto){ vEl.value=''; vPoreSrcText=''; }
+    msg.textContent='V_pore not estimated: '+res.error+'.'; msg.style.color='#c07820';
+    onParamChange(); return false;
+  }
+  vEl.value=parseFloat(res.v.toPrecision(4));
+  vPoreSrcText='estimated from the N₂ 77 K isotherm '+label+' (Gurvich: '+res.q.toPrecision(4)+' mmol g⁻¹ at p/p₀ = '+res.xUsed.toFixed(3)+' × '+N2_VLIQ+' cm³ mol⁻¹ liquid N₂)';
+  msg.textContent='V_pore = '+vEl.value+' cm³ g⁻¹ '+vPoreSrcText+'.'+(res.xUsed<target-0.005?' Note: the isotherm stops at p/p₀ = '+res.maxRel.toFixed(3)+'.':'')+(document.getElementById('excessChk').checked?'':' Tick the box to apply it.');
+  msg.style.color='#2a7a3b';
+  onParamChange();
+  return true;
+}
+function onVPoreManual(){ vPoreAuto=null; vPoreSrcText=''; document.getElementById('vpMsg').textContent=''; onParamChange(); }
+
+// After stepping to another isotherm: refresh the source list and, if V_pore was estimated
+// automatically for the previous material, re-estimate it for the new one.
+function vPoreOnStep(en){
+  vpRefreshSources();
+  if(vPoreAuto && en.mat!==vPoreAuto.mat) estimateVPore(true);
+}
+
+// ── Opening several files / a folder / a ZIP at once ─────────────────────────
+// Minimal ZIP reader (stored + deflate) — only data files (.aif .csv .txt .tsv .dat) are extracted.
+async function unzipData(file){
+  const buf=await file.arrayBuffer(), dv=new DataView(buf), u8=new Uint8Array(buf);
+  let e=u8.length-22;
+  while(e>=0 && dv.getUint32(e,true)!==0x06054b50) e--;
+  if(e<0) throw new Error('not a valid ZIP file');
+  const n=dv.getUint16(e+10,true); let p=dv.getUint32(e+16,true);
+  const dec=new TextDecoder('utf-8'), out=[];
+  for(let i=0;i<n;i++){
+    if(dv.getUint32(p,true)!==0x02014b50) break;
+    const method=dv.getUint16(p+10,true), csize=dv.getUint32(p+20,true);
+    const nl=dv.getUint16(p+28,true), xl=dv.getUint16(p+30,true), cl=dv.getUint16(p+32,true), lho=dv.getUint32(p+42,true);
+    const name=dec.decode(u8.subarray(p+46,p+46+nl));
+    p+=46+nl+xl+cl;
+    if(name.endsWith('/')||!DATA_EXT.test(name)||/(^|\/)__MACOSX\//.test(name)||/(^|\/)\._/.test(name)) continue;
+    const ds=lho+30+dv.getUint16(lho+26,true)+dv.getUint16(lho+28,true), raw=u8.subarray(ds,ds+csize);
+    let bytes;
+    if(method===0) bytes=raw;
+    else if(method===8 && typeof DecompressionStream!=='undefined')
+      bytes=new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
+    else continue;
+    out.push({path:name,text:dec.decode(bytes)});
+  }
+  return out;
+}
+
+// files: File[] (with optional .fullPath) → open as a collection (AIF blocks and/or CSV files)
+async function openCollection(files,source){
+  const found=[];
+  for(const f of files){
+    const path=f.fullPath||f.webkitRelativePath||f.name;
+    try{
+      if(/\.zip$/i.test(f.name)) found.push(...await unzipData(f));
+      else if(DATA_EXT.test(f.name)) found.push({path,text:await f.text()});
+    }catch(err){ st('Could not read "'+f.name+'": '+err.message,'err'); return; }
+  }
+  if(!found.length){
+    if(files.length===1 && !/\.zip$/i.test(files[0].name)){ loadFile(files[0]); return; }
+    st('No .aif or CSV data files found in the dropped items.','err'); return;
+  }
+  found.sort((a,b)=>a.path.localeCompare(b.path,undefined,{numeric:true,sensitivity:'base'}));
+  try{ openEntries(entriesFromFiles(found),source); }
+  catch(err){ st('Error loading file: '+err.message,'err'); console.error(err); }
+}
+
+// Walk dropped FileSystemEntry objects (folders included) into File objects
+async function filesFromEntries(entries){
+  const out=[];
+  async function walk(en){
+    if(!en) return;
+    if(en.isFile){ const f=await new Promise((res,rej)=>en.file(res,rej)); f.fullPath=en.fullPath; out.push(f); }
+    else if(en.isDirectory){
+      const rd=en.createReader(); let batch;
+      do{ batch=await new Promise((res,rej)=>rd.readEntries(res,rej)); for(const c of batch) await walk(c); } while(batch.length);
+    }
+  }
+  for(const en of entries) await walk(en);
+  return out;
+}
+
 // ── Main CSV parser ──────────────────────────────────────────────────────────
-function parseCSV(text,name){
+// opts.keepNav: this text is a navigator entry being (re)loaded — leave the navigator alone;
+// opts.keep: …and keep output units / excess settings (see finishLoad).
+function parseCSV(text,name,opts){
+  opts=opts||{};
+  if(!opts.keepNav){
+    if(isAIFFormat(text)){
+      openEntries(entriesFromFiles([{path:name,text}]),name);
+      return;
+    }
+    clearNav();
+  }
+  const fopts={keep:!!opts.keep};
   if(isHidenXemisFormat(text)){
     const meta=parseHidenXemis(text);
-    finishLoad(meta,name);
+    finishLoad(meta,name,fopts);
     return;
   }
   const allLines=text.split(/\r?\n/);
@@ -1902,13 +2442,21 @@ function parseCSV(text,name){
     rawData.push({p,q,branch});
   }
 
-  finishLoad(meta,name);
+  finishLoad(meta,name,fopts);
 }
 
 // Shared by both the generic parser and parseHidenXemis() — everything that
 // happens once rawData[]/meta{} have been populated, regardless of source format.
-function finishLoad(meta,name){
+// opts.keep: stepping through the navigator — keep the user's output units, excess→absolute
+// settings and tab instead of resetting them as for a freshly opened file.
+function finishLoad(meta,name,opts){
+  opts=opts||{};
   if(!rawData.length){st('No numeric data found in file.','err');return;}
+  if(!opts.keep){
+    document.getElementById('excessChk').checked=false;
+    document.getElementById('vPore').value='';
+    vPoreAuto=null; vPoreSrcText=''; document.getElementById('vpMsg').textContent='';
+  }
 
   // If no units detected from header, apply defaults and note it
   if(!meta.pUnit){ meta.pUnit='bar'; meta._pDefault=true; }
@@ -1921,6 +2469,18 @@ function finishLoad(meta,name){
   resetMetadataFields();
   // Apply metadata to controls and collect notes
   const notes=applyMetadata(meta);
+  if(nav.entries.length>1) notes.unshift({ok:true, msg:'Isotherm <b>'+(nav.idx+1)+'</b> of <b>'+nav.entries.length+'</b> — use the Isotherm Navigator (left panel) to move between them.'});
+  if(meta._isAIF){
+    notes.unshift({ok:true, msg:'AIF (Adsorption Information File) — units read from <b>_units_*</b> tags.'});
+    if(meta._aifType){
+      const isExc=/excess/i.test(meta._aifType);
+      notes.push({ok:true, msg:'Isotherm type: <b>'+meta._aifType+'</b>'+(isExc?' — use the <b>Excess → Absolute</b> panel (left) to convert to absolute uptake.':'.')});
+      if(isExc && !opts.keep){ const s=document.getElementById('sec-excess'); if(s) s.classList.add('open'); }
+    }
+    if(meta._aifP0) notes.push({ok:true, msg:'P<sub>sat</sub> = <b>'+meta.pSat+' bar</b> from the file’s per-point p0 values.'});
+    if(meta._aifBad) notes.push({ok:false, msg:meta._aifBad+' row(s) with missing/non-numeric values skipped.'});
+    (meta._aifWarn||[]).forEach(m=>notes.push({ok:false, msg:m}));
+  }
   populateMetadataPanel(meta);
   showMetaNotes(notes);
 
@@ -1936,18 +2496,24 @@ function finishLoad(meta,name){
   validateUnits();
   autoLabels();
 
-  // Set output units to bar / mmol/g as starting point
-  document.getElementById('pUnitsOut').value = 'bar';
-  document.getElementById('qUnitsOut').value = 'mmol/g';
+  // Set output units to bar / mmol/g as starting point (not when stepping through the navigator)
+  if(!opts.keep){
+    document.getElementById('pUnitsOut').value = 'bar';
+    document.getElementById('qUnitsOut').value = 'mmol/g';
+  }
   autoLabels();  // update labels for output units too
 
   // Always land on Converted — that's the app's whole purpose. If required
   // metadata are missing there's simply no plot, and the left panel shows the
   // user why; they can switch to Raw Input or Summary themselves if they want.
+  // (Stepping through the navigator stays on whichever tab the user is on.)
+  vpRefreshSources();
   const ok = tryConvert(true);
-  switchTab('conv');
+  switchTab(opts.keep ? currentTab : 'conv');
+  const lbl='"'+name+'"';
   if(ok){
-    st('Loaded and converted to mmol g⁻¹ vs bar. Check Summary tab for details.','ok');
+    st(opts.keep ? 'Loaded '+lbl+' — converted to '+fmtUnit(gv('qUnitsOut'))+' vs '+fmtUnit(gv('pUnitsOut'))+'.'
+                 : 'Loaded and converted to mmol g⁻¹ vs bar. Check Summary tab for details.','ok');
   } else {
     st('Loaded '+rawData.length+' points. Set the missing metadata (left panel) to see the converted plot.','ok');
   }
@@ -2004,7 +2570,14 @@ function validateUnits(){
   // Only the metadata this specific unit PAIR genuinely needs — see metaRequirements().
   // (e.g. µg(absolute)→mg(absolute) needs neither gas MW nor host mass: both would
   // cancel out algebraically, so it would be wrong to demand them.)
-  const req = metaRequirements(qIn,qOut);
+  const req = effReq(qIn,qOut);
+  const exOn=gb('excessChk'), vPoreV=gn('vPore'), tK=gn('tempK');
+  if(exOn){
+    if(vPoreV===undefined) msgs.push('Excess → absolute needs the pore volume V<sub>pore</sub> (cm³ g⁻¹) — enter it in the Excess → Absolute panel.');
+    if(!PR_CRIT[gasKey])   msgs.push('Excess → absolute needs a sorptive with Peng–Robinson data — choose it in Metadata.');
+    if(!tK)                msgs.push('Excess → absolute needs the temperature (K) — enter it in Metadata.');
+  }
+  setMissing(['vPore'], exOn&&vPoreV===undefined);
   if(req.gas&&!mwGas)
     msgs.push('Gas molecular weight (M<sub>gas</sub>, g/mol) is required to convert <b>'+qIn+'</b> → <b>'+qOut+'</b> — enter it in Metadata.');
   if(req.host&&!mwHost)
@@ -2072,7 +2645,13 @@ function tryConvert(silent){
   const prm={mwGas,mwHost,rhoHost,massHost,gasKey,tempK,pSat};
   const missing=[];
   // Only the metadata this specific unit pair actually needs (see metaRequirements)
-  const req = metaRequirements(qIn,qOut);
+  const req = effReq(qIn,qOut);
+  const exOn=gb('excessChk'), vPore=gn('vPore');
+  if(exOn){
+    if(vPore===undefined)      missing.push('pore volume V_pore in cm³/g (set in Excess → Absolute)');
+    if(!PR_CRIT[gasKey])       missing.push('sorptive with Peng–Robinson data (set in Metadata)');
+    if(!tempK)                 missing.push('temperature in K (set in Metadata)');
+  }
   if(req.gas&&!mwGas)     missing.push('gas MW (set in Metadata)');
   if(req.host&&!mwHost)   missing.push('host MW (set in Metadata)');
   if(req.mass&&!massHost)  missing.push('mass of host sample in mg (set in Metadata)');
@@ -2090,7 +2669,12 @@ function tryConvert(silent){
   convData=[];let bad=0;
   for(const pt of rawData){
     const pB=pToBar(pt.p,pIn,prm.pSat),pC=pFromBar(pB,pOut,prm.pSat);
-    const qC=convertQty(pt.q,qIn,qOut,prm);
+    let qC;
+    if(exOn){
+      const qM=convertQty(pt.q,qIn,'mmol/g',prm), rho=prRho(gasKey,tempK,pB);
+      if(qM===null||rho===null){bad++;continue;}
+      qC=convertQty(qM+rho*vPore,'mmol/g',qOut,prm);
+    } else qC=convertQty(pt.q,qIn,qOut,prm);
     if(qC===null){bad++;continue;}
     convData.push({p:pC,q:qC,branch:pt.branch});
   }
@@ -2197,6 +2781,18 @@ function updateResults(){
 
   // Conversion method
   if(desc) convNotes.push({ok:true, msg:desc});
+
+  // Excess → absolute correction
+  if(gb('excessChk')){
+    const vP=gn('vPore'), Tk=gn('tempK'), pSatNow=gn('pSat');
+    let maxCorr=0, maxRho=0;
+    for(const pt of rawData){
+      const rho=prRho(gasKey,Tk,pToBar(pt.p,pIn,pSatNow));
+      if(rho!==null&&rho>maxRho){ maxRho=rho; maxCorr=rho*vP; }
+    }
+    convNotes.push({ok:true, msg:`Excess → absolute: n<sub>abs</sub> = n<sub>exc</sub> + ρ<sub>gas</sub>(T,p)·V<sub>pore</sub> with V<sub>pore</sub> = <b>${vP}</b> cm³ g⁻¹, T = ${Tk} K, Peng–Robinson density of ${gasKey} (max ρ = ${maxRho.toPrecision(4)} mmol cm⁻³). Largest correction: <b>+${maxCorr.toPrecision(3)} mmol g⁻¹</b>. Only valid if the file's data are <i>excess</i> uptake.`});
+    if(vPoreSrcText) convNotes.push({ok:true, msg:`V<sub>pore</sub> ${vPoreSrcText}.`});
+  }
 
   // Render using same DOM approach as showMetaNotes
   const convDiv=document.createElement('div');
@@ -2591,9 +3187,16 @@ document.getElementById('btnExport').addEventListener('click',()=>{
   if(rhoHost) lines.push('Host_Density,'+rhoHost);
   lines.push('Pressure_Units,'+pOut);
   lines.push('Uptake_Units,'+qOut);
+  const exOut=gb('excessChk');
+  if(exOut){
+    lines.push('Isotherm_Type,absolute');
+    lines.push('Pore_Volume_cm3_per_g,'+gn('vPore'));
+    lines.push('# Excess converted to absolute: n_abs = n_exc + rho_gas(T,p)*V_pore, Peng-Robinson density');
+  }
   if(metaOut.passthrough){
     metaOut.passthrough.forEach(row=>{
       if(/^#.*(input|output) units/i.test(row)) return;
+      if(exOut && /^exptl_isotherm_type,/i.test(row)) return;   // superseded by Isotherm_Type above
       lines.push(row);
     });
   }
@@ -2613,7 +3216,8 @@ document.getElementById('btnExport').addEventListener('click',()=>{
   const blob = new Blob([csvText],{type:'text/csv'});
 
   // ── Save: use File System Access API if available, else fallback ──
-  const defaultName = (metaOut.sorptive||'sorption')+'_converted.csv';
+  const navName = nav.entries.length>1 ? nav.entries[nav.idx].label.replace(/[\\/:*?"<>|]+/g,'_').replace(/\s+/g,' ').trim() : '';
+  const defaultName = (navName||metaOut.sorptive||'sorption')+'_converted.csv';
   if(window.showSaveFilePicker){
     const opts={ suggestedName: defaultName, types:[{description:'CSV file',accept:{'text/csv':['.csv']}}] };
     if(sourceFileHandle) opts.startIn=sourceFileHandle;
