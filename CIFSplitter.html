@@ -115,7 +115,7 @@ main{flex:1;display:flex;flex-direction:column;align-items:center;padding:2.5rem
 
 <header>
   <h1>CIF Splitter</h1>
-  <span class="sub">split multi-structure CIFs &middot; scans folders/subfolders &middot; extract embedded SHELX files (RES, HKL, FAB)</span>
+  <span class="sub">split multi-structure CIFs &middot; scans folders, subfolders &amp; ZIPs &middot; extract embedded SHELX files (RES, HKL, FAB)</span>
 </header>
 
 <main>
@@ -123,11 +123,11 @@ main{flex:1;display:flex;flex-direction:column;align-items:center;padding:2.5rem
 
   <div class="drop-zone" id="dropZone">
     <div class="dz-icon">&#x2B06;</div>
-    <p>Drop <strong>CIF file(s)</strong> or a <strong>folder</strong> here, or <strong>click to browse</strong></p>
-    <p class="dz-fmt">.cif &middot; .fcf &nbsp;&mdash;&nbsp; subfolders are searched too &middot; extracts: .cif per block &middot; .res &middot; .hkl &middot; .fab</p>
+    <p>Drop <strong>CIF file(s)</strong>, a <strong>folder</strong> or a <strong>ZIP</strong> here, or <strong>click to browse</strong></p>
+    <p class="dz-fmt">.cif &middot; .fcf &middot; .zip &nbsp;&mdash;&nbsp; subfolders and nested ZIPs are searched &middot; extracts: .cif per block &middot; .res &middot; .hkl &middot; .fab</p>
   </div>
   <button type="button" class="dz-folder-link" id="browseFolderBtn">or choose a folder&hellip;</button>
-  <input type="file" id="fileInput" accept=".cif,.fcf" multiple style="display:none">
+  <input type="file" id="fileInput" accept=".cif,.fcf,.zip" multiple style="display:none">
   <input type="file" id="dirInput" webkitdirectory multiple style="display:none">
   <div class="status-msg" id="scanStatus"></div>
 
@@ -201,6 +201,9 @@ function truncateAtZeroRecord(content){
 }
 function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 const CIF_RE=/\.(cif|fcf)$/i;
+const ZIP_RE=/\.zip$/i;
+const INPUT_RE=/\.(cif|fcf|zip)$/i;
+const MAX_ZIP_DEPTH=4,MAX_ZIP_CIFS=5000;
 
 // -- State -------------------------------------------------------------
 // allBlocks: flat list across every source CIF found, in drop order.
@@ -500,9 +503,72 @@ function triggerDownload(blob,name){
 // renders them (grouped by source file when there's more than one).
 function setScanStatus(text){document.getElementById('scanStatus').textContent=text;}
 
-async function processFiles(items){
-  const fileEntries=[];
+// A ZIP entry that reads lazily, so a big archive isn't all decompressed at
+// once - processFiles only touches .text() and then .size, one file at a time.
+function lazyZipFile(entry,name){
+  return{name,size:0,async text(){
+    const bytes=await entry.async('uint8array');
+    this.size=bytes.length;
+    return new TextDecoder('utf-8').decode(bytes);
+  }};
+}
+
+// Finds every CIF/FCF inside a ZIP (source = File, Blob or bytes), descending
+// into nested ZIPs. Paths are prefixed with the archive's name (minus .zip) so
+// they mirror like a folder. ctx = {out, skipped, truncated}.
+async function expandZipInto(source,prefix,ctx,depth){
+  let zip;
+  try{
+    if(typeof JSZip==='undefined')throw new Error('ZIP library not loaded - check your connection');
+    zip=await JSZip.loadAsync(source);
+  }catch(err){
+    ctx.skipped.push(prefix.replace(/\/$/,'')+'.zip ('+((err&&err.message)||'unreadable')+')');
+    return;
+  }
+  const names=Object.keys(zip.files).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true,sensitivity:'base'}));
+  for(const rawName of names){
+    const entry=zip.files[rawName];
+    if(entry.dir)continue;
+    const name=rawName.split('\\').join('/');   // PowerShell 5 writes backslashes
+    const base=name.split('/').pop();
+    if(/(^|\/)__MACOSX\//.test(name)||/^\._/.test(base))continue;
+    const isZip=ZIP_RE.test(name);
+    if(!isZip&&!CIF_RE.test(name))continue;
+    if(isZip){
+      if(depth>=MAX_ZIP_DEPTH){ctx.skipped.push(prefix+name+' (nested too deeply)');continue;}
+      try{
+        const bytes=await entry.async('uint8array');
+        await expandZipInto(bytes,prefix+name.replace(ZIP_RE,'')+'/',ctx,depth+1);
+      }catch(err){ctx.skipped.push(prefix+name+' ('+((err&&err.message)||'unreadable')+')');}
+      continue;
+    }
+    if(ctx.out.length>=MAX_ZIP_CIFS){ctx.truncated=true;return;}
+    ctx.out.push({file:lazyZipFile(entry,base),relPath:prefix+name});
+    setScanStatus('Found '+ctx.out.length+' file'+(ctx.out.length!==1?'s':'')+'\u2026');
+  }
+}
+
+async function processFiles(inputs){
+  let items=inputs;
   let skipped=0;
+  if(inputs.some(it=>ZIP_RE.test(it.relPath))){
+    setScanStatus('Opening ZIP archive\u2026');
+    const ctx={out:[],skipped:[],truncated:false};
+    for(const it of inputs){
+      if(ZIP_RE.test(it.relPath))await expandZipInto(it.file,it.relPath.replace(ZIP_RE,'')+'/',ctx,0);
+      else ctx.out.push(it);
+    }
+    items=ctx.out;
+    skipped+=ctx.skipped.length;
+    if(ctx.skipped.length)console.warn('ZIP entries skipped:',ctx.skipped);
+    if(ctx.truncated)alert('That archive holds more than '+MAX_ZIP_CIFS+' CIF files - only the first '+MAX_ZIP_CIFS+' were read.');
+    if(inputs.length===1)currentBatchName=inputs[0].relPath.split('/').pop().replace(ZIP_RE,'');
+    if(!items.length){
+      alert(ctx.skipped.length?'Could not read the ZIP archive:\n'+ctx.skipped.join('\n'):'No .cif/.fcf files found in the ZIP archive.');
+      return;
+    }
+  }
+  const fileEntries=[];
   for(let i=0;i<items.length;i++){
     const{file,relPath}=items[i];
     setScanStatus('Reading file '+(i+1)+' of '+items.length+'\u2026');
@@ -535,11 +601,11 @@ async function processFiles(items){
 async function walkHandle(handle,prefix,collected){
   const path=prefix?prefix+'/'+handle.name:handle.name;
   if(handle.kind==='file'){
-    if(CIF_RE.test(handle.name)){
+    if(INPUT_RE.test(handle.name)){
       try{
         const file=await handle.getFile();
         collected.push({file,relPath:path});
-        setScanStatus('Found '+collected.length+' CIF file'+(collected.length!==1?'s':'')+'…');
+        setScanStatus('Found '+collected.length+' file'+(collected.length!==1?'s':'')+'\u2026');
       }catch(err){
         console.warn('Could not read file: '+path,err);
       }
@@ -562,11 +628,11 @@ function readEntriesAsync(reader){
 }
 async function walkEntry(entry,collected){
   if(entry.isFile){
-    if(CIF_RE.test(entry.name)){
+    if(INPUT_RE.test(entry.name)){
       try{
         const file=await new Promise((res,rej)=>entry.file(res,rej));
         collected.push({file,relPath:entry.fullPath.replace(/^\/+/,'')});
-        setScanStatus('Found '+collected.length+' CIF file'+(collected.length!==1?'s':'')+'\u2026');
+        setScanStatus('Found '+collected.length+' file'+(collected.length!==1?'s':'')+'\u2026');
       }catch(err){
         console.warn('Could not read file: '+entry.fullPath,err);
       }
@@ -622,14 +688,14 @@ document.addEventListener('drop',async e=>{
         await walkHandle(h,'',collected);
       }else if(c.entry){
         await walkEntry(c.entry,collected);
-      }else if(c.plainFile&&CIF_RE.test(c.plainFile.name)){
+      }else if(c.plainFile&&INPUT_RE.test(c.plainFile.name)){
         collected.push({file:c.plainFile,relPath:c.plainFile.name});
       }
     }
 
     if(!collected.length){
       setScanStatus('');
-      alert('No .cif/.fcf files found (subfolders were checked too).');
+      alert('No .cif/.fcf files or ZIP archives found (subfolders were checked too).');
       return;
     }
     await processFiles(collected);
@@ -660,9 +726,9 @@ fi.addEventListener('change',async()=>{
 
 document.getElementById('browseFolderBtn').addEventListener('click',e=>{e.stopPropagation();di.click();});
 di.addEventListener('change',async()=>{
-  const files=[...di.files].filter(f=>CIF_RE.test(f.name));
+  const files=[...di.files].filter(f=>INPUT_RE.test(f.name));
   if(!files.length){
-    alert('No .cif/.fcf files found in that folder (subfolders were checked too).');
+    alert('No .cif/.fcf files or ZIP archives found in that folder (subfolders were checked too).');
     di.value='';return;
   }
   try{
