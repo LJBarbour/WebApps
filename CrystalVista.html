@@ -10158,6 +10158,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
         });
       }
       voidMeshes[comp.id] = parts;
+      if (typeof fwPaintVoidParts === "function") fwPaintVoidParts(comp, parts, voidOff);
     }
     /* Void geometry just changed (Calculate, Move/Copy, visibility, a fresh
        component) -- refresh sceneBoundRadius (now voidGroup-aware, see its
@@ -16072,8 +16073,9 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
      CIF text Save CIF needs to splice edits back into -- cifOriginalText is
      deliberately left null (see refreshSymmetryUI()'s own gate on it), which
      is what keeps Save CIF correctly disabled for a RES-loaded structure. */
-  function loadResText(text, name) {
-    var res;
+  function loadResText(text, name, cifText) {
+    var res, cifTags = null; /* cifText: the CIF this RES is embedded in, which supplies the space group and the other metadata a RES lacks */
+    if (cifText) { try { cifTags = K.parseCIF(cifText).tags; } catch (e) { cifTags = null; } }
     try { res = K.parseSHELX(text); } catch (e) { setStatus("Could not parse this SHELX .res/.ins file.", true); return; }
     if (res.error) { clearStructure(); setStatus(res.error, true); return; }
     if (!cellIsUsable(res.cell)) { clearStructure(); setStatus("No usable unit cell parameters found in this SHELX file.", true); return; }
@@ -16102,14 +16104,15 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       atoms.push(atomObj);
     }
     var reducedNote = reduced.length < res.atoms.length ? (" (reduced from " + res.atoms.length + " atoms in the file to " + reduced.length + " symmetry-independent ones)") : "";
-    var sgNote = res.titleSpaceGroup ? (", space group " + res.titleSpaceGroup + " read from TITL") : ", space group not given in TITL";
+    var cifSg = cifTags && (cifTags["_symmetry_space_group_name_H-M"] || cifTags["_space_group_name_H-M_alt"]);
+    var sgNote = cifSg ? (", space group " + cifSg + " read from the CIF") : res.titleSpaceGroup ? (", space group " + res.titleSpaceGroup + " read from TITL") : ", space group not given in TITL";
     loadAtoms(atoms, name, {
       cell: res.cell, symops: res.symops, asymUnit: reduced, M: M,
       /* _res_titl_space_group is this app's own key, not a real CIF tag --
          updateStructuralParamsInfo() checks for it specifically so a RES
          load always shows a "Space group" row (the parsed symbol, or "Not
          given"), where a CIF simply omits that row when the tag is absent. */
-      tags: { _res_titl_space_group: res.titleSpaceGroup || "" }
+      tags: Object.assign({}, cifTags || {}, { _res_titl_space_group: res.titleSpaceGroup || "" })
     });
     setStatus("Loaded " + (name || "structure") + ": asymmetric unit, " + atoms.length + " atom" + (atoms.length === 1 ? "" : "s") + reducedNote + sgNote + ". Use the Grow panel to build out the structure.", false);
   }
@@ -16194,10 +16197,10 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     loadAtoms(atoms, name, null);
     setStatus("Loaded " + (name || "structure") + ": " + atoms.length + " atom" + (atoms.length === 1 ? "" : "s") + " from an XYZ file -- no symmetry information available.", false);
   }
-  function handleResFileText(text, name, keepNav) {
+  function handleResFileText(text, name, keepNav, cifText) {
     if (!keepNav) clearMultiBlockNavigator();
     state.cifOriginalText = null; state.cifOriginalLabel = null;
-    loadResText(text, name);
+    loadResText(text, name, cifText);
   }
   /* A CIF exported for multiple entries (e.g. a CSD Conquest search result)
      concatenates several complete "data_XXXX ... " blocks in one file.
@@ -16236,8 +16239,46 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
      handler and the drag-and-drop handler (see wireIO()) -- neither needs
      to know about multi-block files itself, they just hand the raw text
      here instead of straight to loadCIFText(). */
+  /* The SHELX instructions a CIF carries inside it (SHELXL 2013 and later write them to _shelx_res_file, older versions to _iucr_refine_instructions_details):
+     the text of the .res, or "" when the block holds none. It has what the CIF's own atom list lacks: PART numbers, restraints and the refinement model. */
+  function extractEmbeddedRes(blockText) {
+    var lines = blockText.split(/\r?\n/);
+    for (var i = 0; i < lines.length; i++) {
+      if (!/^\s*(_shelx_res_file|_iucr_refine_instructions_details)\s*$/i.test(lines[i])) continue;
+      var j = i + 1; while (j < lines.length && /^\s*$/.test(lines[j])) j++;
+      if (j >= lines.length || lines[j].charAt(0) !== ";") continue;
+      var body = [lines[j].slice(1)]; j++;
+      while (j < lines.length && lines[j].charAt(0) !== ";") { body.push(lines[j]); j++; }
+      var txt = body.join("\n").trim();
+      if (looksLikeShelxRes(txt)) return txt;
+    }
+    return "";
+  }
+  /* One CIF block as navigator entries: the CIF, and next to it the RES embedded in it when there is one, labelled so that it is clear they are one file.
+     o: { base (name shown), name (file name to load it under), path, cifLabel, srcFile (the file they came from) } */
+  var ENTRY_SEP = " — ", ROLE_CIF = "CIF", ROLE_RES = "RES (in the CIF)";
+  function cifBlockEntries(text, o) {
+    var res = extractEmbeddedRes(text), path = o.path || o.srcFile || o.base;
+    var cif = { base: o.base, role: res ? ROLE_CIF : null, label: res ? o.base + ENTRY_SEP + ROLE_CIF : o.base, path: path, text: text, name: o.name, fmt: "cif", cifLabel: o.cifLabel, srcFile: o.srcFile };
+    if (!res) return [cif];
+    cif.title = (o.srcFile || o.base) + ": the CIF part. Cell, symmetry, space group and the refined atoms with their esds. The RES that is embedded in the same file is the next entry.";
+    return [cif, { base: o.base, role: ROLE_RES, label: o.base + ENTRY_SEP + ROLE_RES, path: path + " › RES", text: res, name: o.base.replace(/[\\\/:*?"<>|]/g, "_") + ".res", fmt: "res", cifText: text, srcFile: o.srcFile,
+      title: (o.srcFile || o.base) + ": the SHELX instructions embedded in the same CIF (_shelx_res_file). They carry the PART numbers, which keep the disordered components apart when bonds are drawn, and the restraints. The space group comes from the CIF part." }];
+  }
+  function cleanBlockLabel(s) { return /[\\\/]/.test(s) ? s.replace(/^.*[\\\/]/, "") || s : s; }
   function handleCifFileText(text, name) {
     var blocks = splitCifBlocks(text);
+    /* a CIF that carries its RES (one structure or several) is shown as a Structure Navigator, each CIF followed by its RES */
+    var pairEntries = [], anyRes = false;
+    (blocks || [{ label: "", text: text }]).forEach(function (b) {
+      var base = blocks ? cleanBlockLabel(b.label) : (name || "structure").replace(/\.[^.]*$/, "");
+      cifBlockEntries(b.text, { base: base, name: blocks ? b.label + ".cif" : name, cifLabel: blocks ? b.label : null, srcFile: name, path: (name || "") + (blocks ? " › " + base : "") }).forEach(function (e) { if (e.fmt === "res") anyRes = true; pairEntries.push(e); });
+    });
+    if (anyRes) {
+      state.multiBlocks = pairEntries; state.multiBlockKind = "struct"; state.multiBlockSourceName = name || "";
+      loadStructEntryAtIndex(0);
+      return;
+    }
     if (!blocks) {
       clearMultiBlockNavigator();
       /* the exact raw text of THIS structure, retained so "Save CIF" can
@@ -16391,13 +16432,18 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     files.forEach(function (f) {
       if (!collLooksLikeStructure(f.path, f.text)) { bad++; return; }
       var fmt = collFormatOf(f.path), fileBase = f.path.split("/").pop(), blocks = fmt === "cif" ? splitCifBlocks(f.text) : null;
+      /* a CIF that carries its RES gives two entries, the CIF and the RES, shown as parts of one file (see cifBlockEntries) */
       if (blocks) {
-        blocks.forEach(function (b) { if (/_atom_site_(fract|cartn)_x/i.test(b.text)) entries.push({ label: b.label, path: f.path + " › " + b.label, text: b.text, name: b.label + ".cif", fmt: "cif", cifLabel: b.label }); else bad++; });
-      } else entries.push({ label: fileBase.replace(/\.[^.]+$/, ""), path: f.path, text: f.text, name: fileBase, fmt: fmt, cifLabel: null });
+        blocks.forEach(function (b) { if (/_atom_site_(fract|cartn)_x/i.test(b.text)) cifBlockEntries(b.text, { base: cleanBlockLabel(b.label), name: b.label + ".cif", cifLabel: b.label, srcFile: fileBase, path: f.path + " › " + cleanBlockLabel(b.label) }).forEach(function (e) { entries.push(e); }); else bad++; });
+      } else if (fmt === "cif") cifBlockEntries(f.text, { base: fileBase.replace(/\.[^.]+$/, ""), name: fileBase, cifLabel: null, srcFile: fileBase, path: f.path }).forEach(function (e) { entries.push(e); });
+      else entries.push({ label: fileBase.replace(/\.[^.]+$/, ""), base: fileBase.replace(/\.[^.]+$/, ""), role: null, path: f.path, text: f.text, name: fileBase, fmt: fmt, cifLabel: null, srcFile: fileBase });
     });
-    var seen = {}; /* the same name twice (two folders): show the path for those */
-    entries.forEach(function (e) { seen[e.label] = (seen[e.label] || 0) + 1; });
-    entries.forEach(function (e) { if (seen[e.label] > 1) e.label = e.path.replace(/\.[^.\/›]+(?= ›|$)/, ""); });
+    var seen = {}; /* the same name twice (two folders): show the path for those; a CIF and its own RES are one name */
+    entries.forEach(function (e) { if (e.role !== ROLE_RES) seen[e.base] = (seen[e.base] || 0) + 1; });
+    entries.forEach(function (e) {
+      if (seen[e.base] > 1) e.base = e.path.replace(/ › RES$/, "").replace(/\.[^.\/›]+(?= ›|$)/, "");
+      e.label = e.role ? e.base + ENTRY_SEP + e.role : e.base;
+    });
     return { entries: entries, bad: bad };
   }
   /* load entry idx of a collection into the viewer (the navigator stays as it is) */
@@ -16407,7 +16453,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     var e = state.multiBlocks[idx];
     if (e.fmt === "cif") { state.cifOriginalText = e.text; state.cifOriginalLabel = e.cifLabel; loadCIFText(e.text, e.name); }
     else if (e.fmt === "xyz") handleXyzFileText(e.text, e.name, true);
-    else handleResFileText(e.text, e.name, true);
+    else handleResFileText(e.text, e.name, true, e.cifText);
     syncMultiBlockNavigatorUI();
   }
   /* open what was found: nothing (a message), one structure (loaded as if dropped alone), or several (the navigator) */
@@ -16468,7 +16514,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       if (blocks !== _lastSyncedMultiBlocks) {
         sel.innerHTML = "";
         blocks.forEach(function (b, i) {
-          var opt = document.createElement("option"); opt.value = String(i); opt.textContent = b.label; if (b.path) opt.title = b.path;
+          var opt = document.createElement("option"); opt.value = String(i); opt.textContent = b.label; if (b.title || b.path) opt.title = b.title || b.path;
           sel.appendChild(opt);
         });
         _lastSyncedMultiBlocks = blocks;
@@ -18808,7 +18854,8 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
   var ORB = {
     dir: null, dirName: "", pairDir: null, molDir: null,
     cfg: { command: "orca", preset: "B3LYP D3BJ def2-SVP", keywords: "B3LYP D3BJ def2-SVP TightSCF RIJCOSX def2/J", cp: true, cores: 1, maxcore: 2000, charge: 0, cutoff: 4.0, grid: 60,
-      fwShow: false, fwRadius: 0.25, fwMin: 5 },
+      fwShow: false, fwRadius: 0.25, fwMin: 5, fwLambda: 1.2, fwOnMol: true, fwOnVoid: true, espRedPos: false,
+      fwAxis: 2, fwCells: 3, fwClRadius: 8, fwKeywords: "PBE def2-SVP def2/J RI", fwCharge: 0, fwMaxPts: 60000 },
     dimers: null, results: null, fwGroup: null, mol: { dens: true, frontier: false, esp: false }, molRun: null,
     cubes: [], cubeGroup: null, esp: null, espRange: 0.03, espSource: "", ui: {}
   };
@@ -18947,7 +18994,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     if (state.lastSourceHandle) opts.startIn = state.lastSourceHandle; else if (ORB.dir) opts.startIn = ORB.dir;
     try { ORB.dir = await window.showDirectoryPicker(opts); }
     catch (e) { return false; }
-    ORB.dirName = ORB.dir.name; ORB.pairDir = null; ORB.molDir = null; orbSyncUi();
+    ORB.dirName = ORB.dir.name; ORB.pairDir = null; ORB.molDir = null; ORB.fwDir = null; orbSyncUi();
     return true;
   }
   async function orbEnsureDir() {
@@ -18961,15 +19008,25 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     return orbPickDir();
   }
   async function orbWrite(dir, name, text) { var fh = await dir.getFileHandle(name, { create: true }), w = await fh.createWritable(); await w.write(text); await w.close(); }
-  async function orbRead(dir, name) { var fh = await dir.getFileHandle(name), f = await fh.getFile(); return f.text(); }
+  async function orbRead(dir, name) {
+    try { var fh = await dir.getFileHandle(name), f = await fh.getFile(); return await f.text(); }
+    catch (e) { if (e && e.name === "NotFoundError") throw new Error("\"" + name + "\" is not in the folder " + (dir.name || "chosen") + " (it was moved, renamed or deleted, or the job has not written it yet)"); throw e; }
+  }
   async function orbSubdir(prefix) {
     var name = prefix + "_" + orbBase();
     return ORB.dir.getDirectoryHandle(name, { create: true });
   }
+  /* the job folder to read: the chosen folder itself if it holds the job, else the subfolder of that name, else the newest subfolder that holds a job of this kind */
   async function orbFindSubdir(prefix) {
-    var want = prefix + "_" + orbBase(), best = null;
-    for await (var ent of ORB.dir.values()) { if (ent.kind === "directory" && ent.name === want) return ent; if (ent.kind === "directory" && ent.name.indexOf(prefix + "_") === 0 && !best) best = ent; }
-    return best;
+    var manifest = prefix + "_manifest.json", want = prefix + "_" + orbBase(), cands = [];
+    try { await ORB.dir.getFileHandle(manifest); return ORB.dir; } catch (e) { /* not the job folder itself */ }
+    for await (var ent of ORB.dir.values()) {
+      if (ent.kind !== "directory" || ent.name.indexOf(prefix + "_") !== 0) continue;
+      try { var f = await (await ent.getFileHandle(manifest)).getFile(); cands.push({ dir: ent, t: f.lastModified, exact: ent.name === want ? 1 : 0 }); } catch (e) { /* no job here */ }
+    }
+    if (!cands.length) return null;
+    cands.sort(function (a, b) { return (b.exact - a.exact) || (b.t - a.t); });
+    return cands[0].dir;
   }
 
   /* ---- pair energies: write, read ---- */
@@ -19108,7 +19165,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       }
       await orbWrite(dir, "mol_manifest.json", JSON.stringify(man, null, 1));
       var bat = ["@echo off", 'cd /d "%~dp0"', "echo Running Orca on " + base + " ...", orbCmd() + " " + base + '.inp > ' + base + ".out"];
-      if (sp) bat.push("echo Evaluating the electrostatic potential ...", "orca_vpot " + base + ".gbw " + base + ".scfp " + base + "_points.txt " + base + "_esp.txt");
+      if (sp) bat.push("echo Evaluating the electrostatic potential ...", orbVpotCmd() + " " + base + ".gbw " + base + ".scfp " + base + "_points.txt " + base + "_esp.txt");
       bat.push("del /q " + base + ".bibtex " + base + ".bas* " + base + "*.tmp " + base + ".citations* 2>nul", "echo.", "echo Done. Return to CrystalVista and press Read results.", "pause");
       await orbWrite(dir, "run_mol.bat", bat.join("\r\n") + "\r\n");
       ORB.molDir = dir;
@@ -19257,10 +19314,55 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     return " Not coloured: the Orca potential was calculated for a surface of " + E.sizes.join(" + ") + " vertices (same atoms and probe radius needed), and this one has " + (iso.positions.length / 3) + ".";
   }
   function orbSyncOpacity() { var s = ORB.ui && ORB.ui.espOp; if (s) { s.num.value = state.molSurfaceOpacity; s.range.value = state.molSurfaceOpacity; } }
-  function orbRepaintSurfaces() { if (typeof renderMolSurfaceMeshes === "function") renderMolSurfaceMeshes(); orbSyncCubeUi(); }
+  /* the colour bar in a corner of the 3D view, whenever a potential is painted on a surface */
+  function orbSyncLegend() {
+    var host = document.getElementById("viewwrap"); if (!host) return;
+    var L = document.getElementById("espLegend");
+    if (!ORB.esp) { if (L) L.style.display = "none"; return; }
+    if (!L) { L = document.createElement("div"); L.id = "espLegend"; host.appendChild(L); }
+    var kc = !!ORB.esp.fw, r = kc ? ORB.espRange * HARTREE_KCAL : ORB.espRange, txt = kc ? r.toFixed(r < 10 ? 1 : 0) : r.toPrecision(2), unit = kc ? "kcal/mol" : "a.u.";
+    var neg = ORB.cfg.espRedPos ? "#2f5fb3" : "#d33a2c", pos = ORB.cfg.espRedPos ? "#d33a2c" : "#2f5fb3";
+    L.style.display = "";
+    L.innerHTML = "<div class='eleg-t'>" + (ORB.esp.label || "Potential") + " (" + unit + ")</div><div class='eleg-bar' style='background:linear-gradient(to right," + neg + ",#ffffff," + pos + ")'></div><div class='eleg-l'><span>&minus;" + txt + "</span><span>0</span><span>+" + txt + "</span></div>";
+  }
+  function fwDoCharges() {
+    try {
+      var ch = fwComputeCharges(ORB.cfg.fwLambda), keys = Object.keys(ch.byAu), box = ORB.ui.fwBox, byEl = {};
+      keys.forEach(function (k) { var e = ch.byAu[k]; (byEl[e.el] = byEl[e.el] || []).push(e.q); });
+      var html = "<table class='orb-table'><thead><tr><th>atom</th><th>charge (e)</th><th>&times; in cell</th></tr></thead><tbody>";
+      keys.forEach(function (k) { var e = ch.byAu[k]; html += "<tr><td>" + e.label + "</td><td>" + (e.q >= 0 ? "+" : "&minus;") + Math.abs(e.q).toFixed(3) + "</td><td>" + e.n + "</td></tr>"; });
+      html += "</tbody></table><div class='orb-sum'>" + ch.atoms.length + " host atoms in the cell, total charge " + ch.total.toExponential(1) + " e (EQeq, screening " + ORB.cfg.fwLambda + ")</div>";
+      box.innerHTML = html;
+      setStatus("EQeq charges of " + ch.atoms.length + " host atoms: " + Object.keys(byEl).map(function (e) { var a = byEl[e]; return e + " " + Math.min.apply(null, a).toFixed(2) + " to " + Math.max.apply(null, a).toFixed(2); }).join(", ") + ".", false);
+    } catch (e) { setStatus("Framework potential: " + e.message + ".", true); }
+  }
+  /* the two "which surfaces" tick boxes act at once when a framework potential is on show */
+  function fwApplyKinds() {
+    if (!(ORB.esp && ORB.esp.fw)) return;
+    if (ORB.cfg.fwOnMol === false && ORB.cfg.fwOnVoid === false) { orbClearEsp(); return; }
+    fwDoMap();
+  }
+  function fwDoMap() {
+    try {
+      var t0 = Date.now(), rows = fwMapMolSurfaces(), box = ORB.ui.fwBox;
+      var html = "<table class='orb-table'><thead><tr><th>surface</th><th>V<sub>max</sub></th><th>V<sub>min</sub></th></tr></thead><tbody>";
+      rows.forEach(function (r) { html += "<tr><td>" + (r.kind === "mol" ? "surface #" + r.id + " (" + r.atoms + " atoms)" : (r.kind === "channel" ? "channel " : "void ") + r.id) + "</td><td>" + (r.max >= 0 ? "+" : "&minus;") + Math.abs(r.max).toFixed(1) + "</td><td>" + (r.min >= 0 ? "+" : "&minus;") + Math.abs(r.min).toFixed(1) + "</td></tr>"; });
+      box.innerHTML = html + "</tbody></table><div class='orb-sum'>kcal/mol; the potential of the host charges, framework only</div>";
+      setStatus("Mapped the framework potential onto " + rows.length + " surface" + (rows.length === 1 ? "" : "s") + " (" + (Date.now() - t0) + " ms).", false);
+    } catch (e) { setStatus("Framework potential: " + e.message + ".", true); }
+  }
+  function orbRepaintSurfaces() {
+    if (typeof renderMolSurfaceMeshes === "function") renderMolSurfaceMeshes();
+    /* void and channel surfaces carry the framework potential too, and lose it again when it is cleared */
+    var voidsNow = !!(ORB.esp && ORB.esp.voids);
+    if ((voidsNow || ORB.espVoidPainted) && state.voidComponents && state.voidComponents.length && typeof renderVoidMeshes === "function") renderVoidMeshes();
+    ORB.espVoidPainted = voidsNow;
+    orbSyncCubeUi();
+  }
   function orbEspColor(v, range, out, o) {
     if (!isFinite(v)) { out[o] = out[o + 1] = out[o + 2] = 0.8; return; }
     var t = Math.max(-1, Math.min(1, v / range));
+    if (ORB.cfg.espRedPos) t = -t; /* red for positive, as in the framework-potential figures of the literature */
     if (t < 0) { out[o] = 1; out[o + 1] = 1 + t; out[o + 2] = 1 + t; } else { out[o] = 1 - t; out[o + 1] = 1 - t; out[o + 2] = 1; }
   }
   /* called by renderMolSurfaceMeshes for every surface it draws */
@@ -19301,7 +19403,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
   function orbInjectStyle() {
     if (document.getElementById("orbStyle")) return;
     var st = document.createElement("style"); st.id = "orbStyle";
-    st.textContent = ".orb-table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px}.orb-table th{text-align:left;color:var(--ink-faint);font-size:9.5px;letter-spacing:.5px;text-transform:uppercase;padding:3px 5px;border-bottom:1px solid var(--border)}.orb-table td{padding:3px 5px;border-bottom:1px solid var(--line);color:var(--ink);white-space:nowrap}.orb-table tr.orb-row{cursor:pointer}.orb-table tr.orb-row:hover{background:var(--accent-soft)}.orb-table tr.dim td{color:var(--ink-faint)}.orb-sum{font-family:var(--mono);font-size:11px;padding:4px 5px;color:var(--ink)}.orb-cube{border:1px solid var(--line);border-radius:4px;padding:6px 7px;display:flex;flex-direction:column;gap:6px}.orb-cube-h{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600}.orb-cube-h .x{margin-left:auto;cursor:pointer;color:var(--ink-mid);font-size:17px;line-height:1;padding:0 6px;border-radius:3px}.orb-cube-h .x:hover{color:#fff;background:var(--danger)}.orb-text{flex:1 1 auto;min-width:0}";
+    st.textContent = ".orb-table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px}.orb-table th{text-align:left;color:var(--ink-faint);font-size:9.5px;letter-spacing:.5px;text-transform:uppercase;padding:3px 5px;border-bottom:1px solid var(--border)}.orb-table td{padding:3px 5px;border-bottom:1px solid var(--line);color:var(--ink);white-space:nowrap}.orb-table tr.orb-row{cursor:pointer}.orb-table tr.orb-row:hover{background:var(--accent-soft)}.orb-table tr.dim td{color:var(--ink-faint)}.orb-sum{font-family:var(--mono);font-size:11px;padding:4px 5px;color:var(--ink)}.orb-cube{border:1px solid var(--line);border-radius:4px;padding:6px 7px;display:flex;flex-direction:column;gap:6px}.orb-cube-h{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600}.orb-cube-h .x{margin-left:auto;cursor:pointer;color:var(--ink-mid);font-size:17px;line-height:1;padding:0 6px;border-radius:3px}.orb-cube-h .x:hover{color:#fff;background:var(--danger)}.orb-text{flex:1 1 auto;min-width:0}#espLegend{position:absolute;right:14px;bottom:42px;width:210px;padding:7px 9px 6px;background:rgba(250,246,238,.93);border:1px solid var(--border);border-radius:5px;font-family:var(--mono);font-size:10.5px;color:var(--ink);z-index:5;pointer-events:none}#espLegend .eleg-t{margin-bottom:4px}#espLegend .eleg-bar{height:12px;border:1px solid var(--border)}#espLegend .eleg-l{display:flex;justify-content:space-between;margin-top:3px}";
     document.head.appendChild(st);
   }
   function orbSyncUi() { if (ORB.ui.dirLabel) ORB.ui.dirLabel.textContent = ORB.dirName || "no folder chosen"; }
@@ -19411,6 +19513,36 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     button(mr, "Read results", "ghost", orbReadMol);
     molJ.appendChild(mr);
 
+    var fwS = subsection(ob, "Framework potential", false);
+    numberOnly(fwS, "dielectric screening", 1, 5, 0.05, C.fwLambda, "", function (v) { C.fwLambda = v; orbSaveCfg(); }).title = "The EQeq screening parameter (1.2 is the published value).";
+    toggle(fwS, "Molecular surfaces", C.fwOnMol !== false, function (v) { C.fwOnMol = v; orbSaveCfg(); fwApplyKinds(); }).parentNode.title = "Colour the molecular surfaces in the view (over the host atoms around a channel, or over a guest). Changing it updates the colours at once.";
+    toggle(fwS, "Void / channel surfaces", C.fwOnVoid !== false, function (v) { C.fwOnVoid = v; orbSaveCfg(); fwApplyKinds(); }).parentNode.title = "Colour the surfaces found by Void / Channel Analysis. They lie a probe radius away from the walls, so the potential on them is weaker than on the walls themselves. Changing it updates the colours at once.";
+    var fwRow = el("div", "btnrow");
+    button(fwRow, "Calculate charges", "ghost", fwDoCharges).title = "EQeq point charges of the host atoms, for the whole periodic framework.";
+    button(fwRow, "Map potential", "ghost", fwDoMap).title = "Colours the molecular surfaces and the void and channel surfaces (as ticked above) by the potential of the host charges.";
+    fwS.appendChild(fwRow);
+    var fwRow2 = el("div", "btnrow");
+    button(fwRow2, "Clear colours", "ghost", orbClearEsp).title = "Restores the plain surface colours.";
+    fwS.appendChild(fwRow2);
+    U1.fwBox = el("div", "orb-scroll"); U1.fwBox.style.overflowX = "auto"; fwS.appendChild(U1.fwBox);
+    var fwHead = el("div", "hint", "Orca cluster"); fwHead.style.marginTop = "10px"; fwHead.style.fontWeight = "600"; fwS.appendChild(fwHead);
+    select(fwS, "axis along the channel", [[0, "a"], [1, "b"], [2, "c"]], C.fwAxis, function (v) { C.fwAxis = parseInt(v, 10); orbSaveCfg(); }).title = "The cell axis the channel runs along: the cluster is a cylinder around it.";
+    numberOnly(fwS, "cells along it", 1, 10, 1, C.fwCells, "", function (v) { C.fwCells = Math.max(1, Math.round(v)); orbSaveCfg(); }).title = "Length of the cluster in unit cells (the published model used 3).";
+    numberOnly(fwS, "radius", 4, 30, 0.5, C.fwClRadius, U.ang, function (v) { C.fwClRadius = v; orbSaveCfg(); }).title = "Radius of the cylinder around the channel axis, which passes through the centre of the guest atoms (or of the selected atoms).";
+    var kwRow = el("div", "ctl-inline"); kwRow.appendChild(el("label", "plain", "keywords"));
+    var kwIn = document.createElement("input"); kwIn.type = "text"; kwIn.className = "num orb-text"; kwIn.style.textAlign = "left"; kwIn.value = C.fwKeywords; kwIn.title = "The Orca keyword line of the cluster job. A GGA functional with RI is the fast choice for a large cluster.";
+    kwIn.addEventListener("input", function () { C.fwKeywords = kwIn.value; orbSaveCfg(); }); kwRow.appendChild(kwIn); fwS.appendChild(kwRow);
+    numberOnly(fwS, "charge", -8, 8, 1, C.fwCharge, "", function (v) { C.fwCharge = Math.round(v); orbSaveCfg(); }).title = "Charge of the whole cluster (0 for complete coordination units with their carboxylates).";
+    numberOnly(fwS, "most points", 1000, 500000, 1000, C.fwMaxPts, "", function (v) { C.fwMaxPts = Math.max(1000, Math.round(v)); orbSaveCfg(); }).title = "At most this many surface vertices are sent to Orca; the others take the value of the nearest one.";
+    var fwRow3 = el("div", "btnrow"); button(fwRow3, "Build cluster", "ghost", fwDoBuild).title = "Adds the host atoms of the cylinder (and whatever must come with them) to the view and selects them.";
+    fwS.appendChild(fwRow3);
+    var fwRow4 = el("div", "btnrow");
+    button(fwRow4, "Write cluster job", "ghost", fwWriteCluster).title = "Writes the Orca input for the selected host atoms, the surface points and run_fw.bat.";
+    button(fwRow4, "Add surfaces", "ghost", fwAddSurfaces).title = "For surfaces built after the cluster job was run (for example over the guest): writes their points and run_vpot.bat, which evaluates them from the finished job's wavefunction in minutes.";
+    button(fwRow4, "Read cluster results", "ghost", fwReadCluster).title = "Colours the surfaces by the potential Orca calculated.";
+    fwS.appendChild(fwRow4);
+    U1.fwInfo = el("div", "orb-sum"); fwS.appendChild(U1.fwInfo);
+
     /* ======== menu 2: Cube & ESP ======== */
     var cv = section(left, "Cube & ESP", false);
     var loadRow = el("div", "btnrow");
@@ -19435,6 +19567,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       orbSetEspFromCube(c);
     });
     button(er, "Clear colours", "ghost", orbClearEsp); espSub.appendChild(er);
+    toggle(espSub, "Red = positive", C.espRedPos, function (v) { C.espRedPos = v; orbSaveCfg(); if (ORB.esp) orbRepaintSurfaces(); }).parentNode.title = "Reverses the colours: red for positive potential, blue for negative, as in many framework-potential figures.";
     var rs = slider(espSub, "colour range ±", 0.001, 0.2, 0.001, ORB.espRange, "a.u.", function (v) { ORB.espRange = v; if (ORB.esp) orbRepaintSurfaces(); }); U1.espRange = rs;
     /* the same setting as "surface opacity" in Molecular Surface, kept in step with it */
     U1.espOp = slider(espSub, "surface opacity", 0.05, 1.0, 0.05, state.molSurfaceOpacity, "", function (v) {
@@ -19449,6 +19582,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     catch (e) { setStatus("Could not read " + f.name + ": " + e.message, true); }
   }
   function orbSyncCubeUi() {
+    orbSyncLegend();
     var U1 = ORB.ui; if (!U1.cubeBox) return;
     U1.cubeBox.innerHTML = "";
     ORB.cubes.forEach(function (c) {
@@ -19488,6 +19622,586 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     }
   }
   /* ORCABRIDGE-END */
+  /* ---- FWPOT-BEGIN: framework electrostatic potential from point charges ----
+     The charges of the host atoms come from the EQeq charge-equilibration method (C. E. Wilmer, K. C. Kim and R. Q. Snurr, J. Phys. Chem. Lett. 2012, 3, 2506)
+     applied to the periodic framework: the atoms of the whole unit cell, with the Coulomb terms summed over neighbouring cells. The ionisation energies and
+     electron affinities it uses are the ones tabulated with that method (electron affinities after T. Andersen et al., ionisation energies after C. E. Moore).
+     The potential of those charges is then evaluated at any points (the vertices of a surface) by Ewald summation, in kcal/mol. */
+  var EQEQ_DATA = "H:0.75420,13.598000,,,,,,,;He:0.00000,24.58700,54.41600,,,,,,;Li:0.61805,5.39200,75.63800,122.45100,,,,,;Be:0.00000,9.32200,18.21100,153.89300,217.71300,,,,;B:0.27972,8.29800,25.15400,37.93000,259.36800,340.21700,,,;C:1.26212,11.26000,24.38300,47.88700,64.49200,392.07700,489.98100,,;N:-0.07000,14.53400,29.60100,47.44800,77.47200,97.88800,552.05700,667.02900,;O:1.46111,13.61800,35.11600,54.93400,77.41200,113.89600,138.11600,739.31500,871.38700;F:3.40119,17.42200,34.97000,62.70700,87.13800,114.24000,157.16100,185.18200,953.88600;Ne:0.00000,21.56400,40.96200,63.45000,97.11000,126.21000,157.93000,207.27000,239.09000;Na:0.54793,5.13900,47.28600,71.64000,98.91000,138.39000,172.15000,208.47000,264.18000;Mg:0.00000,7.64600,15.03500,80.14300,109.24000,141.26000,186.50000,224.94000,265.90000;Al:0.43283,5.98600,18.82800,28.44700,119.99000,153.71000,190.47000,241.43000,284.59000;Si:1.38952,8.15100,16.34500,33.49200,45.14100,166.77000,205.05000,246.52000,303.17000;P:0.74650,10.45800,19.72500,30.18000,51.37000,65.02300,220.43000,263.22000,309.41000;S:2.07710,10.36000,23.33000,34.83000,47.30000,72.68000,88.04900,280.93000,328.23000;Cl:3.61272,12.96700,23.81000,39.61000,53.46000,67.80000,97.03000,114.19300,348.28000;Ar:0.00000,15.75900,27.62900,40.74000,59.81000,75.02000,91.00700,124.31900,143.45600;K:0.50146,4.34100,31.62500,45.72000,60.91000,82.66000,100.00000,117.56000,154.86000;Ca:0.02455,6.11300,11.87100,50.90800,67.10000,84.41000,108.78000,127.70000,147.24000;Sc:0.18800,6.54000,12.80000,24.76000,73.47000,91.66000,111.10000,138.00000,158.70000;Ti:0.08400,6.82000,13.58000,27.49100,43.26600,99.22000,119.36000,140.80000,168.50000;V:0.52500,6.74000,14.65000,29.31000,46.70700,65.23000,128.12000,150.17000,173.70000;Cr:0.67584,6.76600,16.50000,30.96000,49.10000,69.30000,90.56000,161.10000,184.70000;Mn:0.00000,7.43500,15.64000,33.66700,51.20000,72.40000,95.00000,119.27000,196.46000;Fe:0.15100,7.87000,16.18000,30.65100,54.80000,75.00000,99.00000,125.00000,151.06000;Co:0.66330,7.86000,17.06000,33.50000,51.30000,79.50000,102.00000,129.00000,157.00000;Ni:1.15716,7.63500,18.16800,35.17000,54.90000,75.50000,108.00000,133.00000,162.00000;Cu:1.23578,7.72600,20.29200,36.83000,55.20000,79.90000,103.00000,139.00000,166.00000;Zn:0.00000,9.39400,17.96400,39.72200,59.40000,82.60000,108.00000,134.00000,174.00000;Ga:0.41000,5.99900,20.51000,30.71000,64.00000,,,,;Ge:1.23271,7.89900,15.93400,34.22000,45.71000,93.50000,,,;As:0.81400,9.81000,18.63300,28.35100,50.13000,62.63000,127.60000,,;Se:2.02070,9.75200,21.19000,30.82000,42.94400,68.30000,81.70000,155.40000,;Br:3.36359,11.81400,21.80000,36.00000,47.30000,59.70000,88.60000,103.00000,192.80000;Kr:0.00000,13.99900,24.35900,36.95000,52.50000,64.70000,18.50000,111.00000,126.00000;Rb:0.48592,4.17700,27.28000,40.00000,52.60000,71.00000,84.40000,99.20000,136.00000;Sr:0.05206,5.69500,11.03000,43.60000,57.00000,71.60000,90.80000,106.00000,122.30000;Y:0.30700,6.38000,12.24000,20.52000,61.80000,77.00000,93.00000,116.00000,129.00000;Zr:0.42600,6.84000,13.13000,22.99000,34.34000,81.50000,,,;Nb:0.89300,6.88000,14.32000,25.04000,38.30000,50.55000,102.60000,125.00000,;Mo:0.74720,7.09900,16.15000,27.16000,46.40000,61.20000,68.00000,126.80000,153.00000;Tc:0.55000,7.28000,15.26000,29.54000,,,,,;Ru:1.04638,7.37000,16.76000,28.47000,,,,,;Rh:1.14289,7.46000,18.08000,31.06000,,,,,;Pd:0.56214,8.34000,19.43000,32.93000,,,,,;Ag:1.30447,7.57600,21.49000,34.83000,,,,,;Cd:0.00000,8.99300,16.90800,37.48000,,,,,;In:0.40400,5.78600,18.86900,28.03000,54.00000,,,,;Sn:1.11207,7.34400,14.63200,30.50200,40.73400,72.28000,,,;Sb:1.04740,8.64100,16.53000,25.30000,44.20000,56.00000,108.00000,,;Te:1.97088,9.00900,18.60000,27.96000,37.41000,58.75000,70.70000,137.00000,;I:3.05904,10.45100,19.13100,33.00000,,,,,;Xe:0.00000,12.13000,21.21000,32.10000,,,,,;Cs:0.47163,3.89400,25.10000,,,,,,;Ba:0.14462,5.21200,10.00400,,,,,,;La:0.47000,5.57700,11.06000,19.17500,,,,,;Ce:0.70000,5.47000,10.85000,20.20000,36.72000,,,,;Pr:0.5,5.42000,10.55000,21.62000,38.95000,57.45000,,,;Nd:0.5,5.49000,10.72000,,,,,,;Pm:0.5,5.55000,10.90000,,,,,,;Sm:0.5,5.63000,11.07000,,,,,,;Eu:0.5,5.67000,11.25000,,,,,,;Gd:0.5,6.14000,12.10000,,,,,,;Tb:0.5,5.85000,11.52000,,,,,,;Dy:0.5,5.93000,11.67000,,,,,,;Ho:0.5,6.02000,11.80000,,,,,,;Er:0.5,6.10000,11.93000,,,,,,;Tm:0.5,6.18000,12.05000,23.71000,,,,,;Yb:0.5,6.25400,12.17000,25.20000,,,,,;Lu:0.5,5.42600,13.90000,,,,,,;Hf:0.00000,7.00000,14.90000,23.30000,33.30000,,,,;Ta:0.32200,7.89000,,,,,,,;W:0.81500,7.98000,,,,,,,;Re:0.01500,7.88000,,,,,,,;Os:1.07780,8.70000,,,,,,,;Ir:1.56436,9.10000,,,,,,,;Pt:2.12510,9.00000,18.56300,,,,,,;Au:2.30861,9.22500,20.50000,,,,,,;Hg:0.00000,10.43700,18.75600,34.20000,,,,,;Tl:0.37700,6.10800,20.42800,29.83000,,,,,;Pb:0.36400,7.41600,15.03200,31.93700,42.32000,68.80000,,,;Bi:0.94236,7.28900,16.69000,25.56000,45.30000,56.00000,88.30000,,;Po:1.90000,8.42000,,,,,,,";
+  var EQEQ_CC = "H0,He0,Li1,Be2,B0,C0,N0,O0,F0,Ne0,Na1,Mg2,Al3,Si0,P0,S0,Cl0,Ar0,K1,Ca2,Sc3,Ti4,V4,Cr3,Mn2,Fe2,Co2,Ni2,Cu2,Zn2,Ga3,Ge0,As0,Se0,Br0,Kr0,Rb1,Sr2,Y3,Zr4,Nb4,Mo4,Tc2,Ru2,Rh2,Pd2,Ag1,Cd2,In3,Sn2,Sb0,Te0,I0,Xe0,Cs1,Ba1,La2,Ce3,Pr3,Nd1,Pm1,Sm1,Eu1,Gd1,Tb1,Dy1,Ho1,Er1,Tm2,Yb2,Lu1,Hf3,Ta0,W0,Re0,Os0,Ir0,Pt1,Au1,Hg1,Tl1,Pb2,Bi3,Po0";
+  var EQEQ_TAB = null;
+  var FW = { charges: null, last: null };
+  var FW_COULOMB = 332.0637, HARTREE_KCAL = 627.5095; /* kcal Angstrom / (mol e^2), and kcal/mol per hartree */
+  function eqeqTable() {
+    if (EQEQ_TAB) return EQEQ_TAB;
+    var t = {}, cc = {};
+    EQEQ_DATA.split(";").forEach(function (row) { var p = row.split(":"); t[p[0]] = p[1].split(",").map(function (s) { return s === "" ? null : parseFloat(s); }); });
+    EQEQ_CC.split(",").forEach(function (s) { var m = /^([A-Za-z]+)(\d+)$/.exec(s); if (m) cc[m[1]] = parseInt(m[2], 10); });
+    EQEQ_TAB = { ion: t, cc: cc }; return EQEQ_TAB;
+  }
+  /* electronegativity X and hardness J of an atom (eV), from its charge centre and the two ionisation steps around it */
+  function eqeqXJ(el, hI0) {
+    if (el === "H" || el === "D") return { X: 0.5 * (13.598 + hI0), J: 13.598 - hI0 };
+    var T = eqeqTable(), v = T.ion[el];
+    if (!v) throw new Error("no ionisation data for " + el);
+    var cC = T.cc[el] || 0, lo = v[cC], hi = v[cC + 1];
+    if (cC === 0 && lo == null) lo = 0; /* a missing electron affinity counts as zero */
+    if (lo == null || hi == null) throw new Error("incomplete ionisation data for " + el);
+    var J = hi - lo;
+    return { X: 0.5 * (hi + lo) - cC * J, J: J };
+  }
+  function fwErfc(x) { var t = 1 / (1 + 0.3275911 * x), y = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429)))); return y * Math.exp(-x * x); }
+  function fwCross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+  function fwDot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+  function fwLattice() {
+    var M = state.cifFracToCart; if (!M) throw new Error("this needs a structure with a unit cell");
+    var a = K.fracToCart(M, [1, 0, 0]), b = K.fracToCart(M, [0, 1, 0]), c = K.fracToCart(M, [0, 0, 1]);
+    var vol = Math.abs(fwDot(a, fwCross(b, c))), s = 2 * Math.PI / fwDot(a, fwCross(b, c)), bc = fwCross(b, c), ca = fwCross(c, a), ab = fwCross(a, b);
+    return { a: a, b: b, c: c, vol: vol, h1: [s * bc[0], s * bc[1], s * bc[2]], h2: [s * ca[0], s * ca[1], s * ca[2]], h3: [s * ab[0], s * ab[1], s * ab[2]] };
+  }
+  /* the atoms of the unit cell that belong to the host layer: every symmetry image of every host position of the asymmetric unit, each counted once */
+  function fwHostCell() {
+    if (!state.isCif || !state.cifAsymUnit || !state.cifSymops || !state.cifFracToCart) throw new Error("this needs a CIF or SHELX structure that still has its symmetry");
+    var host = {}, any = false;
+    (state.atoms || []).forEach(function (a) { if (a.auIndex !== undefined && !a.isCentroid && a.el !== "Xx") { host[a.auIndex] = true; any = true; } });
+    if (!any) throw new Error("there are no host atoms in the view");
+    var M = state.cifFracToCart, atoms = [];
+    Object.keys(host).forEach(function (ks) {
+      var au = state.cifAsymUnit[+ks]; if (!au || au.deleted || au.el === "Xx") return;
+      state.cifSymops.forEach(function (op, opi) {
+        var f0 = K.applySymop(op, [au.fx, au.fy, au.fz]), f = [f0[0] - Math.floor(f0[0]), f0[1] - Math.floor(f0[1]), f0[2] - Math.floor(f0[2])];
+        for (var q = 0; q < atoms.length; q++) {
+          var b = atoms[q]; if (b.el !== au.el) continue;
+          var d = [f[0] - b.f[0], f[1] - b.f[1], f[2] - b.f[2]]; d = [d[0] - Math.round(d[0]), d[1] - Math.round(d[1]), d[2] - Math.round(d[2])];
+          var c = K.fracToCart(M, d); if (c[0] * c[0] + c[1] * c[1] + c[2] * c[2] < 0.09) return; /* the same site again (a special position, or two disorder sites of one atom) */
+        }
+        var c2 = K.fracToCart(M, f); atoms.push({ el: au.el, f: f, x: c2[0], y: c2[1], z: c2[2], au: +ks, label: au.label || au.el, op: opi, sh: [-Math.floor(f0[0]), -Math.floor(f0[1]), -Math.floor(f0[2])] }); /* op and sh: this site is symmetry operation op of the asymmetric-unit atom, moved by sh cells into the unit cell */
+      });
+    });
+    /* two atoms that close are overlapping disorder components: EQeq is not meaningful for them */
+    for (var i = 0; i < atoms.length; i++) for (var j = i + 1; j < atoms.length; j++) {
+      var d = [atoms[i].f[0] - atoms[j].f[0], atoms[i].f[1] - atoms[j].f[1], atoms[i].f[2] - atoms[j].f[2]]; d = [d[0] - Math.round(d[0]), d[1] - Math.round(d[1]), d[2] - Math.round(d[2])];
+      var cc = K.fracToCart(M, d);
+      if (cc[0] * cc[0] + cc[1] * cc[1] + cc[2] * cc[2] < 0.81) throw new Error(atoms[i].label + " and " + atoms[j].label + " are less than 0.9 " + U.ang + " apart (disorder components?): remove one of them from the host first");
+    }
+    return atoms;
+  }
+  /* EQeq charges of the cell atoms: opt.lambda (dielectric screening, 1.2), opt.hI0 (hydrogen electron affinity, -2.0); the Ewald-type sums use the cells -2..2 in real and reciprocal space with splitting parameter 50, as the method defines */
+  function eqeqCharges(atoms, lat, opt) {
+    opt = opt || {};
+    var lambda = opt.lambda == null ? 1.2 : opt.lambda, hI0 = opt.hI0 == null ? -2 : opt.hI0, mR = 2, mK = 2, eta = 50, kc = 14.4, N = atoms.length, i, j, u, v, w, X = new Float64Array(N), Jd = new Float64Array(N);
+    for (i = 0; i < N; i++) { var p = eqeqXJ(atoms[i].el, hI0); X[i] = p.X; Jd[i] = p.J; }
+    var T = [], R = [];
+    for (u = -mR; u <= mR; u++) for (v = -mR; v <= mR; v++) for (w = -mR; w <= mR; w++) T.push([u * lat.a[0] + v * lat.b[0] + w * lat.c[0], u * lat.a[1] + v * lat.b[1] + w * lat.c[1], u * lat.a[2] + v * lat.b[2] + w * lat.c[2], u === 0 && v === 0 && w === 0]);
+    for (u = -mK; u <= mK; u++) for (v = -mK; v <= mK; v++) for (w = -mK; w <= mK; w++) {
+      if (u === 0 && v === 0 && w === 0) continue;
+      var hx = u * lat.h1[0] + v * lat.h2[0] + w * lat.h3[0], hy = u * lat.h1[1] + v * lat.h2[1] + w * lat.h3[1], hz = u * lat.h1[2] + v * lat.h2[2] + w * lat.h3[2], h2 = hx * hx + hy * hy + hz * hz, b = 0.5 * Math.sqrt(h2) * eta;
+      R.push([hx, hy, hz, Math.exp(-b * b) / h2]);
+    }
+    var fourPiV = 4 * Math.PI / lat.vol, sqPi = Math.sqrt(Math.PI);
+    function ov(a, r) { return Math.exp(-(a * a * r * r)) * (2 * a - a * a * r - 1 / r); }
+    var Jm = new Float64Array(N * N);
+    for (i = 0; i < N; i++) for (j = i; j < N; j++) {
+      var a = Math.sqrt(Jd[i] * Jd[j]) / kc, val;
+      if (i === j) {
+        var orbital = 0, alphaStar = 0, betaStar = 0;
+        for (var t = 0; t < T.length; t++) { if (T[t][3]) continue; var r = Math.sqrt(T[t][0] * T[t][0] + T[t][1] * T[t][1] + T[t][2] * T[t][2]); orbital += ov(a, r); alphaStar += fwErfc(r / eta) / r; }
+        for (var s = 0; s < R.length; s++) betaStar += R[s][3];
+        betaStar *= fourPiV;
+        val = Jd[i] + lambda * (kc / 2) * (alphaStar + betaStar + orbital - 2 / (eta * sqPi));
+      } else {
+        var dx = atoms[i].x - atoms[j].x, dy = atoms[i].y - atoms[j].y, dz = atoms[i].z - atoms[j].z, orb = 0, al = 0, be = 0;
+        for (var t2 = 0; t2 < T.length; t2++) { var ex = dx + T[t2][0], ey = dy + T[t2][1], ez = dz + T[t2][2], r2 = Math.sqrt(ex * ex + ey * ey + ez * ez); orb += ov(a, r2); al += fwErfc(r2 / eta) / r2; }
+        for (var s2 = 0; s2 < R.length; s2++) be += Math.cos(R[s2][0] * dx + R[s2][1] * dy + R[s2][2] * dz) * R[s2][3];
+        val = lambda * (kc / 2) * (al + fourPiV * be + orb);
+      }
+      Jm[i * N + j] = val; Jm[j * N + i] = val;
+    }
+    /* the linear system: the charges sum to zero, and the chemical potential X + sum_j J_ij Q_j is the same for every atom */
+    var A = [], bb = new Float64Array(N);
+    for (i = 0; i < N; i++) A.push(new Float64Array(N));
+    for (j = 0; j < N; j++) A[0][j] = 1;
+    bb[0] = 0;
+    for (i = 1; i < N; i++) { bb[i] = X[i] - X[i - 1]; for (j = 0; j < N; j++) A[i][j] = Jm[(i - 1) * N + j] - Jm[i * N + j]; }
+    return fwSolve(A, bb);
+  }
+  function fwSolve(A, b) {
+    var n = b.length, i, j, k;
+    for (i = 0; i < n; i++) {
+      var piv = i, mx = Math.abs(A[i][i]);
+      for (j = i + 1; j < n; j++) if (Math.abs(A[j][i]) > mx) { mx = Math.abs(A[j][i]); piv = j; }
+      if (mx < 1e-14) throw new Error("the charge equations are singular");
+      if (piv !== i) { var tr = A[i]; A[i] = A[piv]; A[piv] = tr; var tb = b[i]; b[i] = b[piv]; b[piv] = tb; }
+      for (j = i + 1; j < n; j++) { var f = A[j][i] / A[i][i]; if (f === 0) continue; for (k = i; k < n; k++) A[j][k] -= f * A[i][k]; b[j] -= f * b[i]; }
+    }
+    var x = new Float64Array(n);
+    for (i = n - 1; i >= 0; i--) { var s = b[i]; for (k = i + 1; k < n; k++) s -= A[i][k] * x[k]; x[i] = s / A[i][i]; }
+    return x;
+  }
+  /* potential (kcal/mol) at the points P (x,y,z triples) of the periodic point charges q at the cell atoms, by Ewald summation: real-space terms within 14 A, reciprocal terms to |h| = 2/A; opt.alpha is the splitting parameter */
+  function fwPotential(P, atoms, q, lat, opt) {
+    opt = opt || {};
+    var alpha = opt.alpha || 0.25, rcut = opt.rcut || 14, n = P.length / 3, V = new Float64Array(n), N = atoms.length, i, k;
+    var hmax = 2 * alpha * Math.sqrt(Math.log(1e7)), hs = [], vecs = [lat.a, lat.b, lat.c];
+    var nr = vecs.map(function (v) { return Math.ceil(hmax * Math.sqrt(fwDot(v, v)) / (2 * Math.PI)); });
+    var pre = 4 * Math.PI / lat.vol * 2;
+    for (var u = -nr[0]; u <= nr[0]; u++) for (var v = -nr[1]; v <= nr[1]; v++) for (var w = -nr[2]; w <= nr[2]; w++) {
+      if (!(u > 0 || (u === 0 && (v > 0 || (v === 0 && w > 0))))) continue;
+      var hx = u * lat.h1[0] + v * lat.h2[0] + w * lat.h3[0], hy = u * lat.h1[1] + v * lat.h2[1] + w * lat.h3[1], hz = u * lat.h1[2] + v * lat.h2[2] + w * lat.h3[2], h2 = hx * hx + hy * hy + hz * hz;
+      if (h2 > hmax * hmax) continue;
+      var C = 0, S = 0;
+      for (i = 0; i < N; i++) { var ph = hx * atoms[i].x + hy * atoms[i].y + hz * atoms[i].z; C += q[i] * Math.cos(ph); S += q[i] * Math.sin(ph); }
+      var f = pre * Math.exp(-h2 / (4 * alpha * alpha)) / h2;
+      hs.push([hx, hy, hz, f * C, f * S]);
+    }
+    /* the image charges that can lie within rcut of any point, binned on a grid */
+    var mn = [Infinity, Infinity, Infinity], mxv = [-Infinity, -Infinity, -Infinity];
+    for (k = 0; k < n; k++) for (var d = 0; d < 3; d++) { var pv = P[k * 3 + d]; if (pv < mn[d]) mn[d] = pv; if (pv > mxv[d]) mxv[d] = pv; }
+    for (var d2 = 0; d2 < 3; d2++) { mn[d2] -= rcut; mxv[d2] += rcut; }
+    var Minv = fwInv3(lat), fmin = [Infinity, Infinity, Infinity], fmax = [-Infinity, -Infinity, -Infinity];
+    for (var cx = 0; cx < 2; cx++) for (var cy = 0; cy < 2; cy++) for (var cz = 0; cz < 2; cz++) {
+      var corner = [cx ? mxv[0] : mn[0], cy ? mxv[1] : mn[1], cz ? mxv[2] : mn[2]], fr = [Minv[0][0] * corner[0] + Minv[0][1] * corner[1] + Minv[0][2] * corner[2], Minv[1][0] * corner[0] + Minv[1][1] * corner[1] + Minv[1][2] * corner[2], Minv[2][0] * corner[0] + Minv[2][1] * corner[1] + Minv[2][2] * corner[2]];
+      for (var e = 0; e < 3; e++) { if (fr[e] < fmin[e]) fmin[e] = fr[e]; if (fr[e] > fmax[e]) fmax[e] = fr[e]; }
+    }
+    var sx = [], sy = [], sz = [], sq = [];
+    for (var l0 = Math.floor(fmin[0]) - 1; l0 <= Math.ceil(fmax[0]) + 1; l0++) for (var l1 = Math.floor(fmin[1]) - 1; l1 <= Math.ceil(fmax[1]) + 1; l1++) for (var l2 = Math.floor(fmin[2]) - 1; l2 <= Math.ceil(fmax[2]) + 1; l2++) {
+      var tx = l0 * lat.a[0] + l1 * lat.b[0] + l2 * lat.c[0], ty = l0 * lat.a[1] + l1 * lat.b[1] + l2 * lat.c[1], tz = l0 * lat.a[2] + l1 * lat.b[2] + l2 * lat.c[2];
+      for (i = 0; i < N; i++) {
+        var x = atoms[i].x + tx, y = atoms[i].y + ty, z = atoms[i].z + tz;
+        if (x < mn[0] || x > mxv[0] || y < mn[1] || y > mxv[1] || z < mn[2] || z > mxv[2]) continue;
+        sx.push(x); sy.push(y); sz.push(z); sq.push(q[i]);
+      }
+    }
+    var bs = rcut / 2, nx = Math.max(1, Math.ceil((mxv[0] - mn[0]) / bs)), ny = Math.max(1, Math.ceil((mxv[1] - mn[1]) / bs)), nz = Math.max(1, Math.ceil((mxv[2] - mn[2]) / bs));
+    var cell = new Int32Array(nx * ny * nz + 1), ns = sx.length, order = new Int32Array(ns), bin = new Int32Array(ns);
+    for (i = 0; i < ns; i++) { var bi = Math.min(nx - 1, Math.floor((sx[i] - mn[0]) / bs)), bj = Math.min(ny - 1, Math.floor((sy[i] - mn[1]) / bs)), bk = Math.min(nz - 1, Math.floor((sz[i] - mn[2]) / bs)); bin[i] = (bi * ny + bj) * nz + bk; cell[bin[i] + 1]++; }
+    for (i = 0; i < nx * ny * nz; i++) cell[i + 1] += cell[i];
+    var fill = cell.slice(0, nx * ny * nz); for (i = 0; i < ns; i++) order[fill[bin[i]]++] = i;
+    var rc2 = rcut * rcut;
+    for (k = 0; k < n; k++) {
+      var px = P[k * 3], py = P[k * 3 + 1], pz = P[k * 3 + 2], real = 0;
+      var ci = Math.min(nx - 1, Math.max(0, Math.floor((px - mn[0]) / bs))), cj = Math.min(ny - 1, Math.max(0, Math.floor((py - mn[1]) / bs))), ck = Math.min(nz - 1, Math.max(0, Math.floor((pz - mn[2]) / bs)));
+      for (var a1 = Math.max(0, ci - 2); a1 <= Math.min(nx - 1, ci + 2); a1++) for (var a2 = Math.max(0, cj - 2); a2 <= Math.min(ny - 1, cj + 2); a2++) for (var a3 = Math.max(0, ck - 2); a3 <= Math.min(nz - 1, ck + 2); a3++) {
+        var bb = (a1 * ny + a2) * nz + a3;
+        for (var m = cell[bb]; m < cell[bb + 1]; m++) {
+          var s = order[m], dx = px - sx[s], dy = py - sy[s], dz = pz - sz[s], r2 = dx * dx + dy * dy + dz * dz;
+          if (r2 > rc2 || r2 < 1e-10) continue;
+          var r = Math.sqrt(r2); real += sq[s] * fwErfc(alpha * r) / r;
+        }
+      }
+      var rec = 0;
+      for (var hh = 0; hh < hs.length; hh++) { var ph2 = hs[hh][0] * px + hs[hh][1] * py + hs[hh][2] * pz; rec += hs[hh][3] * Math.cos(ph2) + hs[hh][4] * Math.sin(ph2); }
+      V[k] = FW_COULOMB * (real + rec);
+    }
+    return V;
+  }
+  function fwInv3(lat) {
+    /* inverse of the matrix whose columns are the lattice vectors: rows are the reciprocal vectors / (2 pi) */
+    var s = 1 / (2 * Math.PI);
+    return [[lat.h1[0] * s, lat.h1[1] * s, lat.h1[2] * s], [lat.h2[0] * s, lat.h2[1] * s, lat.h2[2] * s], [lat.h3[0] * s, lat.h3[1] * s, lat.h3[2] * s]];
+  }
+  /* charges for the host in the view: cached until the structure or the screening changes */
+  function fwComputeCharges(lambda) {
+    var atoms = fwHostCell(), lat = fwLattice(), sig = atoms.length + ":" + atoms.map(function (a) { return a.au; }).join(",") + ":" + lambda + ":" + lat.vol.toFixed(3);
+    if (FW.charges && FW.charges.sig === sig) return FW.charges;
+    var q = eqeqCharges(atoms, lat, { lambda: lambda }), byAu = {}, tot = 0;
+    atoms.forEach(function (a, i) { tot += q[i]; if (byAu[a.au] === undefined) byAu[a.au] = { label: a.label, el: a.el, q: q[i], n: 0 }; byAu[a.au].n++; });
+    FW.charges = { sig: sig, atoms: atoms, q: q, lat: lat, byAu: byAu, total: tot, lambda: lambda };
+    return FW.charges;
+  }
+  function fwPercentile(arr, p) { var a = Array.prototype.slice.call(arr).sort(function (x, y) { return x - y; }); return a.length ? a[Math.min(a.length - 1, Math.floor(a.length * p))] : 0; }
+  /* the potential of the host charges at every vertex of every molecular surface in the view, painted on those surfaces; returns one row of extremes (kcal/mol) per surface */
+  function fwMapMolSurfaces() {
+    var ch = fwComputeCharges(ORB.cfg.fwLambda), onMol = ORB.cfg.fwOnMol !== false, onVoid = ORB.cfg.fwOnVoid !== false, rows = [], byId = {}, bySig = {}, sizes = [], all = [];
+    if (onMol) (state.molSurfaces || []).forEach(function (s) {
+      var iso = state._molSurfaceIsoById[s.id]; if (!iso || !iso.positions.length) return;
+      var V = fwPotential(iso.positions, ch.atoms, ch.q, ch.lat), au = new Float32Array(V.length), mn = Infinity, mx = -Infinity;
+      for (var i = 0; i < V.length; i++) { au[i] = V[i] / HARTREE_KCAL; if (V[i] < mn) mn = V[i]; if (V[i] > mx) mx = V[i]; all.push(Math.abs(au[i])); }
+      byId[s.id] = au; bySig[orbSurfaceSig(iso.positions)] = au; sizes.push(au.length);
+      rows.push({ id: s.id, atoms: s.atomCount, probe: s.probeRadius, min: mn, max: mx, n: V.length, kind: "mol" });
+    });
+    var hasVoid = onVoid && state.voidComponents && state.voidComponents.length > 0;
+    if (!rows.length && !hasVoid) throw new Error("there is no molecular surface or void / channel surface in the view to colour");
+    ORB.esp = { byId: byId, bySig: bySig, cube: null, label: "Framework potential", sizes: sizes, fw: true, voids: !!hasVoid, voidVals: {}, voidRows: {} };
+    if (hasVoid) {
+      renderVoidMeshes(); /* evaluates the potential on every void and channel surface (see fwPaintVoidParts) */
+      Object.keys(ORB.esp.voidVals).forEach(function (k) { var a = ORB.esp.voidVals[k]; for (var i = 0; i < a.length; i++) all.push(Math.abs(a[i])); });
+      Object.keys(ORB.esp.voidRows).forEach(function (k) { var r = ORB.esp.voidRows[k]; rows.push({ id: r.id, kind: r.type === "channel" ? "channel" : "void", min: r.min, max: r.max }); });
+    }
+    ORB.espRange = Math.max(0.001, Math.round(fwPercentile(all, 0.95) * 1000) / 1000);
+    FW.last = { rows: rows };
+    orbRepaintSurfaces();
+    return rows;
+  }
+  /* called by renderVoidMeshes for every void or channel it draws: colours its surfaces by the framework potential, evaluated once per distinct piece of surface and position */
+  function fwPaintVoidParts(comp, parts, voidOff) {
+    var E = ORB.esp; if (!E || !E.fw || !E.voids || (!FW.charges && E.source !== "orca")) return; /* Orca values need no point charges */
+    var ch = FW.charges;
+    parts.forEach(function (m) {
+      var geo = m.geometry, pa = geo && geo.getAttribute("position"); if (!pa) return;
+      var off = [m.position.x - voidOff[0], m.position.y - voidOff[1], m.position.z - voidOff[2]], i;
+      var key = orbSurfaceSig(pa.array) + "@" + off.map(function (v) { return v.toFixed(2); }).join(",");
+      var vals = E.voidVals[key];
+      if (!vals && E.source === "orca") return; /* values from an Orca job exist only for the surfaces that were written to it */
+      if (!vals) {
+        var P = new Float64Array(pa.array.length);
+        for (i = 0; i < P.length; i += 3) { P[i] = pa.array[i] + off[0]; P[i + 1] = pa.array[i + 1] + off[1]; P[i + 2] = pa.array[i + 2] + off[2]; }
+        var V = fwPotential(P, ch.atoms, ch.q, ch.lat), mn = Infinity, mx = -Infinity; vals = new Float32Array(V.length);
+        for (i = 0; i < V.length; i++) { vals[i] = V[i] / HARTREE_KCAL; if (V[i] < mn) mn = V[i]; if (V[i] > mx) mx = V[i]; }
+        E.voidVals[key] = vals;
+        var r = E.voidRows[comp.id] || (E.voidRows[comp.id] = { id: comp.id, type: comp.type, min: Infinity, max: -Infinity });
+        if (mn < r.min) r.min = mn; if (mx > r.max) r.max = mx;
+      }
+      var n = pa.count, col = new Float32Array(n * 3);
+      for (var j = 0; j < n; j++) orbEspColor(vals[j], ORB.espRange, col, j * 3);
+      geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+      m.material.vertexColors = true; m.material.color.set(0xffffff); m.material.needsUpdate = true;
+    });
+  }
+  /* ---- framework cluster: a finite piece of the host, cut from the crystal around a channel, calculated with Orca ----
+     Bonds that may be cut at the edge of the cluster: single carbon-carbon bonds (1.46 A or longer, which includes the single bond between a ring and a vinyl group), which are capped with a hydrogen atom, and the
+     dative bond between a metal and a nitrogen atom, which needs no cap. Every other bond is kept, so whole coordination units, carboxylate groups and
+     aromatic or conjugated ligands are included together and the cluster stays closed-shell and neutral. */
+  var FW_CAP_CH = 1.09;
+  function fwBondKind(ea, eb, d) {
+    if (ea === "H" || ea === "D" || eb === "H" || eb === "D") return "forced";
+    if (ea === "C" && eb === "C" && d >= 1.46) return "cap";
+    if ((isMetalElement(ea) && eb === "N") || (isMetalElement(eb) && ea === "N")) return "dative";
+    return "forced";
+  }
+  /* every image of the host cell atoms whose position lies in the box lo..hi */
+  function fwImagesInBox(cell, lat, lo, hi) {
+    var Minv = fwInv3(lat), fmin = [Infinity, Infinity, Infinity], fmax = [-Infinity, -Infinity, -Infinity], out = [], cx, cy, cz, e;
+    for (cx = 0; cx < 2; cx++) for (cy = 0; cy < 2; cy++) for (cz = 0; cz < 2; cz++) {
+      var c = [cx ? hi[0] : lo[0], cy ? hi[1] : lo[1], cz ? hi[2] : lo[2]];
+      for (e = 0; e < 3; e++) { var f = Minv[e][0] * c[0] + Minv[e][1] * c[1] + Minv[e][2] * c[2]; if (f < fmin[e]) fmin[e] = f; if (f > fmax[e]) fmax[e] = f; }
+    }
+    for (var l0 = Math.floor(fmin[0]) - 1; l0 <= Math.ceil(fmax[0]) + 1; l0++) for (var l1 = Math.floor(fmin[1]) - 1; l1 <= Math.ceil(fmax[1]) + 1; l1++) for (var l2 = Math.floor(fmin[2]) - 1; l2 <= Math.ceil(fmax[2]) + 1; l2++) {
+      var tx = l0 * lat.a[0] + l1 * lat.b[0] + l2 * lat.c[0], ty = l0 * lat.a[1] + l1 * lat.b[1] + l2 * lat.c[1], tz = l0 * lat.a[2] + l1 * lat.b[2] + l2 * lat.c[2];
+      for (var i = 0; i < cell.length; i++) {
+        var a = cell[i], x = a.x + tx, y = a.y + ty, z = a.z + tz;
+        if (x < lo[0] || x > hi[0] || y < lo[1] || y > hi[1] || z < lo[2] || z > hi[2]) continue;
+        out.push({ el: a.el, x: x, y: y, z: z, au: a.au, op: a.op, s: [a.sh[0] + l0, a.sh[1] + l1, a.sh[2] + l2], label: a.label });
+      }
+    }
+    return out;
+  }
+  /* bonds between atoms (by covalent radii, as the rest of the app does), each with its kind */
+  function fwAdjacency(atoms) {
+    var cs = 3.2, grid = {}, n = atoms.length, adj = new Array(n), i, j, dx, dy, dz;
+    for (i = 0; i < n; i++) { adj[i] = []; var k = Math.floor(atoms[i].x / cs) + "," + Math.floor(atoms[i].y / cs) + "," + Math.floor(atoms[i].z / cs); (grid[k] = grid[k] || []).push(i); }
+    for (i = 0; i < n; i++) {
+      var a = atoms[i], bx = Math.floor(a.x / cs), by = Math.floor(a.y / cs), bz = Math.floor(a.z / cs);
+      for (dx = -1; dx <= 1; dx++) for (dy = -1; dy <= 1; dy++) for (dz = -1; dz <= 1; dz++) {
+        var list = grid[(bx + dx) + "," + (by + dy) + "," + (bz + dz)]; if (!list) continue;
+        for (var m = 0; m < list.length; m++) {
+          j = list[m]; if (j <= i) continue;
+          var b = atoms[j], ex = a.x - b.x, ey = a.y - b.y, ez = a.z - b.z, d = Math.sqrt(ex * ex + ey * ey + ez * ez);
+          if (d > 0.4 && d < K.cov(a.el) + K.cov(b.el) + 0.4) { var kind = fwBondKind(a.el, b.el, d); adj[i].push([j, kind, d]); adj[j].push([i, kind, d]); }
+        }
+      }
+    }
+    return adj;
+  }
+  /* finds an atom of a list by position (to 0.15 A) */
+  function fwPosIndex(list) {
+    var g = {};
+    list.forEach(function (a, i) { var k = Math.floor(a.x) + "," + Math.floor(a.y) + "," + Math.floor(a.z); (g[k] = g[k] || []).push(i); });
+    return function (x, y, z, el) {
+      var bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z);
+      for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) for (var dz = -1; dz <= 1; dz++) {
+        var l = g[(bx + dx) + "," + (by + dy) + "," + (bz + dz)]; if (!l) continue;
+        for (var m = 0; m < l.length; m++) { var a = list[l[m]]; if (el && a.el !== el) continue; if (Math.abs(a.x - x) < 0.15 && Math.abs(a.y - y) < 0.15 && Math.abs(a.z - z) < 0.15) return l[m]; }
+      }
+      return -1;
+    };
+  }
+  /* the hydrogen caps (and any bond that cannot be cut) for a set of cluster atoms */
+  function fwCapsFor(inS, img, adj) {
+    var caps = [], problems = [], i, k;
+    for (i = 0; i < img.length; i++) {
+      if (!inS[i]) continue;
+      for (k = 0; k < adj[i].length; k++) {
+        var j = adj[i][k][0], kind = adj[i][k][1], d = adj[i][k][2];
+        if (inS[j]) continue;
+        if (kind === "cap") { var s = FW_CAP_CH / d; caps.push({ x: img[i].x + (img[j].x - img[i].x) * s, y: img[i].y + (img[j].y - img[i].y) * s, z: img[i].z + (img[j].z - img[i].z) * s }); }
+        else if (kind === "forced") problems.push(img[i].label + "-" + img[j].label);
+      }
+    }
+    return { caps: caps, problems: problems };
+  }
+  /* the cluster of a channel: the host atoms in a cylinder of the given radius and length (a number of cells along a cell axis) around a centre, completed so that no bond
+     that must be kept is cut; returns the atoms, the caps and a note when the result cannot be trusted */
+  function fwBuildCluster(opt) {
+    var cell = fwHostCell(), lat = fwLattice(), axisV = [lat.a, lat.b, lat.c][opt.axis], alen = Math.sqrt(fwDot(axisV, axisV)), u = [axisV[0] / alen, axisV[1] / alen, axisV[2] / alen];
+    var L = opt.cells * alen, R = opt.radius, C = opt.centre, margin = 16, half = Math.max(L / 2, R) + margin;
+    var lo = [C[0] - half, C[1] - half, C[2] - half], hi = [C[0] + half, C[1] + half, C[2] + half];
+    var img = fwImagesInBox(cell, lat, lo, hi), adj = fwAdjacency(img), n = img.length, inS = new Uint8Array(n), queue = [], i, k;
+    for (i = 0; i < n; i++) {
+      var px = img[i].x - C[0], py = img[i].y - C[1], pz = img[i].z - C[2], t = px * u[0] + py * u[1] + pz * u[2], r2 = px * px + py * py + pz * pz - t * t;
+      if (Math.abs(t) <= L / 2 && r2 <= R * R) { inS[i] = 1; queue.push(i); }
+    }
+    while (queue.length) {
+      var a = queue.pop();
+      for (k = 0; k < adj[a].length; k++) { var j = adj[a][k][0]; if (!inS[j] && adj[a][k][1] === "forced") { inS[j] = 1; queue.push(j); } }
+    }
+    var atoms = [], near = false;
+    for (i = 0; i < n; i++) if (inS[i]) {
+      atoms.push(img[i]);
+      if (img[i].x < lo[0] + 3 || img[i].x > hi[0] - 3 || img[i].y < lo[1] + 3 || img[i].y > hi[1] - 3 || img[i].z < lo[2] + 3 || img[i].z > hi[2] - 3) near = true;
+    }
+    var cp = fwCapsFor(inS, img, adj);
+    return { atoms: atoms, caps: cp.caps, problems: cp.problems, tooBig: near, length: L, radius: R };
+  }
+  /* the caps for the host atoms now selected in the view (whatever way they were chosen) */
+  function fwClusterFromSelection() {
+    var sel = (state.atoms || []).filter(function (a) { return a.selected && !a.isCentroid && a.el !== "Xx"; });
+    if (!sel.length) throw new Error("select the host atoms of the cluster first (Build cluster does it)");
+    var cell = fwHostCell(), lat = fwLattice(), lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    sel.forEach(function (a) { var p = [a.x, a.y, a.z]; for (var d = 0; d < 3; d++) { if (p[d] < lo[d]) lo[d] = p[d]; if (p[d] > hi[d]) hi[d] = p[d]; } });
+    for (var d2 = 0; d2 < 3; d2++) { lo[d2] -= 6; hi[d2] += 6; }
+    var img = fwImagesInBox(cell, lat, lo, hi), adj = fwAdjacency(img), find = fwPosIndex(img), inS = new Uint8Array(img.length), missing = [];
+    sel.forEach(function (a) { var j = find(a.x, a.y, a.z, a.el); if (j < 0) missing.push(a.el + (a.auIndex !== undefined && state.cifAsymUnit[a.auIndex] ? state.cifAsymUnit[a.auIndex].label : "")); else inS[j] = 1; });
+    if (missing.length) throw new Error("some selected atoms are not on a host site of the crystal (" + missing.slice(0, 3).join(", ") + "): the cluster has to be made of unmoved host atoms");
+    var cp = fwCapsFor(inS, img, adj);
+    return { atoms: sel, caps: cp.caps, problems: cp.problems };
+  }
+  /* rough size and time of a cluster job (def2-SVP, a GGA functional with RI) */
+  function fwEstimate(atoms, caps) {
+    var nbf = caps.length * 5, el = 0;
+    atoms.forEach(function (a) { var z = orbZ(a.el); el += z; nbf += z === 1 ? 5 : z <= 10 ? 14 : z <= 18 ? 18 : z <= 20 ? 24 : z <= 36 ? 31 : 40; });
+    /* measured on this computer with PBE def2-SVP def2/J RI and 6 cores: 53 s for 838 basis functions, 14 min for 3173; the cost grows about as the 2.1th power of the size */
+    var cores = Math.max(1, ORB.cfg.cores), hours = 53 * Math.pow(nbf / 838, 2.1) * 1.3 * (6 / Math.min(cores, 8)) / 3600; /* x1.3 for the extra SCF cycles of a larger cluster */
+    /* Orca's memory-conserving SCF needs four matrices of the size of the basis set in each process: 4 x 8 bytes x nbf^2 (it asked for 5994 MB per core at 13688 functions), here with 15 % to spare */
+    var needMB = Math.ceil(32e-6 * nbf * nbf * 1.15), mb = Math.max(Math.round(ORB.cfg.maxcore), needMB);
+    return { nbf: nbf, electrons: el + caps.length, hours: hours, needMB: needMB, jobMB: mb, totalGB: Math.round(mb * cores / 1024 * 10) / 10, cores: cores };
+  }
+  function fwEstimateText(atoms, caps, charge) {
+    var e = fwEstimate(atoms, caps), ne = e.electrons - charge;
+    return atoms.length + " atoms and " + caps.length + " hydrogen caps, about " + e.nbf + " basis functions, " + ne + " electrons" + (ne % 2 ? " (ODD: closed-shell is not possible, change the charge)" : "") + "; roughly " + (e.hours < 1 ? Math.max(1, Math.round(e.hours * 60)) + " minutes" : e.hours.toFixed(e.hours < 10 ? 1 : 0) + " hours") + " (a rough guess); Orca will need " + e.jobMB + " MB per core, " + e.totalGB + " GB in all with " + e.cores + " core" + (e.cores === 1 ? "" : "s") + (e.needMB > Math.round(ORB.cfg.maxcore) ? " (more than the " + Math.round(ORB.cfg.maxcore) + " MB per core in Setup: it is raised for this job; lower the cores in Setup if the total does not fit in your memory)" : "") + ".";
+  }
+  function fwClusterCentre() {
+    var g = (state.guestAtoms || []).filter(function (a) { return !a.isCentroid; }), src = g.length ? g : (state.atoms || []).filter(function (a) { return a.selected; });
+    if (!src.length) return null;
+    var s = [0, 0, 0]; src.forEach(function (a) { s[0] += a.x; s[1] += a.y; s[2] += a.z; });
+    return [s[0] / src.length, s[1] / src.length, s[2] / src.length];
+  }
+  /* Build cluster: make the atoms of the cluster exist in the view (as more of the host) and select them */
+  function fwDoBuild() {
+    try {
+      var C = ORB.cfg, centre = fwClusterCentre();
+      if (!centre) throw new Error("the cluster is centred on the guest atoms, or on the selected atoms if there is no guest: there is neither");
+      var t0 = Date.now(), cl = fwBuildCluster({ centre: centre, axis: C.fwAxis, cells: C.fwCells, radius: C.fwClRadius });
+      if (cl.problems.length) throw new Error("the cluster cuts bonds that cannot be capped (" + cl.problems.slice(0, 3).join(", ") + ")");
+      var idx = fwPosIndex(state.atoms || []), add = [];
+      cl.atoms.forEach(function (a) { if (idx(a.x, a.y, a.z, a.el) < 0) add.push(generateSymmetryAtom(a.au, a.op, a.s[0], a.s[1], a.s[2])); });
+      if (add.length) commitGrownAtoms(add);
+      var cidx = fwPosIndex(cl.atoms), nSel = 0;
+      clearSelection();
+      (state.atoms || []).forEach(function (a) { if (!a.isCentroid && cidx(a.x, a.y, a.z, a.el) >= 0) { a.selected = true; nSel++; } });
+      renderSelection(); updateSelectionInfo();
+      var txt = fwEstimateText(cl.atoms, cl.caps, C.fwCharge);
+      if (ORB.ui.fwInfo) ORB.ui.fwInfo.textContent = txt;
+      setStatus("Cluster of " + nSel + " host atoms selected (" + add.length + " added to the view, " + cl.caps.length + " hydrogen caps for the file) in " + (Date.now() - t0) + " ms." + (cl.tooBig ? " Warning: the cluster reaches the edge of the region searched." : ""), !!cl.tooBig);
+    } catch (e) { setStatus("Framework cluster: " + e.message + ".", true); }
+  }
+  /* the surfaces to evaluate the potential on: every molecular surface and void/channel surface in the view that the tick boxes allow, as lists of Angstrom positions */
+  function fwCollectTargets() {
+    var C = ORB.cfg, T = [], seen = {};
+    if (C.fwOnMol !== false) (state.molSurfaces || []).forEach(function (s) {
+      var iso = state._molSurfaceIsoById[s.id]; if (!iso || !iso.positions.length) return;
+      T.push({ type: "mol", id: s.id, n: iso.positions.length / 3, sig: orbSurfaceSig(iso.positions), pos: iso.positions, off: [0, 0, 0] });
+    });
+    if (C.fwOnVoid !== false && state.voidComponents && typeof voidMeshes !== "undefined") {
+      var vo = centroid();
+      state.voidComponents.forEach(function (comp) {
+        (voidMeshes[comp.id] || []).forEach(function (m) {
+          var pa = m.geometry && m.geometry.getAttribute("position"); if (!pa) return;
+          var off = [m.position.x - vo[0], m.position.y - vo[1], m.position.z - vo[2]], key = orbSurfaceSig(pa.array) + "@" + off.map(function (v) { return v.toFixed(2); }).join(",");
+          if (seen[key]) return; seen[key] = true;
+          T.push({ type: "void", comp: comp.id, key: key, n: pa.count, pos: pa.array, off: off });
+        });
+      });
+    }
+    return T;
+  }
+  function orbVpotCmd() {
+    var c = (ORB.cfg.command || "orca").trim().replace(/^"|"$/g, "");
+    if (/[\\/]/.test(c)) { var v = c.replace(/orca(\.exe)?$/i, "orca_vpot.exe"); return /\s/.test(v) ? '"' + v + '"' : v; }
+    return "orca_vpot";
+  }
+  async function fwWriteCluster() {
+    try {
+      var C = ORB.cfg, cl = fwClusterFromSelection();
+      if (cl.problems.length) { setStatus("The selected atoms cut bonds that cannot be capped (" + cl.problems.slice(0, 3).join(", ") + "): use Build cluster, or add the missing atoms.", true); return; }
+      var T = fwCollectTargets(); if (!T.length) { setStatus("Nothing to evaluate the potential on: build a molecular surface over the guest or the channel wall, or run Void / Channel Analysis.", true); return; }
+      if (!(await orbEnsureDir())) { setStatus("No folder chosen.", true); return; }
+      var total = 0; T.forEach(function (t) { total += t.n; });
+      var stride = Math.max(1, Math.ceil(total / Math.max(1000, C.fwMaxPts))), lines = [], np = 0;
+      T.forEach(function (t) {
+        t.stride = stride; t.np = 0;
+        for (var i = 0; i < t.n; i += stride) { lines.push(((t.pos[i * 3] + t.off[0]) / ORB_BOHR).toFixed(5) + " " + ((t.pos[i * 3 + 1] + t.off[1]) / ORB_BOHR).toFixed(5) + " " + ((t.pos[i * 3 + 2] + t.off[2]) / ORB_BOHR).toFixed(5)); t.np++; }
+        np += t.np;
+      });
+      var dir = await orbSubdir("fw"), base = "fw_" + orbBase(), q = C.fwCharge, ne = 0;
+      cl.atoms.forEach(function (a) { ne += orbZ(a.el); }); ne += cl.caps.length - q;
+      var mult = ne % 2 ? 2 : 1, xyz = orbXyzLines(cl.atoms, false).concat(cl.caps.map(function (c) { return "H".padEnd(5) + " " + c.x.toFixed(6).padStart(12) + " " + c.y.toFixed(6).padStart(12) + " " + c.z.toFixed(6).padStart(12); }));
+      var est = fwEstimate(cl.atoms, cl.caps);
+      var inp = "# CrystalVista framework cluster: " + cl.atoms.length + " host atoms + " + cl.caps.length + " hydrogen caps\n! " + C.fwKeywords + "\n%maxcore " + est.jobMB + "\n" + (C.cores > 1 ? "%pal nprocs " + Math.round(C.cores) + " end\n" : "") + "%scf\n  MaxIter 500\nend\n* xyz " + q + " " + mult + "\n" + xyz.join("\n") + "\n*\n";
+      await orbWrite(dir, base + ".inp", inp.replace(/\n/g, "\r\n"));
+      await orbWrite(dir, base + "_points.txt", (np + "\r\n" + lines.join("\r\n") + "\r\n"));
+      var man = { kind: "fw", version: 1, structure: state.name || "", base: base, atoms: cl.atoms.length, caps: cl.caps.length, charge: q, mult: mult, keywords: C.fwKeywords, stride: stride, points: np,
+        targets: T.map(function (t) { return t.type === "mol" ? { type: "mol", id: t.id, n: t.n, sig: t.sig, stride: t.stride, np: t.np } : { type: "void", comp: t.comp, key: t.key, n: t.n, stride: t.stride, np: t.np }; }) };
+      await orbWrite(dir, "fw_manifest.json", JSON.stringify(man, null, 1));
+      var bat = ["@echo off", 'cd /d "%~dp0"', "echo Running Orca on " + base + " (a cluster job can take hours) ...", orbCmd() + " " + base + ".inp > " + base + ".out",
+        'findstr /c:"ORCA TERMINATED NORMALLY" "' + base + '.out" >nul 2>&1', "if errorlevel 1 (", "  echo.", "  echo Orca did NOT finish normally. Open " + base + ".out and look near its end for the reason.", "  pause", "  exit /b 1", ")",
+        "echo Evaluating the electrostatic potential at " + np + " points ...", orbVpotCmd() + " " + base + ".gbw " + base + ".scfp " + base + "_points.txt " + base + "_esp.txt",
+        "del /q " + base + ".bibtex " + base + ".bas* " + base + "*.tmp " + base + "*.tmp.* " + base + ".citations* 2>nul", "echo.", "echo Done. Return to CrystalVista and press Read cluster results.", "pause"]; /* the .densities file stays: orca_vpot needs it to evaluate more surfaces later */
+      await orbWrite(dir, "run_fw.bat", bat.join("\r\n") + "\r\n");
+      ORB.fwDir = dir;
+      var txt = fwEstimateText(cl.atoms, cl.caps, q);
+      if (ORB.ui.fwInfo) ORB.ui.fwInfo.textContent = txt;
+      setStatus("Wrote " + base + ".inp, " + np + " surface points" + (stride > 1 ? " (every " + stride + "th vertex)" : "") + " and run_fw.bat to " + ORB.dirName + "/" + dir.name + ". Run run_fw.bat, then press Read cluster results. " + txt + orbCoreNote(), ne % 2 ? true : false);
+    } catch (e) { setStatus("Framework cluster: " + e.message + ".", true); }
+  }
+  /* run_vpot.bat: evaluates every added set whose result file is missing. No parentheses anywhere in it: a ")" inside an echo closes an if-block in a batch file, which ends the script at once */
+  async function fwWriteVpotBat(dir, man) {
+    var base = man.base, bat = ["@echo off", 'cd /d "%~dp0"'], dens = base + "_dens";
+    /* orca_vpot reads the electron density from <gbw name>.densities, which the original job's cleanup used to delete (and an interrupted job may not have written). It is rebuilt from the converged orbitals: same input with MORead NoIter LooseSCF: Orca writes the density from the stored orbitals at the start and then needs only a cycle or two. The setup of a large cluster still takes its usual several minutes. */
+    try {
+      var inp = await orbRead(dir, base + ".inp"), done = false;
+      var lines = inp.split(/\r?\n/).reduce(function (a, l) { a.push(l); if (!done && l.indexOf("! ") === 0) { a[a.length - 1] = l + " MORead NoIter LooseSCF"; a.push('%moinp "' + base + '.gbw"'); done = true; } return a; }, []);
+      if (done) await orbWrite(dir, dens + ".inp", lines.join("\r\n"));
+    } catch (e) { /* no input to derive it from: the job must have its density file already */ }
+    bat.push("set G=" + base, "if exist " + base + ".densities goto :run", "set G=" + dens, "if exist " + dens + ".densities goto :run",
+      "echo Rebuilding the electron density from " + base + ".gbw. The SCF is not repeated but the setup is, so this takes some minutes ...",
+      orbCmd() + " " + dens + ".inp > " + dens + ".out",
+      'findstr /c:"ORCA TERMINATED NORMALLY" "' + dens + '.out" >nul 2>&1', "if errorlevel 1 goto :failed", ":run");
+    (man.batches || []).forEach(function (b) {
+      bat.push("if not exist " + b.esp + " echo Evaluating the electrostatic potential at " + b.points + " points from " + b.file + " ...",
+        "if not exist " + b.esp + " " + orbVpotCmd() + " %G%.gbw %G%.scfp " + b.file + " " + b.esp,
+        "if not exist " + b.esp + " echo FAILED: " + b.esp + " was not written. Read the message above.");
+    });
+    bat.push("echo.", "echo Finished. Return to CrystalVista and press Read cluster results.", "pause", "exit /b 0", ":failed", "echo.", "echo Orca did NOT finish rebuilding the density. Open " + dens + ".out and look near its end for the reason.", "pause", "exit /b 1");
+    await orbWrite(dir, "run_vpot.bat", bat.join("\r\n") + "\r\n");
+  }
+  /* surfaces built after the job was run: their points are evaluated from the wavefunction the finished job left behind (minutes, not hours) */
+  async function fwAddSurfaces() {
+    try {
+      if (!(await orbEnsureDir())) { setStatus("No folder chosen.", true); return; }
+      var dir = null; if (ORB.fwDir) { try { await ORB.fwDir.getFileHandle("fw_manifest.json"); dir = ORB.fwDir; } catch (e) { ORB.fwDir = null; } } if (!dir) dir = await orbFindSubdir("fw");
+      if (!dir) { setStatus("No cluster job (a folder with fw_manifest.json) found in " + ORB.dirName + ": choose the folder that contains the fw_ folder, or the fw_ folder itself.", true); return; }
+      var man = JSON.parse(await orbRead(dir, "fw_manifest.json")), outTxt = ""; try { outTxt = await orbRead(dir, man.base + ".out"); } catch (e) { outTxt = ""; }
+      var problem = fwOrcaProblem(outTxt); if (problem) throw new Error(problem);
+      try { await dir.getFileHandle(man.base + ".gbw"); } catch (e) { throw new Error("the wavefunction " + man.base + ".gbw is not in the folder " + dir.name + ", so the new surfaces cannot be evaluated without running the whole job again (Write cluster job)"); }
+      var batches = man.batches || [], known = {};
+      var mark = function (t) { known[t.type === "mol" ? "m" + t.sig : "v" + t.key] = true; };
+      man.targets.forEach(mark); batches.forEach(function (b) { b.targets.forEach(mark); });
+      var T = fwCollectTargets().filter(function (t) { return !known[t.type === "mol" ? "m" + t.sig : "v" + t.key]; });
+      if (!T.length) {
+        if (batches.length) { await fwWriteVpotBat(dir, man); ORB.fwDir = dir; setStatus("Every surface in the view is in the job already. Rewrote run_vpot.bat in " + ORB.dirName + "/" + dir.name + ": run it if you have not (it skips what is done), then press Read cluster results.", false); }
+        else setStatus("Every surface in the view has been evaluated already: press Read cluster results.", false);
+        return;
+      }
+      var total = 0; T.forEach(function (t) { total += t.n; });
+      var stride = Math.max(1, Math.ceil(total / Math.max(1000, ORB.cfg.fwMaxPts))), lines = [], np = 0, k = batches.length + 2;
+      T.forEach(function (t) {
+        t.stride = stride; t.np = 0;
+        for (var i = 0; i < t.n; i += stride) { lines.push(((t.pos[i * 3] + t.off[0]) / ORB_BOHR).toFixed(5) + " " + ((t.pos[i * 3 + 1] + t.off[1]) / ORB_BOHR).toFixed(5) + " " + ((t.pos[i * 3 + 2] + t.off[2]) / ORB_BOHR).toFixed(5)); t.np++; }
+        np += t.np;
+      });
+      var pf = man.base + "_s" + k + "_points.txt", ef = man.base + "_s" + k + "_esp.txt";
+      await orbWrite(dir, pf, np + "\r\n" + lines.join("\r\n") + "\r\n");
+      batches.push({ points: np, stride: stride, file: pf, esp: ef, targets: T.map(function (t) { return t.type === "mol" ? { type: "mol", id: t.id, n: t.n, sig: t.sig, stride: t.stride, np: t.np } : { type: "void", comp: t.comp, key: t.key, n: t.n, stride: t.stride, np: t.np }; }) });
+      man.batches = batches;
+      await orbWrite(dir, "fw_manifest.json", JSON.stringify(man, null, 1));
+      await fwWriteVpotBat(dir, man);
+      ORB.fwDir = dir;
+      setStatus("Wrote " + np + " points on " + T.length + " new surface" + (T.length === 1 ? "" : "s") + (stride > 1 ? " (every " + stride + "th vertex)" : "") + " and run_vpot.bat to " + ORB.dirName + "/" + dir.name + ". Run run_vpot.bat (it reuses " + man.base + ".gbw and takes minutes), then press Read cluster results.", false);
+    } catch (e) { setStatus("Framework cluster: " + e.message + ".", true); }
+  }
+  /* a surface's vertex values from the values at every stride-th vertex: each other vertex takes the value of the nearest evaluated one */
+  function fwExpandSamples(pos, stride, sv) {
+    var n = pos.length / 3, out = new Float32Array(n), cs = 1.5, grid = {}, i, k;
+    for (k = 0, i = 0; i < n; i += stride, k++) { var key = Math.floor(pos[i * 3] / cs) + "," + Math.floor(pos[i * 3 + 1] / cs) + "," + Math.floor(pos[i * 3 + 2] / cs); (grid[key] = grid[key] || []).push(i, k); }
+    for (i = 0; i < n; i++) {
+      if (stride === 1) { out[i] = sv[i]; continue; }
+      if (i % stride === 0) { out[i] = sv[i / stride]; continue; }
+      var bx = Math.floor(pos[i * 3] / cs), by = Math.floor(pos[i * 3 + 1] / cs), bz = Math.floor(pos[i * 3 + 2] / cs), best = -1, bd = Infinity;
+      for (var r = 1; r <= 3 && best < 0; r++) for (var dx = -r; dx <= r; dx++) for (var dy = -r; dy <= r; dy++) for (var dz = -r; dz <= r; dz++) {
+        var l = grid[(bx + dx) + "," + (by + dy) + "," + (bz + dz)]; if (!l) continue;
+        for (var m = 0; m < l.length; m += 2) { var j = l[m], ex = pos[i * 3] - pos[j * 3], ey = pos[i * 3 + 1] - pos[j * 3 + 1], ez = pos[i * 3 + 2] - pos[j * 3 + 2], d = ex * ex + ey * ey + ez * ez; if (d < bd) { bd = d; best = l[m + 1]; } }
+      }
+      out[i] = best >= 0 ? sv[best] : sv[Math.min(sv.length - 1, Math.floor(i / stride))];
+    }
+    return out;
+  }
+  /* why an Orca output is not a result, in words; empty when it is one (or when there is no output to look at) */
+  function fwOrcaProblem(t) {
+    if (!t) return "";
+    var mem = /Please increase MaxCore to more than:\s*([\d.]+)\s*MB/i.exec(t);
+    if (mem) return "Orca stopped for lack of memory and did not calculate a result. It needs at least " + Math.ceil(parseFloat(mem[1])) + " MB per core: set MB in Setup to that or more (and lower the cores if cores x MB does not fit in your memory), or use a smaller cluster, write the job again and rerun it. The potential in the folder comes from an unfinished wavefunction and was not used";
+    var err = /Error\s*\(([^)]*)\):\s*([^\r\n]*)/i.exec(t), fin = /ORCA finished by error termination in ([A-Za-z0-9_-]+)/.exec(t);
+    if (/SCF NOT CONVERGED/.test(t)) return "The SCF of the cluster did not converge, so the potential is not a result (try keywords such as PBE def2-SVP def2/J RI SlowConv, or a smaller cluster)";
+    if (!/ORCA TERMINATED NORMALLY/.test(t)) return "Orca did not finish normally" + (fin ? " (error termination in " + fin[1] + ")" : "") + (err ? ": " + err[2].trim() : ", or is still running") + ". Open the .out file and look near its end. The potential in the folder was not used";
+    return "";
+  }
+  async function fwReadCluster() {
+    try {
+      if (!(await orbEnsureDir())) { setStatus("No folder chosen.", true); return; }
+      var dir = null; if (ORB.fwDir) { try { await ORB.fwDir.getFileHandle("fw_manifest.json"); dir = ORB.fwDir; } catch (e) { ORB.fwDir = null; } } if (!dir) dir = await orbFindSubdir("fw"); if (!dir) { setStatus("No cluster job (a folder with fw_manifest.json) found in " + ORB.dirName + ": choose the folder that contains the fw_ folder, or the fw_ folder itself.", true); return; }
+      var man = JSON.parse(await orbRead(dir, "fw_manifest.json")), outTxt = "", note = "";
+      try { outTxt = await orbRead(dir, man.base + ".out"); } catch (e) { outTxt = ""; }
+      /* a job that did not finish normally leaves a wavefunction that is not a result: the potential from it is meaningless, so nothing is coloured */
+      var problem = fwOrcaProblem(outTxt); if (problem) throw new Error(problem);
+      var espText; try { espText = await orbRead(dir, man.base + "_esp.txt"); } catch (e) { throw new Error("the potential file " + man.base + "_esp.txt is not in the folder " + dir.name + ". run_fw.bat writes it at the very end, so the job has not finished, or Orca stopped before that (look at " + man.base + ".out), or the folder was moved or emptied. Run run_fw.bat in that folder, or choose the folder that holds the finished job"); }
+      var vals = orbParseEsp(espText);
+      if (vals.length !== man.points) throw new Error("the potential file holds " + vals.length + " values, not " + man.points);
+      /* surfaces added later with "Add surfaces" have their own points and potential files */
+      var parts = [{ vals: vals, targets: man.targets }], waiting = 0;
+      for (var bi = 0; bi < (man.batches || []).length; bi++) {
+        var bt = man.batches[bi], btxt = null; try { btxt = await orbRead(dir, bt.esp); } catch (e) { btxt = null; }
+        if (btxt === null) { waiting++; continue; }
+        var bv = orbParseEsp(btxt); if (bv.length !== bt.points) throw new Error("the potential file " + bt.esp + " holds " + bv.length + " values, not " + bt.points);
+        parts.push({ vals: bv, targets: bt.targets });
+      }
+      if (waiting) note += " " + waiting + " added set" + (waiting === 1 ? "" : "s") + " of surfaces not evaluated yet: run run_vpot.bat in the job folder.";
+      var byId = {}, bySig = {}, voidVals = {}, voidRows = {}, sizes = [], all = [], rows = [], pos = 0, miss = 0, curMol = {}, curVoid = {};
+      (state.molSurfaces || []).forEach(function (s) { var iso = state._molSurfaceIsoById[s.id]; if (iso && iso.positions.length) curMol[orbSurfaceSig(iso.positions)] = { id: s.id, pos: iso.positions, atoms: s.atomCount }; });
+      var vo = centroid();
+      (state.voidComponents || []).forEach(function (comp) { (typeof voidMeshes !== "undefined" ? voidMeshes[comp.id] || [] : []).forEach(function (m) {
+        var pa = m.geometry && m.geometry.getAttribute("position"); if (!pa) return;
+        var off = [m.position.x - vo[0], m.position.y - vo[1], m.position.z - vo[2]], key = orbSurfaceSig(pa.array) + "@" + off.map(function (v) { return v.toFixed(2); }).join(",");
+        curVoid[key] = { comp: comp, pos: pa.array };
+      }); });
+      parts.forEach(function (part) { pos = 0; part.targets.forEach(function (t) {
+        var sv = part.vals.subarray(pos, pos + t.np); pos += t.np;
+        var cur = t.type === "mol" ? curMol[t.sig] : curVoid[t.key];
+        if (!cur || cur.pos.length / 3 !== t.n) { miss++; return; }
+        var full = fwExpandSamples(cur.pos, t.stride, sv), mn = Infinity, mx = -Infinity, i;
+        for (i = 0; i < full.length; i++) { var kc = full[i] * HARTREE_KCAL; if (kc < mn) mn = kc; if (kc > mx) mx = kc; all.push(Math.abs(full[i])); }
+        if (t.type === "mol") { byId[cur.id] = full; bySig[t.sig] = full; sizes.push(full.length); rows.push({ id: cur.id, atoms: cur.atoms, min: mn, max: mx, kind: "mol" }); }
+        else { voidVals[t.key] = full; var r = voidRows[cur.comp.id] || (voidRows[cur.comp.id] = { id: cur.comp.id, type: cur.comp.type, min: Infinity, max: -Infinity }); if (mn < r.min) r.min = mn; if (mx > r.max) r.max = mx; }
+      }); });
+      Object.keys(voidRows).forEach(function (k) { var r = voidRows[k]; rows.push({ id: r.id, kind: r.type === "channel" ? "channel" : "void", min: r.min, max: r.max }); });
+      if (!rows.length) throw new Error("none of the surfaces that were written is in the view now (rebuild them as they were: " + man.targets.length + " surface" + (man.targets.length === 1 ? "" : "s") + ")");
+      ORB.esp = { byId: byId, bySig: bySig, cube: null, label: "Framework potential (Orca)", sizes: sizes, fw: true, source: "orca", voids: Object.keys(voidVals).length > 0, voidVals: voidVals, voidRows: voidRows };
+      ORB.espRange = Math.max(0.001, Math.round(fwPercentile(all, 0.95) * 1000) / 1000);
+      FW.last = { rows: rows };
+      orbRepaintSurfaces();
+      fwShowRows(rows, "kcal/mol; the potential of the Orca cluster, framework only" + (man.stride > 1 ? "; Orca evaluated every " + man.stride + "th vertex, so the extremes are approximate" : ""));
+      setStatus("Read the framework potential of " + man.atoms + " atoms (" + man.keywords + ") onto " + rows.length + " surface" + (rows.length === 1 ? "" : "s") + (miss ? "; " + miss + " written surface" + (miss === 1 ? " is" : "s are") + " no longer in the view" : "") + "." + note, !!note || miss > 0);
+    } catch (e) { setStatus("Framework cluster: " + e.message + ".", true); }
+  }
+  function fwShowRows(rows, caption) {
+    var box = ORB.ui.fwBox; if (!box) return;
+    var html = "<table class='orb-table'><thead><tr><th>surface</th><th>V<sub>max</sub></th><th>V<sub>min</sub></th></tr></thead><tbody>";
+    rows.forEach(function (r) { html += "<tr><td>" + (r.kind === "mol" ? "surface #" + r.id + " (" + r.atoms + " atoms)" : (r.kind === "channel" ? "channel " : "void ") + r.id) + "</td><td>" + (r.max >= 0 ? "+" : "&minus;") + Math.abs(r.max).toFixed(1) + "</td><td>" + (r.min >= 0 ? "+" : "&minus;") + Math.abs(r.min).toFixed(1) + "</td></tr>"; });
+    box.innerHTML = html + "</tbody></table><div class='orb-sum'>" + caption + "</div>";
+  }
+  /* ---- cluster-end ---- */
+  /* ---- FWPOT-END ---- */
+
 
   /* ---- HELPBUTTONS-BEGIN: a small "?" in the title bar of the menus below opens a short, task-focused help panel (looks like the Guide, but floats beside the 3D view without dimming it, so it can stay open while you work). The text lives only here; the Guide and the Manual stay the full reference. ---- */
   var HELP_TITLES = { "Orca bridge": "orca", "Cube & ESP": "cube", "Macro": "macro", "Grow": "grow", "Void / Channel Analysis": "voidch", "Molecular Surface": "molsurf",
@@ -19507,6 +20221,14 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<h3>Molecule job: orbitals, density, electrostatic potential</h3><ol>" +
       "<li>Select the molecule, tick what you want, <b>Write inputs</b>, double-click <b>run_mol.bat</b>, then <b>Read results</b>. The cubes appear in the <b>Cube &amp; ESP</b> menu.</li>" +
       "<li>For the potential, first build a surface in <b>Molecular Surface</b> (probe radius about 0.5 &Aring;), tick <b>ESP on the molecular surface</b>, and keep that surface in view until the results are read.</li></ol>" +
+      "<h3>Framework potential: the potential of the host, mapped onto surfaces</h3><ol>" +
+      "<li>The host must be a CIF or SHELX structure that still has its symmetry, with any guest moved to a guest group (Structure &gt; Edit atoms &gt; Move selection to). Only host atoms count. Remove one component of any disorder first.</li>" +
+      "<li><b>Calculate charges</b> gives point charges (EQeq) for the whole periodic host. No Orca run is needed.</li>" +
+      "<li>Build the surfaces to colour: a molecular surface over the guest, or over the host atoms around a channel (grow them first), and/or run Void / Channel Analysis.</li>" +
+      "<li><b>Map potential</b> colours them in kcal/mol, with a colour bar in the corner of the view. <b>Red = positive</b> in Cube &amp; ESP switches to the convention used in the literature.</li></ol>" +
+      "<p>The point-charge map is a quick model: use it to compare sites and frameworks, not as an absolute value.</p>" +
+      "<p>For a more accurate map, <b>Build cluster</b> (axis, cells along it, radius) selects a cluster of the host around the channel, <b>Write cluster job</b> writes the Orca input and <b>run_fw.bat</b>, and after you run it <b>Read cluster results</b> colours the surfaces. Build the surfaces first; the size and time estimate is shown under the buttons.</p>" +
+      "<p>A surface built <i>after</i> the job was run (for example over the guest) has no values yet: build it, press <b>Add surfaces</b>, double-click <b>run_vpot.bat</b> (it reuses the finished wavefunction and takes minutes) and press <b>Read cluster results</b> again.</p>" +
       "<h3>If nothing seems to happen</h3><p>Read the status line at the bottom of the 3D view: it says what was done or why not. After changing cores, memory or the method, write the inputs again and delete the old .out files you want recalculated.</p>" },
     cube: { title: "Cube & ESP", html:
       "<p>Draws Gaussian cube files (electron density, orbitals, potential) as surfaces, and colours molecular surfaces by the electrostatic potential.</p>" +
@@ -19619,6 +20341,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<h3>Filling it</h3><ul>" +
       "<li>Drop a <b>folder</b>, a <b>.zip</b> file, or <b>several files</b> on the 3D view. Subfolders and zips inside zips are searched for .cif, .res, .ins and .xyz files.</li>" +
       "<li>A CIF holding several structures (for example a CSD search result) gives one entry for each.</li>" +
+      "<li>A CIF that carries its own SHELX .res (SHELXL writes it into the CIF) gives <b>two</b> entries, one after the other: <b>name &mdash; CIF</b> and <b>name &mdash; RES (in the CIF)</b>. This holds for a CIF with one structure and for each structure of a CIF with several. The RES has the PART numbers, so bonds between the components of a disorder are drawn correctly; the space group is taken from the CIF part. Hover over either entry for a reminder.</li>" +
       "<li>The first structure loads at once. Files with no usable structure are left out, and the status line says how many.</li>" +
       "<li>The limit is 5000 files or 400 MB.</li></ul>" +
       "<h3>Using it</h3><ul>" +
@@ -21946,7 +22669,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<p><b>Save model...</b> and <b>Load model...</b>, at the bottom of the <b>Export</b> panel, save or restore the complete working state to a single file -- every atom including everything Grow has added, the CIF symmetry data, colour and radius overrides, bond and display settings, and the camera's exact position -- so a session can be closed and reopened later exactly where it was left, without repeating the grow steps. This is a separate, deliberate snapshot of one specific piece of work, distinct from the automatic per-browser memory of element radii and display settings described below -- a saved model file is portable and permanent, and is the one to keep if the work needs to survive a change of computer or browser. Manually added and cut bonds are saved with it. The original CIF text is not part of it, so <b>Save CIF</b> is not available after a project has been loaded. <b>Compress as zip</b>, just above Save model, saves that same project data as a single JSON file inside a .zip archive instead of a plain .json -- text compresses well, so a large, heavily-grown project can end up considerably smaller on disk; remembered like any other setting. Load model... reads a .zip archive back regardless of this checkbox either way. A zip containing more than one .json file -- created by hand, one file per version of a model (e.g. <span class='mono'>Figure 1a.json</span>, <span class='mono'>Figure 1b.json</span>) then zipped together -- loads with the same prev/next/dropdown <b>Navigator</b> a multi-structure CIF uses (see \"Loading structures\" below), labelled by each .json file's own name rather than anything stored inside it, so those file names are exactly what shows up to choose between.</p>" +
       "<h3>Loading structures</h3>" +
       "<p>The <b>name of the loaded file</b> is shown in the header, in line with the left edge of the model panel (shortened with an ellipsis if it is too long for the window; hover for the full name). It follows whatever is loaded: a CIF, a saved model, another structure of a multi-structure file, and it clears when the structure is closed. The same name is listed as <i>File</i> under Structure &gt; Metadata.</p>" +
-      "<p>Dropping a <b>.cif</b> onto the 3D view loads it as the <b>host</b> and starts symmetry mode, described below -- it's a fresh structure to build outward from by growth, not a fixed set of coordinates, and replaces any previously loaded host, clearing the current guest along with it. There is no separate guest file or drop box: a <b>guest</b> (e.g. an included gas molecule) is created from the same loaded structure by selecting the atoms that belong to it and using \"Move selection to\" &gt; New guest group (Structure &gt; Edit atoms). \"Remove all guests\" clears every guest component so you can start over. A CIF holding more than one complete structure (e.g. a CSD/Conquest search result, several <span class='mono'>data_XXXX</span> blocks concatenated in one file) loads its first entry the same way, and a <b>Navigator</b> appears at the top of Structure with prev/next buttons and a dropdown for switching between the rest -- the same Navigator a multi-.json zip archive uses (see Export &gt; Model above), just showing each structure's own block label instead of a file name. When a CIF is read, extra symmetry-equivalent copies are removed only if they have the same element and lie within 0.03 &Aring; of a symmetry image of an atom already kept (closely spaced disorder sites stay separate); data names are read without regard to case, in the traditional and the dotted spellings; numbers may carry an exponent; an atom with missing or unreadable coordinates is skipped and listed in the status line; and a cell that is not a real cell is refused. Any newly dropped structure, whatever its format, replaces the previous host, its guests, the undo history and all manual bond edits. In a SHELX file the free variables (FVAR) and PART occupancy codes are resolved into occupancies. <b>Save CIF</b> rewrites only the atom-site (and anisotropic) loops of the original file: columns the app does not edit keep their original values, and a coordinate, occupancy or displacement value you have not changed keeps its original text, standard uncertainty included; edited values are written without one, and a file that gives Cartesian coordinates is saved back in Cartesian coordinates. You can also drop a <b>folder</b>, a <b>.zip</b> file, or <b>several files at once</b>: CrystalVista searches everything dropped (subfolders too, and zip files inside zip files) for structure files -- <b>.cif</b>, <b>.res</b>, <b>.ins</b> and <b>.xyz</b> -- and lists each structure in the Navigator, which is then titled <b>Structure Navigator</b> (<b>CIF Navigator</b> when everything found is a CIF). A file gives one entry, named after it, with its folder path added where two files share a name (hover over an entry for its full path); a CIF holding several structures gives one entry per <span class='mono'>data_</span> block. The first structure loads at once, and the line under the title shows which entry you are on and where they came from. Files with no usable structure (a CIF without atom coordinates, a text file) are left out, and the status line says how many. A zip that holds no structure files is read as a saved project, as before. The limit is 5000 files or 400 MB.</p>" +
+      "<p>Dropping a <b>.cif</b> onto the 3D view loads it as the <b>host</b> and starts symmetry mode, described below -- it's a fresh structure to build outward from by growth, not a fixed set of coordinates, and replaces any previously loaded host, clearing the current guest along with it. There is no separate guest file or drop box: a <b>guest</b> (e.g. an included gas molecule) is created from the same loaded structure by selecting the atoms that belong to it and using \"Move selection to\" &gt; New guest group (Structure &gt; Edit atoms). \"Remove all guests\" clears every guest component so you can start over. A CIF holding more than one complete structure (e.g. a CSD/Conquest search result, several <span class='mono'>data_XXXX</span> blocks concatenated in one file) loads its first entry the same way, and a <b>Navigator</b> appears at the top of Structure with prev/next buttons and a dropdown for switching between the rest -- the same Navigator a multi-.json zip archive uses (see Export &gt; Model above), just showing each structure's own block label instead of a file name. A CIF that also embeds the SHELX <b>.res</b> it was refined from (the <span class='mono'>_shelx_res_file</span> item that SHELXL writes) shows two entries for that structure, <b>name &mdash; CIF</b> and <b>name &mdash; RES (in the CIF)</b>, one after the other and under the Structure Navigator title, whether the file holds one structure or several; the RES entry has the PART numbers, so the bonding of a disordered structure can be read correctly, and takes its space group and other file data from the CIF part (Save CIF stays available only for the CIF entry). When a CIF is read, extra symmetry-equivalent copies are removed only if they have the same element and lie within 0.03 &Aring; of a symmetry image of an atom already kept (closely spaced disorder sites stay separate); data names are read without regard to case, in the traditional and the dotted spellings; numbers may carry an exponent; an atom with missing or unreadable coordinates is skipped and listed in the status line; and a cell that is not a real cell is refused. Any newly dropped structure, whatever its format, replaces the previous host, its guests, the undo history and all manual bond edits. In a SHELX file the free variables (FVAR) and PART occupancy codes are resolved into occupancies. <b>Save CIF</b> rewrites only the atom-site (and anisotropic) loops of the original file: columns the app does not edit keep their original values, and a coordinate, occupancy or displacement value you have not changed keeps its original text, standard uncertainty included; edited values are written without one, and a file that gives Cartesian coordinates is saved back in Cartesian coordinates. You can also drop a <b>folder</b>, a <b>.zip</b> file, or <b>several files at once</b>: CrystalVista searches everything dropped (subfolders too, and zip files inside zip files) for structure files -- <b>.cif</b>, <b>.res</b>, <b>.ins</b> and <b>.xyz</b> -- and lists each structure in the Navigator, which is then titled <b>Structure Navigator</b> (<b>CIF Navigator</b> when everything found is a CIF). A file gives one entry, named after it, with its folder path added where two files share a name (hover over an entry for its full path); a CIF holding several structures gives one entry per <span class='mono'>data_</span> block. The first structure loads at once, and the line under the title shows which entry you are on and where they came from. Files with no usable structure (a CIF without atom coordinates, a text file) are left out, and the status line says how many. A zip that holds no structure files is read as a saved project, as before. The limit is 5000 files or 400 MB.</p>" +
       "<p>A SHELX <b>.res</b> or <b>.ins</b> file drops in exactly the same way and works identically from that point on -- same host/guest handling, same Grow panel, same everything -- since both formats are read into the same unit cell + symmetry operators + asymmetric unit shape internally; the one difference is that Save CIF stays disabled afterwards, since there's no original CIF text to splice edits back into. A <b>PART n</b> instruction in the file is read and remembered per atom: automatic bond generation never bonds two atoms that have different, both non-zero PART numbers, since SHELX uses PART specifically to mark alternative, mutually-exclusive disorder components that are never really present together -- PART 0 (the default, before any PART instruction, and every CIF-loaded atom, which has no PART concept at all) still bonds to anything. A negative PART number additionally stops bonds forming, across a symmetry operation, to a grown copy with any non-zero PART number -- the standard way of handling a group disordered across a special position (e.g. a solvent molecule sitting on an inversion centre) without it bonding to its own symmetry mate. <b>Shift+Ctrl+Alt+click</b> selects every currently-displayed atom sharing the clicked atom's PART number (a second click on the same part deselects them) -- only available for a PART-tagged, .res/.ins-derived structure; it does nothing on a CIF-loaded one, which has no PART numbers to select by.</p>" +
       "<p>An XMol <b>.xyz</b> file (a bare atom count, a title line, then one <span class='mono'>element x y z</span> row per atom, in Cartesian &Aring;ngstr&ouml;ms) drops in the same way too, but loads as a plain molecule with no unit cell and no symmetry operators at all -- an .xyz file simply doesn't carry that information. The Grow panel, Fill unit cell, Forget symmetry, and any cell-mode void/channel analysis are all unavailable for an XYZ-loaded structure for the same reason they're unavailable after Forget symmetry is used on a CIF/RES one; Save CIF likewise stays disabled, exactly as for a SHELX load. Everything else -- display style, bonding, selection, molecular surfaces, molecular-neighbourhood-mode void/channel analysis, export -- works normally on the atoms as given.</p>" +
       "<h3>CIF and symmetry (Symmetry panel)</h3>" +
@@ -22039,6 +22762,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<p><b>Pair energies.</b> Grow the neighbouring molecules around one molecule first (Grow), select the central molecule (any atom of it, or Ctrl-click for the whole molecule) and press <b>Find dimers</b>. Every molecule in the view that has an atom within the <b>contact cutoff</b> of the central one is a neighbour; pairs that are the same by symmetry are listed once, with how often they occur (&times;), the centroid distance, the shortest contact and the neighbour&rsquo;s formula. Tick the ones to calculate (a neighbour of a different formula starts unticked, since a partial molecule at the edge of what you grew would give a wrong energy); clicking a row selects that neighbour in the view. <b>Write inputs</b> creates a <span class='mono'>pairs_&lt;name&gt;</span> folder holding <span class='mono'>dimer_01.inp</span>, ..., <span class='mono'>run_pairs.bat</span> and <span class='mono'>pairs_manifest.json</span>. Each input is three Orca jobs, the dimer and each molecule alone, giving the interaction energy E(dimer) &minus; E(A) &minus; E(B); with counterpoise on, each molecule is computed with its partner as ghost atoms. The script skips jobs that already finished and removes Orca&rsquo;s large scratch files. <b>Read results</b> fills the table in kJ/mol and a line &frac12;&Sigma;n&middot;E, half the sum of the pair energies of the central molecule with its neighbours, each counted as often as it occurs: a rough lattice energy per molecule that leaves out many-body terms and depends on the method and on how many neighbours were grown. For hydrogen atoms from X-ray data, use Normalise H atoms first. <b>Energy framework</b> draws tubes between the centres of every pair of molecules in the view that matches a calculated dimer, as thick as the energy (blue attractive, red repulsive), above a chosen smallest |E|.</p>" +
       "<p><b>Molecule job</b> uses the selected atoms as one molecule and writes <span class='mono'>mol_&lt;name&gt;.inp</span> (a single-point calculation), with any of: an <b>electron density cube</b>, <b>HOMO and LUMO cubes</b> (closed-shell molecules), and the <b>electrostatic potential at every vertex of the molecular surfaces now in the view</b>, for which Orca&rsquo;s <span class='mono'>orca_vpot</span> is run by the same script. For the ESP, build the molecular surface first (Molecular Surface). Building a surface clears the selection, so with the ESP box ticked and nothing selected the job uses the atoms the surfaces were built from; select atoms yourself to use a different set. <b>Read results</b> loads the cubes into <b>Cube &amp; ESP</b> and colours the surfaces by the potential; a surface that is deleted and rebuilt with the same atoms and probe radius is coloured again automatically. The coordinates written are exactly those in the view, so the results fall on the atoms.</p>" +
       "<h3>Cube &amp; ESP</h3>" +
+      "<p><b>Framework potential</b> (Orca bridge) shows how the electrostatic potential of a host framework varies over a surface, for example the wall of a channel or the surface of a guest molecule in it. <b>Calculate charges</b> assigns EQeq point charges to every host atom of the periodic structure (the host layer only, so move any guest to a guest group first; remove all but one component of a disorder). <b>Map potential</b> then evaluates the potential of those charges, with the periodic sum done by Ewald summation, at every vertex of the molecular surfaces in the view and/or of the void and channel surfaces, and colours them: negative red and positive blue unless <b>Red = positive</b> (Cube &amp; ESP) is ticked. A colour bar in kcal/mol appears in the 3D view, the table lists the highest and lowest values on each surface, and <b>dielectric screening</b> is the EQeq parameter (1.2). The point-charge model is quick and needs no Orca run. For a better potential, <b>Build cluster</b> cuts a cluster of the host (a number of cells along the channel, within a radius of its axis) from the crystal, adds it to the view and selects it; <b>Write cluster job</b> writes an Orca input for it, closed-shell and neutral with hydrogen caps on any cut carbon-carbon bond, plus the surface points and run_fw.bat; and after you run the script, <b>Read cluster results</b> colours the surfaces by the potential Orca calculated from the real electron density. The line under the buttons estimates the size and time of the job before you write it. Surfaces built after the job was run have no values: <b>Add surfaces</b> writes their points and <b>run_vpot.bat</b>, which evaluates them from the finished job's wavefunction in minutes, and a second <b>Read cluster results</b> colours them together with the first.</p>" +
       "<p><b>Load cube file...</b> (or drop a <span class='mono'>.cube</span> file on the 3D view) shows a Gaussian cube file (density, orbital, potential) as an isosurface; each file gets a card with its grid and value range, an <b>isovalue</b> (shown to three decimals; its spin buttons move by 0.001, or by a finer step for a cube whose values are all very small), colour swatches for the positive and (for signed data such as orbitals) negative lobes, each with its own tick box to show or hide that lobe, and an <b>opacity</b> (1, fully solid, to begin with; a translucent surface is drawn back faces first, then front faces); untick the card to hide the whole cube and use &times; to remove it, or <b>Clear cubes</b> to remove them all; loading a new structure removes them too. Surfaces are lightly smoothed to hide the steps of a coarse grid. A cube whose atoms do not coincide with the atoms in view is drawn in its own frame and says so. <b>ESP colouring</b> paints the molecular surfaces by the electrostatic potential, either from the Orca results read by the bridge or from a loaded cube (<b>Colour surface</b>): red where the potential is negative, white at zero and blue where it is positive, over the chosen <b>colour range</b> (atomic units; the default covers 95% of the values). <b>Clear colours</b> restores the plain surface colours. The <b>surface opacity</b> slider here is the same setting as in Molecular Surface.</p>" +
       "<h3>Macro</h3>" +
       "<p>A macro is a plain-text sequence of commands, one per line, that can be replayed later to reproduce a sequence of actions -- recorded live from your own clicks and button presses, typed or pasted in by hand, or a mix of both (the memo box is an ordinary text area throughout, editable at any time). It's designed to work not just on the structure it was recorded against but on a whole series of similar ones (e.g. a variable-temperature data set for the same crystal) -- provided each structure's asymmetric unit is labelled the same way and sits in the same place, which is the user's own responsibility to ensure; nothing here can verify that automatically.</p>" +
