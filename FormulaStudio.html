@@ -8,19 +8,19 @@
 :root{
   --bg:#f3f5f8; --panel:#ffffff; --panel2:#eef1f6; --ink:#1b2430; --muted:#566275; --line:#d3d9e2;
   --accent:#1d5fbd; --accent-ink:#ffffff; --accent-soft:#e3edfb; --danger:#b3261e; --ok:#1b7a3d;
-  --shadow:0 1px 3px rgba(20,30,50,.12);
+  --shadow:0 1px 3px rgba(20,30,50,.12); --selbg:#c4c8cf;
 }
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
     --bg:#12161c; --panel:#1b212a; --panel2:#232b36; --ink:#e7ebf1; --muted:#a4afbf; --line:#364050;
     --accent:#7db1ff; --accent-ink:#0a1220; --accent-soft:#25344d; --danger:#ff8f86; --ok:#6fd48f;
-    --shadow:0 1px 3px rgba(0,0,0,.5);
+    --shadow:0 1px 3px rgba(0,0,0,.5); --selbg:#59627a;
   }
 }
 :root[data-theme="dark"]{
   --bg:#12161c; --panel:#1b212a; --panel2:#232b36; --ink:#e7ebf1; --muted:#a4afbf; --line:#364050;
   --accent:#7db1ff; --accent-ink:#0a1220; --accent-soft:#25344d; --danger:#ff8f86; --ok:#6fd48f;
-  --shadow:0 1px 3px rgba(0,0,0,.5);
+  --shadow:0 1px 3px rgba(0,0,0,.5); --selbg:#59627a;
 }
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
@@ -132,7 +132,10 @@ dialog::backdrop{background:rgba(10,15,25,.55)}
 #vcanvas:not(:focus) .fsCaret{opacity:.4;animation:none}
 @keyframes vblink{50%{opacity:0}}
 #vcanvas [class*="fsP"]{color:var(--muted)}
-#vcanvas .fsOn,#vcanvas .fsSel,#vcanvas .fsBuf{color:var(--accent)}
+#vcanvas .fsOn,#vcanvas .fsBuf{color:var(--accent)}
+.vwrap{position:relative;display:inline-block}
+.vwrap svg{position:relative;z-index:1}
+.vsel{position:absolute;z-index:0;background:var(--selbg);border-radius:2px;pointer-events:none}
 #vcanvas .vmsg{color:var(--danger);font:13px/1.4 Consolas,monospace;white-space:pre-wrap}
 #vsugg{display:none;gap:5px;flex-wrap:wrap;padding:4px 10px;background:var(--panel2);font-size:13px;border-bottom:1px solid var(--line)}
 #vsugg.on{display:flex}
@@ -397,7 +400,8 @@ function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('on
 const XLINK='http://www.w3.org/1999/xlink', SVGNS='http://www.w3.org/2000/svg';
 // Sums, products, unions and lim-type operators normally put their limits beside the sign inside fractions,
 // scripts and inline text. Unless the user picks "TeX default", force them above/below everywhere.
-const LIMOPS=/\\(?:sum|prod|coprod|bigcup|bigcap|bigvee|bigwedge|bigoplus|bigotimes|bigodot|biguplus|bigsqcup|lim|limsup|liminf|max|min|sup|inf)(?![a-zA-Z])(?!\s*\\(?:no)?limits)/g;
+const LIMOPS=/\\(?:sum|prod|coprod|bigcup|bigcap|bigvee|bigwedge|bigoplus|bigotimes|bigodot|biguplus|bigsqcup|lim|limsup|liminf|max|min|sup|inf)(?![a-zA-Z])(?!\s*\}?\s*\\(?:no)?limits)/g;
+const INTOPS=new Set(['\\int','\\iint','\\iiint','\\iiiint','\\idotsint','\\oint']);
 function fixLimits(tex){ return cfg.limits==='tex'?tex:tex.replace(LIMOPS,m=>m+'\\limits '); }
 function baseSVG(tex,display){
   MathJax.texReset();
@@ -451,6 +455,8 @@ const T  = (t,l,h)=>({t:t,l:l||slotLabel(t),h:h||''});
 const SY = s => s.trim().split(/\s+/).map(x=>T(x+' ',x,x));
 
 const PAL = {};
+// "not constrained to be equal" (crystallography): an upright C with a slash through it; built from standard parts (needs mathtools in real LaTeX)
+const NCE = String.raw`\mathrel{\mathrlap{\mkern 3.5mu\mathrm{/}}\mathrm{C}}`;
 PAL['Structures'] = [
  {g:'Fractions',i:[T(R`\frac{}{}`),T(R`\dfrac{}{}`),T(R`\tfrac{}{}`),T(R`\cfrac{}{}`,null,'continued fraction'),T(R`\binom{}{}`),T(R`\dbinom{}{}`),
    T(R`\frac{\mathrm{d}¦}{\mathrm{d}{}}`,R`\frac{\mathrm{d}y}{\mathrm{d}x}`,'derivative'),
@@ -536,7 +542,7 @@ PAL['Operators'] = [
  {g:'Calculus & logic',i:SY(R`\partial \nabla \infty \forall \exists \nexists \neg \lnot \therefore \because \top \bot \vdash \dashv \models \vDash \Vdash \land \lor \to \gets \mapsto \implies \impliedby \iff`)}
 ];
 PAL['Relations'] = [
- {g:'Equality & order',i:SY(R`= \neq \equiv \not\equiv \approx \approxeq \simeq \cong \sim \backsim \thicksim \propto \doteq \triangleq \eqcirc \coloneqq \eqqcolon \le \ge \leq \geq \leqslant \geqslant \ll \gg \lll \ggg \lesssim \gtrsim \lessgtr \gtrless \lneq \gneq \nleq \ngeq \nless \ngtr \ncong \nsim \napprox \prec \succ \preceq \succeq \nprec \nsucc`)},
+ {g:'Equality & order',i:(a=>{ a.splice(2,0,T(NCE,null,'not constrained to be equal (crystallography): C with a slash')); return a; })(SY(R`= \neq \equiv \not\equiv \approx \approxeq \simeq \cong \sim \backsim \thicksim \propto \doteq \triangleq \eqcirc \coloneqq \eqqcolon \le \ge \leq \geq \leqslant \geqslant \ll \gg \lll \ggg \lesssim \gtrsim \lessgtr \gtrless \lneq \gneq \nleq \ngeq \nless \ngtr \ncong \nsim \napprox \prec \succ \preceq \succeq \nprec \nsucc`))},
  {g:'Sets',i:SY(R`\in \notin \ni \subset \supset \subseteq \supseteq \subsetneq \supsetneq \nsubseteq \nsupseteq \sqsubset \sqsupset \sqsubseteq \sqsupseteq \emptyset \varnothing \cup \cap`)},
  {g:'Other relations',i:SY(R`\mid \nmid \parallel \nparallel \perp \asymp \bowtie \Join \smile \frown \between \pitchfork \vartriangleleft \vartriangleright \trianglelefteq \trianglerighteq`)}
 ];
@@ -577,6 +583,11 @@ PAL['Chemistry'] = [
 PAL['Crystal'] = [
  {g:'Indices & directions',i:[T(R`(hkl)`),T(R`(\bar{h}\bar{k}\bar{l})`),T(R`\{hkl\}`),T(R`[uvw]`),T(R`\langle uvw\rangle`),T(R`(\bar{1}\,\bar{1}\,0)`),T(R`[01\bar{1}]`),T(R`\{100\}`),T(R`\langle 111\rangle`),
    T(R`\bar{1}`),T(R`\bar{2}`),T(R`\bar{3}`),T(R`\bar{4}`),T(R`\bar{6}`),T(R`d_{hkl}`),T(R`2\theta`),T(R`\mathbf{a}^{*}`),T(R`\mathbf{b}^{*}`),T(R`\mathbf{c}^{*}`)]},
+ {g:'Cell relationships',i:[T(NCE,null,'not constrained to be equal'),
+   T(R`\beta \mathrel{\mathrlap{\mkern 3.5mu\mathrm{/}}\mathrm{C}} 90^{\circ}`,null,'monoclinic: beta not constrained to 90 degrees'),
+   T(R`a \neq b \neq c,\quad \alpha = \gamma = 90^{\circ},\quad \beta \mathrel{\mathrlap{\mkern 3.5mu\mathrm{/}}\mathrm{C}} 90^{\circ}`),
+   T(R`a \neq b \neq c,\quad \alpha \mathrel{\mathrlap{\mkern 3.5mu\mathrm{/}}\mathrm{C}} \beta \mathrel{\mathrlap{\mkern 3.5mu\mathrm{/}}\mathrm{C}} \gamma \mathrel{\mathrlap{\mkern 3.5mu\mathrm{/}}\mathrm{C}} 90^{\circ}`),
+   T(R`a = b \neq c,\quad \alpha = \beta = \gamma = 90^{\circ}`),T(R`a = b = c,\quad \alpha = \beta = \gamma = 90^{\circ}`),T(R`a = b \neq c,\quad \alpha = \beta = 90^{\circ},\ \gamma = 120^{\circ}`)]},
  {g:'Space-group symbols',i:[T(R`P\bar{1}`),T(R`P2_{1}/c`),T(R`P2_{1}2_{1}2_{1}`),T(R`C2/c`),T(R`Pna2_{1}`),T(R`Pbca`),T(R`I4_{1}/amd`),T(R`R\bar{3}c`),T(R`P6_{3}/mmc`),T(R`Fm\bar{3}m`),T(R`Ia\bar{3}d`),T(R`P\bar{4}2_{1}c`),T(R`P4/nmm`)]},
  {g:'Quantities & units',i:[T(R`F_{\mathrm{o}}`),T(R`F_{\mathrm{c}}`),T(R`F_{\mathrm{o}}^{2}`),T(R`F_{\mathrm{c}}^{2}`),T(R`|F_{hkl}|^{2}`),T(R`\sigma(I)`),T(R`I/\sigma(I)`),T(R`R_{\mathrm{int}}`),T(R`R_{1}`),T(R`wR_{2}`),T(R`U_{\mathrm{eq}}`),T(R`U_{ij}`),T(R`U_{\mathrm{iso}}`),T(R`\Delta\rho_{\max}`),T(R`\Delta\rho_{\min}`),T(R`\text{Å}`),T(R`\text{Å}^{3}`),T(R`\text{Å}^{-1}`),T(R`10.123(4)\ \text{Å}`),T(R`90.00^{\circ}`),T(R`\alpha,\beta,\gamma`)]}
 ];
@@ -1382,7 +1393,9 @@ function gTpl(nd,E,c){
     case 'text': return gText(nd,E,c);
     case 'xarr': return wrapT(nd,E,c,nd.cmd+((E||!emptyK(1))?'['+K(1)+']':'')+'{'+K(0)+'}',true);
     case 'op': {
-      let s=nd.cmd+(nd.lm||'');
+      // editing canvas: wrap the sign so it can be clicked and highlighted; give it the same limit placement as the real output
+      const L=nd.lm||((cfg.limits==='tex'&&!INTOPS.has(nd.cmd))?'':(INTOPS.has(nd.cmd)?'\\nolimits':'\\limits'));
+      let s=E?'\\mathop{\\class{fsT'+nd.id+'}{'+nd.cmd+'}}'+L+' ':nd.cmd+(nd.lm||'');
       nd.kinds.forEach((kd,i)=>{ if(E||!emptyK(i)) s+=(kd==='lo'?'_':'^')+'{'+K(i)+'}'; });
       return s;
     }
@@ -1410,14 +1423,14 @@ Pz.prototype.ws=function(){
     else break;
   }
 };
-const ACC=['hat','widehat','tilde','widetilde','bar','overline','underline','vec','overrightarrow','overleftarrow','overleftrightarrow','underrightarrow','underleftarrow','dot','ddot','dddot','ddddot','acute','grave','breve','check','mathring','boxed','cancel','bcancel','xcancel','phantom','hphantom','vphantom','smash','mathrm','mathbf','mathit','mathsf','mathtt','mathcal','mathscr','mathfrak','mathbb','mathnormal','boldsymbol','bm','operatorname','fbox','mathrlap','mathllap','mathclap','overbrace','underbrace','substack','mathstrut'];
+const ACC=['hat','widehat','tilde','widetilde','bar','overline','underline','vec','overrightarrow','overleftarrow','overleftrightarrow','underrightarrow','underleftarrow','dot','ddot','dddot','ddddot','acute','grave','breve','check','mathring','boxed','cancel','bcancel','xcancel','phantom','hphantom','vphantom','smash','mathrm','mathbf','mathit','mathsf','mathtt','mathcal','mathscr','mathfrak','mathbb','mathnormal','boldsymbol','bm','operatorname','mathrlap','mathllap','mathclap','overbrace','underbrace','substack','mathstrut'];
 const C1=new Set(ACC.filter(a=>a!=='mathstrut').map(a=>'\\'+a));
 const C2=new Set(['\\frac','\\dfrac','\\tfrac','\\cfrac','\\binom','\\dbinom','\\tbinom','\\overset','\\underset','\\stackrel']);
 const TXT=new Set(['\\text','\\textbf','\\textit','\\textrm','\\textsf','\\texttt','\\mbox']);
 const XARR=new Set(['\\xrightarrow','\\xleftarrow','\\xleftrightarrow','\\xRightarrow','\\xLeftarrow','\\xLeftrightarrow','\\xlongequal','\\xtwoheadrightarrow','\\xtwoheadleftarrow','\\xhookrightarrow','\\xhookleftarrow','\\xmapsto','\\xrightleftharpoons','\\xleftrightharpoons','\\xrightharpoonup','\\xrightharpoondown','\\xleftharpoonup','\\xleftharpoondown']);
 const OPS=new Set(['\\sum','\\prod','\\coprod','\\bigcup','\\bigcap','\\bigvee','\\bigwedge','\\bigoplus','\\bigotimes','\\bigodot','\\biguplus','\\bigsqcup','\\int','\\iint','\\iiint','\\iiiint','\\idotsint','\\oint','\\lim','\\limsup','\\liminf','\\max','\\min','\\sup','\\inf']);
 const SIZED=new Set(['\\big','\\Big','\\bigg','\\Bigg','\\bigl','\\Bigl','\\biggl','\\Biggl','\\bigr','\\Bigr','\\biggr','\\Biggr','\\bigm','\\Bigm','\\biggm','\\Biggm','\\middle']);
-const RAWARGS={'\\ce':1,'\\pu':1,'\\tag':1,'\\label':1,'\\eqref':1,'\\ref':1,'\\color':1,'\\textcolor':2,'\\colorbox':2,'\\fcolorbox':3,'\\href':2,'\\class':2,'\\style':2,'\\cssId':2,'\\hspace':1,'\\vspace':1,'\\raisebox':2,'\\rule':2,'\\mathbin':1,'\\mathrel':1,'\\mathop':1,'\\mathord':1,'\\mathopen':1,'\\mathclose':1,'\\mathpunct':1,'\\mathinner':1,'\\unicode':1,'\\cancelto':2,'\\bbox':1,'\\pmod':1,'\\pod':1,'\\verb':0};
+const RAWARGS={'\\ce':1,'\\pu':1,'\\tag':1,'\\label':1,'\\eqref':1,'\\ref':1,'\\color':1,'\\textcolor':2,'\\colorbox':2,'\\fcolorbox':3,'\\href':2,'\\class':2,'\\style':2,'\\cssId':2,'\\hspace':1,'\\vspace':1,'\\raisebox':2,'\\rule':2,'\\mathbin':1,'\\mathrel':1,'\\mathop':1,'\\mathord':1,'\\mathopen':1,'\\mathclose':1,'\\mathpunct':1,'\\mathinner':1,'\\unicode':1,'\\cancelto':2,'\\bbox':1,'\\pmod':1,'\\pod':1,'\\verb':0,'\\fbox':1,'\\dv':2,'\\pdv':2,'\\ket':1,'\\bra':1,'\\braket':2,'\\expval':1,'\\abs':1,'\\norm':1,'\\comm':2,'\\ip':2,'\\qty':1,'\\vb':1,'\\mel':3,'\\ev':1,'\\order':1};
 const NOWRAP=new Set(['\\displaystyle','\\textstyle','\\scriptstyle','\\scriptscriptstyle','\\color','\\limits','\\nolimits','\\hline','\\middle','\\notag','\\nonumber','\\rm','\\bf','\\it','\\sf','\\tt','\\tag','\\label','\\tiny','\\small','\\large','\\Large','\\LARGE','\\huge','\\Huge','\\normalsize','\\scriptsize','\\footnotesize']);
 const MATENV=new Set(['matrix','pmatrix','bmatrix','Bmatrix','vmatrix','Vmatrix','smallmatrix','cases','rcases','array','aligned','gathered','split','align','align*','gather','gather*','multline','multline*']);
 function readCS(P){
@@ -1879,10 +1892,37 @@ function renderVisual(){
   }catch(e){ vcv.innerHTML=''; const d=document.createElement('div'); d.className='vmsg'; d.textContent='Cannot draw this expression: '+errMsg(e); vcv.appendChild(d); updateBar(); return; }
   const vb=vbox(svg);
   svg.removeAttribute('style'); svg.setAttribute('width',vb[2]/1000*VFS); svg.setAttribute('height',vb[3]/1000*VFS);
-  vcv.innerHTML=''; vcv.appendChild(svg);
+  vcv.innerHTML='';
+  const wrap=document.createElement('div'); wrap.className='vwrap'; wrap.appendChild(svg); vcv.appendChild(wrap);
+  drawSelection(wrap,svg);
   const ca=svg.querySelector('.fsCaret,.fsOn,.fsBuf');
   if(ca&&!V.drag){ try{ ca.scrollIntoView({block:'nearest',inline:'nearest'}); }catch(e){} }
   updateBar();
+}
+// Grey selection box (like Word's equation editor): the union of everything selected, drawn behind the maths.
+function selClasses(nodes,out){
+  nodes.forEach(nd=>{
+    if(nd.k==='a'){ out.push('fsA'+nd.id); return; }
+    out.push('fsT'+nd.id);
+    nd.kids.forEach(r=>{ if(!r.n.length) out.push('fsP'+r.id); selClasses(r.n,out); });
+  });
+  return out;
+}
+function drawSelection(wrap,svg){
+  const s=V.sel; if(!s||s.a===s.b||!V.maps.r[s.row.id]) return;
+  const nodes=s.row.n.slice(Math.min(s.a,s.b),Math.max(s.a,s.b));
+  let L=1e9,T=1e9,R=-1e9,B=-1e9,found=false;
+  selClasses(nodes,[]).forEach(cn=>{
+    svg.querySelectorAll('.'+cn).forEach(e=>{
+      const r=e.getBoundingClientRect(); if(!r.width&&!r.height) return;
+      found=true; L=Math.min(L,r.left); T=Math.min(T,r.top); R=Math.max(R,r.right); B=Math.max(B,r.bottom);
+    });
+  });
+  if(!found) return;
+  const w=wrap.getBoundingClientRect(), pad=3;
+  const d=document.createElement('div'); d.className='vsel';
+  d.style.left=(L-w.left-pad)+'px'; d.style.top=(T-w.top-pad)+'px'; d.style.width=(R-L+2*pad)+'px'; d.style.height=(B-T+2*pad)+'px';
+  wrap.insertBefore(d,svg);
 }
 function updateBar(){
   const inMat=!!matCtx(V.cur.row);
