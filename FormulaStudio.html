@@ -402,7 +402,31 @@ const XLINK='http://www.w3.org/1999/xlink', SVGNS='http://www.w3.org/2000/svg';
 // scripts and inline text. Unless the user picks "TeX default", force them above/below everywhere.
 const LIMOPS=/\\(?:sum|prod|coprod|bigcup|bigcap|bigvee|bigwedge|bigoplus|bigotimes|bigodot|biguplus|bigsqcup|lim|limsup|liminf|max|min|sup|inf)(?![a-zA-Z])(?!\s*\}?\s*\\(?:no)?limits)/g;
 const INTOPS=new Set(['\\int','\\iint','\\iiint','\\iiiint','\\idotsint','\\oint']);
-function fixLimits(tex){ return cfg.limits==='tex'?tex:tex.replace(LIMOPS,m=>m+'\\limits '); }
+function fixLimits(tex){
+  tex=wrapLines(tex);
+  return cfg.limits==='tex'?tex:tex.replace(LIMOPS,m=>m+'\\limits ');
+}
+// A bare \\ outside any environment does nothing in MathJax. Give such formulae their own centred lines
+// (gathered), or aligned columns if the source also has top-level & marks.
+function wrapLines(tex){
+  let depth=0,env=0,brk=false,amp=false;
+  for(let i=0;i<tex.length;i++){
+    const ch=tex[i];
+    if(ch==='\\'){
+      if(tex[i+1]==='\\'){ if(depth===0&&env===0) brk=true; i++; continue; }
+      const m=/^\\(begin|end)\{/.exec(tex.slice(i,i+8));
+      if(m){ env+=m[1]==='begin'?1:-1; i+=m[0].length-1; continue; }
+      i++; while(i+1<tex.length&&/[a-zA-Z]/.test(tex[i])&&/[a-zA-Z]/.test(tex[i+1])) i++;
+      continue;
+    }
+    if(ch==='{') depth++; else if(ch==='}') depth--;
+    else if(ch==='&'&&depth===0&&env===0) amp=true;
+  }
+  if(!brk) return tex;
+  const body=tex.replace(/(\\\\(\[[^\]]*\])?\s*)+$/,'');
+  const e=amp?'aligned':'gathered';
+  return '\\begin{'+e+'}'+body+'\\end{'+e+'}';
+}
 function baseSVG(tex,display){
   MathJax.texReset();
   const node=MathJax.tex2svg(fixLimits(tex),{display:display,em:16,ex:8});
@@ -523,7 +547,7 @@ PAL['Equations'] = [
    T(R`\begin{multline} {} \\ {} \end{multline}`,R`\mathrm{multline}`),
    T(R`\begin{alignedat}{2} {} &= {} &\quad {} &= {} \\ {} &= {} & {} &= {} \end{alignedat}`,null,'side-by-side aligned columns'),
    T(R`\begin{cases} {} \\ {} \end{cases}`),T(R`\left\{\begin{aligned} {} \\ {} \end{aligned}\right.`,null,'system of equations')]},
- {g:'Tags, boxes, notes',i:[T(R`\tag{1}`,null,'equation number'),T(R`\tag*{(1)}`),T(R`\boxed{}`),T(R`\fbox{}`),T(R`\bbox[5px,border:1px solid]{}`,null,'padded box'),
+ {g:'Tags, boxes, notes',i:[T(R`\tag{1}`,R`\text{tag (1)}`,'equation number, shown as (1) at the right'),T(R`\tag*{(1)}`,R`\text{tag* (1)}`,'equation number without added brackets'),T(R`\boxed{}`),T(R`\fbox{}`),T(R`\bbox[5px,border:1px solid]{}`,null,'padded box'),
    T(R`\text{}`),T(R`\quad\text{where}\quad`),T(R`\quad\text{for all } {}\quad`),T(R`\underbrace{}_{\text{}}`),T(R`\overbrace{}^{\text{}}`),T(R`\overset{\text{}}{=}`),T(R`\stackrel{\mathrm{def}}{=}`),T(R`\xlongequal[]{}`)]},
  {g:'Colour & highlight',i:[T(R`\color{red}{}`),T(R`\textcolor{blue}{}`),T(R`\colorbox{yellow}{}`),T(R`\fcolorbox{black}{yellow}{}`),T(R`\bbox[yellow]{}`),T(R`\bbox[#d6ecff,3px]{}`)]},
  {g:'Physics shortcuts',i:[T(R`\dv{}{}`,null,'derivative'),T(R`\pdv{}{}`,null,'partial'),T(R`\ket{}`),T(R`\bra{}`),T(R`\braket{}{}`),T(R`\expval{}`),T(R`\abs{}`),T(R`\norm{}`),T(R`\comm{}{}`),T(R`\grad`),T(R`\curl`),T(R`\div`),T(R`\laplacian`)]}
@@ -555,7 +579,7 @@ PAL['Arrows'] = [
 ];
 PAL['Symbols'] = [
  {g:'Number sets',i:SY(R`\mathbb{N} \mathbb{Z} \mathbb{Q} \mathbb{R} \mathbb{C} \mathbb{H} \mathbb{P} \mathbb{F} \mathbb{K} \mathbb{E} \mathbb{D} \mathbb{T} \mathbb{S} \mathbb{1}`)},
- {g:'Dots & misc',i:SY(R`\ldots \cdots \vdots \ddots \dots \prime \backprime \surd \angle \measuredangle \sphericalangle \triangle \square \blacksquare \Box \Diamond \lozenge \blacklozenge \bigstar \blacktriangle \blacktriangledown \diagup \diagdown \complement \mho \Finv \Game \clubsuit \diamondsuit \heartsuit \spadesuit \flat \natural \sharp \checkmark \maltese \S \P \dag \ddag \copyright \circledS \degree \celsius \perthousand \micro \ohm \mathrm{\AA}`).concat([T(R`\text{Å}`),T(R`\%`),T(R`\&`),T(R`\#`),T(R`\$`),T(R`\_`),T(R`\ `,R`\text{␣}`,'explicit space')])},
+ {g:'Dots & misc',i:SY(R`\ldots \cdots \vdots \ddots \dots \prime \backprime \surd \angle \measuredangle \sphericalangle \triangle \square \blacksquare \Box \Diamond \lozenge \blacklozenge \bigstar \blacktriangle \blacktriangledown \diagup \diagdown \complement \mho \Finv \Game \clubsuit \diamondsuit \heartsuit \spadesuit \flat \natural \sharp \checkmark \maltese \S \P \dag \ddag \copyright \circledS \degree \celsius \perthousand \micro \ohm \mathrm{\AA}`).concat([T(R`\text{Å}`),T(R`\%`),T(R`\&`),T(R`\#`),T(R`\$`),T(R`\_`),T(R`\ `,R`\text{space}`,'explicit space')])},
  {g:'Letters & styles',i:SY(R`\mathcal{A} \mathcal{B} \mathcal{F} \mathcal{H} \mathcal{L} \mathcal{N} \mathcal{O} \mathcal{P} \mathcal{R} \mathscr{L} \mathscr{F} \mathfrak{A} \mathfrak{g} \mathfrak{S} \mathbf{R} \mathsf{T}`)}
 ];
 PAL['Delimiters'] = [
@@ -571,9 +595,9 @@ PAL['Accents'] = [
 ];
 PAL['Style'] = [
  {g:'Fonts',i:['mathrm','mathbf','mathit','mathsf','mathtt','mathcal','mathscr','mathfrak','mathbb','boldsymbol','bm','text','textbf','textit','textrm','textsf','texttt','operatorname','mathnormal'].map(f=>T('\\'+f+'{}',null,'\\'+f))},
- {g:'Size & style',i:[T(R`\displaystyle `,R`\displaystyle\sum`),T(R`\textstyle `,R`\textstyle\sum`),T(R`\scriptstyle `,R`\scriptstyle x`),T(R`\scriptscriptstyle `,R`\scriptscriptstyle x`),
-   T(R`\tiny `,R`\tiny x`),T(R`\small `,R`\small x`),T(R`\large `,R`\large x`),T(R`\Large `,R`\Large x`),T(R`\LARGE `,R`\LARGE x`),T(R`\huge `,R`\huge x`)].map(x=>x)},
- {g:'Spacing',i:[T(R`\, `,R`\text{thin}`,'thin space'),T(R`\: `,R`\text{med}`,'medium space'),T(R`\; `,R`\text{thick}`,'thick space'),T(R`\! `,R`\text{neg}`,'negative thin space'),T(R`\quad `,R`\text{quad}`),T(R`\qquad `,R`\text{qquad}`),T(R`\hspace{1em}`,R`\text{hspace}`),T(R`\\ `,R`\text{newline}`,'new line'),T(R`\phantom{}`),T(R`\hphantom{}`),T(R`\vphantom{}`),T(R`\smash{}`),T(R`\mathstrut `,R`\text{strut}`),T(R`\mathrlap{}`),T(R`\mathllap{}`),T(R`\mathclap{}`)]}
+ {g:'Size & style',i:[T(R`\displaystyle `,R`\displaystyle\sum`),T(R`\textstyle `,R`\textstyle\sum`),T(R`\scriptstyle `,R`\scriptstyle x`),T(R`\scriptscriptstyle `,R`{\scriptscriptstyle x}\,\text{scriptscript}`),
+   T(R`\tiny `,R`{\tiny x}\,\text{tiny}`),T(R`\small `,R`{\small x}\,\text{small}`),T(R`\large `,R`{\large x}\,\text{large}`),T(R`\Large `,R`{\Large x}\,\text{Large}`),T(R`\LARGE `,R`{\LARGE x}\,\text{LARGE}`),T(R`\huge `,R`{\huge x}\,\text{huge}`)].map(x=>x)},
+ {g:'Spacing',i:[T(R`\, `,R`\text{thin}`,'thin space'),T(R`\: `,R`\text{med}`,'medium space'),T(R`\; `,R`\text{thick}`,'thick space'),T(R`\! `,R`\text{neg}`,'negative thin space'),T(R`\quad `,R`\text{quad}`),T(R`\qquad `,R`\text{qquad}`),T(R`\hspace{1em}`,R`\text{hspace}`),T(R`\\ `,R`\text{newline}`,'new line'),T(R`\phantom{}`,R`\text{phantom}`,'invisible, but takes up the space of its contents'),T(R`\hphantom{}`,R`\text{hphantom}`,'invisible; keeps the width only'),T(R`\vphantom{}`,R`\text{vphantom}`,'invisible; keeps the height only'),T(R`\smash{}`,R`\text{smash}`,'draws the contents but ignores their height'),T(R`\mathstrut `,R`\text{strut}`,'invisible parenthesis-height strut'),T(R`\mathrlap{}`,R`\text{rlap}`,'overlap to the right: contents take no width'),T(R`\mathllap{}`,R`\text{llap}`,'overlap to the left: contents take no width'),T(R`\mathclap{}`,R`\text{clap}`,'centred overlap: contents take no width')]}
 ];
 PAL['Chemistry'] = [
  {g:'Formulae & ions (mhchem)',i:[T(R`\ce{H2O}`),T(R`\ce{CO2}`),T(R`\ce{SO4^2-}`),T(R`\ce{NH4+}`),T(R`\ce{Fe(CN)6^{3-}}`),T(R`\ce{CuSO4 * 5H2O}`),T(R`\ce{^{14}C}`),T(R`\ce{^{227}_{90}Th+}`),T(R`\ce{[Cu(NH3)4]^2+}`),T(R`\ce{C6H5-CH3}`),T(R`\ce{R-OH}`),T(R`\ce{C=C}`),T(R`\ce{C#C}`),T(R`\ce{H3O+}`),T(R`\ce{OH-}`),T(R`\ce{Na+ + Cl-}`),T(R`\ce{{}}`)]},
@@ -1994,6 +2018,7 @@ vcv.addEventListener('keydown',e=>{
     if(/^[A-Za-z]$/.test(k)){ e.preventDefault(); V.buf+=k; bufSuggest(); renderVisual(); return; }
     if(k==='Backspace'){ e.preventDefault(); V.buf=V.buf.slice(0,-1); if(V.buf===''&&false) V.buf=null; bufSuggest(); renderVisual(); return; }
     if(k==='Escape'){ e.preventDefault(); V.buf=null; vHideSugg(); renderVisual(); return; }
+    if(k==='\\'&&V.buf===''){ e.preventDefault(); V.buf=null; vHideSugg(); visualInsertTeX('\\\\'); return; }
     if(k===' '||k==='Enter'||k==='Tab'){ e.preventDefault(); if(!bufFinish(k===' '?'space':'accept')) renderVisual(); return; }
     if(k.length===1){ e.preventDefault(); const ok=bufFinish('space'); if(ok) vType(k); return; }
     V.buf=null; vHideSugg();
@@ -2008,7 +2033,7 @@ vcv.addEventListener('keydown',e=>{
     case 'End':  e.preventDefault(); if(e.shiftKey) extend(()=>{V.cur.i=V.cur.row.n.length;}); else { V.sel=null; V.cur.i=V.cur.row.n.length; } renderVisual(); return;
     case 'Backspace': e.preventDefault(); vBackspace(); return;
     case 'Delete': e.preventDefault(); vDelete(); return;
-    case 'Enter': e.preventDefault(); vEnter(); return;
+    case 'Enter': e.preventDefault(); if(matCtx(V.cur.row)) vEnter(); else if(!(V.cur.row.p&&V.cur.row.p.tpl==='text')) visualInsertTeX('\\\\'); return;
     case 'Escape': V.sel=null; renderVisual(); return;
     case 'Tab': {
       const row=V.cur.row;
