@@ -4420,8 +4420,26 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       : state.cameraMode === "ortho" ? camDist : camDist * orthoDistMultFor(activeOrthoFovDeg());
     scene.fog = state.fogOn ? new THREE.FogExp2(state.bgColor, state.fogDensity / Math.max(fogRefDist, 1)) : null;
   }
+  /* One export at a time. The image is made by temporarily changing the scene (transparent background, no fog, full detail, export size) and
+     restoring it in the toBlob callback, which runs LATER. A second export started in between (a double click on Copy, or a click while a large image
+     is still being encoded) captured the already-changed scene as the state to restore, so the background stayed null for good: the view then cleared
+     to black although the background colour setting still said white. Further requests now wait their turn. */
+  var exportBusy = false, exportQueue = [];
   function renderExportBlob(callback) {
-    var vp = document.getElementById("viewport"); if (!vp) { callback(null); return; }
+    if (exportBusy) { exportQueue.push(callback); return; }
+    exportBusy = true;
+    var released = false;
+    function release() { if (released) return; released = true; exportBusy = false; var next = exportQueue.shift(); if (next) renderExportBlob(next); }
+    try { renderExportBlobNow(callback, release); }
+    catch (e) {
+      /* whatever was half-changed goes back to what the settings say */
+      if (!scene.background) scene.background = new THREE.Color(state.bgColor);
+      renderer.setClearAlpha(1); updateFog();
+      try { callback(null); } finally { release(); }
+    }
+  }
+  function renderExportBlobNow(callback, release) {
+    var vp = document.getElementById("viewport"); if (!vp) { try { callback(null); } finally { release(); } return; }
     var cw = vp.clientWidth, ch = vp.clientHeight;
     var wasHighDetail = state.highDetail, oldRatio = renderer.getPixelRatio();
     var wasFog = scene.fog, wasBackground = scene.background;
@@ -4456,10 +4474,10 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     function finish(blob) {
       renderer.setPixelRatio(oldRatio);
       renderer.setSize(cw, ch, false);
-      if (state.exportTransparent) { scene.background = wasBackground; scene.fog = wasFog; renderer.setClearAlpha(1); }
+      if (state.exportTransparent) { scene.background = wasBackground || new THREE.Color(state.bgColor); scene.fog = wasFog; renderer.setClearAlpha(1); }
       if (!wasHighDetail) { state.highDetail = false; if (sphereGeo) sphereGeo.dispose(); sphereGeo = new THREE.SphereGeometry(1, 20, 16); renderStructure(); renderSurface(); }
       else { renderFrame(); }
-      callback(blob, cw * state.exportScale, ch * state.exportScale);
+      try { callback(blob, cw * state.exportScale, ch * state.exportScale); } finally { release(); }
     }
     if (!includeAxisKey) { renderer.domElement.toBlob(finish, "image/png"); return; }
     var exportW = cw * state.exportScale, exportH = ch * state.exportScale;
@@ -5244,13 +5262,22 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       setStatus("This browser does not support copying images to the clipboard from a local file -- try Export image (PNG) instead.", true);
       return;
     }
-    renderExportBlob(function (blob) {
-      if (!blob) { setStatus("Copy failed.", true); return; }
-      navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]).then(function () {
-        setStatus("Copied image to clipboard" + (state.exportTransparent ? " (transparent background)" : "") + ".", false);
-      }).catch(function () {
-        setStatus("Couldn't copy to the clipboard -- this can happen without a recent user click, or without clipboard permission. Try again, or use Export image (PNG).", true);
-      });
+    /* The clipboard is asked for NOW, inside the click, and given the image as a promise: the browser only allows a clipboard write for a few seconds after
+       a click (and while the page has focus), and drawing and encoding a large image can take longer than that, which is when "couldn't copy" appeared. */
+    var transparent = state.exportTransparent;
+    var blobP = new Promise(function (resolve, reject) {
+      renderExportBlob(function (blob) { if (blob) resolve(blob); else reject(new Error("the image could not be made")); });
+    });
+    var item;
+    try { item = new ClipboardItem({ "image/png": blobP }); }
+    catch (e) { /* a browser that wants the finished image rather than a promise */
+      blobP.then(function (blob) { return navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]); }).then(function () { setStatus("Copied image to clipboard" + (transparent ? " (transparent background)" : "") + ".", false); }, function () { setStatus("Couldn't copy to the clipboard. Try again, or use Export image (PNG).", true); });
+      return;
+    }
+    navigator.clipboard.write([item]).then(function () {
+      setStatus("Copied image to clipboard" + (transparent ? " (transparent background)" : "") + ".", false);
+    }).catch(function (e) {
+      setStatus(e && e.name === "NotAllowedError" ? "The browser refused the copy (the page needs focus and clipboard permission). Click the view once and try again, or use Export image (PNG)." : "Couldn't copy to the clipboard" + (e && e.message ? " (" + e.message + ")" : "") + ". Try again, or use Export image (PNG).", true);
     });
   }
   function setHighDetail(on) {
@@ -22660,7 +22687,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<p><b>High detail spheres &amp; tubes</b> swaps in much finer sphere and cylinder tessellation, at some cost to rotation smoothness for large structures -- useful for previewing exactly how a figure will look before exporting. <b>Depth cueing</b> fades distant atoms toward the background colour, which can help read depth in a crowded structure; <b>fog amount</b> controls how aggressively.</p>" +
       "<p>Atoms don't emit any light themselves -- <b>atom roughness</b>, <b>atom metalness</b>, and <b>reflection strength</b> (Material panel) control how they respond to the scene's lighting instead. Lower roughness gives a glossier, more reflective surface; higher metalness moves it from a plastic-like look toward bare metal (useful for a striking cover-art render, less so for a conventional scientific figure); reflection strength scales how much the environment map contributes, which mainly shows up once metalness is raised. If a selected atom's highlight is hard to make out, a glossy, brightly lit atom is usually why -- the highlight itself doesn't respond to lighting at all, but a very bright, reflective atom underneath it can still make thin highlight lines harder to see by contrast.</p>" +
       "<p><b>Export image (PNG)</b> always renders at full tessellation regardless of the high detail toggle, at the chosen <b>export resolution</b> multiple of the current view size, then restores the interactive settings afterward -- so a quick figure never requires manually maxing out quality settings first. In Chrome or Edge it opens a normal save dialog, defaulting to the folder of whichever host CIF was most recently dropped onto the app (not one opened via the file browser button, since only a genuine drag hands over that information) -- other browsers fall back to a plain download instead. That last-used folder is only remembered for the current session, not saved between visits. If <b>Show axis key</b> (Display) is on, the key is drawn into the exported image at its current on-screen position, size, and orientation, same as it appears in the live view -- a part currently overlapping the sidebar or header is clipped out of the export too, matching what's actually visible on screen.</p>" +
-      "<p><b>Transparent background</b> drops the background colour (and briefly suspends fog, which would otherwise leave a visible tint) for that one exported frame, then restores both immediately afterward -- normal interactive display is never affected. It applies to both Export image and <b>Copy image to clipboard</b>, which renders the same way but places the PNG directly on the system clipboard for pasting into another document instead of saving a file; transparency survives that route too; wherever it lands, whether it stays transparent from there depends on the receiving application. Clipboard copying needs a recent click to work (this triggers it) and isn't available in every browser -- Export image (PNG) always works as the fallback.</p>" +
+      "<p><b>Transparent background</b> drops the background colour (and briefly suspends fog, which would otherwise leave a visible tint) for that one exported frame, then restores both immediately afterward -- normal interactive display is never affected. Images are made one at a time: a Copy or Export pressed while the previous image is still being prepared waits for it, so the background and fog are always put back as they were. It applies to both Export image and <b>Copy image to clipboard</b>, which renders the same way but places the PNG directly on the system clipboard for pasting into another document instead of saving a file; transparency survives that route too; wherever it lands, whether it stays transparent from there depends on the receiving application. Clipboard copying needs a recent click to work (this triggers it) and isn't available in every browser -- Export image (PNG) always works as the fallback.</p>" +
       "<p><b>Video</b> (Export panel) records the view as a video file, either as <b>Rotation</b> (one full 360&deg; turn about a view axis, in the number of <i>steps</i> you give) or as <b>Rocking</b>, a swing back and forth that is made to be played on a loop. Pick the kind with the radio buttons at the top; only the settings that belong to it are shown, and the button at the bottom exports that kind. <b>fps</b>, <b>size</b> and <b>format</b> (AVI uncompressed, or the much smaller MP4) apply to both. The axis is a view axis: +Y is the turntable (vertical) axis, +X tumbles the model forwards, +Z rolls it, and a plus sign always means the right-hand-rule rotation of the model.</p>" +
       "<p><b>Rocking video.</b> The recording starts at the view you have now. Choose <b>rock about</b> (the axis, and with its sign the direction of the first swing), the <b>angle</b> (degrees, fractions allowed), <b>frames per cycle</b> and <b>cycles in the file</b>. <b>One side</b> swings from the starting view to +angle and back; <b>Both sides</b> swings from &minus;angle to +angle through the starting view. With <b>Momentum</b> ticked (the default) the swing slows as it nears a limit, stops there and starts back slowly, and is fastest in the middle, exactly like a pendulum (a sinusoid); unticked, it moves at constant speed and turns round at once at each limit. The line under the settings states in words what will be recorded, the length of a cycle in seconds, and the largest step per frame.</p>" +
       "<p><b>Why it loops without a hitch.</b> The cycle is the N samples at phase k/N (k = 0 &hellip; N&minus;1) of a periodic curve, so the last frame is one ordinary step <i>before</i> the first and is never a copy of it; the first frame is not shown twice at the join, and the speed is continuous across it in the second and every later cycle (with momentum, so is the acceleration). To make the turning points fall exactly on a frame, so that the angle you asked for is exactly the angle reached, the number of frames is moved to the nearest multiple of 2 (one side) or 4 (both sides); the line under the settings says when it has done so. One cycle is enough for a video that is played on a loop; <i>cycles in the file</i> only repeats the same frames for a player that does not loop.</p>" +
