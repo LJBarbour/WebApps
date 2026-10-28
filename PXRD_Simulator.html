@@ -607,8 +607,8 @@ input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;}
 
     <h3>Quick start</h3>
     <ul>
-      <li>Drop one or more <strong>CIF</strong>, <strong>SHELX (.res/.ins)</strong>, <strong>.xy</strong>, <strong>.xye</strong>, <strong>.xrdml</strong> or <strong>.raw</strong> files anywhere on the page. Each structure file becomes a simulated pattern with its own colour.</li>
-      <li>Optionally drop an <strong>experimental file</strong> (.xy, .xye, .dat, .csv -- two columns, 2&theta; &amp; intensity; comment lines and a single-number wavelength header line are skipped). Bruker <strong>.raw</strong> files in the binary RAW 4.00 format (DIFFRAC.SUITE, single scan range) are read directly; other binary RAW versions and multi-range files are rejected with a message, and a plain-text .raw export is read as two columns.</li>
+      <li>Drop one or more <strong>CIF</strong>, <strong>SHELX (.res/.ins)</strong>, <strong>experimental PXRD files</strong> (.xy, .xye, .xrdml, .raw, .brml, .uxd, .ras, .rasx, .asc, .rd, .udf, .gsa, .fxye, .zip ...) anywhere on the page. Each structure file becomes a simulated pattern with its own colour.</li>
+      <li>Optionally drop an <strong>experimental file</strong> to overlay it (normalised to 100). Formats are detected from the file content: text columns (<code>.xy .xye .dat .txt .csv</code>, 2&theta; &amp; intensity; headers, comment lines and a single-number wavelength line are skipped), Malvern Panalytical <code>.xrdml</code>, Bruker <code>.raw</code> (RAW4.00, RAW1.01, RAW2, v1), <code>.brml</code> and <code>.uxd</code>, Rigaku <code>.ras .rasx .asc</code>, Philips <code>.rd .udf</code>, GSAS <code>.gsa .gss .fxye</code>, and <code>.zip</code> archives of these. Files with several scans/ranges add one pattern per scan. Not readable: Rigaku/Shimadzu/STOE binary <code>.raw</code>, and intensity-only files with no angle axis -- export those as .xy or .xrdml. Only <code>.xy/.xye/.xrdml</code> and Bruker RAW4.00 have been tested on real instrument files; the other formats follow published format descriptions.</li>
       <li>Click a pattern card on the left to select it -- <strong>Save .xy of selected</strong> (under Output) exports that one pattern's data.</li>
       <li>Adjust, then export as <strong>PNG</strong> or <strong>.xy</strong> data.</li>
     </ul>
@@ -1301,76 +1301,432 @@ function updateButtons(){
 // ===========================================================
 // 8. FILE LOADING
 // ===========================================================
-function parseXRDML(text){
-  const doc=new DOMParser().parseFromString(text,'application/xml');
-  if(doc.querySelector('parsererror'))throw new Error('XRDML: XML parse error');
-  const getVal=(el,tag)=>{const f=el.querySelector(tag);return f?f.textContent.trim():null;};
-  let startPos=null,endPos=null;
-  for(const pos of doc.querySelectorAll('positions')){
-    if(pos.getAttribute('axis')==='2Theta'){
-      startPos=parseFloat(getVal(pos,'startPosition'));
-      endPos=parseFloat(getVal(pos,'endPosition'));
-      break;
+// Shared PXRD file readers (identical block in Vx PXRD Viewer; source: 5 Crystallographic Apps/PXRD_Readers).
+/* PXRD_READERS_BEGIN  -- shared experimental-PXRD file readers (Vx PXRD Viewer + PXRD Simulator).
+   Source of truth: 5 Crystallographic Apps/PXRD_Readers/pxrd_readers.js ; injected by inject.ps1.
+   API:  await PXRD.load(name, arrayBuffer) -> { scans:[{name,x,y,meta}], warnings:[...] }
+         meta: { format, wavelength (A), temperatureC, note, axis }
+   Every reader returns raw intensities as stored; the apps normalise if they want to.        */
+const PXRD=(function(){
+'use strict';
+const text8=(buf)=>new TextDecoder('utf-8').decode(buf).replace(/^﻿/,'');
+const baseName=(n)=>n.split(/[\\/]/).pop();
+const extOf=(n)=>{const m=baseName(n).match(/\.([^.]+)$/);return m?m[1].toLowerCase():'';};
+const fin=(v)=>typeof v==='number'&&isFinite(v);
+function mkScan(x,y,meta,e){return{x,y,e:e||null,meta:meta||{}};}
+
+/* ---------------------------------------------------------------- ZIP (stored/deflate, no dependencies) */
+async function unzip(buf){
+  const dv=new DataView(buf),len=buf.byteLength;
+  let e=-1;for(let i=len-22;i>=Math.max(0,len-22-65535);i--){if(dv.getUint32(i,true)===0x06054b50){e=i;break;}}
+  if(e<0)throw new Error('not a valid ZIP archive');
+  const count=dv.getUint16(e+10,true);let p=dv.getUint32(e+16,true);const out=[];
+  for(let k=0;k<count;k++){
+    if(dv.getUint32(p,true)!==0x02014b50)break;
+    const method=dv.getUint16(p+10,true),csize=dv.getUint32(p+20,true),nl=dv.getUint16(p+28,true),
+          xl=dv.getUint16(p+30,true),cl=dv.getUint16(p+32,true),off=dv.getUint32(p+42,true);
+    const name=new TextDecoder().decode(new Uint8Array(buf,p+46,nl));
+    p+=46+nl+xl+cl;
+    if(name.endsWith('/'))continue;
+    out.push({name,async getBuf(){
+      const lnl=dv.getUint16(off+26,true),lxl=dv.getUint16(off+28,true),ds=off+30+lnl+lxl;
+      const comp=buf.slice(ds,ds+csize);
+      if(method===0)return comp;
+      if(method!==8)throw new Error('unsupported ZIP compression method '+method);
+      if(typeof DecompressionStream==='undefined')throw new Error('this browser cannot inflate ZIP data (needs DecompressionStream)');
+      return await new Response(new Blob([comp]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer();
+    }});
+  }
+  return out;
+}
+
+/* ---------------------------------------------------------------- generic column text (xy, xye, dat, txt, csv, asc ...) */
+function parseColumns(text){
+  const xs=[],ys=[],es=[],singles=[];
+  for(const raw of text.split(/\r?\n/)){
+    const line=raw.trim();
+    if(!line||/^[#!;'%\/*]/.test(line))continue;
+    let toks;
+    if(/[;\t]/.test(line))toks=line.split(/[;\t]+/).map(t=>t.trim().replace(',','.'));
+    else toks=line.split(/[\s,]+/);
+    const nums=[];for(const t of toks){if(t==='')continue;const n=Number(t);if(!isFinite(n))break;nums.push(n);}
+    if(!nums.length)continue;
+    if(nums.length===1){singles.push(nums[0]);continue;}
+    xs.push(nums[0]);ys.push(nums[1]);if(nums.length>2)es.push(nums[2]);
+  }
+  if(xs.length<5){
+    if(singles.length>=10)throw new Error('file holds a single column of intensities with no angle axis (start angle and step are not stored)');
+    throw new Error('no two-column numeric data found');
+  }
+  const meta={};
+  if(singles.length===1&&singles[0]>0.3&&singles[0]<3)meta.wavelength=singles[0];
+  return[mkScan(xs,ys,meta,es.length===xs.length?es:null)];
+}
+
+/* ---------------------------------------------------------------- Bruker / Siemens UXD */
+function parseUXD(text){
+  const scans=[];let st={start:null,step:null,wl:null,temp:null},cur=null;
+  const flush=()=>{
+    if(!cur)return;
+    if(cur.mode==='step'){
+      if(cur.vals.length>=5&&fin(cur.start)&&fin(cur.step)){
+        scans.push(mkScan(cur.vals.map((_,i)=>cur.start+i*cur.step),cur.vals,{wavelength:cur.wl,temperatureC:cur.temp}));}
+    }else{
+      const s=cur.mode==='time'?3:2,xs=[],ys=[];
+      for(let i=0;i+1<cur.vals.length;i+=s){xs.push(cur.vals[i]);ys.push(cur.vals[i+1]);}
+      if(xs.length>=5)scans.push(mkScan(xs,ys,{wavelength:cur.wl,temperatureC:cur.temp}));}
+    cur=null;};
+  for(const raw of text.split(/\r?\n/)){
+    const line=raw.trim();
+    if(!line||line[0]===';')continue;
+    if(line[0]==='_'){
+      const eq=line.indexOf('='),key=(eq<0?line:line.slice(0,eq)).trim().toUpperCase(),val=eq<0?'':line.slice(eq+1).trim().replace(/^'|'$/g,'');
+      if(key==='_DRIVE'){flush();continue;}
+      if(key==='_START')st.start=parseFloat(val);
+      else if(key==='_STEPSIZE')st.step=parseFloat(val);
+      else if(key==='_WL1'||key==='_WL'||key==='_WAVELENGTH'){const w=parseFloat(val);if(w>0.3&&w<3)st.wl=w;}
+      else if(key==='_TEMP'||key==='_TEMPERATURE'){const t=parseFloat(val);if(fin(t))st.temp=t;}
+      else if(key==='_COUNT'||key==='_CPS'){flush();cur={mode:'step',vals:[],start:st.start,step:st.step,wl:st.wl,temp:st.temp};}
+      else if(key==='_2THETACOUNTS'||key==='_2THETACPS'){flush();cur={mode:'pair',vals:[],wl:st.wl,temp:st.temp};}
+      else if(key==='_2THETACOUNTSTIME'){flush();cur={mode:'time',vals:[],wl:st.wl,temp:st.temp};}
+      else if(key==='_D-I'||key==='_2THETA-I'){flush();cur={mode:'peaks',vals:[]};}
+      continue;
+    }
+    if(cur&&cur.mode!=='peaks'&&/^[-+.\d]/.test(line)){
+      for(const t of line.split(/[\s,]+/)){const n=Number(t);if(t!==''&&isFinite(n))cur.vals.push(n);}
     }
   }
-  if(!isFinite(startPos)||!isFinite(endPos))throw new Error('XRDML: could not find 2Theta positions');
-  const intensEl=doc.querySelector('intensities');
-  if(!intensEl)throw new Error('XRDML: no intensities element found');
-  const rawInts=intensEl.textContent.trim().split(/\s+/).map(Number).filter(isFinite);
-  const n=rawInts.length;
-  if(n<5)throw new Error('XRDML: fewer than 5 intensity points');
-  const xs=Array.from({length:n},(_,i)=>startPos+(i/(n-1))*(endPos-startPos));
-  const ys=rawInts.slice();
-  const m=arrMax(ys)||1;
-  for(let i=0;i<ys.length;i++)ys[i]*=100/m;
-  return{ex:xs,ey:ys};
+  flush();
+  if(!scans.length)throw new Error('no scan data found in UXD file');
+  return scans;
 }
-function parseXY(text){
-  const xs=[],ys=[];let first=true;
-  for(let ln of text.split(/\r?\n/)){
-    ln=ln.trim();
-    if(!ln||/^[#!;'%\/]/.test(ln))continue;
-    const parts=ln.split(/[\s,;]+/).map(Number).filter(v=>Number.isFinite(v));
-    if(first&&parts.length===1){first=false;continue;}   // wavelength header line
-    first=false;
-    if(parts.length>=2){xs.push(parts[0]);ys.push(parts[1]);}
+
+/* ---------------------------------------------------------------- Rigaku RAS (text) */
+function parseRAS(text){
+  const scans=[];let hdr={},inData=false,xs=[],ys=[];
+  for(const raw of text.split(/\r?\n/)){
+    const l=raw.trim();
+    if(!l)continue;
+    if(l.startsWith('*RAS_INT_START')){inData=true;xs=[];ys=[];continue;}
+    if(l.startsWith('*RAS_INT_END')){
+      inData=false;
+      if(xs.length>=5){const wl=parseFloat(hdr['HW_XG_WAVE_LENGTH_ALPHA1']||hdr['MEAS_COND_XG_WAVE_LENGTH_ALPHA1']||'');
+        scans.push(mkScan(xs,ys,{wavelength:wl>0.3&&wl<3?wl:null}));}
+      continue;}
+    if(l[0]==='*'){const m=l.match(/^\*(\S+)\s+"?([^"]*)"?\s*$/);if(m)hdr[m[1]]=m[2];continue;}
+    if(inData){
+      const t=l.split(/\s+/).map(Number);
+      if(t.length>=2&&fin(t[0])&&fin(t[1])){xs.push(t[0]);ys.push(fin(t[2])&&t[2]>0&&t[2]!==1?t[1]*t[2]:t[1]);}
+    }
   }
-  if(xs.length<5)throw new Error('No two-column numeric data found.');
-  const m=arrMax(ys)||1;
-  for(let i=0;i<ys.length;i++)ys[i]*=100/m;
-  return{ex:xs,ey:ys};
+  if(!scans.length)throw new Error('no scan data found in Rigaku RAS file');
+  return scans;
 }
-// Bruker RAW 4.00 (DIFFRAC.SUITE), single range. Tagged records [u32 type][u32 length] run from
-// 0x3D to the range record (type 30); the fixed scan block after it holds the point count (+4),
-// start angle (+0x48) and step (+0x50) as doubles; float32 counts fill the end of the file.
-function parseBrukerRaw(buf){
+
+/* ---------------------------------------------------------------- Rigaku DAT / ASC ("*TYPE" files) */
+function parseRigakuDat(text){
+  const scans=[];let start=null,step=null,count=null,vals=null;
+  for(const raw of text.split(/\r?\n/)){
+    const l=raw.trim();
+    if(!l||l[0]==='#')continue;
+    if(l[0]==='*'){
+      const u=l.toUpperCase();
+      if(u.startsWith('*BEGIN')){vals=[];continue;}
+      if(u.startsWith('*END')){
+        if(vals&&vals.length>=5&&fin(start)&&fin(step))scans.push(mkScan(vals.map((_,i)=>start+i*step),vals,{}));
+        vals=null;continue;}
+      if(u.startsWith('*EOF'))break;
+      const m=l.match(/^\*([^=\s]+)\s*=\s*(.*)$/);
+      if(m){const k=m[1].toUpperCase(),v=parseFloat(m[2]);if(k==='START')start=v;else if(k==='STEP')step=v;else if(k==='COUNT')count=v;}
+      continue;}
+    if(vals&&/^[-+.\d]/.test(l)){for(const t of l.split(/[\s,]+/)){const n=Number(t);if(t!==''&&isFinite(n))vals.push(n);}}
+  }
+  if(!scans.length)throw new Error('no scan data found in Rigaku DAT/ASC file');
+  return scans;
+}
+
+/* ---------------------------------------------------------------- GSAS (STD / ESD / FXYE) */
+function parseGSAS(text){
+  const lines=text.split(/\r?\n/),scans=[];
+  for(let i=0;i<lines.length;i++){
+    if(!/^BANK\s/i.test(lines[i]))continue;
+    const head=lines[i],c=head.trim().split(/\s+/),up=head.toUpperCase();
+    if(/SLOG|RALF|TIME_MAP|TOF/.test(up))throw new Error('GSAS time-of-flight banks are not 2theta data');
+    const rows=[];let j=i+1;
+    while(j<lines.length&&!/^BANK\s/i.test(lines[j])&&lines[j][0]!=='#'){rows.push(lines[j]);j++;}
+    i=j-1;
+    const xs=[],ys=[];
+    if(/FXY/.test(up)){
+      for(const r of rows){const t=r.trim().split(/\s+/).map(Number);if(t.length>=2&&fin(t[0])&&fin(t[1])){xs.push(t[0]/100);ys.push(t[1]);}}
+    }else{
+      const nch=parseInt(c[2],10),start=parseFloat(c[5])/100,step=parseFloat(c[6])/100;
+      if(!fin(start)||!fin(step)||!(nch>0))throw new Error('unreadable GSAS BANK header');
+      const esd=/ESD/.test(up);let n=0;
+      outer:for(const r of rows){
+        if(esd){for(let k=0;k<80;k+=16){if(r.slice(k,k+8).trim()==='')break;const y=parseFloat(r.slice(k,k+8));if(!fin(y))continue;xs.push(start+step*n);ys.push(Math.max(y,0));if(++n>=nch)break outer;}}
+        else{for(let k=0;k<80;k+=8){if(r.slice(k,k+8).trim()==='')break;const y=parseFloat(r.slice(k+2,k+8));xs.push(start+step*n);ys.push(fin(y)?Math.max(y,0):0);if(++n>=nch)break outer;}}
+      }
+    }
+    if(xs.length>=5)scans.push(mkScan(xs,ys,{}));
+  }
+  if(!scans.length)throw new Error('no GSAS bank data found');
+  return scans;
+}
+
+/* ---------------------------------------------------------------- Philips UDF (text) */
+function parseUDF(text){
+  const lines=text.split(/\r?\n/);let start=null,end=null,step=null,wl=null,idx=-1;
+  for(let i=0;i<lines.length;i++){
+    const l=lines[i].trim();
+    if(l==='RawScan'){idx=i;break;}
+    const a=l.indexOf(','),b=l.lastIndexOf(',');if(a<0||b<=a)continue;
+    const k=l.slice(0,a).trim(),v=l.slice(a+1,b).trim();
+    if(k==='DataAngleRange'){const t=v.split(',').map(Number);start=t[0];end=t[1];}
+    else if(k==='ScanStepSize')step=parseFloat(v);
+    else if(k==='LabdaAlpha1')wl=parseFloat(v);
+  }
+  if(idx<0)throw new Error('UDF: no RawScan block');
+  const vals=[];
+  for(let i=idx+1;i<lines.length;i++){
+    const l=lines[i];const stop=l.indexOf('/')>=0;
+    for(const t of l.replace('/',' ').split(/[\s,]+/)){const n=Number(t);if(t!==''&&isFinite(n))vals.push(n);}
+    if(stop)break;
+  }
+  if(!fin(step)&&fin(start)&&fin(end)&&vals.length>1)step=(end-start)/(vals.length-1);
+  if(vals.length<5||!fin(start)||!(step>0))throw new Error('UDF: incomplete scan header');
+  return[mkScan(vals.map((_,i)=>start+i*step),vals,{wavelength:wl>0.3&&wl<3?wl:null})];
+}
+
+/* ---------------------------------------------------------------- XRDML (Malvern Panalytical, 1.0-2.x) */
+function parseXRDML(text){
+  const doc=new DOMParser().parseFromString(text,'application/xml');
+  if(doc.querySelector('parsererror'))throw new Error('XML parse error');
+  const kids=(el,tag)=>[...el.children].filter(c=>c.localName===tag);
+  const first=(el,tag)=>{const f=el.getElementsByTagName(tag)[0];return f?f.textContent.trim():null;};
+  const scans=[];
+  for(const meas of doc.getElementsByTagName('xrdMeasurement')){
+    let wl=null;const uw=meas.getElementsByTagName('usedWavelength')[0];
+    if(uw){const w=parseFloat(first(uw,'kAlpha1')||first(uw,'kAlpha')||'');if(w>0.3&&w<3)wl=w;}
+    for(const scan of meas.getElementsByTagName('scan')){
+      const dp=scan.getElementsByTagName('dataPoints')[0];if(!dp)continue;
+      const pos=kids(dp,'positions');
+      let p=pos.find(e=>/^2theta/i.test(e.getAttribute('axis')||''))||pos.find(e=>first(e,'startPosition')!=null||first(e,'listPositions')!=null);
+      if(!p)continue;
+      const axis=p.getAttribute('axis')||'';
+      const ie=kids(dp,'intensities')[0]||kids(dp,'counts')[0];if(!ie)continue;
+      let ys=ie.textContent.trim().split(/\s+/).map(Number).filter(fin);
+      if(ie.localName==='counts'){const ct=parseFloat(first(dp,'commonCountingTime')||'');if(ct>0)ys=ys.map(v=>v/ct);}
+      const n=ys.length;if(n<5)continue;
+      let xs;const lp=first(p,'listPositions');
+      if(lp){xs=lp.split(/\s+/).map(Number).filter(fin);if(xs.length!==n)continue;}
+      else{const a=parseFloat(first(p,'startPosition')),b=parseFloat(first(p,'endPosition'));if(!fin(a)||!fin(b))continue;xs=Array.from({length:n},(_,i)=>a+i*(b-a)/(n-1));}
+      let temp=null;
+      for(const na of dp.getElementsByTagName('nonAmbientPoints')){
+        const type=na.getAttribute('type')||'';if(type&&!/temp/i.test(type))continue;
+        const vs=(first(na,'nonAmbientValues')||first(na,'listPositions')||'').split(/[\s,]+/).map(Number).filter(fin);
+        if(vs.length){const m=vs.reduce((s,v)=>s+v,0)/vs.length;temp=(na.getAttribute('unit')||'')==='K'?+(m-273.15).toFixed(2):+m.toFixed(2);break;}
+      }
+      scans.push(mkScan(xs,ys,{wavelength:wl,temperatureC:temp,axis:/^2theta/i.test(axis)?null:axis}));
+    }
+  }
+  if(!scans.length)throw new Error('no usable scans found in XRDML file');
+  return scans;
+}
+
+/* ---------------------------------------------------------------- Bruker BRML (zip of XML) / RawData XML */
+function parseBRMLXml(text){
+  const doc=new DOMParser().parseFromString(text,'application/xml');
+  if(doc.querySelector('parsererror'))throw new Error('XML parse error');
+  const routes=[...doc.getElementsByTagName('DataRoute')];
+  const pick=routes.length>1?routes[1]:routes[0];
+  if(!pick)throw new Error('BRML: no DataRoute');
+  const first=(el,tag)=>{const f=el.getElementsByTagName(tag)[0];return f?f.textContent.trim():null;};
+  const si=pick.getElementsByTagName('ScanInformation')[0];
+  const eff=parseFloat(si&&first(si,'TimePerStepEffective')||'')||1;
+  const data=[...pick.getElementsByTagName('Datum')].map(d=>d.textContent.trim().split(',').map(Number));
+  if(data.length>10){
+    const xs=[],ys=[],alt=[];
+    for(const e of data){if(e.length<5)continue;xs.push(e[2]);ys.push(e[4]*e[0]/eff);alt.push(e[3]);}
+    const mn=Math.min(...ys),mx=Math.max(...ys);
+    const y=(mx>0&&Math.abs(1-mn/mx)<1e-4)?alt:ys;
+    if(xs.length>10)return mkScan(xs,y,{});
+  }
+  const ax=pick.getElementsByTagName('ScaleAxisInfo')[0];
+  if(ax&&data.length===1){
+    const a=parseFloat(first(ax,'Start')),inc=parseFloat(first(ax,'Increment')),n=parseInt(si&&first(si,'MeasurementPoints')||'',10)||(data[0].length-3);
+    const ys=data[0].slice(3,3+n);
+    if(fin(a)&&inc>0&&ys.length>10)return mkScan(ys.map((_,i)=>a+i*inc),ys,{});
+  }
+  throw new Error('BRML: scan data not recognised (stationary-detector or unsupported layout)');
+}
+async function parseBRML(entries){
+  const raws=entries.filter(e=>/RawData\d*\.xml$/i.test(e.name))
+    .sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}));
+  if(!raws.length)throw new Error('BRML: no RawData XML inside archive');
+  let wl=null;
+  for(const e of entries){if(!/\.xml$/i.test(e.name)||/RawData/i.test(e.name))continue;
+    const m=new TextDecoder().decode(await e.getBuf()).match(/WaveLengthAlpha1[^>]*?Value="([\d.eE+-]+)"/);if(m){wl=parseFloat(m[1]);break;}}
+  const scans=[];let lastErr=null;
+  for(const e of raws){try{const s=parseBRMLXml(text8(await e.getBuf()));s.meta.wavelength=wl>0.3&&wl<3?wl:null;scans.push(s);}catch(err){lastErr=err;}}
+  if(!scans.length)throw lastErr||new Error('BRML: no scans');
+  return scans;
+}
+
+/* ---------------------------------------------------------------- Rigaku RASX (zip of text) */
+async function parseRASX(entries){
+  const prof=entries.filter(e=>/Profile\d*\.txt$/i.test(e.name)).sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}));
+  const scans=[];
+  for(const e of prof){try{const s=parseColumns(text8(await e.getBuf()));scans.push(...s);}catch(_){}}
+  if(!scans.length)throw new Error('RASX: no profile data found');
+  return scans;
+}
+
+/* ---------------------------------------------------------------- Bruker RAW (binary): RAW4.00, RAW1.01, RAW2, "RAW " */
+function parseBrukerRaw(buf,magic){
+  const dv=new DataView(buf),len=buf.byteLength,scans=[];
+  const le=true;
+  if(magic==='RAW4.00'){
+    let p=61;
+    while(p+8<=len){const t=dv.getUint32(p,le),l=dv.getUint32(p+4,le);if(t===0||t===160)break;if(l<8||p+l>len)throw new Error('unexpected RAW4.00 record structure');p+=l;}
+    while(p+160<=len){
+      const n=dv.getUint32(p+4,le),start=dv.getFloat64(p+72,le),step=dv.getFloat64(p+80,le),wl=dv.getFloat64(p+112,le),
+            datum=dv.getUint32(p+136,le),hdr=dv.getUint32(p+140,le),ds=p+160+hdr;
+      if(!(n>=1)||!(datum>0)||ds+n*datum>len)break;
+      const type=new TextDecoder('latin1').decode(new Uint8Array(buf,p+32,24)).replace(/\0[\s\S]*$/,'');
+      if(datum===4&&n>=5&&step>0&&fin(start)&&/Coupled|Detector/i.test(type)){
+        const xs=new Array(n),ys=new Array(n);
+        for(let i=0;i<n;i++){xs[i]=start+i*step;const v=dv.getFloat32(ds+4*i,le);ys[i]=fin(v)?v:0;}
+        scans.push(mkScan(xs,ys,{wavelength:wl>0.3&&wl<3?wl:null}));
+      }
+      p=ds+n*datum;
+    }
+  }else if(magic==='RAW1.01'){
+    const nr=dv.getUint32(12,le);let p=712;const wl0=dv.getFloat64(624,le);
+    for(let r=0;r<Math.max(nr,1)&&p+304<=len;r++){
+      const hl=dv.getUint32(p,le),n=dv.getUint32(p+4,le),start=dv.getFloat64(p+16,le),step=dv.getFloat64(p+176,le),
+            wl=dv.getFloat64(p+240,le),supp=dv.getUint32(p+256,le),tK=dv.getFloat32(p+212,le);
+      const ds=p+(hl>=304?hl:304)+supp;
+      if(n<5||!(step>0)||ds+4*n>len)break;
+      const xs=new Array(n),ys=new Array(n);
+      for(let i=0;i<n;i++){xs[i]=start+i*step;const v=dv.getFloat32(ds+4*i,le);ys[i]=fin(v)?v:0;}
+      const w=wl>0.3&&wl<3?wl:(wl0>0.3&&wl0<3?wl0:null);
+      scans.push(mkScan(xs,ys,{wavelength:w,temperatureC:tK>200&&tK<3000?+(tK-273.15).toFixed(1):null}));
+      p=ds+4*n;
+    }
+  }else if(magic==='RAW2'){
+    const nr=dv.getUint16(4,le);let p=256;
+    const wl=dv.getFloat32(190,le);
+    for(let r=0;r<nr&&p+48<=len;r++){
+      const hl=dv.getUint16(p,le),n=dv.getUint16(p+2,le),step=dv.getFloat32(p+12,le),start=dv.getFloat32(p+16,le),tK=dv.getUint16(p+46,le);
+      if(hl<48||n<5||!(step>0)||p+hl+4*n>len)break;
+      const xs=new Array(n),ys=new Array(n);
+      for(let i=0;i<n;i++){xs[i]=start+i*step;const v=dv.getFloat32(p+hl+4*i,le);ys[i]=fin(v)?v:0;}
+      scans.push(mkScan(xs,ys,{wavelength:wl>0.3&&wl<3?wl:null,temperatureC:tK>200&&tK<3000?+(tK-273.15).toFixed(1):null}));
+      p+=hl+4*n;
+    }
+  }else{ /* "RAW " (v1) */
+    let p=4,first=true;
+    while(p+4<=len){
+      let n=dv.getUint32(p,le);p+=4;
+      if(!first){if(n===0x20574152){n=dv.getUint32(p,le);p+=4;}}
+      first=false;
+      if(p+112>len)break;
+      const step=dv.getFloat32(p+4,le),start=dv.getFloat32(p+16,le);
+      const ka1=dv.getFloat32(p+20+12+32,le);
+      const follow=dv.getUint32(p+4+4+4+4+4+12+32+8+72,le);
+      p+=4+4+4+4+4+12+32+8+72+4;
+      if(n<5||!(step>0)||p+4*n>len)break;
+      const xs=new Array(n),ys=new Array(n);
+      for(let i=0;i<n;i++){xs[i]=start+i*step;const v=dv.getFloat32(p+4*i,le);ys[i]=fin(v)?v:0;}
+      scans.push(mkScan(xs,ys,{wavelength:ka1>0.3&&ka1<3?ka1:null}));
+      p+=4*n;
+      if(!(follow>0))break;
+    }
+  }
+  if(!scans.length)throw new Error('could not locate scan data in Bruker '+magic.trim()+' file');
+  return scans;
+}
+
+/* ---------------------------------------------------------------- Philips RD (V3RD / V5RD) */
+function parsePhilipsRD(buf){
   const dv=new DataView(buf),len=buf.byteLength;
-  const magic=String.fromCharCode(...new Uint8Array(buf,0,Math.min(8,len))).replace(/\0[\s\S]*$/,'');
-  if(magic!=='RAW4.00'){
-    if(/^RAW/.test(magic))throw new Error('Bruker '+magic.trim()+' binary format is not supported (only RAW4.00)');
-    return parseXY(new TextDecoder().decode(buf));
-  }
-  if(len<0x100||Math.max(dv.getUint32(0x24,true),dv.getUint32(0x28,true),dv.getUint32(0x2C,true))>1)
-    throw new Error('multi-range RAW4.00 files are not supported yet');
-  let p=0x3D;
-  while(p+8<=len){
-    const t=dv.getUint32(p,true),l=dv.getUint32(p+4,true);
-    if(l<8||p+l>len)throw new Error('unexpected RAW4.00 record structure');
-    if(t===30)break;
-    p+=l;
-  }
-  if(p+8>len)throw new Error('no scan range found in RAW4.00 file');
-  const E=p+dv.getUint32(p+4,true);
-  if(E+0x58>len)throw new Error('truncated RAW4.00 file');
-  const n=dv.getUint32(E+4,true),start=dv.getFloat64(E+0x48,true),step=dv.getFloat64(E+0x50,true);
-  const dataStart=len-n*4;
-  if(!(n>=5)||!(step>0)||!isFinite(start)||dataStart<E+0x58)throw new Error('could not locate the scan header in RAW4.00 file');
+  const v=new TextDecoder('latin1').decode(new Uint8Array(buf,0,2));
+  const step=dv.getFloat64(214,true),start=dv.getFloat64(222,true),end=dv.getFloat64(230,true);
+  if(!(step>0)||!fin(start)||!fin(end)||end<=start)throw new Error('Philips RD: unreadable scan header');
+  const n=Math.floor((end-start)/step+1),ds=v==='V3'?250:810;
+  if(n<5||ds+2*n>len)throw new Error('Philips RD: data block does not fit the file');
   const xs=new Array(n),ys=new Array(n);
-  for(let i=0;i<n;i++){xs[i]=start+i*step;const v=dv.getFloat32(dataStart+4*i,true);ys[i]=isFinite(v)?v:0;}
-  const m=arrMax(ys)||1;
-  for(let i=0;i<n;i++)ys[i]*=100/m;
-  return{ex:xs,ey:ys};
+  for(let i=0;i<n;i++){xs[i]=start+i*step;const a=dv.getUint16(ds+2*i,true);ys[i]=Math.floor(0.01*a*a);}
+  return[mkScan(xs,ys,{note:'Philips RD stores counts in compressed form (rounded by up to 0.5%)'})];
 }
+
+/* ---------------------------------------------------------------- dispatch */
+function sniffText(text,name){
+  const head=text.slice(0,4000);
+  if(/^\s*</.test(head)){
+    if(/xrdMeasurement/.test(text))return['XRDML',parseXRDML];
+    if(/<RawData[\s>]/.test(head)||/<DataRoute/.test(text))return['Bruker BRML (XML)',t=>[parseBRMLXml(t)]];
+    throw new Error('XML file is not XRDML or BRML');
+  }
+  if(/^\s*_FILEVERSION/m.test(head))return['Bruker UXD',parseUXD];
+  if(/^\*RAS_/m.test(head))return['Rigaku RAS',parseRAS];
+  if(/^\*TYPE\b/m.test(head)||/^\*BEGIN\b/m.test(text))return['Rigaku DAT/ASC',parseRigakuDat];
+  if(/^BANK\s/m.test(text))return['GSAS',parseGSAS];
+  if(/^\s*RawScan\s*$/m.test(text)&&/DataAngleRange/.test(text))return['Philips UDF',parseUDF];
+  return['Text columns',parseColumns];
+}
+async function readBuffer(name,buf){
+  const u8=new Uint8Array(buf),len=u8.length;
+  if(len<8)throw new Error('file is empty or too short');
+  const m4=String.fromCharCode(u8[0],u8[1],u8[2],u8[3]);
+  const m7=String.fromCharCode(...u8.subarray(0,7));
+  if(u8[0]===0x50&&u8[1]===0x4B&&u8[2]===3&&u8[3]===4){
+    const entries=await unzip(buf);
+    const ext=extOf(name);
+    if(ext==='brml'||entries.some(e=>/RawData\d*\.xml$/i.test(e.name))){const s=await parseBRML(entries);s.forEach(x=>x.meta.format='Bruker BRML');return{scans:s,warnings:[]};}
+    if(ext==='rasx'||entries.some(e=>/Profile\d*\.txt$/i.test(e.name)&&/Data/i.test(e.name))){const s=await parseRASX(entries);s.forEach(x=>x.meta.format='Rigaku RASX');return{scans:s,warnings:[]};}
+    const scans=[],warnings=[];
+    for(const e of entries.sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:'base'}))){
+      const bn=baseName(e.name);
+      if(/^(\.|__MACOSX)/.test(bn)||e.name.includes('__MACOSX/')||/\.(png|jpe?g|gif|pdf|docx?|xlsx?|json|html?|cif|res|ins)$/i.test(bn))continue;
+      try{
+        const r=await readBuffer(bn,await e.getBuf());
+        r.scans.forEach((s,k)=>{s.name=r.scans.length>1?bn.replace(/(\.[^.]*)?$/,` [scan ${k+1}]$1`):bn;scans.push(s);});
+        warnings.push(...r.warnings);
+      }catch(err){warnings.push(bn+': '+err.message);}
+    }
+    if(!scans.length)throw new Error('no readable diffraction files in the archive'+(warnings.length?' ('+warnings[0]+')':''));
+    return{scans,warnings};
+  }
+  let scans,fmt;
+  if(m7==='RAW4.00'||m7==='RAW1.01'){fmt='Bruker '+m7;scans=parseBrukerRaw(buf,m7);}
+  else if(m4==='RAW2'){fmt='Bruker RAW2';scans=parseBrukerRaw(buf,'RAW2');}
+  else if(m4==='RAW '){fmt='Bruker RAW (v1)';scans=parseBrukerRaw(buf,'RAW ');}
+  else if(m4==='V3RD'||m4==='V5RD'){fmt='Philips RD';scans=parsePhilipsRD(buf);}
+  else if(/^V\d(SD|RD)/.test(m4))throw new Error('Philips '+m4+' files are not supported (only V3RD / V5RD); export as text from the instrument software');
+  else{
+    let nul=false;for(let i=0;i<Math.min(len,2048);i++)if(u8[i]===0){nul=true;break;}
+    if(nul){
+      if(/^PK/.test(m4))throw new Error('unsupported archive');
+      throw new Error('unrecognised binary format'+(/\.raw$/i.test(name)?' (Rigaku/Shimadzu/STOE RAW cannot be read -- export as .xy, .asc or .xrdml)':''));
+    }
+    const [f,fn]=sniffText(text8(buf),name);fmt=f;scans=fn(text8(buf));
+  }
+  scans=scans.filter(s=>s.x.length>=5&&s.x.length===s.y.length);
+  scans.forEach(s=>{s.meta.format=fmt;});
+  return{scans,warnings:[]};
+}
+async function load(name,buf){
+  const r=await readBuffer(name,buf);
+  const bn=baseName(name);
+  r.scans.forEach((s,k)=>{if(!s.name)s.name=r.scans.length>1?bn.replace(/(\.[^.]*)?$/,` [scan ${k+1}]$1`):bn;});
+  return r;
+}
+const EXTENSIONS='xy xye xrdml raw brml rasx ras rd udf uxd asc dat txt csv gsa gsas gss xra fxye zip';
+return{load,readBuffer,unzip,parseColumns,parseUXD,parseRAS,parseRigakuDat,parseGSAS,parseUDF,parseXRDML,parseBRMLXml,parseBrukerRaw,parsePhilipsRD,EXTENSIONS};
+})();
+/* PXRD_READERS_END */
+function normExp(s){const m=arrMax(s.y)||1;return{ex:s.x,ey:s.y.map(v=>v*100/m)};}
 function addSimDataset(parsed,name,format){
   const ds={id:uid++,type:'sim',name,format:format||'CIF',color:nextColor(),visible:true,parsed,refs:null,y:null};
   datasets.push(ds);selId=ds.id;
@@ -1390,32 +1746,36 @@ function handleFiles(files){
   for(const f of files){
     const r=new FileReader();
     r.onerror=()=>showError('Could not read '+f.name);
-    const isRaw=/\.raw$/i.test(f.name);
-    r.onload=e=>{
-      const base=f.name.replace(/\.[^.]+$/,'');
+    r.onload=async e=>{
+      const buf=e.target.result,base=f.name.replace(/\.[^.]+$/,'');
       try{
-        if(isRaw){addExpDataset(parseBrukerRaw(e.target.result),base);return;}
-        const text=e.target.result;
-        if(/\.cif$/i.test(f.name)||looksLikeCIF(text)){
-          const parsed=parseCIF(text);
-          if(!parsed.atoms.length)throw new Error('No atom coordinates found in '+f.name);
-          if(isNaN(parsed.cell.a))throw new Error('Could not read unit cell in '+f.name);
-          sourceName=base;
-          addSimDataset(parsed,base,'CIF');
-        }else if(/\.(res|ins)$/i.test(f.name)||looksLikeSHELX(text)){
-          const parsed=parseSHELX(text);
-          if(!parsed.atoms.length)throw new Error('No atom coordinates found in '+f.name);
-          if(isNaN(parsed.cell.a))throw new Error('Could not read unit cell in '+f.name);
-          sourceName=base;
-          addSimDataset(parsed,base,'SHX');
-        }else if(/\.xrdml$/i.test(f.name)){
-          addExpDataset(parseXRDML(text),base);
-        }else{
-          addExpDataset(parseXY(text),base);
+        let binary=false;const u=new Uint8Array(buf,0,Math.min(buf.byteLength,2048));
+        for(let i=0;i<u.length;i++)if(u[i]===0){binary=true;break;}
+        if(!binary){
+          const text=new TextDecoder().decode(buf);
+          if(/\.cif$/i.test(f.name)||looksLikeCIF(text)){
+            const parsed=parseCIF(text);
+            if(!parsed.atoms.length)throw new Error('No atom coordinates found in '+f.name);
+            if(isNaN(parsed.cell.a))throw new Error('Could not read unit cell in '+f.name);
+            sourceName=base;
+            addSimDataset(parsed,base,'CIF');
+            return;
+          }
+          if(/\.(res|ins)$/i.test(f.name)||looksLikeSHELX(text)){
+            const parsed=parseSHELX(text);
+            if(!parsed.atoms.length)throw new Error('No atom coordinates found in '+f.name);
+            if(isNaN(parsed.cell.a))throw new Error('Could not read unit cell in '+f.name);
+            sourceName=base;
+            addSimDataset(parsed,base,'SHX');
+            return;
+          }
         }
+        const res=await PXRD.load(f.name,buf);
+        for(const s of res.scans)addExpDataset(normExp(s),s.name.replace(/\.[^.]+$/,''));
+        if(res.warnings.length)showError(res.warnings.join(' | '));
       }catch(err){showError('Parse error ('+f.name+'): '+err.message);$('statusEl').textContent='Error';}
     };
-    if(isRaw)r.readAsArrayBuffer(f);else r.readAsText(f);
+    r.readAsArrayBuffer(f);
   }
 }
 const DEMO_CIF=`data_NaCl_example
