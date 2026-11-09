@@ -5326,7 +5326,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     if (next === state.walkMode) return;
     state.walkMode = next;
     if (state.walkMode) {
-      exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitGuestDragMode(); exitMolNeighborMode(); setVoidUiMode(null);
+      exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitGuestDragMode(); exitMolNeighborMode(); setVoidUiMode(null); fcfExitMode();
       invalidateWalkStaticGeom(); /* structure may have changed since the last time walk mode was on -- see walkCollisionGeometry's own comment */
       recenterWalkCamera();
       activeCam = walkCam;
@@ -10464,7 +10464,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
   }
   function setVoidUiMode(mode) {
     state.voidUiMode = (state.voidUiMode === mode) ? null : mode;
-    if (state.voidUiMode) { exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode(); } /* the click-hijacking modes are mutually exclusive */
+    if (state.voidUiMode) { exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode(); fcfExitMode(); } /* the click-hijacking modes are mutually exclusive */
     state.voidSelectedFragments = {};
     state.voidSelectedChannels = {};
     state.voidRecolourPending = null;
@@ -12054,6 +12054,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     return function (a) { return a.batch === comp; };
   }
   function handleLeftClick(clientX, clientY, mods) {
+    if (FCF.erase.on && FCF.data && IFACE.features.fcf) { fcfEraseClick(clientX, clientY); return; } /* Difference density > Erase mode */
     if (state.molNeighborMode) { molecularNeighborhoodClick(clientX, clientY); return; }
     if (state.voidUiMode) { handleVoidSelectClick(clientX, clientY, mods); return; }
     if (state.atomEditUiMode === "create") { createAtomAtClick(clientX, clientY); return; }
@@ -12243,7 +12244,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
    * cancel it (see exitAtomEditMode() and its call sites). */
   function setAtomEditUiMode(mode) {
     state.atomEditUiMode = (state.atomEditUiMode === mode) ? null : mode;
-    if (state.atomEditUiMode) { exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode(); } /* the click-hijacking modes are mutually exclusive */
+    if (state.atomEditUiMode) { exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode(); fcfExitMode(); } /* the click-hijacking modes are mutually exclusive */
     syncAtomEditButtons();
   }
   function syncAtomEditButtons() {
@@ -12264,7 +12265,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
      their own call sites). */
   function setGuestDragMode(on) {
     state.guestDragMode = (typeof on === "boolean") ? on : !state.guestDragMode;
-    if (state.guestDragMode) { exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitMolNeighborMode(); exitWalkMode(); }
+    if (state.guestDragMode) { exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitMolNeighborMode(); exitWalkMode(); fcfExitMode(); }
     var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = state.guestDragMode ? "move" : "";
     syncGuestDragButton();
   }
@@ -12282,7 +12283,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     var next = (typeof on === "boolean") ? on : !state.molNeighborMode;
     if (next === state.molNeighborMode) return;
     state.molNeighborMode = next;
-    if (state.molNeighborMode) { exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitGuestDragMode(); setVoidUiMode(null); exitWalkMode(); }
+    if (state.molNeighborMode) { exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitGuestDragMode(); setVoidUiMode(null); exitWalkMode(); fcfExitMode(); }
     var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = state.molNeighborMode ? "crosshair" : "";
     updateMolNeighborBtnLabel();
     refreshMolecularNeighborhood(); /* computes+renders when turning on; renders nothing (see its own guard) when turning off, and clearGroup already ran inside renderMolecularNeighborhood either way */
@@ -12320,7 +12321,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
      partway through, e.g. loading each file in a folder batch) would be a
      real, unwanted behaviour change of its own. */
   function exitAllInteractiveModes() {
-    exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode();
+    exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode(); fcfExitMode();
     setVoidUiMode(null);
   }
   function createAtomAtClick(clientX, clientY) {
@@ -13519,7 +13520,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     state.bondEditMode = on;
     state.bondEditPair = [];
     renderBondEditHighlight();
-    if (on) { exitGrowMode(); exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode(); } /* the interactive click-hijacking modes are mutually exclusive */
+    if (on) { exitGrowMode(); exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode(); fcfExitMode(); } /* the interactive click-hijacking modes are mutually exclusive */
     var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = on ? "crosshair" : "";
     updateBondEditModeBtnLabel();
   }
@@ -16366,16 +16367,17 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
    * Dropping a folder, a .zip, or several files onto the 3D view looks through everything dropped (subfolders too, and ZIP files inside ZIP
    * files) for structure files -- .cif, .res, .ins and .xyz -- and lists each structure in the Structure Navigator: one entry per file, or one
    * per data_ block for a CIF that holds several structures. A .zip with no structure files in it (a saved project) goes the old way. */
-  var STRUCT_EXT = /\.(cif|res|ins|xyz)$/i, ZIP_EXT = /\.zip$/i, COLL_MAX_ENTRIES = 5000, COLL_MAX_BYTES = 400 * 1024 * 1024;
+  var STRUCT_EXT = /\.(cif|res|ins|xyz|fcf)$/i, ZIP_EXT = /\.zip$/i, COLL_MAX_ENTRIES = 5000, COLL_MAX_BYTES = 400 * 1024 * 1024;
   /* does this file really hold a structure of the kind its name says? (a quick look at the text) */
   function collLooksLikeStructure(path, text) {
     var ext = (/\.([a-z]+)$/i.exec(path) || [, ""])[1].toLowerCase();
     if (ext === "cif") return /_atom_site_(fract|cartn)_x/i.test(text);
     if (ext === "res" || ext === "ins") return /^\s*CELL\s/mi.test(text);
     if (ext === "xyz") return looksLikeXyz(text);
+    if (ext === "fcf") return /_refln_index_h|^\s*-?\d+\s+-?\d+\s+-?\d+\s+\S+\s+\S+\s+\S+\s+\S+\s*$/m.test(text);
     return false;
   }
-  function collFormatOf(path) { var ext = (/\.([a-z]+)$/i.exec(path) || [, ""])[1].toLowerCase(); return ext === "cif" ? "cif" : ext === "xyz" ? "xyz" : "res"; }
+  function collFormatOf(path) { var ext = (/\.([a-z]+)$/i.exec(path) || [, ""])[1].toLowerCase(); return ext === "cif" ? "cif" : ext === "xyz" ? "xyz" : ext === "fcf" ? "fcf" : "res"; }
   /* the structure files of a ZIP archive (stored or deflated entries), nested archives opened too: [{ path, text }] */
   async function collReadZip(buf, prefix, budget) {
     var dv = new DataView(buf), n = buf.byteLength, eocd = -1, out = [], p;
@@ -16455,11 +16457,11 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
   }
   /* navigator entries from the files found, one per structure: { label, path, text, name, fmt, cifLabel } */
   function collEntriesFrom(files) {
-    var entries = [], bad = 0;
+    var entries = [], bad = 0, fcfs = [];
     files.forEach(function (f) {
       if (!collLooksLikeStructure(f.path, f.text)) { bad++; return; }
       var fmt = collFormatOf(f.path), fileBase = f.path.split("/").pop(), blocks = fmt === "cif" ? splitCifBlocks(f.text) : null;
-      /* a CIF that carries its RES gives two entries, the CIF and the RES, shown as parts of one file (see cifBlockEntries) */
+      if (fmt === "fcf") { fcfs.push({ path: f.path, name: fileBase, text: f.text, parsed: null }); return; } /* a reflection file is not a structure: it is attached to the one it belongs to (below) */      /* a CIF that carries its RES gives two entries, the CIF and the RES, shown as parts of one file (see cifBlockEntries) */
       if (blocks) {
         blocks.forEach(function (b) { if (/_atom_site_(fract|cartn)_x/i.test(b.text)) cifBlockEntries(b.text, { base: cleanBlockLabel(b.label), name: b.label + ".cif", cifLabel: b.label, srcFile: fileBase, path: f.path + " › " + cleanBlockLabel(b.label) }).forEach(function (e) { entries.push(e); }); else bad++; });
       } else if (fmt === "cif") cifBlockEntries(f.text, { base: fileBase.replace(/\.[^.]+$/, ""), name: fileBase, cifLabel: null, srcFile: fileBase, path: f.path }).forEach(function (e) { entries.push(e); });
@@ -16471,7 +16473,15 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       if (seen[e.base] > 1) e.base = e.path.replace(/ › RES$/, "").replace(/\.[^.\/›]+(?= ›|$)/, "");
       e.label = e.role ? e.base + ENTRY_SEP + e.role : e.base;
     });
-    return { entries: entries, bad: bad };
+    /* each .fcf goes with the structure file of the same name (same folder); a lone .fcf dropped with a lone structure file goes with it whatever the names */
+    var stem = function (p) { return p.split(" › ")[0].replace(/\.[^.\/]+$/, "").toLowerCase(); }, srcs = {};
+    entries.forEach(function (e) { srcs[stem(e.path)] = true; });
+    entries.forEach(function (e) {
+      var m = fcfs.filter(function (x) { return stem(x.path) === stem(e.path); });
+      if (!m.length && fcfs.length === 1 && Object.keys(srcs).length === 1) m = fcfs;
+      if (m.length) e.fcf = m[0];
+    });
+    return { entries: entries, bad: bad, fcfs: fcfs };
   }
   /* load entry idx of a collection into the viewer (the navigator stays as it is) */
   function loadStructEntryAtIndex(idx) {
@@ -16481,6 +16491,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     if (e.fmt === "cif") { state.cifOriginalText = e.text; state.cifOriginalLabel = e.cifLabel; loadCIFText(e.text, e.name); }
     else if (e.fmt === "xyz") handleXyzFileText(e.text, e.name, true);
     else handleResFileText(e.text, e.name, true, e.cifText);
+    fcfAttachRecord(e.fcf); /* the reflection file that came with this structure, if any */
     syncMultiBlockNavigatorUI();
   }
   /* open what was found: nothing (a message), one structure (loaded as if dropped alone), or several (the navigator) */
@@ -16495,6 +16506,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     if (ex.bad) notes.push(ex.bad + " without a usable structure skipped");
     if (r.budget.skipped.length) notes.push(r.budget.skipped.length + " unreadable: " + r.budget.skipped.slice(0, 3).join(", ") + (r.budget.skipped.length > 3 ? "..." : ""));
     if (r.budget.truncated) notes.push("only the first " + entries.length + " were read (limit " + COLL_MAX_ENTRIES + " files or " + (COLL_MAX_BYTES >> 20) + " MB)");
+    if (!entries.length && ex.fcfs.length && state.isCif) { fcfAttachRecord(ex.fcfs[0]); return true; } /* only a reflection file was dropped: it goes with the structure that is loaded */
     if (!entries.length) {
       if (!r.files.length && list.some(function (x) { return ZIP_EXT.test(x.path); }) && list.length === 1) return false; /* a ZIP with no structure files: the caller treats it as a saved project */
       setStatus("No structure files (CIF, RES, INS, XYZ) found in " + (name || "what was dropped") + (notes.length ? " -- " + notes.join("; ") : "") + ".", true); return true;
@@ -16504,6 +16516,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       var one = entries[0];
       if (one.fmt === "cif") { state.cifOriginalText = one.text; state.cifOriginalLabel = one.cifLabel; loadCIFText(one.text, one.name); }
       else handleStructureFileText(one.text, one.name);
+      fcfAttachRecord(one.fcf);
       return true;
     }
     state.multiBlocks = entries; state.multiBlockKind = "struct"; state.multiBlockSourceName = name || "";
@@ -16794,10 +16807,13 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
      all), and dragging/rotating it only ever moves this one placed copy. */
   function handleGuestCifDrop(text, name) {
     if (!state.atoms || !state.atoms.length) { setStatus("Load a host structure first.", true); return; }
-    var cif;
-    try { cif = K.parseCIF(text); } catch (e) { setStatus("Could not parse this guest CIF file.", true); return; }
-    if (!cif.atoms || !cif.atoms.length) { setStatus("No atom coordinates found in the guest CIF (expected an _atom_site_fract_x loop).", true); return; }
-    if (!(cif.cell.a > 0 && cif.cell.b > 0 && cif.cell.c > 0)) { setStatus("No usable unit cell parameters found in the guest CIF.", true); return; }
+    /* a SHELX .res/.ins file works too: its atoms and CELL give the Cartesian coordinates just as a CIF's do (Q peaks are not atoms and are left out; PART numbers are kept) */
+    var shelx = /\.(res|ins)$/i.test(name || "") || (!/\.cif$/i.test(name || "") && looksLikeShelxRes(text)), cif, qSkipped = 0, kind = shelx ? "SHELX" : "CIF";
+    try { cif = shelx ? K.parseSHELX(text) : K.parseCIF(text); } catch (e) { setStatus("Could not parse this guest " + kind + " file.", true); return; }
+    if (shelx && cif.error) { setStatus(cif.error, true); return; }
+    if (shelx && cif.atoms) { var nAll = cif.atoms.length; cif.atoms = cif.atoms.filter(function (a) { return !/^Q\d+[A-Za-z]?$/i.test(a.label || ""); }); qSkipped = nAll - cif.atoms.length; }
+    if (!cif.atoms || !cif.atoms.length) { setStatus(shelx ? "No atoms found in the guest SHELX file." : "No atom coordinates found in the guest CIF (expected an _atom_site_fract_x loop).", true); return; }
+    if (!(cif.cell.a > 0 && cif.cell.b > 0 && cif.cell.c > 0)) { setStatus("No usable unit cell parameters found in the guest " + kind + " file.", true); return; }
     var M = K.fracToCartMatrix(cif.cell);
     var n = cif.atoms.length, i, cart = [], sx = 0, sy = 0, sz = 0;
     for (i = 0; i < n; i++) {
@@ -16815,6 +16831,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
         r: K.vdw(el), cr: K.cov(el), color: K.cpk(el),
         isCentroid: false, selected: false, hidden: false
       };
+      if (shelx) atomObj.part = cif.atoms[i].part; /* a SHELX file's PART numbers keep the components of a disordered guest apart when bonds are drawn */
       if (canRegisterAsu) {
         var f = K.cartToFrac(state.cifFracToCart, [atomObj.x, atomObj.y, atomObj.z]);
         var auIndex = state.cifAsymUnit.length;
@@ -16833,7 +16850,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     refreshGuestAtomColors();
     recomputeViewOffset();
     renderStructure(); updateGuestInfo(); buildGuestColorEditor(); buildGuestGroupsUI(); buildSelectionGroupsUI(); refreshBondCleanupElements(); refreshReassignElementOptions(); updateSelectionInfo();
-    setStatus("Added guest \"" + (name || "guest") + "\": " + n + " atom" + (n === 1 ? "" : "s") + ", centred at the origin" +
+    setStatus("Added guest \"" + (name || "guest") + "\" from a " + kind + " file: " + n + " atom" + (n === 1 ? "" : "s") + (qSkipped ? " (" + qSkipped + " Q peak" + (qSkipped === 1 ? "" : "s") + " left out)" : "") + ", centred at the origin" +
       (canRegisterAsu ? " (grow it by symmetry from Grow > Mouse or Sphere of inclusion, same as a host atom)" : "") + ".", false);
   }
   function refreshHostAtomColors(atomsSubset) {
@@ -19407,7 +19424,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
 
   /* ---- per-frame position (the groups hold raw Cartesian coordinates; the view offset moves them with the atoms) ---- */
   function orbBridgeFrameSync() { var off = centroid(); [ORB.fwGroup, ORB.cubeGroup].forEach(function (g) { if (g) g.position.set(off[0], off[1], off[2]); }); }
-  function orcaBridgeFrame() { if (ORB.fwGroup || ORB.cubeGroup) orbBridgeFrameSync(); }
+  function orcaBridgeFrame() { if (ORB.fwGroup || ORB.cubeGroup) orbBridgeFrameSync(); fcfFrame(); }
   /* removes every cube surface from the view; returns how many there were */
   function orbDisposeCube(c) {
     (c.meshes || []).forEach(function (m) { if (ORB.cubeGroup) ORB.cubeGroup.remove(m); if (m.geometry) m.geometry.dispose(); if (m.material) m.material.dispose(); });
@@ -19421,6 +19438,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
   }
   function orcaBridgeReset() {
     ORB.dimers = null; ORB.results = null; ORB.pairDir = null; ORB.molDir = null; ORB.esp = null;
+    fcfReset(); /* a new structure also drops its reflection file */
     orbClearCubes(); /* a new structure also clears the cube surfaces, as it clears the molecular surfaces */
     if (ORB.fwGroup) { clearGroup(ORB.fwGroup); ORB.fwGroup.visible = false; }
     if (ORB.ui && ORB.ui.dimerBox) { orbSyncDimers(); orbSyncResults(); orbSyncCubeUi(); }
@@ -20230,9 +20248,917 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
   /* ---- FWPOT-END ---- */
 
 
+  /* ---- FCF-BEGIN: difference electron density from a SHELXL .fcf file ----
+   * A .fcf written with LIST 6 holds, for each unique reflection, Fo-squared, its sigma, |Fc| and the phase of Fc. From those the map
+   *   rho(x) = (1/V) * sum_h (|Fo| - |Fc|) exp(i phi_c) exp(-2 pi i h.x)
+   * is calculated: the reflections are expanded with the symmetry operators (F(R^T h) = F(h) exp(-2 pi i h.t)) and with Friedel's law, placed on a
+   * reciprocal grid and transformed with a 3D FFT. The result is in e/A^3 (|Fo| and |Fc| are on the absolute scale of the refinement). The map is
+   * periodic and is sampled by trilinear interpolation, so surfaces can be drawn for any part of the (grown) structure. The only lines outside this
+   * block are: buildFcfUi() in buildUI, fcfFrame() in orcaBridgeFrame, fcfReset() in orcaBridgeReset, the .fcf routes in the drop handler and in
+   * the folder/ZIP collection, and the "fcf" entry of FEATURES. */
+  var FCF = {
+    data: null, group: null, meshes: [], timer: null, ui: {}, last: null, erase: { on: false, kind: "erase" },
+    cfg: { mapKind: "diff", sets: {}, show: true, mode: "solid", units: "rms", level: 4, levels: [3, 6, 10], on: [true, true, true], cols: [0x3b6fff, 0x2fbf4a, 0xff3b30], colPos: 0x2fbf4a, colNeg: 0xe03030, colNegMesh: 0xcc33cc, neg: true, opacity: 0.7, thick: 1, meshStep: 0.25, eraseTool: "blob", eraseRadius: 1.5, eraseCopies: "this", countLevel: 2, countTool: "blob", countRadius: 2, countProbe: 1.2, countMinVol: 20, region: "all", margin: 3, step: 0.15 }
+  };
+  /* ---- reading the .fcf ---- */
+  function fcfCellOf(tags) {
+    var g = function (k) { var v = parseFloat(tags[k]); return isFinite(v) ? v : null; };
+    var c = { a: g("_cell_length_a"), b: g("_cell_length_b"), c: g("_cell_length_c"), alpha: g("_cell_angle_alpha"), beta: g("_cell_angle_beta"), gamma: g("_cell_angle_gamma") };
+    return (c.a && c.b && c.c && c.alpha && c.beta && c.gamma) ? c : null;
+  }
+  function fcfParse(text, name) {
+    var lines = text.split(/\r?\n/), n = lines.length, i = 0, tags = {}, symops = [], cols = null, rows = null, block = "";
+    var res = { name: name || "", block: "", title: "", list: 0, f000: null, dmin: null, cell: null, symops: null, n: 0, error: "" };
+    while (i < n) {
+      var L = lines[i], T = L.trim();
+      if (!T || T.charAt(0) === "#") { i++; continue; }
+      var dm = /^data_(\S*)/i.exec(T); if (dm) { if (!block) block = dm[1]; i++; continue; }
+      if (/^loop_/i.test(T)) {
+        var hd = []; i++;
+        while (i < n && /^\s*_/.test(lines[i])) { hd.push(lines[i].trim().split(/\s+/)[0].toLowerCase()); i++; }
+        var isRefln = hd.indexOf("_refln_index_h") >= 0, isSym = hd.indexOf("_space_group_symop_operation_xyz") >= 0 || hd.indexOf("_symmetry_equiv_pos_as_xyz") >= 0;
+        if (isRefln) {
+          cols = {}; hd.forEach(function (h, k) { cols[h] = k; }); rows = [];
+          while (i < n) { var R = lines[i].trim(); if (!R || /^(loop_|_|#|data_)/i.test(R)) break; rows.push(R); i++; }
+        } else if (isSym) {
+          var si = hd.indexOf("_space_group_symop_operation_xyz") >= 0 ? hd.indexOf("_space_group_symop_operation_xyz") : hd.indexOf("_symmetry_equiv_pos_as_xyz");
+          while (i < n) {
+            var S = lines[i].trim(); if (!S || /^(loop_|_|#|data_)/i.test(S)) break;
+            var q = /^['"]([^'"]*)['"]/.exec(S), xyz = q ? q[1] : S.split(/\s+/)[si];
+            var op = K.parseSymop((xyz || "").replace(/\s+/g, "")); if (op) symops.push(op); i++;
+          }
+        } else { while (i < n && lines[i].trim() && !/^(loop_|_|data_)/i.test(lines[i].trim())) i++; }
+        continue;
+      }
+      var tm = /^(_\S+)\s+(.*)$/.exec(T);
+      if (tm) tags[tm[1].toLowerCase()] = tm[2].replace(/^['"]|['"]$/g, "");
+      i++;
+    }
+    res.block = block; res.title = tags["_shelx_title"] || ""; res.list = parseInt(tags["_shelx_refln_list_code"], 10) || 0;
+    res.f000 = parseFloat(tags["_exptl_crystal_f_000"]); if (!isFinite(res.f000)) res.f000 = null;
+    res.dmin = parseFloat(tags["_reflns_d_resolution_high"]); if (!isFinite(res.dmin)) res.dmin = null;
+    res.cell = fcfCellOf(tags); res.symops = symops.length ? symops : null;
+    var H = [], Kk = [], Ll = [], FO = [], SG = [], FC = [], PH = [], k;
+    if (rows) {
+      var cH = cols["_refln_index_h"], cK = cols["_refln_index_k"], cL = cols["_refln_index_l"], cFo2 = cols["_refln_f_squared_meas"], cSg = cols["_refln_f_squared_sigma"], cFc = cols["_refln_f_calc"], cPh = cols["_refln_phase_calc"];
+      var cA = cols["_refln_a_calc"], cB = cols["_refln_b_calc"], cSt = cols["_refln_observed_status"], cFc2 = cols["_refln_f_squared_calc"];
+      if (cFo2 === undefined && cols["_refln_f_meas"] !== undefined) cFo2 = -1; /* Fo given instead of Fo-squared */
+      var cFo = cols["_refln_f_meas"];
+      if (cFo2 === undefined && cFo === undefined) { res.error = "this reflection list has no measured structure factors (_refln_F_squared_meas)"; return res; }
+      if (!((cFc !== undefined && cPh !== undefined) || (cA !== undefined && cB !== undefined))) {
+        res.error = cFc2 !== undefined ? "this .fcf has no phases (it is a LIST 4 file: Fo-squared, sigma and Fc-squared only). Put LIST 6 in the SHELXL instructions and refine once more, then use that .fcf" : "this .fcf has no calculated structure factors with phases";
+        return res;
+      }
+      for (k = 0; k < rows.length; k++) {
+        var t = rows[k].split(/\s+/); if (t.length < 4) continue;
+        if (cSt !== undefined && /^[x-]$/i.test(t[cSt] || "")) continue;
+        var fo2 = cFo2 >= 0 && cFo2 !== undefined ? parseFloat(t[cFo2]) : (cFo !== undefined ? Math.pow(parseFloat(t[cFo]), 2) : NaN), fc, ph;
+        if (cA !== undefined && cB !== undefined && (cFc === undefined || cPh === undefined)) { var A = parseFloat(t[cA]), B = parseFloat(t[cB]); fc = Math.sqrt(A * A + B * B); ph = Math.atan2(B, A) * 180 / Math.PI; }
+        else { fc = parseFloat(t[cFc]); ph = parseFloat(t[cPh]); }
+        if (!isFinite(fo2) || !isFinite(fc) || !isFinite(ph)) continue;
+        H.push(parseInt(t[cH], 10)); Kk.push(parseInt(t[cK], 10)); Ll.push(parseInt(t[cL], 10)); FO.push(fo2); SG.push(cSg !== undefined ? parseFloat(t[cSg]) : 0); FC.push(Math.abs(fc)); PH.push(ph);
+      }
+    } else {
+      /* the older layout without column names: h k l Fo-squared sigma Fc phase */
+      for (k = 0; k < n; k++) {
+        var m = /^\s*(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s*$/.exec(lines[k]); if (!m) continue;
+        H.push(+m[1]); Kk.push(+m[2]); Ll.push(+m[3]); FO.push(+m[4]); SG.push(+m[5]); FC.push(Math.abs(+m[6])); PH.push(+m[7]);
+      }
+    }
+    if (!H.length) { res.error = "no reflections found (expected the loop of _refln_index_h/k/l in a .fcf written with LIST 6)"; return res; }
+    res.n = H.length; res.h = Int16Array.from(H); res.k = Int16Array.from(Kk); res.l = Int16Array.from(Ll);
+    res.fo2 = Float32Array.from(FO); res.sig = Float32Array.from(SG); res.fc = Float32Array.from(FC); res.phi = Float32Array.from(PH);
+    return res;
+  }
+  /* ---- the map ---- */
+  function fcfFft1(re, im, n, tw) {
+    var i, j = 0, k, t;
+    for (i = 0; i < n - 1; i++) {
+      if (i < j) { t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
+      k = n >> 1; while (k <= j) { j -= k; k >>= 1; } j += k;
+    }
+    for (var len = 2; len <= n; len <<= 1) {
+      var half = len >> 1, step = n / len;
+      for (i = 0; i < n; i += len) for (k = 0; k < half; k++) {
+        var wr = tw.c[k * step], wi = -tw.s[k * step], a = i + k, b = a + half; /* exp(-2 pi i k/len) */
+        var xr = re[b] * wr - im[b] * wi, xi = re[b] * wi + im[b] * wr;
+        re[b] = re[a] - xr; im[b] = im[a] - xi; re[a] += xr; im[a] += xi;
+      }
+    }
+  }
+  function fcfTwiddle(n) { var c = new Float64Array(n >> 1), s = new Float64Array(n >> 1); for (var k = 0; k < (n >> 1); k++) { c[k] = Math.cos(2 * Math.PI * k / n); s[k] = Math.sin(2 * Math.PI * k / n); } return { c: c, s: s }; }
+  function fcfFft3(re, im, nx, ny, nz) {
+    var ax, tr, ti, tw, i, j, k, p;
+    /* z: contiguous */
+    tw = fcfTwiddle(nz); tr = new Float64Array(nz); ti = new Float64Array(nz);
+    for (i = 0; i < nx * ny; i++) { p = i * nz; for (k = 0; k < nz; k++) { tr[k] = re[p + k]; ti[k] = im[p + k]; } fcfFft1(tr, ti, nz, tw); for (k = 0; k < nz; k++) { re[p + k] = tr[k]; im[p + k] = ti[k]; } }
+    /* y: stride nz */
+    tw = fcfTwiddle(ny); tr = new Float64Array(ny); ti = new Float64Array(ny);
+    for (i = 0; i < nx; i++) for (k = 0; k < nz; k++) { p = i * ny * nz + k; for (j = 0; j < ny; j++) { tr[j] = re[p + j * nz]; ti[j] = im[p + j * nz]; } fcfFft1(tr, ti, ny, tw); for (j = 0; j < ny; j++) { re[p + j * nz] = tr[j]; im[p + j * nz] = ti[j]; } }
+    /* x: stride ny*nz */
+    tw = fcfTwiddle(nx); tr = new Float64Array(nx); ti = new Float64Array(nx); var sx = ny * nz;
+    for (j = 0; j < sx; j++) { for (i = 0; i < nx; i++) { tr[i] = re[j + i * sx]; ti[i] = im[j + i * sx]; } fcfFft1(tr, ti, nx, tw); for (i = 0; i < nx; i++) { re[j + i * sx] = tr[i]; im[j + i * sx] = ti[i]; } }
+  }
+  function fcfPow2(x) { var n = 16; while (n < x) n <<= 1; return n; }
+  /* d: parsed .fcf; cell: {a,b,c,alpha,beta,gamma}; symops: [{rot,trans}] */
+  function fcfComputeMap(d, cell, symops, kind) { /* kind "2fofc": coefficients 2|Fo| - |Fc|, otherwise |Fo| - |Fc| */
+    var M = K.fracToCartMatrix(cell), V = M[0][0] * M[1][1] * M[2][2], ns = symops.length, i, s;
+    /* every symmetry-equivalent reflection, with its phase; Friedel mates are added when the grid is filled */
+    var cap = d.n * ns, eh = new Int32Array(cap), ek = new Int32Array(cap), el = new Int32Array(cap), ea = new Float32Array(cap), ep = new Float32Array(cap), ne = 0, mx = [0, 0, 0];
+    for (i = 0; i < d.n; i++) {
+      var h = d.h[i], k = d.k[i], l = d.l[i], amp = (kind === "2fofc" ? 2 : 1) * Math.sqrt(Math.max(d.fo2[i], 0)) - d.fc[i], ph0 = d.phi[i] * Math.PI / 180;
+      for (s = 0; s < ns; s++) {
+        var R = symops[s].rot, t = symops[s].trans;
+        var hx = R[0][0] * h + R[1][0] * k + R[2][0] * l, hy = R[0][1] * h + R[1][1] * k + R[2][1] * l, hz = R[0][2] * h + R[1][2] * k + R[2][2] * l;
+        eh[ne] = Math.round(hx); ek[ne] = Math.round(hy); el[ne] = Math.round(hz); ea[ne] = amp; ep[ne] = ph0 - 2 * Math.PI * (h * t[0] + k * t[1] + l * t[2]);
+        mx[0] = Math.max(mx[0], Math.abs(eh[ne])); mx[1] = Math.max(mx[1], Math.abs(ek[ne])); mx[2] = Math.max(mx[2], Math.abs(el[ne])); ne++;
+      }
+    }
+    var over = 3, nn;
+    for (;;) {
+      nn = mx.map(function (m) { return fcfPow2(Math.ceil(over * m) + 1); });
+      if (nn[0] * nn[1] * nn[2] <= 8388608 || over <= 2) break; over -= 0.5;
+    }
+    var nx = nn[0], ny = nn[1], nz = nn[2], re = new Float32Array(nx * ny * nz), im = new Float32Array(nx * ny * nz);
+    function put(hx, hy, hz, a, p) { var ix = ((hx % nx) + nx) % nx, iy = ((hy % ny) + ny) % ny, iz = ((hz % nz) + nz) % nz, q = (ix * ny + iy) * nz + iz; re[q] = a * Math.cos(p); im[q] = a * Math.sin(p); }
+    for (i = 0; i < ne; i++) { put(eh[i], ek[i], el[i], ea[i], ep[i]); put(-eh[i], -ek[i], -el[i], ea[i], -ep[i]); }
+    fcfFft3(re, im, nx, ny, nz);
+    var N = nx * ny * nz, rho = re, sum = 0, sq = 0, mxv = -Infinity, mnv = Infinity, mxi = 0, mni = 0, v;
+    for (i = 0; i < N; i++) { v = re[i] / V; rho[i] = v; sum += v; sq += v * v; if (v > mxv) { mxv = v; mxi = i; } if (v < mnv) { mnv = v; mni = i; } }
+    var mean = sum / N, rms = Math.sqrt(sq / N - mean * mean);
+    function fracOf(q) { var iz = q % nz, iy = ((q - iz) / nz) % ny, ix = (q - iz - iy * nz) / (ny * nz); return [ix / nx, iy / ny, iz / nz]; }
+    return { kind: kind || "diff", ops: symops, nx: nx, ny: ny, nz: nz, data: rho, V: V, M: M, mean: mean, rms: rms, max: mxv, min: mnv, maxF: fracOf(mxi), minF: fracOf(mni), cell: cell };
+  }
+  /* periodic trilinear sampling of the map at a Cartesian point (the same frame as the atoms) */
+  function fcfSampler(map) {
+    var nx = map.nx, ny = map.ny, nz = map.nz, d = map.data, M = map.M, m00 = M[0][0], m01 = M[0][1], m02 = M[0][2], m11 = M[1][1], m12 = M[1][2], m22 = M[2][2], syz = ny * nz;
+    return function (x, y, z) {
+      var fz = z / m22, fy = (y - m12 * fz) / m11, fx = (x - m01 * fy - m02 * fz) / m00;
+      var u = fx * nx, v = fy * ny, w = fz * nz, iu = Math.floor(u), iv = Math.floor(v), iw = Math.floor(w), du = u - iu, dv = v - iv, dw = w - iw;
+      iu = ((iu % nx) + nx) % nx; iv = ((iv % ny) + ny) % ny; iw = ((iw % nz) + nz) % nz;
+      var ju = iu + 1 === nx ? 0 : iu + 1, jv = iv + 1 === ny ? 0 : iv + 1, jw = iw + 1 === nz ? 0 : iw + 1;
+      var a0 = iu * syz, a1 = ju * syz, b0 = iv * nz, b1 = jv * nz;
+      var c00 = d[a0 + b0 + iw] * (1 - dw) + d[a0 + b0 + jw] * dw, c01 = d[a0 + b1 + iw] * (1 - dw) + d[a0 + b1 + jw] * dw;
+      var c10 = d[a1 + b0 + iw] * (1 - dw) + d[a1 + b0 + jw] * dw, c11 = d[a1 + b1 + iw] * (1 - dw) + d[a1 + b1 + jw] * dw;
+      return (c00 * (1 - dv) + c01 * dv) * (1 - du) + (c10 * (1 - dv) + c11 * dv) * du;
+    };
+  }
+  /* the highest peaks and deepest holes: grid maxima/minima refined by a parabola, with the nearest atom of the structure (all symmetry images) */
+  function fcfFindPeaks(map, nPeak, nHole) {
+    var nx = map.nx, ny = map.ny, nz = map.nz, d = map.data, syz = ny * nz, thr = 2.5 * map.rms, peaks = [], holes = [];
+    function at(i, j, k) { return d[(((i + nx) % nx) * ny + ((j + ny) % ny)) * nz + ((k + nz) % nz)]; }
+    for (var i = 0; i < nx; i++) for (var j = 0; j < ny; j++) for (var k = 0; k < nz; k++) {
+      var v = d[(i * ny + j) * nz + k]; if (v < thr && v > -thr) continue;
+      var isMax = v > 0, ok = true;
+      for (var a = -1; a <= 1 && ok; a++) for (var b = -1; b <= 1 && ok; b++) for (var c = -1; c <= 1; c++) { if (!a && !b && !c) continue; var w = at(i + a, j + b, k + c); if (isMax ? w > v : w < v) { ok = false; break; } }
+      if (!ok) continue;
+      var f = [i, j, k], dim = [nx, ny, nz], h0 = v;
+      var nb = [[at(i - 1, j, k), at(i + 1, j, k)], [at(i, j - 1, k), at(i, j + 1, k)], [at(i, j, k - 1), at(i, j, k + 1)]];
+      for (var e = 0; e < 3; e++) { var m = nb[e][0], p = nb[e][1], den = m - 2 * v + p; if (Math.abs(den) > 1e-12) { var off = 0.5 * (m - p) / den; if (Math.abs(off) <= 1) { f[e] += off; h0 -= 0.25 * (m - p) * off; } } }
+      var row = { h: h0, f: [f[0] / nx, f[1] / ny, f[2] / nz] };
+      (isMax ? peaks : holes).push(row);
+    }
+    peaks.sort(function (p, q) { return q.h - p.h; }); holes.sort(function (p, q) { return p.h - q.h; });
+    /* a peak and its symmetry equivalents are one peak */
+    var sops = map.ops || [{ rot: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], trans: [0, 0, 0] }];
+    function unique(list, n) {
+      var kept = [];
+      for (var q = 0; q < list.length && kept.length < n; q++) {
+        var dup = kept.some(function (p) {
+          return sops.some(function (op) {
+            var g = K.applySymop(op, p.f), df = [g[0] - list[q].f[0], g[1] - list[q].f[1], g[2] - list[q].f[2]].map(function (x) { return x - Math.round(x); }), cc = K.fracToCart(map.M, df);
+            return cc[0] * cc[0] + cc[1] * cc[1] + cc[2] * cc[2] < 0.36; /* within 0.6 A */
+          });
+        });
+        if (!dup) kept.push(list[q]);
+      }
+      return kept;
+    }
+    peaks = unique(peaks, nPeak); holes = unique(holes, nHole);
+    var asu = state.cifAsymUnit || [], ops = state.cifSymops || [{ rot: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], trans: [0, 0, 0] }], M = map.M;
+    function nearest(f) {
+      var best = Infinity, bl = "";
+      asu.forEach(function (a) {
+        if (a.isGuestAsu) return;
+        ops.forEach(function (op) {
+          var g = K.applySymop(op, [a.fx, a.fy, a.fz]), df = [g[0] - f[0], g[1] - f[1], g[2] - f[2]]; df = df.map(function (x) { return x - Math.round(x); });
+          var cc = K.fracToCart(M, df), dd = Math.sqrt(cc[0] * cc[0] + cc[1] * cc[1] + cc[2] * cc[2]); if (dd < best) { best = dd; bl = a.label || a.el; }
+        });
+      });
+      return { label: bl, d: best };
+    }
+    peaks.concat(holes).forEach(function (r) { r.near = asu.length ? nearest(r.f) : null; });
+    return { peaks: peaks, holes: holes };
+  }
+  /* ---- showing it ---- */
+  function fcfLevelAbs(v, map) { return FCF.cfg.units === "rms" ? v * (map || FCF.data.map).rms : v; }
+  /* the map that is drawn: the difference map, or the 2Fo-Fc map (calculated the first time it is wanted). D.diffMap stays what counting and the peak list use. */
+  function fcfPickShown(d) {
+    if (FCF.cfg.mapKind === "2fofc") { if (!d.map2) { d.map2 = fcfComputeMap(d, d.cellUsed, d.opsUsed, "2fofc"); d.map2.cellKey = d.diffMap.cellKey; } d.map = d.map2; }
+    else d.map = d.diffMap;
+  }
+  function fcfRuleList(D, create) { var k = FCF.cfg.mapKind === "2fofc" ? "rules2" : "rules"; if (create && !D[k]) D[k] = []; return D[k]; } /* hidden parts belong to the map they were made on */
+  /* A mesh of adjustable thickness. WebGL draws every line one pixel wide, so each edge of the surface becomes a flat strip that is widened on the screen
+     (a few lines of shader), the same width wherever it lies, whatever the zoom. The width is in screen pixels and follows the pixel ratio, so an exported image keeps the look. */
+  function fcfLineMesh(iso, color) {
+    var idx = iso.indices, pos = iso.positions, nv = pos.length / 3, seen = new Set(), ea = [], eb = [], t, k;
+    for (t = 0; t < idx.length; t += 3) for (k = 0; k < 3; k++) {
+      var a = idx[t + k], b = idx[t + (k + 1) % 3], lo = a < b ? a : b, hi = a < b ? b : a, key = lo * nv + hi;
+      if (seen.has(key)) continue; seen.add(key); ea.push(lo); eb.push(hi);
+    }
+    var ne = ea.length, P = new Float32Array(ne * 12), Q = new Float32Array(ne * 12), S = new Float32Array(ne * 4), I = new Uint32Array(ne * 6), e, v, c;
+    for (e = 0; e < ne; e++) {
+      var A = ea[e] * 3, B = eb[e] * 3;
+      for (v = 0; v < 4; v++) {
+        var atStart = v < 2, from = atStart ? A : B, to = atStart ? B : A, o = (e * 4 + v) * 3;
+        for (c = 0; c < 3; c++) { P[o + c] = pos[from + c]; Q[o + c] = pos[to + c]; }
+        S[e * 4 + v] = (v % 2) ? 1 : -1;
+      }
+      var q = e * 4, w = e * 6; I[w] = q; I[w + 1] = q + 1; I[w + 2] = q + 2; I[w + 3] = q + 1; I[w + 4] = q + 3; I[w + 5] = q + 2;
+    }
+    var geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(P, 3)); geo.setAttribute("aOther", new THREE.BufferAttribute(Q, 3)); geo.setAttribute("aSide", new THREE.BufferAttribute(S, 1)); geo.setIndex(new THREE.BufferAttribute(I, 1));
+    var mat = new THREE.ShaderMaterial({
+      uniforms: { uRes: { value: new THREE.Vector2(1, 1) }, uThick: { value: 1 }, uColor: { value: new THREE.Color(color) } }, side: THREE.DoubleSide,
+      vertexShader: "attribute vec3 aOther; attribute float aSide; uniform vec2 uRes; uniform float uThick;\n" +
+        "void main() { vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0); vec4 q = projectionMatrix * modelViewMatrix * vec4(aOther, 1.0);\n" +
+        "vec2 sp = p.xy / p.w * uRes * 0.5, sq = q.xy / q.w * uRes * 0.5; vec2 d = sq - sp; float l = length(d); d = l > 1e-4 ? d / l : vec2(1.0, 0.0);\n" +
+        "vec2 off = vec2(-d.y, d.x) * aSide * uThick * 0.5; gl_Position = vec4((sp + off) / (uRes * 0.5) * p.w, p.z, p.w); }",
+      fragmentShader: "uniform vec3 uColor; void main() { gl_FragColor = vec4(uColor, 1.0); }"
+    });
+    var m = new THREE.Mesh(geo, mat); m.frustumCulled = false; m.renderOrder = 4;
+    m.onBeforeRender = function (r) { var s = r.getDrawingBufferSize(new THREE.Vector2()); mat.uniforms.uRes.value.copy(s); mat.uniforms.uThick.value = Math.max(0.5, FCF.cfg.thick) * r.getPixelRatio(); };
+    return m;
+  }
+  function fcfClearMeshes() {
+    if (!FCF.group) return;
+    FCF.meshes.forEach(function (m) { FCF.group.remove(m); if (m.geometry && !m.userData.shared) m.geometry.dispose(); if (m.material) m.material.dispose(); });
+    FCF.meshes = [];
+  }
+  function fcfRegionAtoms() {
+    var list = [], C = FCF.cfg;
+    (state.atoms || []).forEach(function (a) { if (!a.hidden && !a.isCentroid) list.push(a); });
+    (state.guestAtoms || []).forEach(function (a) { if (!a.hidden && !a.isCentroid) list.push(a); });
+    if (C.region === "selbox") { var sb = list.filter(function (a) { return a.selected; }); if (sb.length) return { atoms: sb, masked: false }; } /* a box around the selected atoms */
+    if (C.region === "sel") { var s = list.filter(function (a) { return a.selected; }); if (s.length) return { atoms: s, masked: true }; }
+    if (C.region === "vis") return { atoms: list, masked: true }; /* within the radius of any atom in view, not the whole box */
+    return { atoms: list, masked: false };
+  }
+  function fcfBuildSurfaces() {
+    fcfClearMeshes();
+    var D = FCF.data, C = FCF.cfg; if (!D || !D.map || !C.show || !IFACE.features.fcf) { FCF.last = null; if (FCF.erase.on) fcfSetEraseMode(false); fcfSyncStatus(""); return; } /* nothing is drawn while the menu is switched off in Settings */
+    if (!FCF.group) { FCF.group = new THREE.Group(); scene.add(FCF.group); }
+    var reg = fcfRegionAtoms(), atoms = reg.atoms; if (!atoms.length) { fcfSyncStatus("No atoms in view to place the map around."); return; }
+    var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], mg = Math.max(0.5, C.margin);
+    atoms.forEach(function (a) { var p = [a.x, a.y, a.z]; for (var e = 0; e < 3; e++) { lo[e] = Math.min(lo[e], p[e]); hi[e] = Math.max(hi[e], p[e]); } });
+    for (var e = 0; e < 3; e++) { lo[e] -= mg; hi[e] += mg; }
+    var vol = (hi[0] - lo[0]) * (hi[1] - lo[1]) * (hi[2] - lo[2]), step = Math.max(0.05, C.step), note = "";
+    if (C.mode === "mesh") step = Math.max(0.05, C.meshStep);
+    var maxVox = 4e6; if (vol / (step * step * step) > maxVox) { step = Math.cbrt(vol / maxVox); note = "Coarser surface (" + step.toFixed(2) + " Å) because the region is large. "; }
+    var samp = fcfSampler(D.map), mask = null, hide = fcfHiddenFn(D);
+    if (reg.masked) {
+      var R = mg, R2 = R * R, grid = {}, key = function (x, y, z) { return Math.floor(x / R) + "," + Math.floor(y / R) + "," + Math.floor(z / R); };
+      atoms.forEach(function (a) { var k = key(a.x, a.y, a.z); (grid[k] = grid[k] || []).push(a); });
+      mask = function (x, y, z) {
+        var cx = Math.floor(x / R), cy = Math.floor(y / R), cz = Math.floor(z / R);
+        for (var i = -1; i <= 1; i++) for (var j = -1; j <= 1; j++) for (var k = -1; k <= 1; k++) {
+          var l = grid[(cx + i) + "," + (cy + j) + "," + (cz + k)]; if (!l) continue;
+          for (var m = 0; m < l.length; m++) { var dx = l[m].x - x, dy = l[m].y - y, dz = l[m].z - z; if (dx * dx + dy * dy + dz * dz <= R2) return true; }
+        }
+        return false;
+      };
+    }
+    var specs = [];
+    if (C.mode === "mesh") {
+      C.levels.forEach(function (lv, i) { if (C.on[i] !== false) specs.push({ sign: 1, lvl: fcfLevelAbs(lv), col: C.cols[i], wire: true }); });
+      if (C.neg) specs.push({ sign: -1, lvl: fcfLevelAbs(Math.min.apply(null, C.levels)), col: C.colNegMesh, wire: true });
+    } else {
+      specs.push({ sign: 1, lvl: fcfLevelAbs(C.level), col: C.colPos, wire: false });
+      if (C.neg) specs.push({ sign: -1, lvl: fcfLevelAbs(C.level), col: C.colNeg, wire: false });
+    }
+    var made = 0, posL = null, negL = null; /* what a click can hit: the lowest level that is drawn */
+    specs.forEach(function (sp) { if (sp.sign > 0) posL = posL === null ? sp.lvl : Math.min(posL, sp.lvl); else negL = negL === null ? sp.lvl : Math.min(negL, sp.lvl); });
+    FCF.last = { lo: lo, hi: hi, samp: samp, mask: mask, pos: posL, neg: negL };
+    specs.forEach(function (sp) {
+      var fld = function (x, y, z) { if (mask && !mask(x, y, z)) return 0; if (hide && hide(x, y, z)) return 0; return sp.sign * samp(x, y, z); }, iso;
+      try { iso = IsoSurface.extract(fld, lo, hi, step, sp.lvl); } catch (err) { return; }
+      if (!iso || !iso.positions.length) return;
+      if (!sp.wire) { try { smoothIsoMesh(iso, fld, sp.lvl, step, { reproject: false }); } catch (err2) { /* the unsmoothed surface is still usable */ } }
+      var geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.Float32BufferAttribute(iso.positions, 3)); geo.setAttribute("normal", new THREE.Float32BufferAttribute(iso.normals, 3)); geo.setIndex(iso.indices);
+      made++;
+      if (sp.wire) { var wm = fcfLineMesh(iso, sp.col); FCF.group.add(wm); FCF.meshes.push(wm); geo.dispose(); return; }
+      var trans = C.opacity < 0.99;
+      var parts = trans ? [[THREE.BackSide, 2], [THREE.FrontSide, 3]] : [[THREE.DoubleSide, 2]];
+      parts.forEach(function (pp, ix) {
+        var m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: sp.col, roughness: 0.4, metalness: 0, transparent: trans, opacity: C.opacity, depthWrite: !trans, side: pp[0] }));
+        m.renderOrder = pp[1]; if (ix > 0) m.userData.shared = true; FCF.group.add(m); FCF.meshes.push(m);
+      });
+    });
+    fcfFrame();
+    fcfSyncStatus(note + (made ? "" : "Nothing reaches the chosen level in this region."));
+  }
+  function fcfFrame() { if (FCF.group) { var off = centroid(); FCF.group.position.set(off[0], off[1], off[2]); } }
+  function fcfRedraw() { if (FCF.timer) clearTimeout(FCF.timer); FCF.timer = setTimeout(function () { FCF.timer = null; try { fcfBuildSurfaces(); } catch (e) { setStatus("Difference density: " + e.message + ".", true); } }, 60); }
+  function fcfReset() {
+    FCF.data = null; FCF.last = null; if (FCF.erase.on) fcfSetEraseMode(false); fcfClearMeshes();
+    if (FCF.ui && FCF.ui.info) fcfSyncUi();
+    if (typeof refreshFeatures === "function") refreshFeatures();
+  }
+  /* attach a parsed .fcf to the structure that is loaded: checks the cell, then calculates the map */
+  function fcfAttach(d, quiet) {
+    if (!state.isCif || !state.cifCell) { setStatus("The reflection file " + d.name + " needs the structure it belongs to: load the CIF first, or drop the CIF and the .fcf together.", true); return false; }
+    if (d.error) { setStatus("The reflection file " + d.name + " cannot be used: " + d.error + ".", true); return false; }
+    var c0 = state.cifCell, c1 = d.cell;
+    if (c1 && (Math.abs(c0.a - c1.a) / c0.a > 0.003 || Math.abs(c0.b - c1.b) / c0.b > 0.003 || Math.abs(c0.c - c1.c) / c0.c > 0.003 || Math.abs(c0.alpha - c1.alpha) > 0.3 || Math.abs(c0.beta - c1.beta) > 0.3 || Math.abs(c0.gamma - c1.gamma) > 0.3)) {
+      setStatus("The reflection file " + d.name + " has a different unit cell from the loaded structure (" + c1.a + ", " + c1.b + ", " + c1.c + " against " + c0.a + ", " + c0.b + ", " + c0.c + "), so it belongs to another structure.", true); return false;
+    }
+    var ops = d.symops || state.cifSymops; if (!ops || !ops.length) { setStatus("No symmetry operators are available for " + d.name + ".", true); return false; }
+    var t0 = Date.now();
+    try { if (!d.diffMap || d.diffMap.cellKey !== JSON.stringify(c0)) { d.diffMap = fcfComputeMap(d, c1 || c0, ops); d.diffMap.cellKey = JSON.stringify(c0); d.map2 = null; d.peaks = null; } d.cellUsed = c1 || c0; d.opsUsed = ops; fcfPickShown(d); }
+    catch (e) { setStatus("Difference density: " + e.message + ".", true); return false; }
+    if (!d.peaks) d.peaks = fcfFindPeaks(d.diffMap, 8, 5);
+    FCF.data = d; refreshFeatures(); fcfSyncUi(); fcfRedraw();
+    var m = d.map, tg = state.cifTags || {}, sh = tg["_refine_diff_density_max"] != null ? " (SHELXL: " + tg["_refine_diff_density_max"] + ", " + tg["_refine_diff_density_min"] + ", rms " + tg["_refine_diff_density_rms"] + ")" : "";
+    if (!quiet) setStatus("Loaded " + d.name + ": " + d.n + " reflections (LIST " + (d.list || "?") + "), difference map max " + m.max.toFixed(2) + ", min " + m.min.toFixed(2) + ", rms " + m.rms.toFixed(3) + " e/Å³" + sh + " (" + (Date.now() - t0) + " ms)." + (IFACE.features.fcf ? "" : " Switch on \"Difference density\" in Settings to show it."), false);
+    return true;
+  }
+  function fcfAttachText(text, name) {
+    var d; try { d = fcfParse(text, name); } catch (e) { setStatus("Could not read " + name + ": " + e.message + ".", true); return false; }
+    return fcfAttach(d, false);
+  }
+  /* a .fcf found together with the structure files (see collEntriesFrom): parsed once, shared by every entry of that file */
+  function fcfAttachRecord(rec) {
+    if (!rec) { if (FCF.data) fcfReset(); return; }
+    if (!rec.parsed) { try { rec.parsed = fcfParse(rec.text, rec.name); } catch (e) { rec.parsed = { name: rec.name, error: e.message, n: 0 }; } }
+    fcfAttach(rec.parsed, false);
+  }
+  /* ---- erasing parts of the display ----
+   * What is hidden is stored as rules about the MAP, never as triangles of the drawn surface, so a rule still applies after any change of level, spacing or region:
+   *  - blob / keep only: the map is divided once into basins (every grid point belongs to the density peak that steepest ascent leads to); a click finds the
+   *    connected blob above the current level and hides (or keeps) the basins it consists of;
+   *  - ball: everything within a radius of the clicked point.
+   * The rules belong to the loaded reflection data (FCF.data.rules). */
+  function fcfBasins(map) {
+    if (map.basin) return map.basin;
+    var nx = map.nx, ny = map.ny, nz = map.nz, N = nx * ny * nz, d = map.data, thr = 0.5 * map.rms, next = new Int32Array(N).fill(-1), label = new Int32Array(N).fill(-1);
+    var syz = ny * nz, i, ix, iy, iz, a, b, c;
+    for (ix = 0; ix < nx; ix++) for (iy = 0; iy < ny; iy++) for (iz = 0; iz < nz; iz++) {
+      i = ix * syz + iy * nz + iz; var v = d[i]; if (v < thr && v > -thr) continue;
+      var s = v > 0 ? 1 : -1, best = i, bv = v * s;
+      for (a = -1; a <= 1; a++) { var jx = ((ix + a + nx) % nx) * syz;
+        for (b = -1; b <= 1; b++) { var jy = jx + ((iy + b + ny) % ny) * nz;
+          for (c = -1; c <= 1; c++) { var j = jy + ((iz + c + nz) % nz), w = d[j] * s; if (w > bv) { bv = w; best = j; } } } }
+      next[i] = best;
+    }
+    var path = [];
+    for (i = 0; i < N; i++) {
+      if (next[i] < 0 || label[i] >= 0) continue;
+      path.length = 0; var j2 = i;
+      while (label[j2] < 0 && next[j2] !== j2) { path.push(j2); j2 = next[j2]; }
+      var root = label[j2] >= 0 ? label[j2] : j2; label[j2] = root;
+      for (var p = 0; p < path.length; p++) label[path[p]] = root;
+    }
+    map.basin = label; return label;
+  }
+  function fcfFracIdx(map) {
+    var M = map.M, m00 = M[0][0], m01 = M[0][1], m02 = M[0][2], m11 = M[1][1], m12 = M[1][2], m22 = M[2][2], nx = map.nx, ny = map.ny, nz = map.nz, syz = ny * nz;
+    return function (x, y, z) { /* index of the nearest grid point */
+      var fz = z / m22, fy = (y - m12 * fz) / m11, fx = (x - m01 * fy - m02 * fz) / m00;
+      var ix = ((Math.round(fx * nx) % nx) + nx) % nx, iy = ((Math.round(fy * ny) % ny) + ny) % ny, iz = ((Math.round(fz * nz) % nz) + nz) % nz;
+      return ix * syz + iy * nz + iz;
+    };
+  }
+  /* a function (x, y, z) -> true where the rules hide the density; null when there are no rules */
+  function fcfHiddenFn(D) {
+    var rules = D && fcfRuleList(D); if (!rules || !rules.length) return null;
+    var map = D.map, hid = new Set(), keep = new Set(), keepOn = false, balls = [];
+    rules.forEach(function (r) {
+      if (r.type === "blob") r.roots.forEach(function (q) { hid.add(q); });
+      else if (r.type === "keep") { keepOn = true; r.roots.forEach(function (q) { keep.add(q); }); }
+      else if (r.type === "ball") balls.push(r);
+    });
+    var label = (hid.size || keepOn) ? fcfBasins(map) : null, idx = fcfFracIdx(map), M = map.M;
+    function ballHit(b, x, y, z) {
+      var dx = x - b.c[0], dy = y - b.c[1], dz = z - b.c[2];
+      if (b.periodic) {
+        var fz = dz / M[2][2], fy = (dy - M[1][2] * fz) / M[1][1], fx = (dx - M[0][1] * fy - M[0][2] * fz) / M[0][0];
+        fx -= Math.round(fx); fy -= Math.round(fy); fz -= Math.round(fz);
+        dx = M[0][0] * fx + M[0][1] * fy + M[0][2] * fz; dy = M[1][1] * fy + M[1][2] * fz; dz = M[2][2] * fz;
+      }
+      return dx * dx + dy * dy + dz * dz <= b.r * b.r;
+    }
+    return function (x, y, z) {
+      if (label) { var l = label[idx(x, y, z)]; if (hid.size && l >= 0 && hid.has(l)) return true; if (keepOn && !(l >= 0 && keep.has(l))) return true; }
+      for (var k = 0; k < balls.length; k++) if (ballHit(balls[k], x, y, z)) return true;
+      return false;
+    };
+  }
+  /* the first point above the contour level along the line of sight through a click, or null */
+  function fcfPick(clientX, clientY) {
+    var L = FCF.last, D = FCF.data; if (!L || !D || !D.map) return null;
+    var rect = renderer.domElement.getBoundingClientRect();
+    if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return null;
+    if (!FCF.ray) FCF.ray = new THREE.Raycaster();
+    FCF.ray.setFromCamera(new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1), activeCam);
+    var off = centroid(), o = [FCF.ray.ray.origin.x - off[0], FCF.ray.ray.origin.y - off[1], FCF.ray.ray.origin.z - off[2]], dr = [FCF.ray.ray.direction.x, FCF.ray.ray.direction.y, FCF.ray.ray.direction.z];
+    var t0 = 0, t1 = Infinity, e;
+    for (e = 0; e < 3; e++) { /* the part of the line inside the region that is drawn */
+      if (Math.abs(dr[e]) < 1e-9) { if (o[e] < L.lo[e] || o[e] > L.hi[e]) return null; continue; }
+      var ta = (L.lo[e] - o[e]) / dr[e], tb = (L.hi[e] - o[e]) / dr[e]; if (ta > tb) { var tt = ta; ta = tb; tb = tt; }
+      t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
+    }
+    if (!(t1 > t0)) return null;
+    var step = 0.06, samp = L.samp, hide = fcfHiddenFn(D);
+    for (var t = t0; t <= t1; t += step) {
+      var x = o[0] + dr[0] * t, y = o[1] + dr[1] * t, z = o[2] + dr[2] * t, v = samp(x, y, z), sign = 0;
+      if (L.pos !== null && v >= L.pos) sign = 1; else if (L.neg !== null && -v >= L.neg) sign = -1;
+      if (!sign) continue;
+      if (L.mask && !L.mask(x, y, z)) continue;
+      if (hide && hide(x, y, z)) continue;
+      return { p: [x, y, z], sign: sign, level: sign > 0 ? L.pos : L.neg };
+    }
+    return null;
+  }
+  /* the basins of the connected blob around a point, at the level it was clicked at */
+  function fcfBlobRoots(hit) {
+    var D = FCF.data, map = D.map, label = fcfBasins(map), idx = fcfFracIdx(map), d = map.data, nx = map.nx, ny = map.ny, nz = map.nz, syz = ny * nz, hide = null;
+    var start = idx(hit.p[0], hit.p[1], hit.p[2]), s = hit.sign, lvl = hit.level, roots = new Set(), seen = new Uint8Array(nx * ny * nz), stack = [start], count = 0;
+    if (d[start] * s < lvl) { /* the click landed between grid points: take the strongest neighbour */
+      var ix0 = Math.floor(start / syz), iy0 = Math.floor((start % syz) / nz), iz0 = start % nz, bestv = -Infinity, bj = start;
+      for (var a = -1; a <= 1; a++) for (var b = -1; b <= 1; b++) for (var c = -1; c <= 1; c++) { var j = ((ix0 + a + nx) % nx) * syz + ((iy0 + b + ny) % ny) * nz + ((iz0 + c + nz) % nz); if (d[j] * s > bestv) { bestv = d[j] * s; bj = j; } }
+      stack = [bj]; start = bj;
+    }
+    seen[start] = 1;
+    var hiddenNow = new Set(); (fcfRuleList(D) || []).forEach(function (r) { if (r.type === "blob") r.roots.forEach(function (q) { hiddenNow.add(q); }); });
+    while (stack.length && count < 4000000) {
+      var i = stack.pop(); count++;
+      var l = label[i]; if (l >= 0) { if (hiddenNow.has(l)) continue; roots.add(l); }
+      var ix = Math.floor(i / syz), iy = Math.floor((i % syz) / nz), iz = i % nz;
+      for (var a2 = -1; a2 <= 1; a2++) for (var b2 = -1; b2 <= 1; b2++) for (var c2 = -1; c2 <= 1; c2++) {
+        if (!a2 && !b2 && !c2) continue;
+        var j2 = ((ix + a2 + nx) % nx) * syz + ((iy + b2 + ny) % ny) * nz + ((iz + c2 + nz) % nz);
+        if (seen[j2] || d[j2] * s < lvl) continue; seen[j2] = 1; stack.push(j2);
+      }
+    }
+    return Array.from(roots);
+  }
+  async function fcfEraseClick(clientX, clientY) {
+    var D = FCF.data, C = FCF.cfg; if (!D || !D.map) return;
+    var hit = fcfPick(clientX, clientY);
+    if (!hit) { setStatus("There is no map surface under the pointer.", true); return; }
+        if (FCF.erase.kind === "count") {
+      var cr;
+      try {
+        if (C.countTool === "void") cr = await fcfCountVoidAt(hit.p);
+        else {
+          var rr = fcfCountVoids(C.countProbe, C.countMinVol), rho = null;
+          if (rr && !rr.error && rr.voids.length) { await fcfRefineVoids(rr); if (rr.refined) rho = rr.rho; }
+          cr = C.countTool === "ball" ? fcfCountBall(hit.p, C.countRadius, rho) : fcfCountBlob(hit, fcfLevelAbs(C.countLevel, D.diffMap), rho);
+        }
+      } catch (e) { setStatus("Electron count: " + e.message + ".", true); return; }
+      if (!cr) { setStatus("The density under the pointer is below the level to count down to.", true); return; }
+      if (cr.error) { setStatus("Electron count: " + cr.error + ".", true); return; }
+      fcfAddCount(cr); return;
+    }    var rl = fcfRuleList(D, true), t0 = Date.now();
+    if (C.eraseTool === "ball") rl.push({ type: "ball", c: hit.p, r: C.eraseRadius, periodic: C.eraseCopies === "all" });
+    else {
+      var roots = fcfBlobRoots(hit);
+      if (!roots.length) { setStatus("That surface cannot be hidden as a blob: lower the level or use the ball.", true); return; }
+      rl.push({ type: C.eraseTool === "keep" ? "keep" : "blob", roots: roots, c: hit.p });
+    }
+    fcfRulesUi(); fcfRedraw();
+    setStatus((C.eraseTool === "ball" ? "Hid a ball of " + C.eraseRadius.toFixed(1) + " Å" : C.eraseTool === "keep" ? "Kept only the blob you clicked" : "Hid the blob you clicked") + " (" + (Date.now() - t0) + " ms). " + D.rules.length + " rule" + (D.rules.length === 1 ? "" : "s") + " in the list.", false);
+  }
+  /* turns the mouse mode off (when another mode starts, or when the menu or submenu is closed) */
+  function fcfExitMode() { if (FCF.erase && FCF.erase.on) fcfSetEraseMode(false); }
+  /* the red / grey buttons of the two submenus, like Grow > Mouse */
+  function fcfSyncModeBtns() {
+    var U = FCF.ui, on = FCF.erase.on;
+    [[U.eraseBtn, "erase", "Erase mode", "On: click a surface of the map to hide it. Press to turn off. (A drag still turns the view.)", "Turn on erase mode: a click on a surface of the map hides it."],
+     [U.countBtn, "count", "Count mode", "On: click a surface of the map to count its electrons. Press to turn off. (A drag still turns the view.)", "Turn on count mode: a click on a surface of the map counts its electrons."]].forEach(function (x) {
+      var b = x[0]; if (!b) return; var act = on && FCF.erase.kind === x[1];
+      b.textContent = x[2]; b.title = act ? x[3] : x[4]; b.className = "btn prominent mode-btn" + (act ? " grow-active" : " ghost");
+    });
+  }
+  function fcfSetEraseMode(on, kind) { /* kind: "erase" or "count" -- the two share the click, and only one is on at a time */
+    FCF.erase.on = !!on; if (on) FCF.erase.kind = kind || "erase";
+    if (on) { if (state.voidUiMode) setVoidUiMode(state.voidUiMode); exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode(); } /* the click-taking modes are mutually exclusive */
+    var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = on ? "crosshair" : "";
+    fcfSyncModeBtns();
+
+    if (on) setStatus(FCF.erase.kind === "count" ? "Count mode: click a surface of the map to count the electrons in the blob or the ball. Nothing is hidden. Press Count mode again (or leave this submenu) to select atoms again." : "Erase mode: click a surface of the map to hide it. A drag still turns the view. Press Erase mode again (or leave this submenu) to select atoms again.", false);
+  }  function fcfRulesUi() {
+    var U = FCF.ui, box = U.rules, D = FCF.data; if (!box) return;
+    box.innerHTML = ""; var rules = (D && fcfRuleList(D)) || [];
+    rules.forEach(function (r, i) {
+      var row = el("div", "fcf-rule"), txt = r.type === "ball" ? "ball " + r.r.toFixed(1) + " Å" + (r.periodic ? ", all copies" : "") : (r.type === "keep" ? "keep only, " : "hidden blob, ") + r.roots.length + " peak" + (r.roots.length === 1 ? "" : "s");
+      row.appendChild(el("span", null, (i + 1) + ". " + txt)); var x = el("span", "x", "×"); x.title = "Bring this back"; x.addEventListener("click", function () { rules.splice(i, 1); fcfRulesUi(); fcfRedraw(); }); row.appendChild(x); box.appendChild(row);
+    });
+    if (U.undoBtn) { U.undoBtn.disabled = !rules.length; U.resetBtn.disabled = !rules.length; }
+  }
+  /* ---- counting electrons ----
+   * The electrons of a region are the integral of the difference density over it. One thing has to be allowed for: the map has no F(000) term, so its mean over
+   * the cell is exactly zero, and the electrons that the model lacks are balanced by a uniform negative level over the whole cell. If those electrons are all
+   * in the regions counted (a guest, the voids) and the rest of the map is flat, the regions together hold  N = (sum of the raw integrals) / (1 - f)  with f the
+   * fraction of the cell they fill, and each region its raw integral plus N * (its volume / V). The raw integral is shown too. As in SQUEEZE, this is one pass of
+   * the difference map, not an iteration, and it needs the low-angle reflections: the lowest-angle one measured is reported, with a warning when it is high. */
+  function fcfVoxelVolume(map) { return map.V / (map.nx * map.ny * map.nz); }
+  /* how complete the low-angle data are: of the reflections the space group allows with d above a limit, how many are in the file (symmetry equivalents counted once,
+     systematic absences left out). The electron count needs them: they carry the broad features of a guest. */
+  function fcfLowAngle(D) {
+    if (D.lowAngle) return D.lowAngle;
+    var map = D.diffMap, M = map.M, V = map.V, ops = map.ops, dcut = 5, i, s;
+    var a = [M[0][0], 0, 0], b = [M[0][1], M[1][1], 0], cc = [M[0][2], M[1][2], M[2][2]];
+    function cross(u, v) { return [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]]; }
+    var as = cross(b, cc).map(function (x) { return x / V; }), bs = cross(cc, a).map(function (x) { return x / V; }), cs = cross(a, b).map(function (x) { return x / V; });
+    function dsp(h, k, l) { var x = h * as[0] + k * bs[0] + l * cs[0], y = h * as[1] + k * bs[1] + l * cs[1], z = h * as[2] + k * bs[2] + l * cs[2], q = Math.sqrt(x * x + y * y + z * z); return q > 1e-9 ? 1 / q : Infinity; }
+    function code(h, k, l) { return ((h + 128) * 256 + (k + 128)) * 256 + (l + 128); }
+    function canon(h, k, l) {
+      var best = Infinity;
+      for (s = 0; s < ops.length; s++) {
+        var R = ops[s].rot, hx = Math.round(R[0][0] * h + R[1][0] * k + R[2][0] * l), hy = Math.round(R[0][1] * h + R[1][1] * k + R[2][1] * l), hz = Math.round(R[0][2] * h + R[1][2] * k + R[2][2] * l);
+        var c1 = code(hx, hy, hz), c2 = code(-hx, -hy, -hz); if (c1 < best) best = c1; if (c2 < best) best = c2;
+      }
+      return best;
+    }
+    function absent(h, k, l) {
+      for (var q = 0; q < ops.length; q++) {
+        var R = ops[q].rot, t = ops[q].trans;
+        if (Math.round(R[0][0] * h + R[1][0] * k + R[2][0] * l) === h && Math.round(R[0][1] * h + R[1][1] * k + R[2][1] * l) === k && Math.round(R[0][2] * h + R[1][2] * k + R[2][2] * l) === l) {
+          var x = h * t[0] + k * t[1] + l * t[2]; if (Math.abs(x - Math.round(x)) > 1e-6) return true;
+        }
+      }
+      return false;
+    }
+    var have = new Set(), dmax = 0;
+    for (i = 0; i < D.n; i++) { var dd = dsp(D.h[i], D.k[i], D.l[i]); if (dd !== Infinity && dd > dmax) dmax = dd; if (dd >= dcut) have.add(canon(D.h[i], D.k[i], D.l[i])); }
+    var cell = map.cell, hm = Math.ceil(cell.a / dcut) + 1, km = Math.ceil(cell.b / dcut) + 1, lm = Math.ceil(cell.c / dcut) + 1, exp = new Set(), miss = [];
+    for (var h = -hm; h <= hm; h++) for (var k = -km; k <= km; k++) for (var l = -lm; l <= lm; l++) {
+      if (!h && !k && !l) continue; if (dsp(h, k, l) < dcut || absent(h, k, l)) continue;
+      var cd = canon(h, k, l); if (!exp.has(cd)) { exp.add(cd); if (!have.has(cd) && miss.length < 8) miss.push([h, k, l]); }
+    }
+    var nHave = 0; exp.forEach(function (cd) { if (have.has(cd)) nHave++; });
+    D.lowAngle = { dmax: dmax, dcut: dcut, expected: exp.size, have: nHave, fraction: exp.size ? nHave / exp.size : 1 };
+    return D.lowAngle;
+  }
+  function fcfLowAngleText(D) {
+    var L = fcfLowAngle(D); return L.fraction < 0.9 ? "The low-angle data are incomplete (" + L.have + " of " + L.expected + " allowed reflections with d above " + L.dcut + " \u00c5, " + Math.round(100 * L.fraction) + "%): the missing reflections are estimated from the density in the voids, so the count is less certain." : "";
+  }
+  function fcfAddCount(row) {
+    var D = FCF.data; D.counts = D.counts || []; D.counts.push(row); if (D.counts.length > 12) D.counts.shift(); fcfCountsUi();
+    var wtxt = fcfLowAngleText(D);
+    if (row.leaked) wtxt = "The blob has spread into " + Math.round(100 * row.v / D.map.V) + "% of the cell: the level is too low to separate it from its surroundings, so the count is not meaningful (use the void or a higher level). " + wtxt;
+    setStatus(row.label + ": " + row.e.toFixed(1) + " electrons (one-pass integral " + row.raw.toFixed(1) + ") in " + row.v.toFixed(0) + " Å³." + (wtxt ? " " + wtxt : ""), !!wtxt);
+  }
+  /* ---- the guest density, refined ----
+   * One pass of the difference map is only a first-order estimate: it assumes the guest changes the amplitudes of the structure factors but not their phases, and
+   * it lacks the reflections that were not measured. As in SQUEEZE and the solvent masks of other programs, the density is therefore refined, with the guest confined
+   * to the voids: the guest's structure factors Fm (the Fourier transform of its density) are added to the calculated ones, the phase of the sum is used with the
+   * observed amplitude to get a better difference, the density that results is set to zero outside the voids, and Fm is calculated again from it. The reflections that
+   * were not measured (and F(000), which is the number of electrons) are only ever given by the density inside the voids. A few cycles settle. */
+  function fcfReflArrays(D) {
+    if (D.refl && D.refl.map === D.diffMap) return D.refl;
+    var map = D.diffMap, nx = map.nx, ny = map.ny, nz = map.nz, N = nx * ny * nz, syz = ny * nz, ops = map.ops;
+    var FcRe = new Float32Array(N), FcIm = new Float32Array(N), Ao = new Float32Array(N), meas = new Uint8Array(N);
+    function ix(h, k, l) { return (((h % nx) + nx) % nx) * syz + (((k % ny) + ny) % ny) * nz + (((l % nz) + nz) % nz); }
+    for (var i = 0; i < D.n; i++) {
+      var ao = Math.sqrt(Math.max(D.fo2[i], 0)), fc = D.fc[i], ph0 = D.phi[i] * Math.PI / 180, h = D.h[i], k = D.k[i], l = D.l[i];
+      for (var s = 0; s < ops.length; s++) {
+        var R = ops[s].rot, t = ops[s].trans;
+        var hx = Math.round(R[0][0] * h + R[1][0] * k + R[2][0] * l), hy = Math.round(R[0][1] * h + R[1][1] * k + R[2][1] * l), hz = Math.round(R[0][2] * h + R[1][2] * k + R[2][2] * l);
+        var ph = ph0 - 2 * Math.PI * (h * t[0] + k * t[1] + l * t[2]), q = ix(hx, hy, hz);
+        FcRe[q] = fc * Math.cos(ph); FcIm[q] = fc * Math.sin(ph); Ao[q] = ao; meas[q] = 1;
+        q = ix(-hx, -hy, -hz); FcRe[q] = fc * Math.cos(ph); FcIm[q] = -fc * Math.sin(ph); Ao[q] = ao; meas[q] = 1;
+      }
+    }
+    D.refl = { map: D.diffMap, FcRe: FcRe, FcIm: FcIm, Ao: Ao, meas: meas }; return D.refl;
+  }
+  /* r: the result of fcfCountVoids. Adds the refined electrons to every void (v.e), the total (r.total.e) and the density itself (r.rho). */
+  async function fcfRefineVoids(r) {
+    if (!r || r.refined || !r.voids || !r.voids.length) return r;
+    var D = FCF.data, map = D.diffMap, nx = map.nx, ny = map.ny, nz = map.nz, N = nx * ny * nz, V = map.V;
+    if (N > 4300000) { r.note = "The map grid is too large to refine the guest density (" + N + " points): the counts are single-pass values."; return r; }
+    var A = fcfReflArrays(D), keep = {}, omega = new Uint8Array(N), q, it;
+    r.voids.forEach(function (v) { keep[v.id] = true; });
+    for (q = 0; q < N; q++) if (r.lab[q] >= 0 && keep[r.lab[q]]) omega[q] = 1;
+    var FmRe = new Float32Array(N), FmIm = new Float32Array(N), gRe = new Float32Array(N), gIm = new Float32Array(N), rho = new Float32Array(N), hist = [], stable = 0, prev = null;
+    for (it = 0; it < 60; it++) {
+      for (q = 0; q < N; q++) {
+        if (A.meas[q]) {
+          var tr = A.FcRe[q] + FmRe[q], ti = A.FcIm[q] + FmIm[q], a = Math.sqrt(tr * tr + ti * ti);
+          if (a < 1e-9) { tr = A.FcRe[q]; ti = A.FcIm[q]; a = Math.sqrt(tr * tr + ti * ti) || 1; }
+          var sc0 = A.Ao[q] / a; gRe[q] = tr * sc0 - A.FcRe[q]; gIm[q] = ti * sc0 - A.FcIm[q];
+        } else { gRe[q] = FmRe[q]; gIm[q] = FmIm[q]; }
+      }
+      fcfFft3(gRe, gIm, nx, ny, nz); /* V times the density */
+      var cnt = 0; for (q = 0; q < N; q++) { if (omega[q]) { rho[q] = gRe[q] / V; cnt += rho[q]; } else rho[q] = 0; }
+      gRe.set(rho); gIm.fill(0); fcfFft3(gRe, gIm, nx, ny, nz);
+      var sc = V / N; for (q = 0; q < N; q++) { FmRe[q] = gRe[q] * sc; FmIm[q] = -gIm[q] * sc; }
+      var c = cnt * V / N; hist.push(c);
+      if (prev !== null && Math.abs(c - prev) <= 0.002 * Math.abs(c) + 0.02) stable++; else stable = 0; prev = c;
+      if (stable >= 3 && it >= 8) break;
+      if (it % 3 === 2) { setStatus("Refining the guest density in the voids: cycle " + (it + 1) + ", " + c.toFixed(1) + " electrons so far ...", false); await new Promise(function (res) { setTimeout(res, 0); }); }
+    }
+    var acc = {}; r.voids.forEach(function (v) { acc[v.id] = 0; });
+    for (q = 0; q < N; q++) if (omega[q]) acc[r.lab[q]] += rho[q];
+    var dv = V / N, tot = 0; r.voids.forEach(function (v) { v.eSingle = v.raw; v.e = acc[v.id] * dv; tot += v.e; });
+    r.total.eSingle = r.total.raw; r.total.e = tot; r.rho = rho; r.refined = true; r.iterations = hist.length; r.history = hist; r.converged = stable >= 3;
+    return r;
+  }
+  function fcfDimsOf(map) { return map.nx * map.ny * map.nz; }
+  /* the connected blob around a click, down to a lower level than the one that is drawn; confined to the voids when they are known */
+  function fcfCountBlob(hit, level, rho) {
+    var D = FCF.data, map = D.diffMap, idx = fcfFracIdx(map), d = map.data, nx = map.nx, ny = map.ny, nz = map.nz, syz = ny * nz, s = hit.sign, dv = fcfVoxelVolume(map);
+    var start = idx(hit.p[0], hit.p[1], hit.p[2]), seen = new Uint8Array(nx * ny * nz), stack = [], sum = 0, sumR = 0, n = 0, a, b, c;
+    /* the blob stays inside the free space of the structure (the probe setting of Count voids): at a low level it can then only fill its void, and cannot leak through the noise around the atoms */
+    var vm = null; try { var vr0 = fcfCountVoids(FCF.cfg.countProbe, FCF.cfg.countMinVol); if (vr0 && vr0.lab) vm = vr0.lab; } catch (e0) { vm = null; }
+    if (d[start] * s < level) { var bv = -Infinity, bj = start, ix0 = Math.floor(start / syz), iy0 = Math.floor((start % syz) / nz), iz0 = start % nz;
+      for (a = -1; a <= 1; a++) for (b = -1; b <= 1; b++) for (c = -1; c <= 1; c++) { var j = ((ix0 + a + nx) % nx) * syz + ((iy0 + b + ny) % ny) * nz + ((iz0 + c + nz) % nz); if (d[j] * s > bv) { bv = d[j] * s; bj = j; } }
+      start = bj; }
+    if (d[start] * s < level) return null;
+    if (vm && vm[start] < 0) vm = null; /* the click is not in free space: no confinement */
+    stack.push(start); seen[start] = 1;
+    while (stack.length && n < 6000000) {
+      var i = stack.pop(); n++; sum += d[i]; if (rho) sumR += rho[i];
+      var ix = Math.floor(i / syz), iy = Math.floor((i % syz) / nz), iz = i % nz;
+      for (a = -1; a <= 1; a++) for (b = -1; b <= 1; b++) for (c = -1; c <= 1; c++) {
+        if (!a && !b && !c) continue;
+        var j2 = ((ix + a + nx) % nx) * syz + ((iy + b + ny) % ny) * nz + ((iz + c + nz) % nz);
+        if (seen[j2] || d[j2] * s < level || (vm && vm[j2] < 0)) continue; seen[j2] = 1; stack.push(j2);
+      }
+    }
+    var raw = sum * dv, vr = n * dv, refined = !!(rho && vm), e = refined ? sumR * dv : raw / (1 - Math.min(0.9, vr / map.V));
+    return { leaked: vr > 0.25 * map.V, label: (s > 0 ? "blob" : "hole") + (vr > 0.25 * map.V ? " (leaked)" : "") + (vm ? " in the void," : "") + " down to " + level.toFixed(2) + " e/Å³", raw: raw, e: e, v: vr, refined: refined };
+  }
+  function fcfCountBall(c0, r, rho) {
+    var D = FCF.data, map = D.diffMap, M = map.M, nx = map.nx, ny = map.ny, nz = map.nz, syz = ny * nz, d = map.data, dv = fcfVoxelVolume(map);
+    var fz0 = c0[2] / M[2][2], fy0 = (c0[1] - M[1][2] * fz0) / M[1][1], fx0 = (c0[0] - M[0][1] * fy0 - M[0][2] * fz0) / M[0][0];
+    var A = [M[0][0], 0, 0], B = [M[0][1], M[1][1], 0], C = [M[0][2], M[1][2], M[2][2]];
+    function cr(u, v) { return [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]]; }
+    function len(u) { return Math.sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]); }
+    var hA = map.V / len(cr(B, C)), hB = map.V / len(cr(C, A)), hC = map.V / len(cr(A, B));
+    var rx = Math.ceil(r / hA * nx) + 1, ry = Math.ceil(r / hB * ny) + 1, rz = Math.ceil(r / hC * nz) + 1, sum = 0, sumR = 0, n = 0, r2 = r * r;
+    var ix0 = Math.round(fx0 * nx), iy0 = Math.round(fy0 * ny), iz0 = Math.round(fz0 * nz);
+    for (var i = ix0 - rx; i <= ix0 + rx; i++) for (var j = iy0 - ry; j <= iy0 + ry; j++) for (var k = iz0 - rz; k <= iz0 + rz; k++) {
+      var fx = i / nx - fx0, fy = j / ny - fy0, fz = k / nz - fz0;
+      var x = M[0][0] * fx + M[0][1] * fy + M[0][2] * fz, y = M[1][1] * fy + M[1][2] * fz, z = M[2][2] * fz;
+      if (x * x + y * y + z * z > r2) continue;
+      var q = (((i % nx) + nx) % nx) * syz + (((j % ny) + ny) % ny) * nz + (((k % nz) + nz) % nz);
+      sum += d[q]; if (rho) sumR += rho[q]; n++;
+    }
+    var raw = sum * dv, vr = n * dv;
+    return { label: "ball " + r.toFixed(1) + " Å" + (rho ? " (in the voids)" : ""), raw: raw, e: rho ? sumR * dv : raw / (1 - Math.min(0.9, vr / map.V)), v: vr, refined: !!rho };
+  }
+  /* the space the host leaves free: every grid point farther than (van der Waals radius + probe) from every atom, split into separate voids */
+  function fcfCountVoids(probe, minVol) {
+    var D = FCF.data, map = D.diffMap, M = map.M, nx = map.nx, ny = map.ny, nz = map.nz, syz = ny * nz, N = nx * ny * nz, d = map.data, dv = fcfVoxelVolume(map);
+    var asuAll = (state.cifAsymUnit || []).filter(function (a) { return !a.isGuestAsu; }), ops = map.ops || state.cifSymops || [];
+    /* atoms with an occupancy under 0.5 are a modelled guest or solvent (the .fcf of a guest-omitted refinement does not have them either): they must not fill the void that is to be counted */
+    var asu = asuAll.filter(function (a) { return !(a.occ != null && a.occ < 0.5); }), skippedAtoms = asuAll.length - asu.length;
+    if (!asu.length) return { error: "there are no atoms to take the free space from" };
+    var ckey = "c3:" + probe + ":" + minVol + ":" + ops.length + ":" + asu.length + ":" + skippedAtoms + ":" + asu.reduce(function (t, a) { return t + a.fx * 1.1 + a.fy * 1.3 + a.fz * 1.7; }, 0).toFixed(4);
+    if (D.voidCache && D.voidCache.key === ckey) return D.voidCache.res; /* the same mask is reused by the clicks that count a void */
+    var blocked = new Uint8Array(N), A = [M[0][0], 0, 0], B = [M[0][1], M[1][1], 0], C = [M[0][2], M[1][2], M[2][2]];
+    function cr(u, v) { return [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]]; }
+    function len(u) { return Math.sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]); }
+    var hA = map.V / len(cr(B, C)), hB = map.V / len(cr(C, A)), hC = map.V / len(cr(A, B)), seenPos = {};
+    asu.forEach(function (at) {
+      var R = K.vdw(at.el) + probe, R2 = R * R, rx = Math.ceil(R / hA * nx) + 1, ry = Math.ceil(R / hB * ny) + 1, rz = Math.ceil(R / hC * nz) + 1;
+      ops.forEach(function (op) {
+        var g = K.applySymop(op, [at.fx, at.fy, at.fz]), fx0 = g[0] - Math.floor(g[0]), fy0 = g[1] - Math.floor(g[1]), fz0 = g[2] - Math.floor(g[2]);
+        var key = at.el + ":" + fx0.toFixed(3) + "," + fy0.toFixed(3) + "," + fz0.toFixed(3); if (seenPos[key]) return; seenPos[key] = 1; /* an atom on a special position once */
+        var ix0 = Math.round(fx0 * nx), iy0 = Math.round(fy0 * ny), iz0 = Math.round(fz0 * nz);
+        for (var i = ix0 - rx; i <= ix0 + rx; i++) for (var j = iy0 - ry; j <= iy0 + ry; j++) for (var k = iz0 - rz; k <= iz0 + rz; k++) {
+          var fx = i / nx - fx0, fy = j / ny - fy0, fz = k / nz - fz0;
+          var x = M[0][0] * fx + M[0][1] * fy + M[0][2] * fz, y = M[1][1] * fy + M[1][2] * fz, z = M[2][2] * fz;
+          if (x * x + y * y + z * z <= R2) blocked[(((i % nx) + nx) % nx) * syz + (((j % ny) + ny) % ny) * nz + (((k % nz) + nz) % nz)] = 1;
+        }
+      });
+    });
+    /* what is counted is the volume the probe can cover, as in SQUEEZE and the void volumes of other programs: every point within the probe radius of a place where the
+       centre of the probe fits. Spheres are put only around the edge of that centre region (the points inside are covered by their own spheres), so this stays fast. */
+    var region = new Uint8Array(N), offs = [], rxs = Math.ceil(probe / hA * nx) + 1, rys = Math.ceil(probe / hB * ny) + 1, rzs = Math.ceil(probe / hC * nz) + 1, p2 = probe * probe, di, dj, dk, o;
+    for (di = -rxs; di <= rxs; di++) for (dj = -rys; dj <= rys; dj++) for (dk = -rzs; dk <= rzs; dk++) {
+      var gx = di / nx, gy = dj / ny, gz = dk / nz, qx = M[0][0] * gx + M[0][1] * gy + M[0][2] * gz, qy = M[1][1] * gy + M[1][2] * gz, qz = M[2][2] * gz;
+      if (qx * qx + qy * qy + qz * qz <= p2) offs.push(di, dj, dk);
+    }
+    var ix2, iy2, iz2, p0;
+    for (ix2 = 0; ix2 < nx; ix2++) for (iy2 = 0; iy2 < ny; iy2++) for (iz2 = 0; iz2 < nz; iz2++) {
+      p0 = ix2 * syz + iy2 * nz + iz2; if (blocked[p0]) continue; region[p0] = 1;
+      var xm = ((ix2 - 1 + nx) % nx) * syz + iy2 * nz + iz2, xp = ((ix2 + 1) % nx) * syz + iy2 * nz + iz2, ym = ix2 * syz + ((iy2 - 1 + ny) % ny) * nz + iz2, yp = ix2 * syz + ((iy2 + 1) % ny) * nz + iz2, zm = ix2 * syz + iy2 * nz + (iz2 - 1 + nz) % nz, zp = ix2 * syz + iy2 * nz + (iz2 + 1) % nz;
+      if (!(blocked[xm] || blocked[xp] || blocked[ym] || blocked[yp] || blocked[zm] || blocked[zp])) continue;
+      for (o = 0; o < offs.length; o += 3) region[(((ix2 + offs[o]) % nx + nx) % nx) * syz + (((iy2 + offs[o + 1]) % ny + ny) % ny) * nz + (((iz2 + offs[o + 2]) % nz + nz) % nz)] = 1;
+    }
+    for (p0 = 0; p0 < N; p0++) blocked[p0] = region[p0] ? 0 : 1;
+    /* separate voids: periodic flood fill over the free grid points */    var lab = new Int32Array(N).fill(-1), comps = [], stack = [], i, nfree = 0;
+    for (i = 0; i < N; i++) {
+      if (blocked[i] || lab[i] >= 0) continue;
+      var id = comps.length, cnt = 0, sum = 0, sc = [0, 0, 0], ss = [0, 0, 0]; lab[i] = id; stack.length = 0; stack.push(i);
+      while (stack.length) {
+        var p = stack.pop(); cnt++; sum += d[p];
+        var ix = Math.floor(p / syz), iy = Math.floor((p % syz) / nz), iz = p % nz, ang;
+        ang = 2 * Math.PI * ix / nx; sc[0] += Math.cos(ang); ss[0] += Math.sin(ang); ang = 2 * Math.PI * iy / ny; sc[1] += Math.cos(ang); ss[1] += Math.sin(ang); ang = 2 * Math.PI * iz / nz; sc[2] += Math.cos(ang); ss[2] += Math.sin(ang);
+        var nb = [((ix + 1) % nx) * syz + iy * nz + iz, ((ix - 1 + nx) % nx) * syz + iy * nz + iz, ix * syz + ((iy + 1) % ny) * nz + iz, ix * syz + ((iy - 1 + ny) % ny) * nz + iz, ix * syz + iy * nz + (iz + 1) % nz, ix * syz + iy * nz + (iz - 1 + nz) % nz];
+        for (var q = 0; q < 6; q++) { var j2 = nb[q]; if (blocked[j2] || lab[j2] >= 0) continue; lab[j2] = id; stack.push(j2); }
+      }
+      var cen = [0, 1, 2].map(function (e) { var r = Math.sqrt(sc[e] * sc[e] + ss[e] * ss[e]) / cnt; return r > 0.2 ? (((Math.atan2(ss[e], sc[e]) / (2 * Math.PI)) % 1) + 1) % 1 : null; });
+      comps.push({ id: id, n: cnt, raw: sum * dv, v: cnt * dv, cen: cen }); nfree += cnt;
+    }
+    var keep = comps.filter(function (c) { return c.v >= minVol; });
+    var fkeep = keep.reduce(function (s, c) { return s + c.v; }, 0) / map.V, rawTot = keep.reduce(function (s, c) { return s + c.raw; }, 0), Ntot = rawTot / (1 - Math.min(0.9, fkeep));
+    keep.forEach(function (c) { c.e = c.raw + Ntot * c.v / map.V; });
+    keep.sort(function (p, q) { return q.v - p.v; });
+    var res = { voids: keep, total: { raw: rawTot, e: Ntot, v: fkeep * map.V }, ignored: comps.length - keep.length, lab: lab, skippedAtoms: skippedAtoms };
+    D.voidCache = { key: ckey, res: res }; return res;
+  }
+  /* the void that contains a point (or lies next to it): its electrons, with the guest density refined as for Count voids */
+  async function fcfCountVoidAt(p) {
+    var D = FCF.data, C = FCF.cfg, map = D.diffMap, r = fcfCountVoids(C.countProbe, C.countMinVol); if (r.error) return { error: r.error };
+    await fcfRefineVoids(r);
+    var nx = map.nx, ny = map.ny, nz = map.nz, syz = ny * nz, idx = fcfFracIdx(map)(p[0], p[1], p[2]), L = r.lab[idx];
+    if (L < 0) { var ix0 = Math.floor(idx / syz), iy0 = Math.floor((idx % syz) / nz), iz0 = idx % nz;
+      for (var a = -3; a <= 3 && L < 0; a++) for (var b = -3; b <= 3 && L < 0; b++) for (var c = -3; c <= 3; c++) { var l2 = r.lab[((ix0 + a + nx) % nx) * syz + ((iy0 + b + ny) % ny) * nz + ((iz0 + c + nz) % nz)]; if (l2 >= 0) { L = l2; break; } } }
+    if (L < 0) return { error: "the point is inside the zone that the atoms and the probe exclude: use a smaller probe, or delete atoms that sit in the void (a modelled guest)" };
+    var v = r.voids.filter(function (x) { return x.id === L; })[0];
+    if (!v) return { error: "that void is smaller than " + C.countMinVol + " \u00c5\u00b3 and is not counted" };
+    return { label: "void" + (v.cen.every(function (x) { return x !== null; }) ? " at " + v.cen.map(function (x) { return (x >= 0.995 ? 0 : x).toFixed(2); }).join(", ") : ""), raw: v.raw, e: v.e, v: v.v, refined: !!r.refined };
+  }
+  function fcfCountsUi() {
+    var box = FCF.ui.counts, D = FCF.data; if (!box) return; box.innerHTML = "";
+    var rows = (D && D.counts) || []; if (!rows.length) return;
+    var html = "<table class='orb-table'><thead><tr><th>region</th><th>&Aring;&sup3;</th><th>e&minus;</th><th>1 pass</th></tr></thead><tbody>";
+    rows.forEach(function (r) { html += "<tr><td>" + r.label + "</td><td>" + r.v.toFixed(0) + "</td><td><b>" + r.e.toFixed(1) + "</b></td><td>" + r.raw.toFixed(1) + "</td></tr>"; });
+    var L = fcfLowAngle(D);
+    box.innerHTML = html + "</tbody></table><div class=\"orb-sum\" title=\"The electron counts need the low-angle reflections. Of the reflections the space group allows with d above " + L.dcut + " &Aring;, this is the share that is in the file. Below about 90% the counts are less certain: the missing reflections are estimated from the density in the voids.\" style=\"color:" + (L.fraction < 0.9 ? "var(--danger)" : "inherit") + "\">low-angle data " + Math.round(100 * L.fraction) + "% complete (" + L.have + " of " + L.expected + " with d &gt; " + L.dcut + " &Aring;)</div>";
+  }
+  async function fcfDoCountVoids() {
+    var D = FCF.data, C = FCF.cfg; if (!D || !D.map) { setStatus("There is no map: load a .fcf with the structure first.", true); return; }
+    var t0 = Date.now(), r;
+    try { r = fcfCountVoids(C.countProbe, C.countMinVol); if (r.error) { setStatus("Electron count: " + r.error + ".", true); return; } if (r.voids.length) await fcfRefineVoids(r); }
+    catch (e) { setStatus("Electron count: " + e.message + ".", true); return; }
+    if (!r.voids.length) { setStatus((r.skippedAtoms ? r.skippedAtoms + " atoms of occupancy below 0.5 were left out. " : "") + "No void of at least " + C.countMinVol + " \u00c5\u00b3 was found with a probe of " + C.countProbe.toFixed(2) + " \u00c5.", true); return; }
+    D.counts = D.counts || [];
+    r.voids.forEach(function (v, i) { D.counts.push({ label: "void " + (i + 1) + (v.cen.every(function (x) { return x !== null; }) ? " at " + v.cen.map(function (x) { return (x >= 0.995 ? 0 : x).toFixed(2); }).join(", ") : ""), raw: v.raw, e: v.e, v: v.v }); });
+    D.counts.push({ label: "all voids (probe " + C.countProbe.toFixed(2) + " \u00c5)", raw: r.total.raw, e: r.total.e, v: r.total.v });
+    if (D.counts.length > 24) D.counts = D.counts.slice(-24);
+    fcfCountsUi();
+    var wtxt = fcfLowAngleText(D);
+    setStatus(r.voids.length + " void" + (r.voids.length === 1 ? "" : "s") + ", " + r.total.v.toFixed(0) + " \u00c5\u00b3 (" + (100 * r.total.v / D.map.V).toFixed(1) + "% of the cell), " + r.total.e.toFixed(1) + " electrons per cell" + (r.refined ? " (guest density refined in " + r.iterations + " cycles" + (r.converged ? "" : ", not fully settled") + ")" : "") + (r.skippedAtoms ? "; " + r.skippedAtoms + " atom" + (r.skippedAtoms === 1 ? "" : "s") + " of occupancy below 0.5 (a modelled guest?) left out when finding the voids" : "") + (r.ignored ? "; " + r.ignored + " smaller pocket" + (r.ignored === 1 ? "" : "s") + " ignored" : "") + " (" + (Date.now() - t0) + " ms)." + (r.note ? " " + r.note : "") + (wtxt ? " " + wtxt : ""), !!wtxt || !!r.note);
+  }
+  /* each map has its own levels and colours (kept in multiples of the r.m.s. of the map, so they survive a change of unit) */
+  var FCF_SETS = {
+    diff: { level: 4, levels: [3, 6, 10], on: [true, true, true], neg: true, colPos: 0x2fbf4a, colNeg: 0xe03030, cols: [0x3b6fff, 0x2fbf4a, 0xff3b30], colNegMesh: 0xcc33cc },
+    fofc2: { level: 1, levels: [0.7, 1.2, 2], on: [true, true, true], neg: false, colPos: 0x3b6fff, colNeg: 0x3b6fff, cols: [0xa9c0ff, 0x3b6fff, 0x1f3fb0], colNegMesh: 0x3b6fff }
+  };
+  function fcfSetKey(kind) { return kind === "2fofc" ? "fofc2" : "diff"; }
+  function fcfSnapshotSet() {
+    var C = FCF.cfg, r = FCF.data && FCF.data.map ? FCF.data.map.rms : 1, k = C.units === "rms" ? 1 : 1 / r;
+    return { level: C.level * k, levels: C.levels.map(function (x) { return x * k; }), on: C.on.slice(), neg: C.neg, colPos: C.colPos, colNeg: C.colNeg, cols: C.cols.slice(), colNegMesh: C.colNegMesh };
+  }
+  function fcfApplySet(st) {
+    var C = FCF.cfg, U = FCF.ui, r = FCF.data && FCF.data.map ? FCF.data.map.rms : 1, k = C.units === "rms" ? 1 : r;
+    C.level = st.level * k; C.levels = st.levels.map(function (x) { return x * k; }); C.on = st.on.slice(); C.neg = st.neg; C.colPos = st.colPos; C.colNeg = st.colNeg; C.cols = st.cols.slice(); C.colNegMesh = st.colNegMesh;
+    if (U.lvl) U.lvl.value = C.level.toFixed(2);
+    (U.lvls || []).forEach(function (n, i) { n.value = C.levels[i].toFixed(2); });
+    (U.onCbs || []).forEach(function (c, i) { c.checked = C.on[i] !== false; });
+    (U.swCols || []).forEach(function (w, i) { w.value = hexToCss(C.cols[i]); });
+    if (U.swPos) U.swPos.value = hexToCss(C.colPos); if (U.swNeg) U.swNeg.value = hexToCss(C.colNeg); if (U.swNegMesh) U.swNegMesh.value = hexToCss(C.colNegMesh);
+    if (U.negSolid) U.negSolid.checked = C.neg; if (U.negMesh) U.negMesh.checked = C.neg;
+  }
+  function fcfSwitchMap(kind) {
+    var C = FCF.cfg, D = FCF.data; if (kind === C.mapKind) return;
+    C.sets[fcfSetKey(C.mapKind)] = fcfSnapshotSet();
+    C.mapKind = kind; if (D && D.diffMap) fcfPickShown(D);
+    fcfApplySet(C.sets[fcfSetKey(kind)] || FCF_SETS[fcfSetKey(kind)]);
+    fcfSyncUi(); fcfRedraw();
+  }
+  /* ---- the menu ---- */
+  function fcfFmt(v) { return (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(2); }
+  function fcfSyncStatus(msg) { if (FCF.ui.note) FCF.ui.note.textContent = msg || ""; }
+  function fcfSyncUi() {
+    var U = FCF.ui, D = FCF.data; if (!U.info || !U.meshRow || !U.regionNum) return;
+    var C = FCF.cfg;
+    if (!D || !D.map) { U.info.textContent = "No reflection file."; U.stats.innerHTML = ""; U.peaks.innerHTML = ""; fcfRulesUi(); return; }
+    fcfRulesUi(); fcfCountsUi();
+    var m = D.map, tg = state.cifTags || {};
+    U.info.textContent = D.name + ": " + D.n + " reflections, LIST " + (D.list || "?") + (D.dmin ? ", d(min) " + D.dmin.toFixed(2) + " Å" : "");
+    U.stats.innerHTML = "<div class='orb-sum' title='The extremes and the r.m.s. of the map over the unit cell. SHELXL’s own values are in the CIF (_refine_diff_density_max, _min, _rms).'>" + (m.kind === "2fofc" ? "2Fo \u2212 Fc: " : "") + "max " + fcfFmt(m.max) + ", min " + fcfFmt(m.min) + ", rms " + m.rms.toFixed(3) + " e/Å³" +
+      (m.kind !== "2fofc" && tg["_refine_diff_density_max"] != null ? "<br>SHELXL: " + tg["_refine_diff_density_max"] + ", " + tg["_refine_diff_density_min"] + ", " + tg["_refine_diff_density_rms"] : "") + "</div>";
+    var P = D.peaks || { peaks: [], holes: [] };
+    var html = "<table class='orb-table'><thead><tr><th>peak</th><th>e/&Aring;&sup3;</th><th>&times;rms</th><th>x, y, z</th><th>nearest atom</th></tr></thead><tbody>";
+    P.peaks.concat(P.holes).forEach(function (r, i) {
+      html += "<tr><td>" + (r.h > 0 ? "Q" + (i + 1) : "hole") + "</td><td>" + fcfFmt(r.h) + "</td><td>" + (r.h / D.diffMap.rms).toFixed(1) + "</td><td>" + r.f.map(function (v) { return (v - Math.floor(v)).toFixed(3); }).join(", ") + "</td><td>" + (r.near ? r.near.label + " " + r.near.d.toFixed(2) + " &Aring;" : "") + "</td></tr>";
+    });
+    U.peaks.innerHTML = html + "</tbody></table>";
+    U.solidRow.style.display = C.mode === "solid" ? "" : "none"; U.meshRow.style.display = C.mode === "mesh" ? "" : "none";
+    U.regionLabel.textContent = (C.region === "all" || C.region === "selbox") ? "margin" : "radius";
+    if (U.negSolid) U.negSolid.checked = C.neg; if (U.negMesh) U.negMesh.checked = C.neg;
+  }
+  /* the rows of the menu share one grid: a label column of fixed width, then the controls, so values and swatches line up from row to row */
+  function fcfInjectStyle() {
+    if (document.getElementById("fcfStyle")) return;
+    var st = document.createElement("style"); st.id = "fcfStyle";
+    st.textContent = ".fcf-body{display:flex;flex-direction:column;gap:8px;padding-top:2px}.fcf-sub{display:flex;flex-direction:column;gap:8px}" +
+      ".fcf-row{display:flex;align-items:center;gap:7px;min-height:24px}" +
+      ".fcf-row>.fcf-l{flex:0 0 84px;display:flex;align-items:center;justify-content:space-between;gap:6px;padding-right:2px;font-size:12px;color:var(--ink);margin:0;cursor:default}" +
+      ".fcf-row>.fcf-l input{margin:0;flex:0 0 auto}" +
+      ".fcf-row input.num{width:64px;flex:0 0 auto}.fcf-row select{flex:1 1 auto;min-width:0}" +
+      ".fcf-row input[type=range]{flex:1 1 auto;min-width:0}.fcf-row .fcf-v{flex:0 0 34px;text-align:right;font-family:var(--mono);font-size:11.5px;color:var(--ink-mid)}" +
+      ".fcf-row .unit{font-size:11px;color:var(--ink-mid)}.fcf-row input.swatch{flex:0 0 auto}" +
+      ".fcf-rule{display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:var(--ink-mid);padding:1px 2px}.fcf-rule .x{cursor:pointer;color:var(--ink-faint);padding:0 4px}.fcf-rule .x:hover{color:var(--danger)}";
+    document.head.appendChild(st);
+  }
+  function fcfRow(parent, label, checkbox) {
+    var r = el("div", "fcf-row"), l = el("label", "fcf-l");
+    l.appendChild(document.createTextNode(label)); if (checkbox) l.appendChild(checkbox); r.appendChild(l); parent.appendChild(r); return r;
+  }
+  function fcfCheck(val, title, on) { var c = document.createElement("input"); c.type = "checkbox"; c.checked = !!val; if (title) c.title = title; c.addEventListener("change", function () { on(c.checked); }); return c; }
+  function fcfNumber(parent, label, min, max, step, val, unit, on, checkbox) {
+    var r = fcfRow(parent, label, checkbox), n = document.createElement("input"); n.type = "number"; n.className = "num"; n.min = min; n.max = max; n.step = step; n.value = val.toFixed(2);
+    n.addEventListener("input", function () { var v = parseFloat(n.value); if (isFinite(v) && v >= min && v <= max) on(v); });
+    n.addEventListener("change", function () { var v = parseFloat(n.value); if (isFinite(v)) n.value = Math.min(max, Math.max(min, v)).toFixed(2); });
+    r.appendChild(n); if (unit) r.appendChild(el("span", "unit", unit)); r.num = n; return r;
+  }
+  function fcfSlider(parent, label, min, max, step, val, fmt, on) {
+    var r = fcfRow(parent, label), g = document.createElement("input"); g.type = "range"; g.min = min; g.max = max; g.step = step; g.value = val;
+    var v = el("span", "fcf-v", fmt(val)); g.addEventListener("input", function () { var x = parseFloat(g.value); v.textContent = fmt(x); on(x); }); r.appendChild(g); r.appendChild(v); return r;
+  }
+  function fcfSelect(parent, label, opts, val, title, on) {
+    var r = fcfRow(parent, label), s = document.createElement("select"); s.className = "sel"; s.title = title || "";
+    opts.forEach(function (o) { var p = document.createElement("option"); p.value = o[0]; p.textContent = o[1]; if (String(o[0]) === String(val)) p.selected = true; s.appendChild(p); });
+    s.addEventListener("change", function () { on(s.value); }); r.appendChild(s); r.sel = s; return r;
+  }
+  function buildFcfUi(left) {
+    orbInjectStyle(); fcfInjectStyle();
+    var C = FCF.cfg, U = FCF.ui, sec = section(left, "Difference density", false, function (isOpen) { if (!isOpen) fcfExitMode(); }), body = el("div", "fcf-body"); sec.appendChild(body);
+    U.info = el("div", "orb-sum"); body.appendChild(U.info);
+    var rd = function () { fcfSyncUi(); fcfRedraw(); };
+    var showRow = fcfRow(body, "Show map", fcfCheck(C.show, "Shows or hides the difference electron density surfaces.", function (v) { C.show = v; rd(); })); U.showCb = showRow.querySelector("input");
+    fcfSelect(body, "map", [["diff", "difference, Fo \u2212 Fc"], ["2fofc", "2Fo \u2212 Fc"]], C.mapKind, "The difference density (what the model lacks) or the 2Fo \u2212 Fc map (the electron density itself, with the model's phases). Each has its own levels and colours. Counting electrons and the peak list always use the difference map.", function (v) { fcfSwitchMap(v); });
+    fcfSelect(body, "display", [["solid", "solid surface, one level"], ["mesh", "mesh, three levels"]], C.mode, "A transparent solid surface at one level, or three wire meshes at three levels.", function (v) { C.mode = v; rd(); });
+    fcfSelect(body, "levels in", [["rms", "× rms of the map"], ["abs", "e/Å³"]], C.units, "Contour levels as multiples of the r.m.s. of the map (the usual 3σ style) or as electron density.", function (v) {
+      var m = FCF.data && FCF.data.map ? FCF.data.map.rms : 0.1, f = v === "abs" ? m : 1 / m;
+      if (v !== C.units) { C.level *= f; C.countLevel *= f; C.levels = C.levels.map(function (x) { return x * f; }); C.units = v; fcfFillLevels(); }
+      rd();
+    });
+    /* solid surface */
+    U.solidRow = el("div", "fcf-sub"); body.appendChild(U.solidRow);
+    U.lvl = fcfNumber(U.solidRow, "level", 0.01, 99, 0.1, C.level, "", function (v) { C.level = v; fcfRedraw(); }).num;
+    var pr = fcfRow(U.solidRow, "positive"); var sp = U.swPos = colorSwatch(C.colPos, function (h) { C.colPos = h; fcfRedraw(); }); sp.title = "Colour of the positive density"; pr.appendChild(sp);
+    U.negSolid = fcfCheck(C.neg, "Also show the negative density (holes).", function (v) { C.neg = v; rd(); });
+    var nr = fcfRow(U.solidRow, "negative", U.negSolid); var sn = U.swNeg = colorSwatch(C.colNeg, function (h) { C.colNeg = h; fcfRedraw(); }); sn.title = "Colour of the negative density"; nr.appendChild(sn);
+    fcfSlider(U.solidRow, "opacity", 0.1, 1, 0.05, C.opacity, function (v) { return v.toFixed(2); }, function (v) { C.opacity = v; fcfRedraw(); });
+    /* mesh */
+    U.meshRow = el("div", "fcf-sub"); body.appendChild(U.meshRow); U.lvls = []; U.onCbs = []; U.swCols = [];
+    fcfSlider(U.meshRow, "line width", 0.5, 6, 0.5, C.thick, function (v) { return v.toFixed(1); }, function (v) { C.thick = v; }).title = "Thickness of the mesh lines in screen pixels.";
+    fcfNumber(U.meshRow, "spacing", 0.05, 1, 0.05, C.meshStep, "Å", function (v) { C.meshStep = v; fcfRedraw(); }).title = "Distance between the points at which the mesh is calculated: a larger value gives a coarser, more open mesh.";
+    C.levels.forEach(function (lv, i) {
+      var cb = fcfCheck(C.on[i] !== false, "Show this level", function (v) { C.on[i] = v; fcfRedraw(); });
+      var row = fcfNumber(U.meshRow, "level " + (i + 1), 0.01, 99, 0.1, lv, "", function (v) { C.levels[i] = v; fcfRedraw(); }, cb);
+      var sw = colorSwatch(C.cols[i], function (h) { C.cols[i] = h; fcfRedraw(); }); sw.title = "Colour of level " + (i + 1); row.appendChild(sw); U.lvls.push(row.num); U.onCbs.push(cb); U.swCols.push(sw);
+    });
+    U.negMesh = fcfCheck(C.neg, "Also show the negative density (holes), at the lowest level.", function (v) { C.neg = v; rd(); });
+    var nm = fcfRow(U.meshRow, "negative", U.negMesh); var sm = U.swNegMesh = colorSwatch(C.colNegMesh, function (h) { C.colNegMesh = h; fcfRedraw(); }); sm.title = "Colour of the negative mesh"; nm.appendChild(sm);
+    /* region */
+    fcfSelect(body, "region", [["all", "box around the structure"], ["selbox", "box around the selected atoms"], ["vis", "near the visible atoms"], ["sel", "near the selected atoms"]], C.region, "Where the map is drawn: a box around every atom in view, or only within a radius of the visible or the selected atoms.", function (v) { C.region = v; rd(); });
+    var rr0 = fcfNumber(body, "margin", 0.5, 20, 0.5, C.margin, "Å", function (v) { C.margin = v; fcfRedraw(); }); U.regionNum = rr0.num; U.regionLabel = rr0.querySelector(".fcf-l");
+    var rr = el("div", "btnrow");
+    button(rr, "Redraw", "ghost", function () { C.show = true; U.showCb.checked = true; fcfRedraw(); }).title = "Calculates and draws the surfaces again with the settings above, for example after Grow, a new selection or a change of region.";
+    button(rr, "Clear", "ghost", function () { C.show = false; U.showCb.checked = false; fcfRedraw(); }).title = "Removes the surfaces from the view. The map stays loaded and this menu stays: change the settings and press Redraw.";
+    body.appendChild(rr);
+    var es = subsection(sec, "Erase", false, function (isOpen) { if (!isOpen && FCF.erase.on && FCF.erase.kind === "erase") fcfSetEraseMode(false); }), eb = el("div", "fcf-body"); es.appendChild(eb);
+    U.eraseBtn = button(eb, "", "prominent", function () { fcfSetEraseMode(!(FCF.erase.on && FCF.erase.kind === "erase"), "erase"); }); U.eraseBtn.id = "fcfEraseBtn";
+    fcfSelect(eb, "tool", [["blob", "hide the blob"], ["keep", "keep only the blob"], ["ball", "hide a ball"]], C.eraseTool, "Hide the connected blob under the pointer, keep only that blob and hide all the rest, or hide everything within a radius of the point clicked.", function (v) { C.eraseTool = v; fcfSyncErase(); });
+    U.eraseRadiusRow = fcfNumber(eb, "radius", 0.2, 20, 0.1, C.eraseRadius, "\u00c5", function (v) { C.eraseRadius = v; });
+    U.eraseCopiesRow = fcfSelect(eb, "copies", [["this", "this copy only"], ["all", "all copies"]], C.eraseCopies, "Whether a ball also hides the same place in every other unit cell.", function (v) { C.eraseCopies = v; });
+    U.rules = el("div", "fcf-sub"); eb.appendChild(U.rules);
+    var ur = el("div", "btnrow");
+    U.undoBtn = button(ur, "Undo", "ghost", function () { var D2 = FCF.data, l2 = D2 && fcfRuleList(D2); if (l2 && l2.length) { l2.pop(); fcfRulesUi(); fcfRedraw(); } }); U.undoBtn.title = "Brings back what the last rule hid.";
+    U.resetBtn = button(ur, "Reset all", "ghost", function () { var D2 = FCF.data; if (D2) { D2[FCF.cfg.mapKind === "2fofc" ? "rules2" : "rules"] = []; fcfRulesUi(); fcfRedraw(); } }); U.resetBtn.title = "Removes every rule: all of the map is shown again.";
+    eb.appendChild(ur);
+    function fcfSyncErase() { U.eraseRadiusRow.style.display = C.eraseTool === "ball" ? "" : "none"; U.eraseCopiesRow.style.display = C.eraseTool === "ball" ? "" : "none"; }
+    var cs = subsection(sec, "Count electrons", false, function (isOpen) { if (!isOpen && FCF.erase.on && FCF.erase.kind === "count") fcfSetEraseMode(false); }), cb = el("div", "fcf-body"); cs.appendChild(cb);
+    U.countBtn = button(cb, "", "prominent", function () { fcfSetEraseMode(!(FCF.erase.on && FCF.erase.kind === "count"), "count"); }); U.countBtn.id = "fcfCountBtn";
+    fcfSelect(cb, "region", [["blob", "the blob clicked"], ["void", "the void clicked"], ["ball", "a ball around the click"]], C.countTool, "The electrons are counted in the connected blob of density under the pointer (down to the count-to level), in the whole void that contains the point (as set by the probe, like a SQUEEZE mask), or within a radius of the point clicked.", function (v) { C.countTool = v; fcfSyncCount(); });
+    U.countLevelRow = fcfNumber(cb, "count to", 0.05, 99, 0.1, C.countLevel, "", function (v) { C.countLevel = v; }); U.countLevelRow.title = "The level a blob is counted down to, in the unit chosen under levels in: lower than the displayed level, so that the edges of the density are counted too.";
+    U.countRadiusRow = fcfNumber(cb, "radius", 0.2, 20, 0.1, C.countRadius, "\u00c5", function (v) { C.countRadius = v; });
+    var vr = fcfNumber(cb, "probe", 0.2, 3, 0.1, C.countProbe, "\u00c5", function (v) { C.countProbe = v; }); vr.title = "Radius of the probe that is added to the van der Waals radius of every atom: the space farther than that from all atoms is the void space that Count voids counts.";
+    var vb = el("div", "btnrow"); button(vb, "Count voids", "ghost", fcfDoCountVoids).title = "Counts the electrons in each void of the structure, from the difference density: one pass of the map, as in SQUEEZE.";
+    button(vb, "Clear counts", "ghost", function () { if (FCF.data) { FCF.data.counts = []; fcfCountsUi(); } }).title = "Empties the table of counts.";
+    cb.appendChild(vb); U.counts = el("div", "orb-scroll"); U.counts.style.overflowX = "auto"; cb.appendChild(U.counts);
+    function fcfSyncCount() { U.countLevelRow.style.display = C.countTool === "blob" ? "" : "none"; U.countRadiusRow.style.display = C.countTool === "ball" ? "" : "none"; }
+    fcfSyncErase(); fcfSyncCount(); fcfRulesUi(); fcfCountsUi(); fcfSyncModeBtns();    U.note = el("div", "hint"); body.appendChild(U.note);
+    U.stats = el("div"); body.appendChild(U.stats);
+    var ps = subsection(sec, "Peaks and holes", false); U.peaks = el("div", "orb-scroll"); U.peaks.style.overflowX = "auto"; ps.appendChild(U.peaks);
+    function fcfFillLevels() { U.countLevelRow.num.value = C.countLevel.toFixed(2); U.lvl.value = C.level.toFixed(2); U.lvls.forEach(function (n, i) { n.value = C.levels[i].toFixed(2); }); }
+    fcfSyncUi();
+  }
+  /* ---- FCF-END ---- */
+
   /* ---- HELPBUTTONS-BEGIN: a small "?" in the title bar of the menus below opens a short, task-focused help panel (looks like the Guide, but floats beside the 3D view without dimming it, so it can stay open while you work). The text lives only here; the Guide and the Manual stay the full reference. ---- */
   var HELP_TITLES = { "Orca bridge": "orca", "Cube & ESP": "cube", "Macro": "macro", "Grow": "grow", "Void / Channel Analysis": "voidch", "Molecular Surface": "molsurf",
-    "Add guest": "addguest", "Walk mode": "walk", "Clipping Planes": "clip", "Video": "video" };
+    "Add guest": "addguest", "Walk mode": "walk", "Clipping Planes": "clip", "Video": "video", "Difference density": "fcf" };
   var HELP = {
     orca: { title: "Orca bridge", html:
       "<p>Uses the free quantum-chemistry program <b>Orca</b> as a number cruncher. CrystalVista writes the input files, you start a small run script by double-clicking it, and CrystalVista reads the results back. Orca has to be installed separately (it is free for academic use); for more than one core it also needs Microsoft MPI.</p>" +
@@ -20316,7 +21242,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<li>A surface is cut by a clipping plane only if <b>Molecular surface</b> is ticked in that plane&rsquo;s Apply to.</li>" +
       "<li>The surface is what the electrostatic potential is painted on: see Orca bridge and Cube &amp; ESP.</li></ul>" },
     addguest: { title: "Add guest", html:
-      "<p>Drop a CIF containing just one guest molecule here to add it as a new guest component, centred at the origin.</p>" +
+      "<p>Drop a CIF, or a SHELX .res or .ins file, containing just one guest molecule here to add it as a new guest component, centred at the origin. Every atom of the file is taken (Q peaks of a .res are left out) and its cell only converts the coordinates to Cartesian; the PART numbers of a SHELX file are kept.</p>" +
       "<h3>Moving and reorienting it</h3><ol>" +
       "<li>Press <b>Drag/reorient guest</b>. The button turns red while the mode is on.</li>" +
       "<li><b>Drag</b> a guest atom to move the whole guest in the plane of the screen. To change its depth, rotate the view and drag again.</li>" +
@@ -20363,6 +21289,17 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<li><b>fps</b>, <b>size</b> and <b>format</b> apply to both kinds. AVI is uncompressed; MP4 is much smaller but needs a one-time encoder download.</li>" +
       "<li>The recording starts at the view you have now.</li>" +
       "<li><b>Preview</b> rocks the view on screen at the speed of the video, until <b>Stop</b>.</li></ul>" },
+    fcf: { title: "Difference density", html:
+      "<p>Draws the difference electron density (Fo &minus; Fc) of a SHELXL refinement, to show what the model leaves out, for example a guest.</p>" +
+      "<h3>Getting the data in</h3><ul>" +
+      "<li>Refine the structure <b>without</b> the guest, with <b>LIST 6</b> in the instructions (a LIST 4 .fcf has no phases and is refused).</li>" +
+      "<li>Drop the <b>CIF and the .fcf together</b> on the 3D view. A .fcf dropped alone goes with the structure that is loaded.</li>" +
+      "<li>The menu shows only when <b>Difference density (FCF)</b> is on in Settings and a .fcf is loaded.</li></ul>" +
+      "<h3>Using it</h3><ul>" +
+      "<li><b>solid surface</b>: one level, positive green and negative red. <b>mesh</b>: three levels, each with its own checkbox, value and colour, a <b>spacing</b> for the openness of the mesh and a <b>line width</b> slider for its lines.</li>" +
+      "<li>Levels are in multiples of the r.m.s. of the map (3 is the usual start) or in e/&Aring;&sup3;. The highest, lowest and r.m.s. values are shown beside SHELXL's own.</li>" +
+      "<li>The map is drawn around the atoms in view: <b>Grow</b> first, then <b>Redraw</b>. <b>box around the selected atoms</b> frames a void whose surrounding atoms you select; <b>near the visible atoms</b> and <b>near the selected atoms</b> limit it to a radius. <b>Clear</b> removes the surfaces but keeps the menu; change a setting and press <b>Redraw</b>.</li>" +
+      "<li><b>Erase</b> (press the red Erase mode button, then click a surface): hide the blob, keep only the blob, or hide a ball. <b>Count electrons</b> (its own red Count mode button): click a blob or a ball to count its electrons, or press <b>Count voids</b> for each void of the structure. Counts are less certain when low-angle reflections are missing (shown under the table). Atoms of occupancy below 0.5 (a modelled guest) are left out when the voids are found. The hidden parts are kept as rules about the map, so they stay hidden when the level changes; <b>Undo</b> and <b>Reset all</b> bring them back.</li><li><b>Peaks and holes</b> lists the strongest peaks with coordinates and the nearest atom.</li></ul>" },
     navigator: { title: "Structure Navigator", html:
       "<p>Lets you move through many structures without loading them one by one.</p>" +
       "<h3>Filling it</h3><ul>" +
@@ -20431,12 +21368,13 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     { key: "guest", label: "Host&ndash;guest tools", desc: "The Host, Guest and Add guest submenus of Structure.", titles: ["Host", "Guest", "Add guest"] },
     { key: "walk", label: "Walk mode", desc: "The Walk mode submenu of Display.", titles: ["Walk mode"] },
     { key: "macro", label: "Macro and batch", desc: "The Macro menu.", titles: ["Macro"] },
-    { key: "orca", label: "Quantum chemistry (Orca)", desc: "The Orca bridge and Cube &amp; ESP menus.", titles: ["Orca bridge", "Cube & ESP"] }
+    { key: "orca", label: "Quantum chemistry (Orca)", desc: "The Orca bridge and Cube &amp; ESP menus.", titles: ["Orca bridge", "Cube & ESP"] },
+    { key: "fcf", label: "Difference density (FCF)", desc: "The Difference density menu: electron density maps from a SHELXL .fcf file. It appears only while a .fcf has been loaded with the structure.", titles: ["Difference density"], needs: function () { return !!FCF.data; } }
   ];
   var FEATURE_PRESETS = [
     { name: "Viewer", on: {} },
     { name: "Void / channel", on: { void: 1, molsurf: 1, clip: 1, guest: 1 } },
-    { name: "Everything", on: { void: 1, molsurf: 1, clip: 1, guest: 1, walk: 1, macro: 1, orca: 1 } }
+    { name: "Everything", on: { void: 1, molsurf: 1, clip: 1, guest: 1, walk: 1, macro: 1, orca: 1, fcf: 1 } }
   ];
   var IFACE_KEY = "CrystalVista_interface";
   var IFACE = { features: {}, probe: 1.0, help: true };
@@ -20482,6 +21420,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     var changed = false;
     FEATURES.forEach(function (f) {
       var forced = !IFACE.features[f.key] && featureInUse(f.key), show = !!IFACE.features[f.key] || forced;
+      if (f.needs && !f.needs()) show = false; /* a menu that needs data (a loaded .fcf) shows only with it */
       if (featureShown[f.key] === show) return;
       var revealed = show && featureShown[f.key] === false; changed = true;
       featureEls[f.key].forEach(function (e) {
@@ -20489,6 +21428,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
         if (revealed && forced) { e.classList.add("feat-pulse"); setTimeout(function () { e.classList.remove("feat-pulse"); }, 3200); } /* a menu that appears because the model needs it blinks briefly */
       });
       featureShown[f.key] = show;
+      if (f.key === "fcf") fcfRedraw(); /* the map appears and disappears with its menu */
     });
     if (changed || settingsIsOpen()) syncSettingsPanel();
   }
@@ -20532,6 +21472,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       var cb = document.getElementById("setFeat_" + f.key), us = document.getElementById("setUse_" + f.key); if (!cb) return;
       cb.checked = !!IFACE.features[f.key];
       us.textContent = (!IFACE.features[f.key] && featureInUse(f.key)) ? "Shown for now because the loaded model uses it." : "";
+      if (f.key === "fcf" && !IFACE.features.fcf && FCF.data) us.textContent = "A reflection file is loaded with the structure: tick this to show the menu.";
     });
     Array.prototype.forEach.call(document.querySelectorAll("#setPresets button"), function (b, i) {
       b.classList.toggle("on", FEATURES.every(function (f) { return !!IFACE.features[f.key] === !!FEATURE_PRESETS[i].on[f.key]; }));
@@ -20768,7 +21709,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
        body. */
     var addGuestTab = subsection(structC, "Add guest", false, function (isOpen) { if (!isOpen) exitGuestDragMode(); });
     addGuestTab.parentElement.id = "addGuestSection";
-    var guestDropZone = el("div", "guest-dropzone", "Drop guest CIF here");
+    var guestDropZone = el("div", "guest-dropzone", "Drop guest CIF, RES or INS here");
     addGuestTab.appendChild(guestDropZone);
     ["dragenter", "dragover"].forEach(function (ev) {
       guestDropZone.addEventListener(ev, function (e) { e.preventDefault(); e.stopPropagation(); guestDropZone.classList.add("dragging"); });
@@ -20870,22 +21811,6 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     atomsTab.appendChild(reassignRow);
     refreshReassignElementOptions();
     buildMoveSelectionRow(atomsTab);
-    /* Normalise H atoms -- moves H atoms along their X-H direction to typical neutron X-H distances (editable here); acts on the selected H atoms, or every H atom when none is selected */
-    atomsTab.appendChild(el("hr", "divider"));
-    atomsTab.appendChild(el("div", "hint", "X–H distance (" + U.ang + ")"));
-    var normHRow = el("div", "ctl-inline"); normHRow.style.gap = "3px";
-    ["C", "N", "O", "B", "S"].forEach(function (elSym) {
-      var inp = document.createElement("input"); inp.type = "text"; inp.setAttribute("inputmode", "decimal"); inp.className = "num"; inp.style.width = "46px"; inp.style.minWidth = "0"; inp.style.padding = "3px 2px"; inp.style.textAlign = "center"; inp.value = state.normHDist[elSym]; inp.id = "normH_" + elSym;
-      inp.title = elSym + "–H distance used when the parent atom is " + elSym + ". Typical neutron values: C 1.083, N 1.009, O 0.983, B 1.19, S 1.34.";
-      inp.addEventListener("change", function () { var v = parseFloat(inp.value); if (isFinite(v) && v > 0.5 && v < 2) { state.normHDist[elSym] = v; persistPreferences(); } else inp.value = state.normHDist[elSym]; });
-      var lab = el("label", "plain", elSym); lab.style.marginLeft = "5px"; lab.style.marginRight = "0";
-      normHRow.appendChild(lab); normHRow.appendChild(inp);
-    });
-    atomsTab.appendChild(normHRow);
-    var normHBtnRow = el("div", "btnrow");
-    var normHBtn = button(normHBtnRow, "Normalise H atoms", "ghost", normaliseHAtoms); normHBtn.id = "normaliseHBtn";
-    normHBtn.title = "Move each hydrogen along its X–H direction to the distance above (X-ray H positions are too close to X). Acts on the selected H atoms, or on every H atom if none is selected. Undo restores. Atoms in a P1 or symmetry-expanded model move with their asymmetric-unit site.";
-    atomsTab.appendChild(normHBtnRow);
 
     /* ---- per-atom display properties (colour + radius override) ----
        This is now the only place atom colour/size is set -- Host and Guest no
@@ -21231,6 +22156,22 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       cleanupBondsByDistance(el1, el2, lo, hi, mode);
     });
     bondsTab.appendChild(cbRow);
+    /* Normalise H atoms (Edit bonds: it is the X-H bonds that get adjusted) -- moves H atoms along their X-H direction to typical neutron X-H distances (editable here); acts on the selected H atoms, or every H atom when none is selected */
+    bondsTab.appendChild(el("hr", "divider"));
+    bondsTab.appendChild(el("div", "hint", "X–H distance (" + U.ang + ")"));
+    var normHRow = el("div", "ctl-inline"); normHRow.style.gap = "3px";
+    ["C", "N", "O", "B", "S"].forEach(function (elSym) {
+      var inp = document.createElement("input"); inp.type = "text"; inp.setAttribute("inputmode", "decimal"); inp.className = "num"; inp.style.width = "46px"; inp.style.minWidth = "0"; inp.style.padding = "3px 2px"; inp.style.textAlign = "center"; inp.value = state.normHDist[elSym]; inp.id = "normH_" + elSym;
+      inp.title = elSym + "–H distance used when the parent atom is " + elSym + ". Typical neutron values: C 1.083, N 1.009, O 0.983, B 1.19, S 1.34.";
+      inp.addEventListener("change", function () { var v = parseFloat(inp.value); if (isFinite(v) && v > 0.5 && v < 2) { state.normHDist[elSym] = v; persistPreferences(); } else inp.value = state.normHDist[elSym]; });
+      var lab = el("label", "plain", elSym); lab.style.marginLeft = "5px"; lab.style.marginRight = "0";
+      normHRow.appendChild(lab); normHRow.appendChild(inp);
+    });
+    bondsTab.appendChild(normHRow);
+    var normHBtnRow = el("div", "btnrow");
+    var normHBtn = button(normHBtnRow, "Normalise H atoms", "ghost", normaliseHAtoms); normHBtn.id = "normaliseHBtn";
+    normHBtn.title = "Move each hydrogen along its X–H direction to the distance above (X-ray H positions are too close to X). Acts on the selected H atoms, or on every H atom if none is selected. Undo restores. Atoms in a P1 or symmetry-expanded model move with their asymmetric-unit site.";
+    bondsTab.appendChild(normHBtnRow);
 
     var cifDispC = section(left, "Display", false, function (isOpen) { if (!isOpen) exitWalkMode(); });
     cifDispC.parentElement.id = "cifDisplaySection";
@@ -21764,7 +22705,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
 
     var growModeBtn = button(mouseTab, "", "prominent", function () {
       state.growMode = !state.growMode;
-      if (state.growMode) { exitBondEditMode(); exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode(); }
+      if (state.growMode) { exitBondEditMode(); exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode(); fcfExitMode(); }
       var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = state.growMode ? "crosshair" : "";
       updateGrowModeBtnLabel();
     });
@@ -21990,6 +22931,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     buildMolSurfaceTable();
 
     buildOrcaBridgeUi(left); /* the Orca bridge and Cube & ESP menus (see the ORCABRIDGE block) */
+    buildFcfUi(left); /* the Difference density menu (see the FCF block) */
     var sgC = section(left, "Selection & geometry", false);
     var lastClickedInfo = el("div", "readout"); lastClickedInfo.id = "lastClickedInfo"; sgC.appendChild(lastClickedInfo);
     var selInfo = el("div", "readout"); selInfo.id = "selInfo"; selInfo.innerHTML = "<div class='dim'>No atoms selected.</div>"; sgC.appendChild(selInfo);
@@ -22582,6 +23524,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
         var item = items[0];
         if (item && item.getAsFileSystemHandle) item.getAsFileSystemHandle().then(function (h) { state.lastSourceHandle = h; }).catch(function () {});
         if (/\.cub(e)?$/i.test(f.name)) { orbLoadCubeFile(f); return; } /* a Gaussian cube file goes to Cube & ESP */
+        if (/\.fcf$/i.test(f.name)) { var fr = new FileReader(); fr.onload = function () { fcfAttachText(fr.result, f.name); }; fr.readAsText(f); return; } /* a reflection file goes to the structure that is loaded */
         if (isJson) { handleModelFileSelected(f); return; }
         var rd = new FileReader();
         rd.onload = function () { handleStructureFileText(rd.result, f.name); };
@@ -22667,7 +23610,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<h3>Help buttons</h3>" +
       "<p>A small <b>?</b> in the title bar of some menus and submenus (Structure Navigator, Add guest, Clipping Planes, Walk mode, Grow, Void / Channel Analysis, Molecular Surface, Orca bridge, Cube &amp; ESP, Macro and Video) opens a short help panel for just that menu: what it is for, the steps, and the common snags. The panel floats beside the 3D view without dimming it, so it can stay open while you work. Drag its title bar to move it; press the <b>?</b> again, the &times; or <b>Esc</b> to close it; the link at its foot opens this full Guide. Clicking the <b>?</b> does not open or close the menu, and clicking in the panel does not cancel an interactive mode that is on.</p>" +
       "<h3>Settings</h3>" +
-      "<p>The <b>Settings</b> button in the title bar (next to Elements) chooses which menus are shown, so the panel can stay simple. <b>Void / channel analysis</b>, <b>Molecular surface</b>, <b>Clipping planes</b>, <b>Host&ndash;guest tools</b> (the Host, Guest and Add guest submenus), <b>Walk mode</b>, <b>Macro and batch</b> and <b>Quantum chemistry (Orca)</b> (Orca bridge and Cube &amp; ESP) can each be switched on or off, or set together with the presets <b>Viewer</b>, <b>Void / channel</b> and <b>Everything</b>. Every other menu is always shown. Hiding only removes the menu: nothing is switched off, shortcuts and macros keep working, and a menu that the loaded model uses (void results, molecular surfaces, a clipping plane that is on, guests, a cube, a macro, Walk mode) is shown again for as long as it is needed, with a brief highlight, whatever the setting. Settings also holds the <b>default probe radius</b> for molecular surfaces and a switch for the ? help buttons. A browser with no saved choice starts with the Void / channel preset, except that a browser that already holds CrystalVista preferences keeps Everything. The choices are remembered in the browser and are not saved in model files. Menus always start collapsed, and when several structures are loaded (a folder, a zip or a CIF with several structures) the Structure Navigator opens by itself.</p>" +
+      "<p>The <b>Settings</b> button in the title bar (next to Elements) chooses which menus are shown, so the panel can stay simple. <b>Void / channel analysis</b>, <b>Molecular surface</b>, <b>Clipping planes</b>, <b>Host&ndash;guest tools</b> (the Host, Guest and Add guest submenus), <b>Walk mode</b>, <b>Macro and batch</b> and <b>Quantum chemistry (Orca)</b> (Orca bridge and Cube &amp; ESP) and <b>Difference density (FCF)</b> (shown only while a .fcf reflection file is loaded with the structure) can each be switched on or off, or set together with the presets <b>Viewer</b>, <b>Void / channel</b> and <b>Everything</b>. Every other menu is always shown. Hiding only removes the menu: nothing is switched off, shortcuts and macros keep working, and a menu that the loaded model uses (void results, molecular surfaces, a clipping plane that is on, guests, a cube, a macro, Walk mode) is shown again for as long as it is needed, with a brief highlight, whatever the setting. Settings also holds the <b>default probe radius</b> for molecular surfaces and a switch for the ? help buttons. A browser with no saved choice starts with the Void / channel preset, except that a browser that already holds CrystalVista preferences keeps Everything. The choices are remembered in the browser and are not saved in model files. Menus always start collapsed, and when several structures are loaded (a folder, a zip or a CIF with several structures) the Structure Navigator opens by itself.</p>" +
       "<h3>View controls</h3>" +
       "<ul>" +
       "<li><b>Left drag</b> &mdash; rotate. Free rotation about the camera's own axes; there is no limit, and it stops the instant the mouse does. \"Rotation sensitivity\" (Visual Effects panel, Scene tab) can slow this down for lining up a precise view -- it only ever slows down, never speeds up past the default, and resets to full speed the next time the file is opened rather than being remembered.</li>" +
@@ -22696,7 +23639,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<p><b>Save model...</b> and <b>Load model...</b>, at the bottom of the <b>Export</b> panel, save or restore the complete working state to a single file -- every atom including everything Grow has added, the CIF symmetry data, colour and radius overrides, bond and display settings, and the camera's exact position -- so a session can be closed and reopened later exactly where it was left, without repeating the grow steps. This is a separate, deliberate snapshot of one specific piece of work, distinct from the automatic per-browser memory of element radii and display settings described below -- a saved model file is portable and permanent, and is the one to keep if the work needs to survive a change of computer or browser. Manually added and cut bonds are saved with it. The original CIF text is not part of it, so <b>Save CIF</b> is not available after a project has been loaded. <b>Compress as zip</b>, just above Save model, saves that same project data as a single JSON file inside a .zip archive instead of a plain .json -- text compresses well, so a large, heavily-grown project can end up considerably smaller on disk; remembered like any other setting. Load model... reads a .zip archive back regardless of this checkbox either way. A zip containing more than one .json file -- created by hand, one file per version of a model (e.g. <span class='mono'>Figure 1a.json</span>, <span class='mono'>Figure 1b.json</span>) then zipped together -- loads with the same prev/next/dropdown <b>Navigator</b> a multi-structure CIF uses (see \"Loading structures\" below), labelled by each .json file's own name rather than anything stored inside it, so those file names are exactly what shows up to choose between.</p>" +
       "<h3>Loading structures</h3>" +
       "<p>The <b>name of the loaded file</b> is shown in the header, in line with the left edge of the model panel (shortened with an ellipsis if it is too long for the window; hover for the full name). It follows whatever is loaded: a CIF, a saved model, another structure of a multi-structure file, and it clears when the structure is closed. The same name is listed as <i>File</i> under Structure &gt; Metadata.</p>" +
-      "<p>Dropping a <b>.cif</b> onto the 3D view loads it as the <b>host</b> and starts symmetry mode, described below -- it's a fresh structure to build outward from by growth, not a fixed set of coordinates, and replaces any previously loaded host, clearing the current guest along with it. There is no separate guest file or drop box: a <b>guest</b> (e.g. an included gas molecule) is created from the same loaded structure by selecting the atoms that belong to it and using \"Move selection to\" &gt; New guest group (Structure &gt; Edit atoms). \"Remove all guests\" clears every guest component so you can start over. A CIF holding more than one complete structure (e.g. a CSD/Conquest search result, several <span class='mono'>data_XXXX</span> blocks concatenated in one file) loads its first entry the same way, and a <b>Navigator</b> appears at the top of Structure with prev/next buttons and a dropdown for switching between the rest -- the same Navigator a multi-.json zip archive uses (see Export &gt; Model above), just showing each structure's own block label instead of a file name. A CIF that also embeds the SHELX <b>.res</b> it was refined from (the <span class='mono'>_shelx_res_file</span> item that SHELXL writes) shows two entries for that structure, <b>name &mdash; CIF</b> and <b>name &mdash; RES (in the CIF)</b>, one after the other and under the Structure Navigator title, whether the file holds one structure or several; the RES entry has the PART numbers, so the bonding of a disordered structure can be read correctly, and takes its space group and other file data from the CIF part (Save CIF stays available only for the CIF entry). When a CIF is read, extra symmetry-equivalent copies are removed only if they have the same element and lie within 0.03 &Aring; of a symmetry image of an atom already kept (closely spaced disorder sites stay separate); data names are read without regard to case, in the traditional and the dotted spellings; numbers may carry an exponent; an atom with missing or unreadable coordinates is skipped and listed in the status line; and a cell that is not a real cell is refused. Any newly dropped structure, whatever its format, replaces the previous host, its guests, the undo history and all manual bond edits. In a SHELX file the free variables (FVAR) and PART occupancy codes are resolved into occupancies. <b>Save CIF</b> rewrites only the atom-site (and anisotropic) loops of the original file: columns the app does not edit keep their original values, and a coordinate, occupancy or displacement value you have not changed keeps its original text, standard uncertainty included; edited values are written without one, and a file that gives Cartesian coordinates is saved back in Cartesian coordinates. You can also drop a <b>folder</b>, a <b>.zip</b> file, or <b>several files at once</b>: CrystalVista searches everything dropped (subfolders too, and zip files inside zip files) for structure files -- <b>.cif</b>, <b>.res</b>, <b>.ins</b> and <b>.xyz</b> -- and lists each structure in the Navigator, which is then titled <b>Structure Navigator</b> (<b>CIF Navigator</b> when everything found is a CIF). A file gives one entry, named after it, with its folder path added where two files share a name (hover over an entry for its full path); a CIF holding several structures gives one entry per <span class='mono'>data_</span> block. The first structure loads at once, and the line under the title shows which entry you are on and where they came from. Files with no usable structure (a CIF without atom coordinates, a text file) are left out, and the status line says how many. A zip that holds no structure files is read as a saved project, as before. The limit is 5000 files or 400 MB.</p>" +
+      "<p>Dropping a <b>.cif</b> onto the 3D view loads it as the <b>host</b> and starts symmetry mode, described below -- it's a fresh structure to build outward from by growth, not a fixed set of coordinates, and replaces any previously loaded host, clearing the current guest along with it. The main view always means a new host. A <b>guest</b> (e.g. an included gas molecule) is created from the same loaded structure by selecting the atoms that belong to it and using \"Move selection to\" &gt; New guest group (Structure &gt; Edit atoms). \"Remove all guests\" clears every guest component so you can start over. A guest molecule can also be added from a file: drop a CIF, or a SHELX .res or .ins file, holding just one molecule on the drop zone in Structure &gt; Add guest (every atom is taken, Q peaks of a .res are left out, PART numbers are kept, and the molecule is centred at the origin). A CIF holding more than one complete structure (e.g. a CSD/Conquest search result, several <span class='mono'>data_XXXX</span> blocks concatenated in one file) loads its first entry the same way, and a <b>Navigator</b> appears at the top of Structure with prev/next buttons and a dropdown for switching between the rest -- the same Navigator a multi-.json zip archive uses (see Export &gt; Model above), just showing each structure's own block label instead of a file name. A CIF that also embeds the SHELX <b>.res</b> it was refined from (the <span class='mono'>_shelx_res_file</span> item that SHELXL writes) shows two entries for that structure, <b>name &mdash; CIF</b> and <b>name &mdash; RES (in the CIF)</b>, one after the other and under the Structure Navigator title, whether the file holds one structure or several; the RES entry has the PART numbers, so the bonding of a disordered structure can be read correctly, and takes its space group and other file data from the CIF part (Save CIF stays available only for the CIF entry). When a CIF is read, extra symmetry-equivalent copies are removed only if they have the same element and lie within 0.03 &Aring; of a symmetry image of an atom already kept (closely spaced disorder sites stay separate); data names are read without regard to case, in the traditional and the dotted spellings; numbers may carry an exponent; an atom with missing or unreadable coordinates is skipped and listed in the status line; and a cell that is not a real cell is refused. Any newly dropped structure, whatever its format, replaces the previous host, its guests, the undo history and all manual bond edits. In a SHELX file the free variables (FVAR) and PART occupancy codes are resolved into occupancies. <b>Save CIF</b> rewrites only the atom-site (and anisotropic) loops of the original file: columns the app does not edit keep their original values, and a coordinate, occupancy or displacement value you have not changed keeps its original text, standard uncertainty included; edited values are written without one, and a file that gives Cartesian coordinates is saved back in Cartesian coordinates. You can also drop a <b>folder</b>, a <b>.zip</b> file, or <b>several files at once</b>: CrystalVista searches everything dropped (subfolders too, and zip files inside zip files) for structure files -- <b>.cif</b>, <b>.res</b>, <b>.ins</b> and <b>.xyz</b> -- and lists each structure in the Navigator, which is then titled <b>Structure Navigator</b> (<b>CIF Navigator</b> when everything found is a CIF). A file gives one entry, named after it, with its folder path added where two files share a name (hover over an entry for its full path); a CIF holding several structures gives one entry per <span class='mono'>data_</span> block. The first structure loads at once, and the line under the title shows which entry you are on and where they came from. Files with no usable structure (a CIF without atom coordinates, a text file) are left out, and the status line says how many. A zip that holds no structure files is read as a saved project, as before. The limit is 5000 files or 400 MB.</p>" +
       "<p>A SHELX <b>.res</b> or <b>.ins</b> file drops in exactly the same way and works identically from that point on -- same host/guest handling, same Grow panel, same everything -- since both formats are read into the same unit cell + symmetry operators + asymmetric unit shape internally; the one difference is that Save CIF stays disabled afterwards, since there's no original CIF text to splice edits back into. A <b>PART n</b> instruction in the file is read and remembered per atom: automatic bond generation never bonds two atoms that have different, both non-zero PART numbers, since SHELX uses PART specifically to mark alternative, mutually-exclusive disorder components that are never really present together -- PART 0 (the default, before any PART instruction, and every CIF-loaded atom, which has no PART concept at all) still bonds to anything. A negative PART number additionally stops bonds forming, across a symmetry operation, to a grown copy with any non-zero PART number -- the standard way of handling a group disordered across a special position (e.g. a solvent molecule sitting on an inversion centre) without it bonding to its own symmetry mate. <b>Shift+Ctrl+Alt+click</b> selects every currently-displayed atom sharing the clicked atom's PART number (a second click on the same part deselects them) -- only available for a PART-tagged, .res/.ins-derived structure; it does nothing on a CIF-loaded one, which has no PART numbers to select by.</p>" +
       "<p>An XMol <b>.xyz</b> file (a bare atom count, a title line, then one <span class='mono'>element x y z</span> row per atom, in Cartesian &Aring;ngstr&ouml;ms) drops in the same way too, but loads as a plain molecule with no unit cell and no symmetry operators at all -- an .xyz file simply doesn't carry that information. The Grow panel, Fill unit cell, Forget symmetry, and any cell-mode void/channel analysis are all unavailable for an XYZ-loaded structure for the same reason they're unavailable after Forget symmetry is used on a CIF/RES one; Save CIF likewise stays disabled, exactly as for a SHELX load. Everything else -- display style, bonding, selection, molecular surfaces, molecular-neighbourhood-mode void/channel analysis, export -- works normally on the atoms as given.</p>" +
       "<h3>CIF and symmetry (Symmetry panel)</h3>" +
@@ -22757,7 +23700,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<h3>Centroids and reassigning elements</h3>" +
       "<p>Select two or more atoms and \"Generate centroid\" (or Ctrl-C) adds a marker at their average position -- useful as a reference point for measuring or for defining a plane or vector that isn't sitting on a real atom. A centroid always renders as a small white sphere (0.2 &Aring; radius), regardless of the current display style, and doesn't affect bonding in any way -- it's a geometric reference, not a real atom. Its clickable area is a bit larger than it looks, since a sphere that small would otherwise be hard to hit precisely; this doesn't change how big it appears. It can be selected, moved between host and guest, and deleted exactly like any other atom. For a CIF-based structure, a centroid becomes part of the asymmetric unit, so it can be grown by symmetry the same way as everything else.</p>" +
       "<p>\"Reassign element to\", just below \"Move selection to\", changes the element of the selected atom(s) to any element in the periodic table, whether or not that element was already present in the structure -- a new one is picked up automatically, with its own colour and radius, the moment it's assigned. Reassigning a centroid turns it into a real atom of that element from then on: it stops being a fixed white marker and starts looking and behaving like any other atom in whichever layer it belongs to.</p>" +
-      "<p><b>Normalise H atoms</b>, in the same submenu (below &quot;Reassign element to&quot;), corrects the hydrogen positions of an X-ray structure. X-ray H atoms sit about 0.1 &Aring; too close to their parent atom, which matters for anything that measures space next to H (voids, channels, close contacts). Each H atom is moved along its existing X&ndash;H direction to a typical neutron-diffraction distance (C&ndash;H 1.083, N&ndash;H 1.009, O&ndash;H 0.983, B&ndash;H 1.19, S&ndash;H 1.34 &Aring;; after Allen &amp; Bruno, <i>Acta Cryst.</i> B66, 380 (2010)); the five boxes above the button hold these values and can be edited, and are remembered between sessions. The parent is the nearest non-H atom within 1.45 &Aring; (symmetry images included). An H with two parents at similar distances (a bridging H), one with no parent in range, or one on a parent element with no distance set is left alone, and the status line says how many. It acts on the selected H atoms, or on <b>every</b> H atom when none is selected, and <b>Undo</b> restores the old positions. For a CIF-based structure the change is made on the asymmetric-unit site, so every symmetry copy moves together and the symmetry stays exact. As a macro command it is <span class='mono'>NORMALISE_H</span> (it uses whatever distances are currently set).</p>" +
+      "<p><b>Normalise H atoms</b>, at the foot of <b>Structure &gt; Edit bonds</b> (it is the X&ndash;H bonds that it adjusts), corrects the hydrogen positions of an X-ray structure. X-ray H atoms sit about 0.1 &Aring; too close to their parent atom, which matters for anything that measures space next to H (voids, channels, close contacts). Each H atom is moved along its existing X&ndash;H direction to a typical neutron-diffraction distance (C&ndash;H 1.083, N&ndash;H 1.009, O&ndash;H 0.983, B&ndash;H 1.19, S&ndash;H 1.34 &Aring;; after Allen &amp; Bruno, <i>Acta Cryst.</i> B66, 380 (2010)); the five boxes above the button hold these values and can be edited, and are remembered between sessions. The parent is the nearest non-H atom within 1.45 &Aring; (symmetry images included). An H with two parents at similar distances (a bridging H), one with no parent in range, or one on a parent element with no distance set is left alone, and the status line says how many. It acts on the selected H atoms, or on <b>every</b> H atom when none is selected, and <b>Undo</b> restores the old positions. For a CIF-based structure the change is made on the asymmetric-unit site, so every symmetry copy moves together and the symmetry stays exact. As a macro command it is <span class='mono'>NORMALISE_H</span> (it uses whatever distances are currently set).</p>" +
       "<h3>Viewing along a vector or a plane</h3>" +
       "<p>Select exactly two atoms and \"View along vector\" (Display &gt; Direction) becomes available, orienting the camera to look straight along the line through them. Select exactly three and \"View perpendicular to plane\" becomes available instead, orienting the camera face-on to the plane they define. Both only ever rotate the view -- they never move the zoom level or what the camera is centred on -- and each is disabled again the moment the selection count isn't exactly right for it.</p>" +
       "<h3>L.S. planes (Style)</h3>" +
@@ -22791,6 +23734,8 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<h3>Cube &amp; ESP</h3>" +
       "<p><b>Framework potential</b> (Orca bridge) shows how the electrostatic potential of a host framework varies over a surface, for example the wall of a channel or the surface of a guest molecule in it. <b>Calculate charges</b> assigns EQeq point charges to every host atom of the periodic structure (the host layer only, so move any guest to a guest group first; remove all but one component of a disorder). <b>Map potential</b> then evaluates the potential of those charges, with the periodic sum done by Ewald summation, at every vertex of the molecular surfaces in the view and/or of the void and channel surfaces, and colours them: negative red and positive blue unless <b>Red = positive</b> (Cube &amp; ESP) is ticked. A colour bar in kcal/mol appears in the 3D view, the table lists the highest and lowest values on each surface, and <b>dielectric screening</b> is the EQeq parameter (1.2). The point-charge model is quick and needs no Orca run. For a better potential, <b>Build cluster</b> cuts a cluster of the host (a number of cells along the channel, within a radius of its axis) from the crystal, adds it to the view and selects it; <b>Write cluster job</b> writes an Orca input for it, closed-shell and neutral with hydrogen caps on any cut carbon-carbon bond, plus the surface points and run_fw.bat; and after you run the script, <b>Read cluster results</b> colours the surfaces by the potential Orca calculated from the real electron density. The line under the buttons estimates the size and time of the job before you write it. Surfaces built after the job was run have no values: <b>Add surfaces</b> writes their points and <b>run_vpot.bat</b>, which evaluates them from the finished job's wavefunction in minutes, and a second <b>Read cluster results</b> colours them together with the first.</p>" +
       "<p><b>Load cube file...</b> (or drop a <span class='mono'>.cube</span> file on the 3D view) shows a Gaussian cube file (density, orbital, potential) as an isosurface; each file gets a card with its grid and value range, an <b>isovalue</b> (shown to three decimals; its spin buttons move by 0.001, or by a finer step for a cube whose values are all very small), colour swatches for the positive and (for signed data such as orbitals) negative lobes, each with its own tick box to show or hide that lobe, and an <b>opacity</b> (1, fully solid, to begin with; a translucent surface is drawn back faces first, then front faces); untick the card to hide the whole cube and use &times; to remove it, or <b>Clear cubes</b> to remove them all; loading a new structure removes them too. Surfaces are lightly smoothed to hide the steps of a coarse grid. A cube whose atoms do not coincide with the atoms in view is drawn in its own frame and says so. <b>ESP colouring</b> paints the molecular surfaces by the electrostatic potential, either from the Orca results read by the bridge or from a loaded cube (<b>Colour surface</b>): red where the potential is negative, white at zero and blue where it is positive, over the chosen <b>colour range</b> (atomic units; the default covers 95% of the values). <b>Clear colours</b> restores the plain surface colours. The <b>surface opacity</b> slider here is the same setting as in Molecular Surface.</p>" +
+      "<h3>Difference density</h3>" +
+      "<p>The <b>Difference density</b> menu draws the <b>difference electron density</b> (Fo &minus; Fc) of a SHELXL refinement as surfaces, for example to find a guest that was left out of the model. Refine the structure without the guest, with <span class='mono'>LIST 6</span> in the instructions so that the <span class='mono'>.fcf</span> holds the phases, and drop the CIF and the .fcf <b>together</b> on the 3D view (several files, or a folder or zip; a .fcf goes with the structure file of the same name, and a .fcf dropped alone goes with the structure that is loaded). The menu is an optional one: it is shown only when <b>Difference density (FCF)</b> is switched on in Settings <i>and</i> a .fcf is loaded with the structure. The <b>map</b> is the difference map (Fo &minus; Fc) or the 2Fo &minus; Fc map, each with its own levels and colours. It draws a transparent <b>solid surface</b> at one level (positive green, negative red) or a <b>mesh of three levels</b> (blue, green, red, each with its own checkbox, with the negative density at the lowest level in a fourth colour, and an adjustable mesh spacing and line width); the levels are in multiples of the r.m.s. of the map or in e/&Aring;&sup3;, and the surfaces are drawn in a box around the atoms in view (Grow first, then Redraw), in a box around the selected atoms (select the atoms around a void), or only within a radius of the visible or of the selected atoms. <b>Clear</b> removes the surfaces but keeps the map and the menu. <b>Erase</b> hides parts of the display with the mouse (hide the blob under the pointer, keep only that blob, or hide a ball); what is hidden is stored as rules about the map, so it still applies after a change of level, spacing or region, and <b>Undo</b> and <b>Reset all</b> bring it back. <b>Count electrons</b>, a separate subsection with its own red Count mode button, counts electrons: click a blob or a ball (a table gives its volume and electrons), or press <b>Count voids</b> for each void of the structure. The guest density is refined inside the voids, as in SQUEEZE, and the count is less certain when low-angle reflections are missing (the share present is shown under the table). <b>Peaks and holes</b> lists the highest peaks and deepest holes with their coordinates and nearest atom. The highest, lowest and r.m.s. values are shown next to those SHELXL put in the CIF, as a check. Only LIST 6 files are read; the reflections are not kept in saved model files.</p>" +
       "<h3>Macro</h3>" +
       "<p>A macro is a plain-text sequence of commands, one per line, that can be replayed later to reproduce a sequence of actions -- recorded live from your own clicks and button presses, typed or pasted in by hand, or a mix of both (the memo box is an ordinary text area throughout, editable at any time). It's designed to work not just on the structure it was recorded against but on a whole series of similar ones (e.g. a variable-temperature data set for the same crystal) -- provided each structure's asymmetric unit is labelled the same way and sits in the same place, which is the user's own responsibility to ensure; nothing here can verify that automatically.</p>" +
       "<p><b>Record</b> and <b>Pause</b> are mutually exclusive (pressing one always pops the other back up). While Record is down, every action below that has a defined macro command gets appended to the memo the instant it happens -- not batched or reordered, in the exact sequence performed. Not every possible action has one: a not-yet-implemented combination is simply never recorded, silently, the same as pressing a key with no shortcut bound to it. <b>Clear</b> empties the memo (confirming first if there's anything in it to lose). <b>Save</b> and <b>Load</b> read and write a plain-text <b>.MAC</b> file -- Save suggests the current structure's own name with a .MAC extension and, in Chrome or Edge, starts its folder picker in whichever folder the structure itself was last dropped from; Load offers the same picker (also starting there), falling back to a plain file-browse button in other browsers, and confirms before replacing a non-empty memo. A .MAC file can also be dropped directly onto the 3D view to load it the same way, without going through the Load button at all. <b>Play</b>, <b>Save</b>, and <b>Load</b> are all disabled while Record is down -- pause first.</p>" +
@@ -22850,7 +23795,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<p><b>Void/channel analysis</b>:</p>" +
       "<ul>" +
       "<li><span class='mono'>CALCULATE_VOID</span> / <span class='mono'>CALCULATE_VOID_Q</span> &mdash; \"Calculate\" under Void/Channel Analysis, forcing Accurate volumes on/off respectively. No arguments -- see above for exactly what it does when played, including why the accurate-volumes setting is forced and the batch results table.</li>" +
-      "<li><span class='mono'>NORMALISE_H</span> &mdash; &quot;Normalise H atoms&quot; (Structure &gt; Edit atoms): the selected H atoms, or every H atom if none is selected, moved to the X&ndash;H distances currently set there.</li>" +
+      "<li><span class='mono'>NORMALISE_H</span> &mdash; &quot;Normalise H atoms&quot; (Structure &gt; Edit bonds): the selected H atoms, or every H atom if none is selected, moved to the X&ndash;H distances currently set there.</li>" +
       "</ul>" +
       "<p><b>Export</b>:</p>" +
       "<ul>" +
