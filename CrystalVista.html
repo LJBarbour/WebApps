@@ -20258,7 +20258,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
    * the folder/ZIP collection, and the "fcf" entry of FEATURES. */
   var FCF = {
     data: null, group: null, meshes: [], timer: null, ui: {}, last: null, erase: { on: false, kind: "erase" },
-    cfg: { mapKind: "diff", sets: {}, show: true, mode: "solid", units: "rms", level: 4, levels: [3, 6, 10], on: [true, true, true], cols: [0x3b6fff, 0x2fbf4a, 0xff3b30], colPos: 0x2fbf4a, colNeg: 0xe03030, colNegMesh: 0xcc33cc, neg: true, opacity: 0.7, thick: 1, meshStep: 0.25, eraseTool: "blob", eraseRadius: 1.5, eraseCopies: "this", countLevel: 2, countTool: "blob", countRadius: 2, countProbe: 1.2, countMinVol: 20, region: "all", margin: 3, step: 0.15 }
+    cfg: { mapKind: "diff", sets: {}, styles: ["mesh", "mesh", "mesh", "mesh"], opac: [0.5, 0.5, 0.5, 0.5], show: true, mode: "solid", units: "rms", level: 4, levels: [3, 6, 10], on: [true, true, true], cols: [0x3b6fff, 0x2fbf4a, 0xff3b30], colPos: 0x2fbf4a, colNeg: 0xe03030, colNegMesh: 0xcc33cc, neg: true, opacity: 0.7, thick: 1, meshStep: 0.25, eraseTool: "blob", eraseRadius: 1.5, copiesBlob: "all", copiesBall: "this", countLevel: 2, countTool: "blob", countRadius: 2, countProbe: 1.2, countMinVol: 20, region: "all", margin: 3, step: 0.15 }
   };
   /* ---- reading the .fcf ---- */
   function fcfCellOf(tags) {
@@ -20512,9 +20512,13 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], mg = Math.max(0.5, C.margin);
     atoms.forEach(function (a) { var p = [a.x, a.y, a.z]; for (var e = 0; e < 3; e++) { lo[e] = Math.min(lo[e], p[e]); hi[e] = Math.max(hi[e], p[e]); } });
     for (var e = 0; e < 3; e++) { lo[e] -= mg; hi[e] += mg; }
-    var vol = (hi[0] - lo[0]) * (hi[1] - lo[1]) * (hi[2] - lo[2]), step = Math.max(0.05, C.step), note = "";
-    if (C.mode === "mesh") step = Math.max(0.05, C.meshStep);
-    var maxVox = 4e6; if (vol / (step * step * step) > maxVox) { step = Math.cbrt(vol / maxVox); note = "Coarser surface (" + step.toFixed(2) + " Å) because the region is large. "; }
+    var vol = (hi[0] - lo[0]) * (hi[1] - lo[1]) * (hi[2] - lo[2]), note = "", maxVox = 4e6;
+    /* a mesh is calculated on a coarser grid than a solid surface (mesh spacing); a very large region makes either coarser still */
+    function stepFor(wire) {
+      var st = Math.max(0.05, wire ? C.meshStep : C.step);
+      if (vol / (st * st * st) > maxVox) { st = Math.cbrt(vol / maxVox); note = "Coarser surface (" + st.toFixed(2) + " \u00c5) because the region is large. "; }
+      return st;
+    }
     var samp = fcfSampler(D.map), mask = null, hide = fcfHiddenFn(D);
     if (reg.masked) {
       var R = mg, R2 = R * R, grid = {}, key = function (x, y, z) { return Math.floor(x / R) + "," + Math.floor(y / R) + "," + Math.floor(z / R); };
@@ -20529,18 +20533,16 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       };
     }
     var specs = [];
-    if (C.mode === "mesh") {
-      C.levels.forEach(function (lv, i) { if (C.on[i] !== false) specs.push({ sign: 1, lvl: fcfLevelAbs(lv), col: C.cols[i], wire: true }); });
-      if (C.neg) specs.push({ sign: -1, lvl: fcfLevelAbs(Math.min.apply(null, C.levels)), col: C.colNegMesh, wire: true });
-    } else {
-      specs.push({ sign: 1, lvl: fcfLevelAbs(C.level), col: C.colPos, wire: false });
-      if (C.neg) specs.push({ sign: -1, lvl: fcfLevelAbs(C.level), col: C.colNeg, wire: false });
-    }
-    var made = 0, posL = null, negL = null; /* what a click can hit: the lowest level that is drawn */
+    /* up to three surfaces, each switched on or off, each a mesh or a solid; the negative surface is drawn at the lowest level that is switched on */
+    C.levels.forEach(function (lv, i) { if (C.on[i] !== false) specs.push({ sign: 1, lvl: fcfLevelAbs(lv), col: C.cols[i], wire: C.styles[i] !== "solid", op: C.opac[i], idx: i }); });
+    if (C.neg) {
+      var onLv = C.levels.filter(function (lv, i) { return C.on[i] !== false; }), negLv = Math.min.apply(null, onLv.length ? onLv : C.levels);
+      specs.push({ sign: -1, lvl: fcfLevelAbs(negLv), col: C.colNegMesh, wire: C.styles[3] !== "solid", op: C.opac[3], idx: 3 });
+    }    var made = 0, posL = null, negL = null; /* what a click can hit: the lowest level that is drawn */
     specs.forEach(function (sp) { if (sp.sign > 0) posL = posL === null ? sp.lvl : Math.min(posL, sp.lvl); else negL = negL === null ? sp.lvl : Math.min(negL, sp.lvl); });
     FCF.last = { lo: lo, hi: hi, samp: samp, mask: mask, pos: posL, neg: negL };
     specs.forEach(function (sp) {
-      var fld = function (x, y, z) { if (mask && !mask(x, y, z)) return 0; if (hide && hide(x, y, z)) return 0; return sp.sign * samp(x, y, z); }, iso;
+      var step = stepFor(sp.wire), fld = function (x, y, z) { if (mask && !mask(x, y, z)) return 0; if (hide && hide(x, y, z)) return 0; return sp.sign * samp(x, y, z); }, iso;
       try { iso = IsoSurface.extract(fld, lo, hi, step, sp.lvl); } catch (err) { return; }
       if (!iso || !iso.positions.length) return;
       if (!sp.wire) { try { smoothIsoMesh(iso, fld, sp.lvl, step, { reproject: false }); } catch (err2) { /* the unsmoothed surface is still usable */ } }
@@ -20548,11 +20550,11 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       geo.setAttribute("position", new THREE.Float32BufferAttribute(iso.positions, 3)); geo.setAttribute("normal", new THREE.Float32BufferAttribute(iso.normals, 3)); geo.setIndex(iso.indices);
       made++;
       if (sp.wire) { var wm = fcfLineMesh(iso, sp.col); FCF.group.add(wm); FCF.meshes.push(wm); geo.dispose(); return; }
-      var trans = C.opacity < 0.99;
-      var parts = trans ? [[THREE.BackSide, 2], [THREE.FrontSide, 3]] : [[THREE.DoubleSide, 2]];
+      var op = sp.op != null ? sp.op : C.opacity, trans = op < 0.99, base = 2 + 2 * (sp.idx || 0); /* nested transparent surfaces are drawn one after the other, the lowest level first */
+      var parts = trans ? [[THREE.BackSide, base], [THREE.FrontSide, base + 1]] : [[THREE.DoubleSide, base]];
       parts.forEach(function (pp, ix) {
-        var m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: sp.col, roughness: 0.4, metalness: 0, transparent: trans, opacity: C.opacity, depthWrite: !trans, side: pp[0] }));
-        m.renderOrder = pp[1]; if (ix > 0) m.userData.shared = true; FCF.group.add(m); FCF.meshes.push(m);
+        var m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: sp.col, roughness: 0.4, metalness: 0, transparent: trans, opacity: op, depthWrite: !trans, side: pp[0] }));
+        m.renderOrder = pp[1]; m.userData.solidIdx = sp.idx; if (ix > 0) m.userData.shared = true; FCF.group.add(m); FCF.meshes.push(m);
       });
     });
     fcfFrame();
@@ -20632,13 +20634,23 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
   /* a function (x, y, z) -> true where the rules hide the density; null when there are no rules */
   function fcfHiddenFn(D) {
     var rules = D && fcfRuleList(D); if (!rules || !rules.length) return null;
-    var map = D.map, hid = new Set(), keep = new Set(), keepOn = false, balls = [];
+    var map = D.map, hid = new Set(), keep = new Set(), hidThis = {}, keepThis = {}, keepOn = false, balls = [];
+    /* roots of a rule made for "this copy only" come with a shift: the unit-cell translation, in cells, of the copy that was clicked */
+    function addRoots(r, all, thisMap) {
+      r.roots.forEach(function (q, i) { if (r.shifts) (thisMap[q] = thisMap[q] || []).push(r.shifts[i].join(",")); else all.add(q); });
+    }
     rules.forEach(function (r) {
-      if (r.type === "blob") r.roots.forEach(function (q) { hid.add(q); });
-      else if (r.type === "keep") { keepOn = true; r.roots.forEach(function (q) { keep.add(q); }); }
+      if (r.type === "blob") addRoots(r, hid, hidThis);
+      else if (r.type === "keep") { keepOn = true; addRoots(r, keep, keepThis); }
       else if (r.type === "ball") balls.push(r);
     });
-    var label = (hid.size || keepOn) ? fcfBasins(map) : null, idx = fcfFracIdx(map), M = map.M;
+    var label = (hid.size || keepOn || Object.keys(hidThis).length) ? fcfBasins(map) : null, idx = fcfFracIdx(map), M = map.M, nx = map.nx, ny = map.ny, nz = map.nz, syz = ny * nz;
+    /* which copy of its basin a point lies in: the whole-cell shift between the point and the peak the basin belongs to */
+    function copyKey(x, y, z, l) {
+      var fz = z / M[2][2], fy = (y - M[1][2] * fz) / M[1][1], fx = (x - M[0][1] * fy - M[0][2] * fz) / M[0][0];
+      var iz = l % nz, iy = ((l - iz) / nz) % ny, ix = (l - iz - iy * nz) / syz;
+      return Math.round(fx - ix / nx) + "," + Math.round(fy - iy / ny) + "," + Math.round(fz - iz / nz);
+    }
     function ballHit(b, x, y, z) {
       var dx = x - b.c[0], dy = y - b.c[1], dz = z - b.c[2];
       if (b.periodic) {
@@ -20649,7 +20661,12 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       return dx * dx + dy * dy + dz * dz <= b.r * b.r;
     }
     return function (x, y, z) {
-      if (label) { var l = label[idx(x, y, z)]; if (hid.size && l >= 0 && hid.has(l)) return true; if (keepOn && !(l >= 0 && keep.has(l))) return true; }
+      if (label) {
+        var l = label[idx(x, y, z)];
+        if (l >= 0 && hid.has(l)) return true;
+        if (l >= 0 && hidThis[l] && hidThis[l].indexOf(copyKey(x, y, z, l)) >= 0) return true;
+        if (keepOn && !(l >= 0 && (keep.has(l) || (keepThis[l] && keepThis[l].indexOf(copyKey(x, y, z, l)) >= 0)))) return true;
+      }
       for (var k = 0; k < balls.length; k++) if (ballHit(balls[k], x, y, z)) return true;
       return false;
     };
@@ -20690,7 +20707,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       stack = [bj]; start = bj;
     }
     seen[start] = 1;
-    var hiddenNow = new Set(); (fcfRuleList(D) || []).forEach(function (r) { if (r.type === "blob") r.roots.forEach(function (q) { hiddenNow.add(q); }); });
+    var hiddenNow = new Set(); (fcfRuleList(D) || []).forEach(function (r) { if (r.type === "blob" && !r.shifts) r.roots.forEach(function (q) { hiddenNow.add(q); }); });
     while (stack.length && count < 4000000) {
       var i = stack.pop(); count++;
       var l = label[i]; if (l >= 0) { if (hiddenNow.has(l)) continue; roots.add(l); }
@@ -20721,16 +20738,23 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       if (cr.error) { setStatus("Electron count: " + cr.error + ".", true); return; }
       fcfAddCount(cr); return;
     }    var rl = fcfRuleList(D, true), t0 = Date.now();
-    if (C.eraseTool === "ball") rl.push({ type: "ball", c: hit.p, r: C.eraseRadius, periodic: C.eraseCopies === "all" });
+    if (C.eraseTool === "ball") rl.push({ type: "ball", c: hit.p, r: C.eraseRadius, periodic: fcfCopies() === "all" });
     else {
       var roots = fcfBlobRoots(hit);
       if (!roots.length) { setStatus("That surface cannot be hidden as a blob: lower the level or use the ball.", true); return; }
-      rl.push({ type: C.eraseTool === "keep" ? "keep" : "blob", roots: roots, c: hit.p });
+      var rule = { type: C.eraseTool === "keep" ? "keep" : "blob", roots: roots, c: hit.p };
+      if (fcfCopies() !== "all") { /* this copy only: the translation of each peak that brings it next to the click */
+        var dm = D.map, nx0 = dm.nx, ny0 = dm.ny, nz0 = dm.nz, sz0 = ny0 * nz0, fc = K.cartToFrac(dm.M, hit.p);
+        rule.shifts = roots.map(function (q) { var iz = q % nz0, iy = ((q - iz) / nz0) % ny0, ix = (q - iz - iy * nz0) / sz0; return [Math.round(fc[0] - ix / nx0), Math.round(fc[1] - iy / ny0), Math.round(fc[2] - iz / nz0)]; });
+      }
+      rule.copies = fcfCopies() === "all" ? "all" : "this";
+      rl.push(rule);
     }
     fcfRulesUi(); fcfRedraw();
     setStatus((C.eraseTool === "ball" ? "Hid a ball of " + C.eraseRadius.toFixed(1) + " Å" : C.eraseTool === "keep" ? "Kept only the blob you clicked" : "Hid the blob you clicked") + " (" + (Date.now() - t0) + " ms). " + D.rules.length + " rule" + (D.rules.length === 1 ? "" : "s") + " in the list.", false);
   }
   /* turns the mouse mode off (when another mode starts, or when the menu or submenu is closed) */
+  function fcfCopies() { var C = FCF.cfg; return C.eraseTool === "ball" ? C.copiesBall : C.copiesBlob; } /* the copies setting of the tool that is chosen */
   function fcfExitMode() { if (FCF.erase && FCF.erase.on) fcfSetEraseMode(false); }
   /* the red / grey buttons of the two submenus, like Grow > Mouse */
   function fcfSyncModeBtns() {
@@ -20752,7 +20776,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     var U = FCF.ui, box = U.rules, D = FCF.data; if (!box) return;
     box.innerHTML = ""; var rules = (D && fcfRuleList(D)) || [];
     rules.forEach(function (r, i) {
-      var row = el("div", "fcf-rule"), txt = r.type === "ball" ? "ball " + r.r.toFixed(1) + " Å" + (r.periodic ? ", all copies" : "") : (r.type === "keep" ? "keep only, " : "hidden blob, ") + r.roots.length + " peak" + (r.roots.length === 1 ? "" : "s");
+      var row = el("div", "fcf-rule"), txt = r.type === "ball" ? "ball " + r.r.toFixed(1) + " Å" + (r.periodic ? ", all copies" : ", this copy") : (r.type === "keep" ? "keep only, " : "hidden blob, ") + r.roots.length + " peak" + (r.roots.length === 1 ? "" : "s") + (r.type === "ball" ? "" : (r.copies === "this" ? ", this copy" : ", all copies"));
       row.appendChild(el("span", null, (i + 1) + ". " + txt)); var x = el("span", "x", "×"); x.title = "Bring this back"; x.addEventListener("click", function () { rules.splice(i, 1); fcfRulesUi(); fcfRedraw(); }); row.appendChild(x); box.appendChild(row);
     });
     if (U.undoBtn) { U.undoBtn.disabled = !rules.length; U.resetBtn.disabled = !rules.length; }
@@ -21014,14 +21038,15 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
   function fcfSetKey(kind) { return kind === "2fofc" ? "fofc2" : "diff"; }
   function fcfSnapshotSet() {
     var C = FCF.cfg, r = FCF.data && FCF.data.map ? FCF.data.map.rms : 1, k = C.units === "rms" ? 1 : 1 / r;
-    return { level: C.level * k, levels: C.levels.map(function (x) { return x * k; }), on: C.on.slice(), neg: C.neg, colPos: C.colPos, colNeg: C.colNeg, cols: C.cols.slice(), colNegMesh: C.colNegMesh };
+    return { styles: C.styles.slice(), opac: C.opac.slice(), level: C.level * k, levels: C.levels.map(function (x) { return x * k; }), on: C.on.slice(), neg: C.neg, colPos: C.colPos, colNeg: C.colNeg, cols: C.cols.slice(), colNegMesh: C.colNegMesh };
   }
   function fcfApplySet(st) {
     var C = FCF.cfg, U = FCF.ui, r = FCF.data && FCF.data.map ? FCF.data.map.rms : 1, k = C.units === "rms" ? 1 : r;
-    C.level = st.level * k; C.levels = st.levels.map(function (x) { return x * k; }); C.on = st.on.slice(); C.neg = st.neg; C.colPos = st.colPos; C.colNeg = st.colNeg; C.cols = st.cols.slice(); C.colNegMesh = st.colNegMesh;
+    C.level = st.level * k; C.levels = st.levels.map(function (x) { return x * k; }); C.on = st.on.slice(); C.styles = (st.styles || ["mesh", "mesh", "mesh", "mesh"]).slice(); C.opac = (st.opac || [0.5, 0.5, 0.5, 0.5]).slice(); C.neg = st.neg; C.colPos = st.colPos; C.colNeg = st.colNeg; C.cols = st.cols.slice(); C.colNegMesh = st.colNegMesh;
     if (U.lvl) U.lvl.value = C.level.toFixed(2);
     (U.lvls || []).forEach(function (n, i) { n.value = C.levels[i].toFixed(2); });
     (U.onCbs || []).forEach(function (c, i) { c.checked = C.on[i] !== false; });
+    (U.styleSel || []).forEach(function (sel, i) { if (!sel) return; sel.value = C.styles[i]; U.opSl[i].value = C.opac[i]; U.opVal[i].textContent = C.opac[i].toFixed(2); U.styleSync[i](); });
     (U.swCols || []).forEach(function (w, i) { w.value = hexToCss(C.cols[i]); });
     if (U.swPos) U.swPos.value = hexToCss(C.colPos); if (U.swNeg) U.swNeg.value = hexToCss(C.colNeg); if (U.swNegMesh) U.swNegMesh.value = hexToCss(C.colNegMesh);
     if (U.negSolid) U.negSolid.checked = C.neg; if (U.negMesh) U.negMesh.checked = C.neg;
@@ -21051,7 +21076,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       html += "<tr><td>" + (r.h > 0 ? "Q" + (i + 1) : "hole") + "</td><td>" + fcfFmt(r.h) + "</td><td>" + (r.h / D.diffMap.rms).toFixed(1) + "</td><td>" + r.f.map(function (v) { return (v - Math.floor(v)).toFixed(3); }).join(", ") + "</td><td>" + (r.near ? r.near.label + " " + r.near.d.toFixed(2) + " &Aring;" : "") + "</td></tr>";
     });
     U.peaks.innerHTML = html + "</tbody></table>";
-    U.solidRow.style.display = C.mode === "solid" ? "" : "none"; U.meshRow.style.display = C.mode === "mesh" ? "" : "none";
+    
     U.regionLabel.textContent = (C.region === "all" || C.region === "selbox") ? "margin" : "radius";
     if (U.negSolid) U.negSolid.checked = C.neg; if (U.negMesh) U.negMesh.checked = C.neg;
   }
@@ -21089,37 +21114,46 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     opts.forEach(function (o) { var p = document.createElement("option"); p.value = o[0]; p.textContent = o[1]; if (String(o[0]) === String(val)) p.selected = true; s.appendChild(p); });
     s.addEventListener("change", function () { on(s.value); }); r.appendChild(s); r.sel = s; return r;
   }
-  function buildFcfUi(left) {
-    orbInjectStyle(); fcfInjectStyle();
+  /* the style row of one surface of the three-level display: mesh or solid, and for a solid its opacity */
+  function fcfStyleRow(parent, i) {
+    var C = FCF.cfg, U = FCF.ui, r = fcfRow(parent, "style"), s = document.createElement("select"); s.className = "sel"; s.style.flex = "0 0 76px"; s.title = "Draw this surface as a wire mesh or as a transparent solid.";
+    [["mesh", "mesh"], ["solid", "solid"]].forEach(function (o) { var p = document.createElement("option"); p.value = o[0]; p.textContent = o[1]; s.appendChild(p); });
+    s.value = C.styles[i];
+    var g = document.createElement("input"); g.type = "range"; g.min = 0.05; g.max = 1; g.step = 0.05; g.value = C.opac[i]; g.title = "Opacity of this solid surface: lower it to see the surfaces inside it.";
+    var v = el("span", "fcf-v", C.opac[i].toFixed(2));
+    function sync() { g.style.display = v.style.display = s.value === "solid" ? "" : "none"; }
+    s.addEventListener("change", function () { C.styles[i] = s.value; sync(); fcfRedraw(); });
+    g.addEventListener("input", function () {
+      var old = C.opac[i], nw = parseFloat(g.value); C.opac[i] = nw; v.textContent = nw.toFixed(2);
+      if (old < 0.99 && nw < 0.99) FCF.meshes.forEach(function (m) { if (m.userData.solidIdx === i && m.material && m.material.transparent) m.material.opacity = nw; }); /* the same kind of material: no need to calculate the surface again */
+      else fcfRedraw();
+    });
+    r.firstChild.style.paddingLeft = "10px"; r.appendChild(s); r.appendChild(g); r.appendChild(v); sync();
+    U.styleSel[i] = s; U.opSl[i] = g; U.opVal[i] = v; U.styleSync[i] = sync;
+  }
+  function buildFcfUi(left) {    orbInjectStyle(); fcfInjectStyle();
     var C = FCF.cfg, U = FCF.ui, sec = section(left, "Difference density", false, function (isOpen) { if (!isOpen) fcfExitMode(); }), body = el("div", "fcf-body"); sec.appendChild(body);
     U.info = el("div", "orb-sum"); body.appendChild(U.info);
     var rd = function () { fcfSyncUi(); fcfRedraw(); };
     var showRow = fcfRow(body, "Show map", fcfCheck(C.show, "Shows or hides the difference electron density surfaces.", function (v) { C.show = v; rd(); })); U.showCb = showRow.querySelector("input");
     fcfSelect(body, "map", [["diff", "difference, Fo \u2212 Fc"], ["2fofc", "2Fo \u2212 Fc"]], C.mapKind, "The difference density (what the model lacks) or the 2Fo \u2212 Fc map (the electron density itself, with the model's phases). Each has its own levels and colours. Counting electrons and the peak list always use the difference map.", function (v) { fcfSwitchMap(v); });
-    fcfSelect(body, "display", [["solid", "solid surface, one level"], ["mesh", "mesh, three levels"]], C.mode, "A transparent solid surface at one level, or three wire meshes at three levels.", function (v) { C.mode = v; rd(); });
     fcfSelect(body, "levels in", [["rms", "× rms of the map"], ["abs", "e/Å³"]], C.units, "Contour levels as multiples of the r.m.s. of the map (the usual 3σ style) or as electron density.", function (v) {
       var m = FCF.data && FCF.data.map ? FCF.data.map.rms : 0.1, f = v === "abs" ? m : 1 / m;
       if (v !== C.units) { C.level *= f; C.countLevel *= f; C.levels = C.levels.map(function (x) { return x * f; }); C.units = v; fcfFillLevels(); }
       rd();
     });
-    /* solid surface */
-    U.solidRow = el("div", "fcf-sub"); body.appendChild(U.solidRow);
-    U.lvl = fcfNumber(U.solidRow, "level", 0.01, 99, 0.1, C.level, "", function (v) { C.level = v; fcfRedraw(); }).num;
-    var pr = fcfRow(U.solidRow, "positive"); var sp = U.swPos = colorSwatch(C.colPos, function (h) { C.colPos = h; fcfRedraw(); }); sp.title = "Colour of the positive density"; pr.appendChild(sp);
-    U.negSolid = fcfCheck(C.neg, "Also show the negative density (holes).", function (v) { C.neg = v; rd(); });
-    var nr = fcfRow(U.solidRow, "negative", U.negSolid); var sn = U.swNeg = colorSwatch(C.colNeg, function (h) { C.colNeg = h; fcfRedraw(); }); sn.title = "Colour of the negative density"; nr.appendChild(sn);
-    fcfSlider(U.solidRow, "opacity", 0.1, 1, 0.05, C.opacity, function (v) { return v.toFixed(2); }, function (v) { C.opacity = v; fcfRedraw(); });
     /* mesh */
-    U.meshRow = el("div", "fcf-sub"); body.appendChild(U.meshRow); U.lvls = []; U.onCbs = []; U.swCols = [];
+    U.meshRow = el("div", "fcf-sub"); body.appendChild(U.meshRow); U.lvls = []; U.onCbs = []; U.swCols = []; U.styleSel = []; U.opSl = []; U.opVal = []; U.styleSync = [];
     fcfSlider(U.meshRow, "line width", 0.5, 6, 0.5, C.thick, function (v) { return v.toFixed(1); }, function (v) { C.thick = v; }).title = "Thickness of the mesh lines in screen pixels.";
     fcfNumber(U.meshRow, "spacing", 0.05, 1, 0.05, C.meshStep, "Å", function (v) { C.meshStep = v; fcfRedraw(); }).title = "Distance between the points at which the mesh is calculated: a larger value gives a coarser, more open mesh.";
     C.levels.forEach(function (lv, i) {
       var cb = fcfCheck(C.on[i] !== false, "Show this level", function (v) { C.on[i] = v; fcfRedraw(); });
       var row = fcfNumber(U.meshRow, "level " + (i + 1), 0.01, 99, 0.1, lv, "", function (v) { C.levels[i] = v; fcfRedraw(); }, cb);
       var sw = colorSwatch(C.cols[i], function (h) { C.cols[i] = h; fcfRedraw(); }); sw.title = "Colour of level " + (i + 1); row.appendChild(sw); U.lvls.push(row.num); U.onCbs.push(cb); U.swCols.push(sw);
+      fcfStyleRow(U.meshRow, i);
     });
-    U.negMesh = fcfCheck(C.neg, "Also show the negative density (holes), at the lowest level.", function (v) { C.neg = v; rd(); });
-    var nm = fcfRow(U.meshRow, "negative", U.negMesh); var sm = U.swNegMesh = colorSwatch(C.colNegMesh, function (h) { C.colNegMesh = h; fcfRedraw(); }); sm.title = "Colour of the negative mesh"; nm.appendChild(sm);
+    U.negMesh = fcfCheck(C.neg, "Also show the negative density (holes), at the lowest level that is switched on.", function (v) { C.neg = v; rd(); });
+    var nm = fcfRow(U.meshRow, "negative", U.negMesh); var sm = U.swNegMesh = colorSwatch(C.colNegMesh, function (h) { C.colNegMesh = h; fcfRedraw(); }); sm.title = "Colour of the negative surface"; nm.appendChild(sm); fcfStyleRow(U.meshRow, 3);
     /* region */
     fcfSelect(body, "region", [["all", "box around the structure"], ["selbox", "box around the selected atoms"], ["vis", "near the visible atoms"], ["sel", "near the selected atoms"]], C.region, "Where the map is drawn: a box around every atom in view, or only within a radius of the visible or the selected atoms.", function (v) { C.region = v; rd(); });
     var rr0 = fcfNumber(body, "margin", 0.5, 20, 0.5, C.margin, "Å", function (v) { C.margin = v; fcfRedraw(); }); U.regionNum = rr0.num; U.regionLabel = rr0.querySelector(".fcf-l");
@@ -21131,13 +21165,13 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     U.eraseBtn = button(eb, "", "prominent", function () { fcfSetEraseMode(!(FCF.erase.on && FCF.erase.kind === "erase"), "erase"); }); U.eraseBtn.id = "fcfEraseBtn";
     fcfSelect(eb, "tool", [["blob", "hide the blob"], ["keep", "keep only the blob"], ["ball", "hide a ball"]], C.eraseTool, "Hide the connected blob under the pointer, keep only that blob and hide all the rest, or hide everything within a radius of the point clicked.", function (v) { C.eraseTool = v; fcfSyncErase(); });
     U.eraseRadiusRow = fcfNumber(eb, "radius", 0.2, 20, 0.1, C.eraseRadius, "\u00c5", function (v) { C.eraseRadius = v; });
-    U.eraseCopiesRow = fcfSelect(eb, "copies", [["this", "this copy only"], ["all", "all copies"]], C.eraseCopies, "Whether a ball also hides the same place in every other unit cell.", function (v) { C.eraseCopies = v; });
+    U.eraseCopiesRow = fcfSelect(eb, "copies", [["this", "this copy only"], ["all", "all copies"]], C.eraseTool === "ball" ? C.copiesBall : C.copiesBlob, "The map repeats from cell to cell, so one feature has copies in the neighbouring cells. This copy only hides just the one you clicked; all copies hides the same place in every cell.", function (v) { if (C.eraseTool === "ball") C.copiesBall = v; else C.copiesBlob = v; });
     U.rules = el("div", "fcf-sub"); eb.appendChild(U.rules);
     var ur = el("div", "btnrow");
     U.undoBtn = button(ur, "Undo", "ghost", function () { var D2 = FCF.data, l2 = D2 && fcfRuleList(D2); if (l2 && l2.length) { l2.pop(); fcfRulesUi(); fcfRedraw(); } }); U.undoBtn.title = "Brings back what the last rule hid.";
     U.resetBtn = button(ur, "Reset all", "ghost", function () { var D2 = FCF.data; if (D2) { D2[FCF.cfg.mapKind === "2fofc" ? "rules2" : "rules"] = []; fcfRulesUi(); fcfRedraw(); } }); U.resetBtn.title = "Removes every rule: all of the map is shown again.";
     eb.appendChild(ur);
-    function fcfSyncErase() { U.eraseRadiusRow.style.display = C.eraseTool === "ball" ? "" : "none"; U.eraseCopiesRow.style.display = C.eraseTool === "ball" ? "" : "none"; }
+    function fcfSyncErase() { U.eraseRadiusRow.style.display = C.eraseTool === "ball" ? "" : "none"; U.eraseCopiesRow.style.display = ""; U.eraseCopiesRow.sel.value = C.eraseTool === "ball" ? C.copiesBall : C.copiesBlob; }
     var cs = subsection(sec, "Count electrons", false, function (isOpen) { if (!isOpen && FCF.erase.on && FCF.erase.kind === "count") fcfSetEraseMode(false); }), cb = el("div", "fcf-body"); cs.appendChild(cb);
     U.countBtn = button(cb, "", "prominent", function () { fcfSetEraseMode(!(FCF.erase.on && FCF.erase.kind === "count"), "count"); }); U.countBtn.id = "fcfCountBtn";
     fcfSelect(cb, "region", [["blob", "the blob clicked"], ["void", "the void clicked"], ["ball", "a ball around the click"]], C.countTool, "The electrons are counted in the connected blob of density under the pointer (down to the count-to level), in the whole void that contains the point (as set by the probe, like a SQUEEZE mask), or within a radius of the point clicked.", function (v) { C.countTool = v; fcfSyncCount(); });
@@ -21151,7 +21185,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     fcfSyncErase(); fcfSyncCount(); fcfRulesUi(); fcfCountsUi(); fcfSyncModeBtns();    U.note = el("div", "hint"); body.appendChild(U.note);
     U.stats = el("div"); body.appendChild(U.stats);
     var ps = subsection(sec, "Peaks and holes", false); U.peaks = el("div", "orb-scroll"); U.peaks.style.overflowX = "auto"; ps.appendChild(U.peaks);
-    function fcfFillLevels() { U.countLevelRow.num.value = C.countLevel.toFixed(2); U.lvl.value = C.level.toFixed(2); U.lvls.forEach(function (n, i) { n.value = C.levels[i].toFixed(2); }); }
+    function fcfFillLevels() { U.countLevelRow.num.value = C.countLevel.toFixed(2); U.lvls.forEach(function (n, i) { n.value = C.levels[i].toFixed(2); }); }
     fcfSyncUi();
   }
   /* ---- FCF-END ---- */
@@ -21296,10 +21330,10 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<li>Drop the <b>CIF and the .fcf together</b> on the 3D view. A .fcf dropped alone goes with the structure that is loaded.</li>" +
       "<li>The menu shows only when <b>Difference density (FCF)</b> is on in Settings and a .fcf is loaded.</li></ul>" +
       "<h3>Using it</h3><ul>" +
-      "<li><b>solid surface</b>: one level, positive green and negative red. <b>mesh</b>: three levels, each with its own checkbox, value and colour, a <b>spacing</b> for the openness of the mesh and a <b>line width</b> slider for its lines.</li>" +
+      "<li><b>levels</b>: three surfaces, each with its own checkbox, value, colour and <b>style</b> (mesh, or solid with an opacity, so that nested surfaces show through each other), a <b>spacing</b> for the openness of the mesh and a <b>line width</b> slider for its lines.</li>" +
       "<li>Levels are in multiples of the r.m.s. of the map (3 is the usual start) or in e/&Aring;&sup3;. The highest, lowest and r.m.s. values are shown beside SHELXL's own.</li>" +
       "<li>The map is drawn around the atoms in view: <b>Grow</b> first, then <b>Redraw</b>. <b>box around the selected atoms</b> frames a void whose surrounding atoms you select; <b>near the visible atoms</b> and <b>near the selected atoms</b> limit it to a radius. <b>Clear</b> removes the surfaces but keeps the menu; change a setting and press <b>Redraw</b>.</li>" +
-      "<li><b>Erase</b> (press the red Erase mode button, then click a surface): hide the blob, keep only the blob, or hide a ball. <b>Count electrons</b> (its own red Count mode button): click a blob or a ball to count its electrons, or press <b>Count voids</b> for each void of the structure. Counts are less certain when low-angle reflections are missing (shown under the table). Atoms of occupancy below 0.5 (a modelled guest) are left out when the voids are found. The hidden parts are kept as rules about the map, so they stay hidden when the level changes; <b>Undo</b> and <b>Reset all</b> bring them back.</li><li><b>Peaks and holes</b> lists the strongest peaks with coordinates and the nearest atom.</li></ul>" },
+      "<li><b>Erase</b> (press the red Erase mode button, then click a surface): hide the blob, keep only the blob, or hide a ball, for this copy only or for all the copies of the feature in the neighbouring unit cells (the <b>copies</b> setting). <b>Count electrons</b> (its own red Count mode button): click a blob or a ball to count its electrons, or press <b>Count voids</b> for each void of the structure. Counts are less certain when low-angle reflections are missing (shown under the table). Atoms of occupancy below 0.5 (a modelled guest) are left out when the voids are found. The hidden parts are kept as rules about the map, so they stay hidden when the level changes; <b>Undo</b> and <b>Reset all</b> bring them back.</li><li><b>Peaks and holes</b> lists the strongest peaks with coordinates and the nearest atom.</li></ul>" },
     navigator: { title: "Structure Navigator", html:
       "<p>Lets you move through many structures without loading them one by one.</p>" +
       "<h3>Filling it</h3><ul>" +
@@ -23735,7 +23769,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<p><b>Framework potential</b> (Orca bridge) shows how the electrostatic potential of a host framework varies over a surface, for example the wall of a channel or the surface of a guest molecule in it. <b>Calculate charges</b> assigns EQeq point charges to every host atom of the periodic structure (the host layer only, so move any guest to a guest group first; remove all but one component of a disorder). <b>Map potential</b> then evaluates the potential of those charges, with the periodic sum done by Ewald summation, at every vertex of the molecular surfaces in the view and/or of the void and channel surfaces, and colours them: negative red and positive blue unless <b>Red = positive</b> (Cube &amp; ESP) is ticked. A colour bar in kcal/mol appears in the 3D view, the table lists the highest and lowest values on each surface, and <b>dielectric screening</b> is the EQeq parameter (1.2). The point-charge model is quick and needs no Orca run. For a better potential, <b>Build cluster</b> cuts a cluster of the host (a number of cells along the channel, within a radius of its axis) from the crystal, adds it to the view and selects it; <b>Write cluster job</b> writes an Orca input for it, closed-shell and neutral with hydrogen caps on any cut carbon-carbon bond, plus the surface points and run_fw.bat; and after you run the script, <b>Read cluster results</b> colours the surfaces by the potential Orca calculated from the real electron density. The line under the buttons estimates the size and time of the job before you write it. Surfaces built after the job was run have no values: <b>Add surfaces</b> writes their points and <b>run_vpot.bat</b>, which evaluates them from the finished job's wavefunction in minutes, and a second <b>Read cluster results</b> colours them together with the first.</p>" +
       "<p><b>Load cube file...</b> (or drop a <span class='mono'>.cube</span> file on the 3D view) shows a Gaussian cube file (density, orbital, potential) as an isosurface; each file gets a card with its grid and value range, an <b>isovalue</b> (shown to three decimals; its spin buttons move by 0.001, or by a finer step for a cube whose values are all very small), colour swatches for the positive and (for signed data such as orbitals) negative lobes, each with its own tick box to show or hide that lobe, and an <b>opacity</b> (1, fully solid, to begin with; a translucent surface is drawn back faces first, then front faces); untick the card to hide the whole cube and use &times; to remove it, or <b>Clear cubes</b> to remove them all; loading a new structure removes them too. Surfaces are lightly smoothed to hide the steps of a coarse grid. A cube whose atoms do not coincide with the atoms in view is drawn in its own frame and says so. <b>ESP colouring</b> paints the molecular surfaces by the electrostatic potential, either from the Orca results read by the bridge or from a loaded cube (<b>Colour surface</b>): red where the potential is negative, white at zero and blue where it is positive, over the chosen <b>colour range</b> (atomic units; the default covers 95% of the values). <b>Clear colours</b> restores the plain surface colours. The <b>surface opacity</b> slider here is the same setting as in Molecular Surface.</p>" +
       "<h3>Difference density</h3>" +
-      "<p>The <b>Difference density</b> menu draws the <b>difference electron density</b> (Fo &minus; Fc) of a SHELXL refinement as surfaces, for example to find a guest that was left out of the model. Refine the structure without the guest, with <span class='mono'>LIST 6</span> in the instructions so that the <span class='mono'>.fcf</span> holds the phases, and drop the CIF and the .fcf <b>together</b> on the 3D view (several files, or a folder or zip; a .fcf goes with the structure file of the same name, and a .fcf dropped alone goes with the structure that is loaded). The menu is an optional one: it is shown only when <b>Difference density (FCF)</b> is switched on in Settings <i>and</i> a .fcf is loaded with the structure. The <b>map</b> is the difference map (Fo &minus; Fc) or the 2Fo &minus; Fc map, each with its own levels and colours. It draws a transparent <b>solid surface</b> at one level (positive green, negative red) or a <b>mesh of three levels</b> (blue, green, red, each with its own checkbox, with the negative density at the lowest level in a fourth colour, and an adjustable mesh spacing and line width); the levels are in multiples of the r.m.s. of the map or in e/&Aring;&sup3;, and the surfaces are drawn in a box around the atoms in view (Grow first, then Redraw), in a box around the selected atoms (select the atoms around a void), or only within a radius of the visible or of the selected atoms. <b>Clear</b> removes the surfaces but keeps the map and the menu. <b>Erase</b> hides parts of the display with the mouse (hide the blob under the pointer, keep only that blob, or hide a ball); what is hidden is stored as rules about the map, so it still applies after a change of level, spacing or region, and <b>Undo</b> and <b>Reset all</b> bring it back. <b>Count electrons</b>, a separate subsection with its own red Count mode button, counts electrons: click a blob or a ball (a table gives its volume and electrons), or press <b>Count voids</b> for each void of the structure. The guest density is refined inside the voids, as in SQUEEZE, and the count is less certain when low-angle reflections are missing (the share present is shown under the table). <b>Peaks and holes</b> lists the highest peaks and deepest holes with their coordinates and nearest atom. The highest, lowest and r.m.s. values are shown next to those SHELXL put in the CIF, as a check. Only LIST 6 files are read; the reflections are not kept in saved model files.</p>" +
+      "<p>The <b>Difference density</b> menu draws the <b>difference electron density</b> (Fo &minus; Fc) of a SHELXL refinement as surfaces, for example to find a guest that was left out of the model. Refine the structure without the guest, with <span class='mono'>LIST 6</span> in the instructions so that the <span class='mono'>.fcf</span> holds the phases, and drop the CIF and the .fcf <b>together</b> on the 3D view (several files, or a folder or zip; a .fcf goes with the structure file of the same name, and a .fcf dropped alone goes with the structure that is loaded). The menu is an optional one: it is shown only when <b>Difference density (FCF)</b> is switched on in Settings <i>and</i> a .fcf is loaded with the structure. The <b>map</b> is the difference map (Fo &minus; Fc) or the 2Fo &minus; Fc map, each with its own levels and colours. It draws up to three surfaces at three levels (blue, green, red, each with its own checkbox, with the negative density at the lowest level that is switched on, in a fourth colour), each drawn as a wire mesh (adjustable spacing and line width) or as a transparent solid with its own opacity, so that the surfaces can be seen through each other; the levels are in multiples of the r.m.s. of the map or in e/&Aring;&sup3;, and the surfaces are drawn in a box around the atoms in view (Grow first, then Redraw), in a box around the selected atoms (select the atoms around a void), or only within a radius of the visible or of the selected atoms. <b>Clear</b> removes the surfaces but keeps the map and the menu. <b>Erase</b> hides parts of the display with the mouse (hide the blob under the pointer, keep only that blob, or hide a ball, for this copy only or all copies in the neighbouring cells); what is hidden is stored as rules about the map, so it still applies after a change of level, spacing or region, and <b>Undo</b> and <b>Reset all</b> bring it back. <b>Count electrons</b>, a separate subsection with its own red Count mode button, counts electrons: click a blob or a ball (a table gives its volume and electrons), or press <b>Count voids</b> for each void of the structure. The guest density is refined inside the voids, as in SQUEEZE, and the count is less certain when low-angle reflections are missing (the share present is shown under the table). <b>Peaks and holes</b> lists the highest peaks and deepest holes with their coordinates and nearest atom. The highest, lowest and r.m.s. values are shown next to those SHELXL put in the CIF, as a check. Only LIST 6 files are read; the reflections are not kept in saved model files.</p>" +
       "<h3>Macro</h3>" +
       "<p>A macro is a plain-text sequence of commands, one per line, that can be replayed later to reproduce a sequence of actions -- recorded live from your own clicks and button presses, typed or pasted in by hand, or a mix of both (the memo box is an ordinary text area throughout, editable at any time). It's designed to work not just on the structure it was recorded against but on a whole series of similar ones (e.g. a variable-temperature data set for the same crystal) -- provided each structure's asymmetric unit is labelled the same way and sits in the same place, which is the user's own responsibility to ensure; nothing here can verify that automatically.</p>" +
       "<p><b>Record</b> and <b>Pause</b> are mutually exclusive (pressing one always pops the other back up). While Record is down, every action below that has a defined macro command gets appended to the memo the instant it happens -- not batched or reordered, in the exact sequence performed. Not every possible action has one: a not-yet-implemented combination is simply never recorded, silently, the same as pressing a key with no shortcut bound to it. <b>Clear</b> empties the memo (confirming first if there's anything in it to lose). <b>Save</b> and <b>Load</b> read and write a plain-text <b>.MAC</b> file -- Save suggests the current structure's own name with a .MAC extension and, in Chrome or Edge, starts its folder picker in whichever folder the structure itself was last dropped from; Load offers the same picker (also starting there), falling back to a plain file-browse button in other browsers, and confirms before replacing a non-empty memo. A .MAC file can also be dropped directly onto the 3D view to load it the same way, without going through the Load button at all. <b>Play</b>, <b>Save</b>, and <b>Load</b> are all disabled while Record is down -- pause first.</p>" +
