@@ -1,0 +1,1017 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Error Propagation Lab</title>
+<script>
+  (function(){
+    try {
+      var t = localStorage.getItem("teachingAppTheme");
+      if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+  })();
+</script>
+<style>
+  :root {
+    color-scheme: dark;
+    --ink: #f4f7fb;
+    --muted: #8e9aab;
+    --muted2: #b7c1cf;
+    --panel: rgba(17, 23, 34, .74);
+    --panel2: rgba(17, 23, 34, .55);
+    --line: rgba(255, 255, 255, .095);
+    --cyan: #6cf5ee;
+    --pink: #ff6db1;
+    --violet: #a78bfa;
+    --lime: #b7f36b;
+    --amber: #ffb86c;
+    --teal: #4fd1c5;
+    --bad: #ff6d6d;
+    --eq-ink: #dbe5f2;
+    --glass: rgba(255, 255, 255, .045);
+    --glass-track: rgba(255, 255, 255, .06);
+    --wash: rgba(108, 245, 238, .18);
+    --bg-solid: #080b11;
+    --bg-tint-1: rgba(72, 214, 206, .12);
+    --bg-tint-2: rgba(167, 139, 250, .13);
+  }
+
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --ink: #182131;
+    --muted: #667080;
+    --muted2: #3d4859;
+    --panel: rgba(255, 255, 255, .82);
+    --panel2: rgba(255, 255, 255, .68);
+    --line: rgba(15, 23, 42, .1);
+    --cyan: #0c8f84;
+    --pink: #c22a63;
+    --violet: #6d4fc4;
+    --lime: #4f7a17;
+    --amber: #a15f10;
+    --teal: #0e7d72;
+    --bad: #c93a3a;
+    --eq-ink: #24304a;
+    --glass: rgba(15, 23, 42, .04);
+    --glass-track: rgba(15, 23, 42, .07);
+    --wash: rgba(12, 143, 132, .14);
+    --bg-solid: #f3f4f7;
+    --bg-tint-1: rgba(12, 143, 132, .08);
+    --bg-tint-2: rgba(109, 79, 196, .09);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { min-height: 100%; }
+
+  body {
+    margin: 0;
+    color: var(--ink);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background:
+      radial-gradient(circle at 15% 5%, var(--bg-tint-1), transparent 30rem),
+      radial-gradient(circle at 88% 12%, var(--bg-tint-2), transparent 28rem),
+      var(--bg-solid);
+    transition: background-color .2s ease, color .2s ease;
+  }
+
+  button, input, select { font: inherit; color: inherit; }
+
+  .shell {
+    width: min(1180px, 100%);
+    margin: 0 auto;
+    padding: 28px 28px 60px;
+  }
+
+  header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    margin-bottom: 22px;
+    flex-wrap: wrap;
+  }
+
+  .eyebrow {
+    margin: 0 0 7px;
+    color: var(--cyan);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: clamp(28px, 4vw, 46px);
+    line-height: .98;
+    letter-spacing: -.045em;
+    font-weight: 650;
+  }
+
+  .subtitle {
+    max-width: 560px;
+    margin: 10px 0 0;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.55;
+  }
+
+  .equation {
+    color: var(--eq-ink);
+    font-family: Georgia, "Times New Roman", serif;
+    font-style: italic;
+  }
+
+  .equation i { color: var(--pink); font-style: italic; }
+  .equation b { color: var(--cyan); font-style: italic; font-weight: 400; }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+
+  .tab-btn {
+    appearance: none;
+    border: 1px solid var(--line);
+    background: var(--panel2);
+    color: var(--muted2);
+    padding: 10px 20px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: .01em;
+    cursor: pointer;
+    transition: all .15s ease;
+  }
+
+  .tab-btn:hover { color: var(--ink); border-color: var(--line); }
+
+  .tab-btn.active {
+    background: var(--wash);
+    border-color: var(--cyan);
+    color: var(--ink);
+  }
+
+  .theme-toggle {
+    display: flex;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    overflow: hidden;
+    flex: none;
+  }
+  .theme-toggle button {
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    padding: 8px 15px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .15s ease;
+  }
+  .theme-toggle button.active { background: var(--wash); color: var(--ink); }
+  .tabs-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .tabs-row .tabs { margin-bottom: 0; }
+
+  .view { display: none; }
+  .view.active { display: block; animation: fadein .25s ease; }
+
+  @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+  .card {
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    background: var(--panel);
+    box-shadow: 0 28px 90px rgba(0,0,0,.28);
+    backdrop-filter: blur(14px);
+    padding: 24px 26px;
+    margin-bottom: 18px;
+  }
+
+  .card h2 {
+    margin: 0 0 6px;
+    font-size: 19px;
+    font-weight: 650;
+    letter-spacing: -.01em;
+  }
+
+  .card h3 {
+    margin: 22px 0 10px;
+    font-size: 14px;
+    font-weight: 650;
+    color: var(--cyan);
+    letter-spacing: .02em;
+    text-transform: uppercase;
+    font-size: 11.5px;
+  }
+
+  .card p { color: var(--muted2); line-height: 1.65; font-size: 14px; margin: 8px 0; }
+
+  .formula-box {
+    background: var(--glass);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 18px 22px;
+    text-align: center;
+    font-size: 20px;
+    margin: 14px 0;
+  }
+
+  sup { font-size: 65%; }
+  sub { font-size: 65%; }
+
+  table.rules {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0 4px;
+    font-size: 13.5px;
+  }
+
+  table.rules th, table.rules td {
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  table.rules th {
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    font-weight: 650;
+  }
+
+  table.rules td.eq { font-family: Georgia, "Times New Roman", serif; font-style: italic; color: var(--eq-ink); }
+
+  .pitfall {
+    display: flex;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .pitfall:last-child { border-bottom: none; }
+  .pitfall .dot {
+    flex: none;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    margin-top: 6px;
+    background: var(--pink);
+  }
+  .pitfall strong { color: var(--ink); }
+
+  .worked {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 12px;
+  }
+  @media (max-width: 720px) { .worked { grid-template-columns: 1fr; } }
+
+  .worked .step {
+    background: var(--glass);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 12px 16px;
+  }
+  .worked .step .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 4px; }
+  .worked .step .val { font-family: Georgia, serif; font-style: italic; font-size: 15px; color: var(--eq-ink); }
+
+  /* Calculator */
+  .calc-grid {
+    display: grid;
+    grid-template-columns: minmax(0,1fr) 340px;
+    gap: 18px;
+    align-items: start;
+  }
+  @media (max-width: 880px) { .calc-grid { grid-template-columns: 1fr; } }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; }
+  .chip {
+    appearance: none;
+    border: 1px solid var(--line);
+    background: var(--glass);
+    color: var(--muted2);
+    padding: 6px 13px;
+    border-radius: 999px;
+    font-size: 12.5px;
+    font-family: Georgia, serif;
+    font-style: italic;
+    cursor: pointer;
+    transition: all .15s ease;
+  }
+  .chip:hover { color: var(--ink); border-color: var(--cyan); }
+
+  .formula-input {
+    width: 100%;
+    margin-top: 12px;
+    padding: 16px 18px;
+    font-size: 20px;
+    font-family: Georgia, "Times New Roman", serif;
+    font-style: italic;
+    background: var(--glass);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    color: var(--ink);
+    outline: none;
+  }
+  .formula-input:focus { border-color: var(--cyan); }
+
+  .formula-error {
+    color: var(--bad);
+    font-size: 12.5px;
+    margin-top: 8px;
+    min-height: 16px;
+  }
+
+  .var-row {
+    display: grid;
+    grid-template-columns: 40px 1fr 1fr 78px;
+    gap: 10px;
+    align-items: center;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .var-row:last-child { border-bottom: none; }
+
+  .var-name {
+    font-family: Georgia, serif;
+    font-style: italic;
+    font-size: 17px;
+    color: var(--pink);
+    text-align: center;
+  }
+
+  .field {
+    position: relative;
+  }
+  .field label {
+    display: block;
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    margin-bottom: 3px;
+  }
+  .field input {
+    width: 100%;
+    padding: 8px 10px;
+    background: var(--glass);
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    color: var(--ink);
+    font-size: 14px;
+    outline: none;
+  }
+  .field input:focus { border-color: var(--cyan); }
+
+  .mode-toggle {
+    display: flex;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    overflow: hidden;
+    margin-top: 16px;
+    height: 33px;
+  }
+  .mode-toggle button {
+    flex: 1;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .mode-toggle button.active { background: var(--wash); color: var(--ink); }
+
+  .no-vars {
+    color: var(--muted);
+    font-size: 13px;
+    padding: 10px 0;
+    font-style: italic;
+  }
+
+  /* Results panel */
+  .results-panel {
+    position: sticky;
+    top: 20px;
+  }
+
+  .result-big {
+    text-align: center;
+    padding: 6px 0 4px;
+  }
+  .result-big .rf {
+    font-family: Georgia, serif;
+    font-style: italic;
+    font-size: 30px;
+    color: var(--ink);
+  }
+  .result-big .pm { color: var(--cyan); }
+  .result-big .rel {
+    margin-top: 6px;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+
+  .compute-error {
+    color: var(--bad);
+    font-size: 13px;
+    text-align: center;
+    padding: 20px 0;
+  }
+
+  .bar-row {
+    margin-bottom: 10px;
+  }
+  .bar-row .bar-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--muted2);
+    margin-bottom: 4px;
+    font-family: Georgia, serif;
+    font-style: italic;
+  }
+  .bar-track {
+    height: 8px;
+    border-radius: 99px;
+    background: var(--glass-track);
+    overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%;
+    border-radius: 99px;
+    transition: width .3s ease;
+  }
+
+  .deriv-table {
+    width: 100%;
+    font-size: 12px;
+    border-collapse: collapse;
+    margin-top: 6px;
+  }
+  .deriv-table th, .deriv-table td {
+    padding: 6px 4px;
+    text-align: right;
+    border-bottom: 1px solid var(--line);
+    color: var(--muted2);
+  }
+  .deriv-table th:first-child, .deriv-table td:first-child { text-align: left; }
+  .deriv-table th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 10px; }
+  .deriv-table td.name { font-family: Georgia, serif; font-style: italic; color: var(--pink); }
+
+  .note {
+    font-size: 11.5px;
+    color: var(--muted);
+    line-height: 1.5;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+  }
+
+  .func-ref {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+  }
+  .func-ref span {
+    font-size: 11px;
+    color: var(--muted);
+    background: var(--glass);
+    border: 1px solid var(--line);
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-family: Georgia, serif;
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <header>
+    <div>
+      <p class="eyebrow">Uncertainty Analysis</p>
+      <h1>Error Propagation Lab</h1>
+      <p class="subtitle">How measurement uncertainties in a, b, c&hellip; carry through a calculation into the uncertainty of a result f. Learn the rules, then propagate any formula numerically.</p>
+    </div>
+    <div class="equation" style="font-size:15px; text-align:right; color:var(--muted2);">
+      &sigma;<sub>f</sub> = &radic;( &Sigma;<sub>i</sub> (&part;f/&part;x<sub>i</sub>)&sup2; &sigma;<sub>xi</sub>&sup2; )
+    </div>
+  </header>
+
+  <div class="tabs-row">
+    <div class="tabs">
+      <button class="tab-btn active" data-view="learn">Learn</button>
+      <button class="tab-btn" data-view="calc">Calculator</button>
+    </div>
+    <div class="theme-toggle" id="theme-toggle">
+      <button data-theme-btn="dark">Dark</button>
+      <button data-theme-btn="light">Light</button>
+    </div>
+  </div>
+
+  <!-- ============ LEARN ============ -->
+  <div class="view active" id="view-learn">
+
+    <div class="card">
+      <h2>Why errors propagate</h2>
+      <p>Every measured quantity carries an uncertainty &mdash; a range around the reported value that reflects the limits of the instrument, the reader, or the method. When measured quantities are combined in a calculation (added, multiplied, raised to a power, fed into a function&hellip;) their uncertainties combine too. The result is <b>never</b> more precise than the least well-known ingredient allows.</p>
+      <p>The question this lab answers: given a, b, c&hellip; each with its own uncertainty &sigma;<sub>a</sub>, &sigma;<sub>b</sub>, &sigma;<sub>c</sub>&hellip;, what is the uncertainty of some function f(a, b, c, &hellip;)?</p>
+    </div>
+
+    <div class="card">
+      <h2>The general rule</h2>
+      <p>For independent, randomly-distributed (uncorrelated) uncertainties, the variance of f is the sum of the variances contributed by each variable, each weighted by how sensitively f responds to that variable &mdash; its partial derivative:</p>
+      <div class="formula-box equation">
+        &sigma;<sub>f</sub> = &radic;<span style="text-decoration: overline;">( (&part;f/&part;a)&sup2;&sigma;<sub>a</sub>&sup2; + (&part;f/&part;b)&sup2;&sigma;<sub>b</sub>&sup2; + &hellip; )</span>
+      </div>
+      <p>This single formula is the source of every "shortcut" rule below &mdash; each one is just this equation evaluated for a particular f. The <b>Calculator</b> tab applies it directly (numerically) to whatever formula you type in, so you never have to differentiate by hand.</p>
+    </div>
+
+    <div class="card">
+      <h2>Special cases worth memorising</h2>
+      <table class="rules">
+        <tr><th>Operation</th><th>f</th><th>Propagated uncertainty</th></tr>
+        <tr><td>Sum / difference</td><td class="eq">a &plusmn; b</td><td class="eq">&sigma;<sub>f</sub> = &radic;(&sigma;<sub>a</sub>&sup2; + &sigma;<sub>b</sub>&sup2;)</td></tr>
+        <tr><td>Product</td><td class="eq">a &middot; b</td><td class="eq">(&sigma;<sub>f</sub>/f)&sup2; = (&sigma;<sub>a</sub>/a)&sup2; + (&sigma;<sub>b</sub>/b)&sup2;</td></tr>
+        <tr><td>Quotient</td><td class="eq">a / b</td><td class="eq">(&sigma;<sub>f</sub>/f)&sup2; = (&sigma;<sub>a</sub>/a)&sup2; + (&sigma;<sub>b</sub>/b)&sup2;</td></tr>
+        <tr><td>Power</td><td class="eq">a<sup>n</sup> &nbsp;(n exact)</td><td class="eq">&sigma;<sub>f</sub>/f = |n| &middot; &sigma;<sub>a</sub>/a</td></tr>
+        <tr><td>Scalar multiple</td><td class="eq">k &middot; a &nbsp;(k exact)</td><td class="eq">&sigma;<sub>f</sub> = |k| &middot; &sigma;<sub>a</sub></td></tr>
+        <tr><td>Sum of terms</td><td class="eq">c<sub>1</sub>x<sub>1</sub> + c<sub>2</sub>x<sub>2</sub> + &hellip;</td><td class="eq">&sigma;<sub>f</sub> = &radic;(&Sigma; c<sub>i</sub>&sup2;&sigma;<sub>xi</sub>&sup2;)</td></tr>
+      </table>
+      <p style="margin-top:14px;">Notice the pattern: for <i>addition/subtraction</i>, <b>absolute</b> uncertainties add in quadrature. For <i>multiplication/division</i>, <b>relative</b> (fractional) uncertainties add in quadrature. Quadrature &mdash; "square, sum, square-root" &mdash; is what makes the largest uncertainty dominate the result and small ones matter much less than you'd guess from adding them directly.</p>
+    </div>
+
+    <div class="card">
+      <h2>Worked example &mdash; density</h2>
+      <p>A mass m = 12.40 &plusmn; 0.02 g occupies a volume V = 5.31 &plusmn; 0.03 cm&sup3;. Density &rho; = m / V is a quotient, so relative uncertainties add in quadrature:</p>
+      <div class="worked">
+        <div class="step"><div class="label">Central value</div><div class="val">&rho; = 12.40 / 5.31 = 2.3352 g/cm&sup3;</div></div>
+        <div class="step"><div class="label">Relative uncertainties</div><div class="val">&sigma;<sub>m</sub>/m = 0.00161&nbsp;&nbsp;&sigma;<sub>V</sub>/V = 0.00565</div></div>
+        <div class="step"><div class="label">Combine in quadrature</div><div class="val">&radic;(0.00161&sup2; + 0.00565&sup2;) = 0.00587</div></div>
+        <div class="step"><div class="label">Reported result</div><div class="val" style="color:var(--cyan);">&rho; = 2.335 &plusmn; 0.014 g/cm&sup3;</div></div>
+      </div>
+      <p style="margin-top:14px;">The volume's 0.57% relative uncertainty dominates over the mass's 0.16% &mdash; note it isn't simply the larger of the two that "wins", quadrature blends them, but the smaller one barely moves the answer. Try the same numbers in the <b>Calculator</b> tab (preset "a / b") to check.</p>
+    </div>
+
+    <div class="card">
+      <h2>Common pitfalls</h2>
+      <div class="pitfall"><span class="dot"></span><div><strong>Correlated variables.</strong> The formulas above assume a, b, c&hellip; are independent. If two quantities share a common source of error (e.g. both read from the same miscalibrated scale), the true uncertainty can be larger or smaller than quadrature predicts &mdash; a covariance term is needed.</div></div>
+      <div class="pitfall"><span class="dot"></span><div><strong>Quadrature vs. worst case.</strong> Simply adding uncertainties (&sigma;<sub>a</sub> + &sigma;<sub>b</sub>) gives the "worst possible" error, not the statistically expected one, and is almost always too pessimistic for independent random errors. Use quadrature unless you specifically want a worst-case bound.</div></div>
+      <div class="pitfall"><span class="dot"></span><div><strong>Systematic errors.</strong> A systematic offset that shifts every reading the same way does not average out and should generally be tracked separately from &mdash; not combined in quadrature with &mdash; random uncertainty.</div></div>
+      <div class="pitfall"><span class="dot"></span><div><strong>Over-precise reporting.</strong> An uncertainty is rarely known to better than 1&ndash;2 significant figures, so quoting &sigma; = 0.0138472 is misleading. Round the uncertainty first (usually to 1 sig. fig., or 2 if the leading digit is 1), then round the value to match &mdash; e.g. 2.335 &plusmn; 0.014, not 2.33520 &plusmn; 0.0138472.</div></div>
+    </div>
+
+  </div>
+
+  <!-- ============ CALCULATOR ============ -->
+  <div class="view" id="view-calc">
+
+    <div class="calc-grid">
+      <div>
+        <div class="card">
+          <h2>Formula</h2>
+          <p>Type any expression in your variables. It will be evaluated numerically and its partial derivatives estimated automatically &mdash; no calculus required.</p>
+          <div class="chips" id="presets"></div>
+          <input id="formula" class="formula-input" type="text" spellcheck="false" autocomplete="off" value="a / b">
+          <div class="formula-error" id="formula-error"></div>
+          <div class="func-ref" id="func-ref"></div>
+        </div>
+
+        <div class="card">
+          <h2>Variables</h2>
+          <p id="vars-hint" style="margin-top:-2px;">Enter each variable's central value and its uncertainty (absolute, or as a % of the value).</p>
+          <div id="var-rows"></div>
+          <div class="no-vars" id="no-vars" style="display:none;">No variables detected &mdash; type a formula above using letters like a, b, n&hellip;</div>
+        </div>
+      </div>
+
+      <div class="results-panel">
+        <div class="card">
+          <h2>Result</h2>
+          <div id="result-body"></div>
+          <div class="note">Assumes all variables are <b>independent</b> (uncorrelated) with random, Gaussian-like errors. Derivatives are estimated by central finite difference, so the result matches the analytic formula to numerical precision.</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ---------- tabs ---------- */
+  document.querySelectorAll(".tab-btn").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      document.querySelectorAll(".tab-btn").forEach(function(b){ b.classList.remove("active"); });
+      document.querySelectorAll(".view").forEach(function(v){ v.classList.remove("active"); });
+      btn.classList.add("active");
+      document.getElementById("view-" + btn.dataset.view).classList.add("active");
+    });
+  });
+
+  /* ---------- theme ---------- */
+  var themeButtons = document.querySelectorAll("[data-theme-btn]");
+  function setTheme(theme){
+    document.documentElement.setAttribute("data-theme", theme);
+    try { localStorage.setItem("teachingAppTheme", theme); } catch (e) {}
+    themeButtons.forEach(function(b){ b.classList.toggle("active", b.dataset.themeBtn === theme); });
+    refreshPalette();
+    if (typeof compute === "function") compute();
+  }
+  themeButtons.forEach(function(b){
+    b.addEventListener("click", function(){ setTheme(b.dataset.themeBtn); });
+  });
+  setTheme(document.documentElement.getAttribute("data-theme") || "dark");
+
+  /* ---------- expression engine ---------- */
+  var FUNCS = {
+    sqrt: Math.sqrt, exp: Math.exp, ln: Math.log, log: Math.log10, log10: Math.log10,
+    log2: Math.log2, sin: Math.sin, cos: Math.cos, tan: Math.tan,
+    asin: Math.asin, acos: Math.acos, atan: Math.atan,
+    sinh: Math.sinh, cosh: Math.cosh, tanh: Math.tanh, abs: Math.abs
+  };
+  var CONSTS = { pi: Math.PI, e: Math.E };
+
+  function tokenize(str){
+    var tokens = [], i = 0;
+    while (i < str.length) {
+      var c = str[i];
+      if (/\s/.test(c)) { i++; continue; }
+      if (/[0-9.]/.test(c)) {
+        var j = i, seenDot = false;
+        while (j < str.length) {
+          var ch = str[j];
+          if (/[0-9]/.test(ch)) { j++; continue; }
+          if (ch === '.' && !seenDot) { seenDot = true; j++; continue; }
+          if ((ch === 'e' || ch === 'E') && j > i && /[0-9]/.test(str[j-1])) {
+            var k = j + 1, saw = false;
+            if (str[k] === '+' || str[k] === '-') k++;
+            while (k < str.length && /[0-9]/.test(str[k])) { k++; saw = true; }
+            if (saw) { j = k; continue; }
+          }
+          break;
+        }
+        tokens.push({ type: "num", value: parseFloat(str.slice(i, j)) });
+        i = j; continue;
+      }
+      if (/[A-Za-z_]/.test(c)) {
+        var j2 = i;
+        while (j2 < str.length && /[A-Za-z0-9_]/.test(str[j2])) j2++;
+        tokens.push({ type: "id", value: str.slice(i, j2) });
+        i = j2; continue;
+      }
+      if ("+-*/^(),".indexOf(c) !== -1) { tokens.push({ type: c }); i++; continue; }
+      throw new Error('Unexpected character "' + c + '"');
+    }
+    return tokens;
+  }
+
+  function Parser(tokens){ this.tokens = tokens; this.pos = 0; }
+  Parser.prototype.peek = function(){ return this.tokens[this.pos]; };
+  Parser.prototype.next = function(){ return this.tokens[this.pos++]; };
+  Parser.prototype.expect = function(type){
+    var t = this.next();
+    if (!t || t.type !== type) throw new Error('Expected "' + type + '"');
+    return t;
+  };
+  Parser.prototype.parse = function(){
+    if (!this.tokens.length) throw new Error("Empty formula");
+    var node = this.parseExpr();
+    if (this.pos < this.tokens.length) throw new Error("Unexpected trailing input");
+    return node;
+  };
+  Parser.prototype.parseExpr = function(){
+    var node = this.parseTerm();
+    while (this.peek() && (this.peek().type === "+" || this.peek().type === "-")) {
+      var op = this.next().type;
+      node = { type: "bin", op: op, left: node, right: this.parseTerm() };
+    }
+    return node;
+  };
+  Parser.prototype.parseTerm = function(){
+    var node = this.parseUnary();
+    while (this.peek() && (this.peek().type === "*" || this.peek().type === "/")) {
+      var op = this.next().type;
+      node = { type: "bin", op: op, left: node, right: this.parseUnary() };
+    }
+    return node;
+  };
+  Parser.prototype.parseUnary = function(){
+    if (this.peek() && (this.peek().type === "-" || this.peek().type === "+")) {
+      var op = this.next().type;
+      return { type: "unary", op: op, arg: this.parseUnary() };
+    }
+    return this.parsePow();
+  };
+  Parser.prototype.parsePow = function(){
+    var node = this.parseAtom();
+    if (this.peek() && this.peek().type === "^") {
+      this.next();
+      node = { type: "bin", op: "^", left: node, right: this.parseUnary() };
+    }
+    return node;
+  };
+  Parser.prototype.parseAtom = function(){
+    var t = this.peek();
+    if (!t) throw new Error("Unexpected end of formula");
+    if (t.type === "num") { this.next(); return { type: "num", value: t.value }; }
+    if (t.type === "(") {
+      this.next();
+      var node = this.parseExpr();
+      this.expect(")");
+      return node;
+    }
+    if (t.type === "id") {
+      this.next();
+      if (this.peek() && this.peek().type === "(") {
+        this.next();
+        var args = [this.parseExpr()];
+        while (this.peek() && this.peek().type === ",") { this.next(); args.push(this.parseExpr()); }
+        this.expect(")");
+        return { type: "call", name: t.value, args: args };
+      }
+      return { type: "id", name: t.value };
+    }
+    throw new Error('Unexpected token near "' + (t.value || t.type) + '"');
+  };
+
+  function evaluate(node, vars){
+    switch (node.type) {
+      case "num": return node.value;
+      case "id":
+        if (node.name in CONSTS) return CONSTS[node.name];
+        if (node.name in vars) return vars[node.name];
+        throw new Error('Unknown variable "' + node.name + '"');
+      case "unary": {
+        var v = evaluate(node.arg, vars);
+        return node.op === "-" ? -v : v;
+      }
+      case "bin": {
+        var a = evaluate(node.left, vars), b = evaluate(node.right, vars);
+        if (node.op === "+") return a + b;
+        if (node.op === "-") return a - b;
+        if (node.op === "*") return a * b;
+        if (node.op === "/") return a / b;
+        if (node.op === "^") return Math.pow(a, b);
+        break;
+      }
+      case "call": {
+        var fn = FUNCS[node.name];
+        if (!fn) throw new Error('Unknown function "' + node.name + '"');
+        var args = node.args.map(function(a){ return evaluate(a, vars); });
+        return fn.apply(null, args);
+      }
+    }
+  }
+
+  function collectIdentifiers(node, list, seen){
+    switch (node.type) {
+      case "id":
+        if (!(node.name in CONSTS) && !seen[node.name]) { seen[node.name] = true; list.push(node.name); }
+        break;
+      case "unary": collectIdentifiers(node.arg, list, seen); break;
+      case "bin": collectIdentifiers(node.left, list, seen); collectIdentifiers(node.right, list, seen); break;
+      case "call": node.args.forEach(function(a){ collectIdentifiers(a, list, seen); }); break;
+    }
+    return list;
+  }
+
+  function parseFormula(str){
+    var tokens = tokenize(str);
+    return new Parser(tokens).parse();
+  }
+
+  /* ---------- rounding to sig figs ---------- */
+  function roundPair(value, sigma){
+    if (!isFinite(sigma) || sigma <= 0) {
+      return { value: value, sigma: sigma, valueStr: formatPlain(value), sigmaStr: formatPlain(sigma) };
+    }
+    var exp = Math.floor(Math.log10(Math.abs(sigma)));
+    var mantissa = Math.abs(sigma) / Math.pow(10, exp);
+    var sig = (Math.floor(mantissa + 1e-9) === 1) ? 2 : 1;
+    var decimals = -(exp - (sig - 1));
+    var factor = Math.pow(10, exp - (sig - 1));
+    var sigmaR = Math.round(sigma / factor) * factor;
+    var valueR = Math.round(value / factor) * factor;
+    var d = Math.max(decimals, 0);
+    return {
+      value: valueR, sigma: sigmaR,
+      valueStr: d > 0 ? valueR.toFixed(d) : String(Math.round(valueR)),
+      sigmaStr: d > 0 ? sigmaR.toFixed(d) : String(Math.round(sigmaR))
+    };
+  }
+  function formatPlain(x){
+    if (!isFinite(x)) return "undefined";
+    var a = Math.abs(x);
+    if (a !== 0 && (a < 1e-4 || a >= 1e6)) return x.toExponential(4);
+    return String(Math.round(x * 1e6) / 1e6);
+  }
+
+  /* ---------- state ---------- */
+  var state = { vars: {} }; // name -> { value, uncertainty, mode: 'abs'|'pct' }
+  var currentAst = null;
+  function getVar(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  var palette = [];
+  function refreshPalette(){
+    palette = [getVar("--cyan"), getVar("--pink"), getVar("--violet"), getVar("--lime"), getVar("--amber"), getVar("--teal")];
+  }
+  refreshPalette();
+
+  var formulaEl = document.getElementById("formula");
+  var formulaErrorEl = document.getElementById("formula-error");
+  var varRowsEl = document.getElementById("var-rows");
+  var noVarsEl = document.getElementById("no-vars");
+  var resultBodyEl = document.getElementById("result-body");
+  var funcRefEl = document.getElementById("func-ref");
+
+  ["sqrt(x)","exp(x)","ln(x)","log(x)  [base 10]","sin cos tan","asin acos atan","abs(x)","x^n","pi  e"].forEach(function(s){
+    var span = document.createElement("span"); span.textContent = s; funcRefEl.appendChild(span);
+  });
+
+  var PRESETS = ["a + b", "a - b", "a * b", "a / b", "a^n", "k * a", "sqrt(a)", "ln(a)", "sin(a)"];
+  var presetsEl = document.getElementById("presets");
+  PRESETS.forEach(function(p){
+    var b = document.createElement("button");
+    b.className = "chip"; b.textContent = p.replace(/\*/g, "·");
+    b.addEventListener("click", function(){ formulaEl.value = p; onFormulaChange(); });
+    presetsEl.appendChild(b);
+  });
+
+  function defaultFor(name, idx){
+    if (state.vars[name]) return state.vars[name];
+    var seeds = { n: { value: 2, uncertainty: 0 }, k: { value: 2, uncertainty: 0 } };
+    var seed = seeds[name] || { value: (10 + idx * 2.3), uncertainty: (0.5 + idx * 0.1) };
+    return { value: seed.value, uncertainty: seed.uncertainty, mode: "abs" };
+  }
+
+  function onFormulaChange(){
+    var text = formulaEl.value;
+    try {
+      currentAst = parseFormula(text);
+      formulaErrorEl.textContent = "";
+    } catch (e) {
+      currentAst = null;
+      formulaErrorEl.textContent = e.message;
+      renderNoResult(e.message);
+      return;
+    }
+    var names = collectIdentifiers(currentAst, [], {});
+    var newVars = {};
+    names.forEach(function(name, idx){ newVars[name] = defaultFor(name, idx); });
+    state.vars = newVars;
+    renderVarRows(names);
+    compute();
+  }
+
+  function renderVarRows(names){
+    varRowsEl.innerHTML = "";
+    noVarsEl.style.display = names.length ? "none" : "block";
+    names.forEach(function(name){
+      var v = state.vars[name];
+      var row = document.createElement("div");
+      row.className = "var-row";
+
+      var nameEl = document.createElement("div");
+      nameEl.className = "var-name"; nameEl.textContent = name;
+
+      var valField = document.createElement("div"); valField.className = "field";
+      valField.innerHTML = '<label>Value</label>';
+      var valInput = document.createElement("input");
+      valInput.type = "number"; valInput.step = "any"; valInput.value = v.value;
+      valInput.addEventListener("input", function(){ v.value = parseFloat(valInput.value); compute(); });
+      valField.appendChild(valInput);
+
+      var uncField = document.createElement("div"); uncField.className = "field";
+      uncField.innerHTML = '<label>Uncertainty (&sigma;)</label>';
+      var uncInput = document.createElement("input");
+      uncInput.type = "number"; uncInput.step = "any"; uncInput.min = "0"; uncInput.value = v.uncertainty;
+      uncInput.addEventListener("input", function(){ v.uncertainty = Math.max(0, parseFloat(uncInput.value) || 0); compute(); });
+      uncField.appendChild(uncInput);
+
+      var modeWrap = document.createElement("div");
+      var modeToggle = document.createElement("div"); modeToggle.className = "mode-toggle";
+      var absBtn = document.createElement("button"); absBtn.textContent = "±";
+      var pctBtn = document.createElement("button"); pctBtn.textContent = "%";
+      function refreshMode(){
+        absBtn.className = v.mode === "abs" ? "active" : "";
+        pctBtn.className = v.mode === "pct" ? "active" : "";
+      }
+      absBtn.addEventListener("click", function(){ v.mode = "abs"; refreshMode(); compute(); });
+      pctBtn.addEventListener("click", function(){ v.mode = "pct"; refreshMode(); compute(); });
+      refreshMode();
+      modeToggle.appendChild(absBtn); modeToggle.appendChild(pctBtn);
+      modeWrap.appendChild(modeToggle);
+
+      row.appendChild(nameEl); row.appendChild(valField); row.appendChild(uncField); row.appendChild(modeWrap);
+      varRowsEl.appendChild(row);
+    });
+  }
+
+  function sigmaAbsolute(name){
+    var v = state.vars[name];
+    if (v.mode === "pct") return Math.abs(v.value) * (v.uncertainty / 100);
+    return v.uncertainty;
+  }
+
+  function compute(){
+    if (!currentAst) return;
+    var names = Object.keys(state.vars);
+    var vals = {};
+    var missing = false;
+    names.forEach(function(n){
+      vals[n] = state.vars[n].value;
+      if (!isFinite(vals[n])) missing = true;
+    });
+    if (missing) { renderNoResult("Enter a numeric value for every variable."); return; }
+
+    var f0;
+    try { f0 = evaluate(currentAst, vals); }
+    catch (e) { renderNoResult(e.message); return; }
+    if (!isFinite(f0)) { renderNoResult("Result is undefined for these inputs (check domain, e.g. division by zero or negative sqrt/ln)."); return; }
+
+    var variance = 0, rows = [];
+    names.forEach(function(name){
+      var sigma = sigmaAbsolute(name);
+      var x = vals[name];
+      var partial = 0;
+      if (sigma > 0) {
+        var h = Math.max(Math.abs(x) * 1e-6, 1e-8);
+        var vp = Object.assign({}, vals); vp[name] = x + h;
+        var vm = Object.assign({}, vals); vm[name] = x - h;
+        var fp, fm;
+        try { fp = evaluate(currentAst, vp); fm = evaluate(currentAst, vm); }
+        catch (e) { fp = NaN; fm = NaN; }
+        partial = (fp - fm) / (2 * h);
+      }
+      var contribution = Math.pow(partial * sigma, 2);
+      if (isFinite(contribution)) variance += contribution;
+      rows.push({ name: name, partial: partial, sigma: sigma, contribution: isFinite(contribution) ? contribution : 0 });
+    });
+
+    var sigmaF = Math.sqrt(variance);
+    renderResult(f0, sigmaF, rows);
+  }
+
+  function renderNoResult(msg){
+    resultBodyEl.innerHTML = '<div class="compute-error">' + escapeHtml(msg) + "</div>";
+  }
+
+  function escapeHtml(s){
+    var d = document.createElement("div"); d.textContent = s; return d.innerHTML;
+  }
+
+  function renderResult(f0, sigmaF, rows){
+    var rounded = roundPair(f0, sigmaF);
+    var relPct = f0 !== 0 && isFinite(sigmaF) ? Math.abs(sigmaF / f0) * 100 : null;
+
+    var html = '';
+    html += '<div class="result-big">';
+    html += '<div class="rf">f = ' + rounded.valueStr + ' <span class="pm">&plusmn; ' + rounded.sigmaStr + "</span></div>";
+    html += '<div class="rel">' + (relPct !== null ? ("relative uncertainty: " + relPct.toFixed(2) + "%") : "") + "</div>";
+    html += "</div>";
+
+    var total = rows.reduce(function(s, r){ return s + r.contribution; }, 0);
+    if (total > 0 && rows.length) {
+      var sorted = rows.slice().sort(function(a, b){ return b.contribution - a.contribution; });
+      html += '<h3 style="margin-top:20px;">Variance contribution</h3>';
+      sorted.forEach(function(r, i){
+        var pct = (r.contribution / total) * 100;
+        var color = palette[i % palette.length];
+        html += '<div class="bar-row">';
+        html += '<div class="bar-label"><span>' + r.name + "</span><span>" + pct.toFixed(1) + "%</span></div>";
+        html += '<div class="bar-track"><div class="bar-fill" style="width:' + pct.toFixed(2) + "%;background:" + color + ';"></div></div>';
+        html += "</div>";
+      });
+
+      html += '<table class="deriv-table"><tr><th>var</th><th>&part;f/&part;x</th><th>&sigma;<sub>x</sub></th></tr>';
+      sorted.forEach(function(r){
+        html += "<tr><td class=\"name\">" + r.name + "</td><td>" + formatPlain(r.partial) + "</td><td>" + formatPlain(r.sigma) + "</td></tr>";
+      });
+      html += "</table>";
+    }
+
+    resultBodyEl.innerHTML = html;
+  }
+
+  formulaEl.addEventListener("input", onFormulaChange);
+  onFormulaChange();
+})();
+</script>
+</body>
+</html>
