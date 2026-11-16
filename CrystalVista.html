@@ -235,7 +235,7 @@ select.sel:focus{border-color:var(--accent)}
 .viewgrid .btn{width:100%;padding-left:2px;padding-right:2px}
 .radio{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink-mid);cursor:pointer;flex-shrink:0}
 .radio input{width:13px;height:13px;cursor:pointer}
-.vdivider{align-self:stretch;width:1px;background:var(--border);margin:0 10px}
+.vdivider{align-self:stretch;flex:0 0 1px;width:1px;background:var(--border);margin:0 10px}
 .ctl-col{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
 .ctl-col.col-flex{flex:1 1 0}
 .two-col-row{display:flex;align-items:flex-start}
@@ -2830,7 +2830,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
        the drag-to-place/repositionLabels() design) ---- */
     showLabels: false, labelSize: 2.6, labelColor: 0x2C2416, labelHalo: true,
     labelFont: "Arial, Helvetica, sans-serif",
-    showUnitCell: true, growMode: false, growUnit: "frag", growBySphere: false, sphereRadius: 4.0,
+    showUnitCell: true, growMode: false, growUnit: "frag", growBySphere: false, growByHBonds: false, sphereRadius: 4.0,
     /* Style > Unit cell > "Show axis key" -- a small a/b/c orientation
        indicator, shown in its OWN floating canvas layered above the whole
        app window (not confined to the #viewport panel), draggable anywhere
@@ -2851,7 +2851,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
        comment for the mutual-exclusion contract shared with the other
        click-hijacking modes, and computeMolecularNeighborhood()'s for what
        molNeighborRadius actually controls. */
-    molNeighborMode: false, molNeighborRadius: 2.7, molNeighborBlackNodes: true,
+    molNeighborMode: false, molNeighborRadius: 2.7, molNeighborBlackNodes: true, molNeighborHBonds: false, extendByHBonds: false, completeByHBonds: false,
     unitCellColor: 0x8a7a5c, unitCellThickness: 0.04, unitCellAxisColors: true, showUnitCellLabels: true, showOnlyAsu: false, symmetryForgotten: false,
     /* Coordination polyhedra (Style > Coordination Polyhedra) -- see
        computeCoordinationPolyhedra()'s own comment for the ligand-finding
@@ -7298,7 +7298,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
      changes one of those fields just calls this once afterwards, rather than
      each path having to know every checkbox that echoes the field. */
   function syncShowToggleUIs() {
-    var vals = { showUnitCell: state.showUnitCell, showAxisKey: state.showAxisKey, showLabels: state.showLabels };
+    var vals = { showUnitCell: state.showUnitCell, showAxisKey: state.showAxisKey, showLabels: state.showLabels, showHBonds: state.showHBonds };
     var els = document.querySelectorAll("input[data-sync-key]");
     for (var i = 0; i < els.length; i++) {
       var k = els[i].getAttribute("data-sync-key");
@@ -12101,7 +12101,10 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
          plain-seed and sphere-of-inclusion recordings just below, since
          both respect growUnit identically (see growFromSeed/
          growSphereOfInclusion's own near-identical 3-way branches). */
-      if (state.growBySphere) {
+      if (state.growByHBonds) {
+        growFromSeedHBonds(hit.atom);
+        recordMacroCommand("GROW_HB_" + GROW_UNIT_SUFFIX[state.growUnit] + " " + macroAtomRef(hit.atom));
+      } else if (state.growBySphere) {
         var r = state.sphereRadius;
         if (!isFinite(r) || r <= 0) { setStatus("Enter a valid sphere radius first.", true); return; }
         growSphereOfInclusion([hit.atom.x, hit.atom.y, hit.atom.z], r);
@@ -13206,8 +13209,12 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
            instead of racing ahead against a structure that hasn't actually
            grown yet. */
         return new Promise(function (resolve) { extendAllFragments(function () { resolve(true); }); });
+      case "EXTEND_FRAGS_HB":
+        return new Promise(function (resolve) { extendAllFragments(function () { resolve(true); }, true); });
       case "COMPLETE_MOLS":
         return new Promise(function (resolve) { completeMoleculeFragments(function () { resolve(true); }); });
+      case "COMPLETE_MOLS_HB":
+        return new Promise(function (resolve) { completeMoleculeFragments(function () { resolve(true); }, true); });
       case "GROW_ATOM": case "GROW_FRAG": case "GROW_ASU":
         if (!state.isCif || state.symmetryForgotten) return false;
         hit = findAtomByMacroRef(rest);
@@ -13217,6 +13224,21 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
         state.growUnit = growUnit;
         try { growFromSeed(hit.atom); } finally { state.growUnit = savedGrowUnit; }
         return true;
+      case "GROW_HB_ATOM": case "GROW_HB_FRAG": case "GROW_HB_ASU":
+        if (!state.isCif || state.symmetryForgotten) return false;
+        hit = findAtomByMacroRef(rest);
+        if (!hit) return false;
+        growUnit = cmd === "GROW_HB_ATOM" ? "atom" : cmd === "GROW_HB_FRAG" ? "frag" : "asu";
+        savedGrowUnit = state.growUnit;
+        state.growUnit = growUnit;
+        try { growFromSeedHBonds(hit.atom); } finally { state.growUnit = savedGrowUnit; }
+        return true;
+      case "NEIGHBOURHOOD_HB": case "NEIGHBORHOOD_HB":
+        return runNeighbourhoodHBMacro(rest);
+      case "NEIGHBOURHOOD_SPHERE": case "NEIGHBORHOOD_SPHERE":
+        sp2 = rest.indexOf(" ");
+        if (sp2 < 0) return false;
+        return runNeighbourhoodHBMacro(rest.slice(sp2 + 1).trim(), parseFloat(rest.slice(0, sp2)));
       case "GROW_SPHERE_ATOM": case "GROW_SPHERE_FRAG": case "GROW_SPHERE_ASU":
         if (!state.isCif || state.symmetryForgotten) return false;
         sp2 = rest.indexOf(" ");
@@ -13236,6 +13258,16 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
         if (parts.length !== 6 || !parts.every(isFinite)) return false;
         if (parts[0] > parts[1] || parts[2] > parts[3] || parts[4] > parts[5]) return false;
         growByPackRange({ aMin: parts[0], aMax: parts[1], bMin: parts[2], bMax: parts[3], cMin: parts[4], cMax: parts[5] }, cmd === "PACK_FRAGCENTROID" ? "centroid" : "any");
+        return true;
+      case "PACK_FRAGATOMS_HB": case "PACK_FRAGCENTROID_HB":
+        /* the same six limits, optionally followed by the word REPEAT */
+        parts = rest.split(/\s+/);
+        var packRepeat = parts.length && parts[parts.length - 1].toUpperCase() === "REPEAT";
+        if (packRepeat) parts.pop();
+        parts = parts.map(Number);
+        if (parts.length !== 6 || !parts.every(isFinite)) return false;
+        if (parts[0] > parts[1] || parts[2] > parts[3] || parts[4] > parts[5]) return false;
+        growByPackRange({ aMin: parts[0], aMax: parts[1], bMin: parts[2], bMax: parts[3], cMin: parts[4], cMax: parts[5] }, cmd === "PACK_FRAGCENTROID_HB" ? "centroid" : "any", { hb: true, repeat: packRepeat });
         return true;
       case "GROW_SYM":
         op = K.parseSymop(rest);
@@ -13742,7 +13774,32 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     if (!isCentroid) applyAdpToAtom(atomObj, au, state.cifSymops[opIndex], state.cifCell, state.cifFracToCart);
     return atomObj;
   }
-  function growByPackRange(limits, condition) {
+  /* Pack with "Only copies H-bonded to the structure": of the copies that satisfy the box, keeps those that have an H-bond to what is displayed (the criterion of
+     Show H bonds, found with computeHBondNeighborhood). With repeat, the copies just chosen count as displayed and the scan is run again, round after round,
+     until no further copy in the box is H-bonded to anything -- an H-bonded chain or network confined to the box. All in memory; the caller commits once. */
+  function packSelectHBonded(copies, existing, repeat) {
+    syncGuestAsuRootsFromCurrentPositions();
+    var current = (state.atoms || []).concat(state.guestAtoms || []), added = [], rounds = 0, remaining = copies.slice();
+    function keyOf(a) { return a.auIndex + ":" + a.opIndex + ":" + a.cellI + ":" + a.cellJ + ":" + a.cellK; }
+    while (remaining.length && rounds < 200) {
+      var hbSet = {}, list = computeHBondNeighborhood(current, existing);
+      for (var li = 0; li < list.length; li++) hbSet[keyOf(list[li].atom)] = true;
+      var next = [], got = 0;
+      for (var ci = 0; ci < remaining.length; ci++) {
+        var copy = remaining[ci], hit = false;
+        for (var ai = 0; ai < copy.length && !hit; ai++) if (hbSet[keyOf(copy[ai])]) hit = true;
+        if (!hit) { next.push(copy); continue; }
+        for (var aj = 0; aj < copy.length; aj++) { var k = keyOf(copy[aj]); if (!existing[k]) { existing[k] = true; added.push(copy[aj]); current.push(copy[aj]); got++; } }
+      }
+      remaining = next;
+      if (!got) break;
+      rounds++;
+      if (!repeat) break;
+    }
+    return { atoms: added, rounds: rounds };
+  }
+  function growByPackRange(limits, condition, hbOpts) {
+    var hbOnly = !!(hbOpts && hbOpts.hb), copies = [];
     if (!state.isCif || state.symmetryForgotten) { setStatus("This only applies to a CIF-based structure that still has its symmetry information.", true); return; }
     var existing = existingCifKeySet();
     var activeAu = [];
@@ -13771,6 +13828,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
               qualifies = anyInLimits;
             }
             if (!qualifies) continue;
+            if (hbOnly) { copies.push(fragAtoms); continue; }
             for (var f = 0; f < fragAtoms.length; f++) {
               var a2 = fragAtoms[f];
               var key = a2.auIndex + ":" + a2.opIndex + ":" + a2.cellI + ":" + a2.cellJ + ":" + a2.cellK;
@@ -13780,11 +13838,17 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
         }
       }
     }
+    var hbRounds = 0;
+    if (hbOnly) {
+      var sel = packSelectHBonded(copies, existing, !!hbOpts.repeat);
+      toAdd = sel.atoms; hbRounds = sel.rounds;
+      if (!toAdd.length) { setStatus("No copies within those limits are H-bonded to the structure (they may already be displayed).", false); return; }
+    }
     if (!toAdd.length) { setStatus("No new fragments found within those limits (they may already be displayed, or none qualify).", false); return; }
     var n2 = commitGrownAtoms(toAdd);
-    recordMacroCommand((condition === "centroid" ? "PACK_FRAGCENTROID " : "PACK_FRAGATOMS ") +
-      limits.aMin + " " + limits.aMax + " " + limits.bMin + " " + limits.bMax + " " + limits.cMin + " " + limits.cMax);
-    setStatus("Pack growth added " + n2 + " atom" + (n2 === 1 ? "" : "s") + ".", false);
+    recordMacroCommand((condition === "centroid" ? "PACK_FRAGCENTROID" : "PACK_FRAGATOMS") + (hbOnly ? "_HB " : " ") +
+      limits.aMin + " " + limits.aMax + " " + limits.bMin + " " + limits.bMax + " " + limits.cMin + " " + limits.cMax + (hbOnly && hbOpts.repeat ? " REPEAT" : ""));
+    setStatus("Pack growth added " + n2 + " atom" + (n2 === 1 ? "" : "s") + (hbOnly ? " (H-bonded copies only" + (hbOpts.repeat ? ", " + hbRounds + " round" + (hbRounds === 1 ? "" : "s") : "") + ")" : "") + ".", false);
   }
   /* Reads the Grow > Symmetry sub-panel's own 3x3 rotation spinner grid +
      3 translation text boxes back into a {rot, trans} operator -- module-
@@ -14010,7 +14074,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     }
     return out;
   }
-  function extendAllFragments(onDone) {
+  function extendAllFragments(onDone, byHBonds) {
     /* onDone is an optional zero-arg completion callback -- ONLY macro
        playback passes one (see runMacroLine's EXTEND_FRAGS case), never the
        live "Extend fragment(s)" button (bound via a zero-arg wrapper closure
@@ -14027,6 +14091,19 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     showOverlay(true, "Extending fragments...");
     setTimeout(function () {
       var allNew = [], seenKeys = {};
+      if (byHBonds) {
+        /* through H-bonds instead of covalent bonds: every symmetry position H-bonded to anything displayed (Show H bonds' criterion), each completed to its whole connected fragment */
+        syncGuestAsuRootsFromCurrentPositions();
+        var hbList = computeHBondNeighborhood((state.atoms || []).concat(state.guestAtoms || []), existingCifKeySet());
+        allNew = expandToConnectedFragment(hbList.map(function (e) { return e.atom; }));
+        showOverlay(false);
+        if (!allNew.length) { setStatus("No new H-bonded fragments found to extend.", false); if (onDone) onDone(); return; }
+        var nHb = commitGrownAtoms(allNew);
+        recordMacroCommand("EXTEND_FRAGS_HB");
+        setStatus("Extended fragments through H-bonds: added " + nHb + " atom" + (nHb === 1 ? "" : "s") + ".", false);
+        if (onDone) onDone();
+        return;
+      }
       for (var s = 0; s < seeds.length; s++) {
         /* deliberately NOT sharing a single mutated existing-keys map across
            seeds here -- each call recomputes it fresh from state.atoms/
@@ -14578,6 +14655,49 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     }
     return { newAtoms: allNew, blockedCount: blockedCount };
   }
+  /* "Complete molecule(s)" through H-bonds: the same closure idea as testFragmentClosure, with H-bonds (the criterion of Show H bonds) as the connection. Starting
+     from one displayed fragment, the molecules H-bonded to it are added, then those H-bonded to them, and so on until nothing new turns up. A molecule copy is
+     refused when one of its (asymmetric-unit atom, operator) pairs is already used at a different cell -- it would be there only by lattice translation, which
+     means the H-bonded assembly is a chain, sheet or network rather than a closed cluster. What was completable before that is kept, as with covalent
+     completion; blockedCount tells the caller the assembly goes on. Nothing is committed here. */
+  function testHBondClosure(seedAtoms) {
+    var existingKeys = existingCifKeySet(), usedAuOp = {}, i, displayed = (state.atoms || []).concat(state.guestAtoms || []);
+    function keyOf(a) { return a.auIndex + ":" + a.opIndex + ":" + a.cellI + ":" + a.cellJ + ":" + a.cellK; }
+    for (i = 0; i < displayed.length; i++) {
+      var d = displayed[i]; if (d.auIndex === undefined) continue;
+      var dk = d.auIndex + ":" + d.opIndex; if (!usedAuOp.hasOwnProperty(dk)) usedAuOp[dk] = d.cellI + ":" + d.cellJ + ":" + d.cellK;
+    }
+    var frontier = seedAtoms, allNew = [], blockedCount = 0, iterations = 0;
+    var safetyCap = state.cifAsymUnit.length * state.cifSymops.length + 5; /* structural bound: each (atom, operator) pair is accepted at most once */
+    while (frontier.length && iterations++ < safetyCap) {
+      var list = computeHBondNeighborhood(frontier, existingKeys);
+      if (!list.length) break;
+      var scratch = {}; for (var ek in existingKeys) if (existingKeys.hasOwnProperty(ek)) scratch[ek] = true; /* expandToConnectedFragment writes into the map it is given */
+      var frags = expandToConnectedFragment(list.map(function (e) { return e.atom; }), scratch);
+      var byCopy = {}, order = [];
+      for (i = 0; i < frags.length; i++) {
+        var ck = frags[i].opIndex + ":" + frags[i].cellI + ":" + frags[i].cellJ + ":" + frags[i].cellK;
+        if (!byCopy[ck]) { byCopy[ck] = []; order.push(ck); }
+        byCopy[ck].push(frags[i]);
+      }
+      var accepted = [];
+      for (var oi = 0; oi < order.length; oi++) {
+        var copy = byCopy[order[oi]], blocked = false, j;
+        for (j = 0; j < copy.length && !blocked; j++) {
+          var ao = copy[j].auIndex + ":" + copy[j].opIndex, cs = copy[j].cellI + ":" + copy[j].cellJ + ":" + copy[j].cellK;
+          if (usedAuOp.hasOwnProperty(ao) && usedAuOp[ao] !== cs) blocked = true;
+        }
+        if (blocked) { blockedCount++; continue; }
+        for (j = 0; j < copy.length; j++) {
+          usedAuOp[copy[j].auIndex + ":" + copy[j].opIndex] = copy[j].cellI + ":" + copy[j].cellJ + ":" + copy[j].cellK;
+          existingKeys[keyOf(copy[j])] = true; accepted.push(copy[j]);
+        }
+      }
+      allNew = allNew.concat(accepted);
+      frontier = accepted;
+    }
+    return { newAtoms: allNew, blockedCount: blockedCount };
+  }
   function completeTruncatedLigands(baseImages) {
     /* Coordination polymer/MOF companion to the whole-fragment closure
        above: growth (Pack especially, but any grow path) routinely cuts a
@@ -14606,7 +14726,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     });
     return { atomsAdded: atomsAdded, ligandsCompleted: ligandsCompleted };
   }
-  function completeMoleculeFragments(onDone) {
+  function completeMoleculeFragments(onDone, byHBonds) {
     /* onDone: see extendAllFragments()'s own comment -- same reason, same
        contract (optional, macro-playback-only, never wired to the live
        button directly). */
@@ -14625,7 +14745,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
         [state.atoms, state.guestAtoms].forEach(function (arr) {
           if (!arr) return;
           groupIntoFragments(arr).forEach(function (seedAtoms) {
-            var result = testFragmentClosure(seedAtoms, baseImages);
+            var result = byHBonds ? testHBondClosure(seedAtoms) : testFragmentClosure(seedAtoms, baseImages);
             if (result.newAtoms.length) {
               atomsAdded += commitGrownAtoms(result.newAtoms);
               if (result.blockedCount) partialCount++; else fullCount++;
@@ -14638,26 +14758,28 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
            tops up any ligand still truncated at a metal boundary (the
            common MOF/coordination-polymer case the whole-fragment pass
            above can't reach, since the framework as a whole never closes) */
-        var ligandResult = completeTruncatedLigands(baseImages);
-        atomsAdded += ligandResult.atomsAdded; ligandsCompleted += ligandResult.ligandsCompleted;
+        if (!byHBonds) {
+          var ligandResult = completeTruncatedLigands(baseImages);
+          atomsAdded += ligandResult.atomsAdded; ligandsCompleted += ligandResult.ligandsCompleted;
+        }
       } finally {
         state._autoCompleting = false;
       }
       showOverlay(false);
-      if (!fullCount && !partialCount && !blockedOnlyCount && !ligandsCompleted) { setStatus("Every fragment is already a complete molecule -- nothing to add.", false); if (onDone) onDone(); return; }
+      if (!fullCount && !partialCount && !blockedOnlyCount && !ligandsCompleted) { setStatus(byHBonds ? "Nothing is H-bonded to the structure that is not already displayed." : "Every fragment is already a complete molecule -- nothing to add.", false); if (onDone) onDone(); return; }
       var msg;
       if (fullCount || partialCount || ligandsCompleted) {
         var bits = [];
-        if (fullCount) bits.push(fullCount + " molecule" + (fullCount === 1 ? "" : "s") + " completed");
-        if (partialCount) bits.push(partialCount + " fragment" + (partialCount === 1 ? "" : "s") + " partially completed (the rest extends as a polymer/framework)");
+        if (fullCount) bits.push(fullCount + (byHBonds ? " H-bonded assembl" + (fullCount === 1 ? "y" : "ies") : " molecule" + (fullCount === 1 ? "" : "s")) + " completed");
+        if (partialCount) bits.push(partialCount + " fragment" + (partialCount === 1 ? "" : "s") + " partially completed (the rest extends as a " + (byHBonds ? "H-bonded chain/network" : "polymer/framework") + ")");
         if (ligandsCompleted) bits.push(ligandsCompleted + " ligand" + (ligandsCompleted === 1 ? "" : "s") + " completed at its metal boundary");
         msg = bits.join("; ") + " (+" + atomsAdded + " atom" + (atomsAdded === 1 ? "" : "s") + ")";
         /* only recorded when something was actually added -- a run that
            found nothing but fully-polymeric (blockedOnlyCount-only)
            fragments falls through to the "else" below instead, unrecorded */
-        recordMacroCommand("COMPLETE_MOLS");
+        recordMacroCommand(byHBonds ? "COMPLETE_MOLS_HB" : "COMPLETE_MOLS");
       } else {
-        msg = "No fragment could be completed as a discrete molecule";
+        msg = byHBonds ? "No fragment could be completed as a closed H-bonded assembly" : "No fragment could be completed as a discrete molecule";
       }
       if (blockedOnlyCount) msg += (fullCount || partialCount ? "; " : ". ") + blockedOnlyCount + " fragment" + (blockedOnlyCount === 1 ? "" : "s") + " look" + (blockedOnlyCount === 1 ? "s" : "") + " fully polymeric/extended and " + (blockedOnlyCount === 1 ? "was" : "were") + " left alone -- use \"Extend fragment(s)\" for " + (blockedOnlyCount === 1 ? "it" : "those") + " instead";
       setStatus(msg + ".", !fullCount && !partialCount && blockedOnlyCount > 0);
@@ -14813,7 +14935,11 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       state._autoCompleting = true;
       var n;
       try { n = commitGrownAtoms(toCommit); } finally { state._autoCompleting = false; }
-      setStatus("Also completed the molecule(s)/ligand(s) just grown (+" + n + " atom" + (n === 1 ? "" : "s") + ").", false);
+      /* this completion runs after the click that caused it already refreshed the molecular neighbourhood preview, so the preview still describes the structure
+         WITHOUT these atoms -- e.g. the H-bond positions of the newly added half of a molecule were missing. Refresh it again now. */
+      if (state.molNeighborMode) { molNeighborAtoms = computeMolecularNeighborhood(); renderStructure(); }
+      setStatus("Also completed the molecule(s)/ligand(s) just grown (+" + n + " atom" + (n === 1 ? "" : "s") + ")." +
+        (state.molNeighborMode ? " Molecular neighbourhood: " + molNeighborStatusText() : ""), false);
     }, 30);
   }
   function deleteSymmetryGeneratedAtoms() {
@@ -14889,6 +15015,89 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     var n = commitGrownAtoms(added);
     setStatus("Grew " + n + " atom" + (n === 1 ? "" : "s") + label + ".", false);
   }
+  /* ---------------- Grow > Mouse > H-bonds ----------------
+     The symmetry-related atoms that are hydrogen-bonded to the clicked atom, by the criterion of "Show H bonds" (an H on a donor N/O/S/Cl, an acceptor N/O/S/Cl
+     1.2 to 2.8 A from the H, the D-H...A angle at least 120 degrees). Click the donor (or its H) and the acceptors around it are added; click an acceptor and the
+     donor molecules (the H and its donor) that H-bond to it are added; the grow unit (Atoms, Fragment, ASU) then decides how much of each partner comes with it. */
+  var HB_GROW_DMIN = 1.2, HB_GROW_DMAX = 2.8, HB_GROW_ANGLE = 120;
+  function hbGrowAngle(D, H, A) {
+    var v1x = D.x - H.x, v1y = D.y - H.y, v1z = D.z - H.z, v2x = A.x - H.x, v2y = A.y - H.y, v2z = A.z - H.z;
+    var l1 = Math.sqrt(v1x * v1x + v1y * v1y + v1z * v1z), l2 = Math.sqrt(v2x * v2x + v2y * v2y + v2z * v2z); if (!l1 || !l2) return 0;
+    return Math.acos(Math.max(-1, Math.min(1, (v1x * v2x + v1y * v2y + v1z * v2z) / (l1 * l2)))) * 180 / Math.PI;
+  }
+  function findHBondGrowthCandidates(seed) {
+    var au = state.cifAsymUnit, symops = state.cifSymops, existing = existingCifKeySet(), triples = {}, i, auI, opI;
+    var displayed = (state.atoms || []).concat(state.guestAtoms || []);
+    function bondedTo(a, b) { var dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z, d2 = dx * dx + dy * dy + dz * dz, lim = bondLimit(a, b); return d2 > 0.16 && d2 < lim * lim && partsCanBond(a, b); }
+    function nearCells(p, auIdx, opIdx, cb) { /* the cells that put this (atom, operator) copy nearest the point p */
+      var f = K.cartToFrac(state.cifFracToCart, [p.x, p.y, p.z]), f0 = K.applySymop(symops[opIdx], [au[auIdx].fx, au[auIdx].fy, au[auIdx].fz]);
+      var ic = Math.round(f[0] - f0[0]), jc = Math.round(f[1] - f0[1]), kc = Math.round(f[2] - f0[2]);
+      for (var ci = ic - 2; ci <= ic + 2; ci++) for (var cj = jc - 2; cj <= jc + 2; cj++) for (var ck = kc - 2; ck <= kc + 2; ck++) cb(ci, cj, ck);
+    }
+    function add(a, o, ci, cj, ck) { var key = a + ":" + o + ":" + ci + ":" + cj + ":" + ck; if (!existing[key]) triples[key] = [a, o, ci, cj, ck]; }
+    /* the clicked atom as a donor: its hydrogens, and the acceptors around each of them */
+    var pairs = [];
+    if (seed.el === "H") {
+      var dBest = null, dBestD = Infinity;
+      displayed.forEach(function (a) { if (HBOND_ELEMENTS.hasOwnProperty(a.el) && bondedTo(seed, a)) { var dd = (a.x - seed.x) * (a.x - seed.x) + (a.y - seed.y) * (a.y - seed.y) + (a.z - seed.z) * (a.z - seed.z); if (dd < dBestD) { dBestD = dd; dBest = a; } } });
+      if (dBest) pairs.push({ H: seed, D: dBest });
+    } else if (HBOND_ELEMENTS.hasOwnProperty(seed.el)) {
+      displayed.forEach(function (a) { if (a.el === "H" && bondedTo(a, seed)) pairs.push({ H: a, D: seed }); });
+    }
+    pairs.forEach(function (pr) {
+      for (auI = 0; auI < au.length; auI++) {
+        if (au[auI].deleted || !HBOND_ELEMENTS.hasOwnProperty(au[auI].el)) continue;
+        for (opI = 0; opI < symops.length; opI++) nearCells(pr.H, auI, opI, function (ci, cj, ck) {
+          if (existing[auI + ":" + opI + ":" + ci + ":" + cj + ":" + ck]) return;
+          var pos = generateSymmetryPosition(auI, opI, ci, cj, ck), dx = pos.x - pr.H.x, dy = pos.y - pr.H.y, dz = pos.z - pr.H.z, d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 < HB_GROW_DMIN * HB_GROW_DMIN || d2 > HB_GROW_DMAX * HB_GROW_DMAX) return;
+          var ex = pos.x - pr.D.x, ey = pos.y - pr.D.y, ez = pos.z - pr.D.z; if (ex * ex + ey * ey + ez * ez < 0.09) return; /* the donor itself */
+          if (hbGrowAngle(pr.D, pr.H, pos) < HB_GROW_ANGLE || !partsCanBond(pos, pr.H)) return;
+          add(auI, opI, ci, cj, ck);
+        });
+      }
+    });
+    /* the clicked atom as an acceptor: the hydrogens (with their donors) that point at it */
+    if (HBOND_ELEMENTS.hasOwnProperty(seed.el)) {
+      for (auI = 0; auI < au.length; auI++) {
+        if (au[auI].deleted || au[auI].el !== "H") continue;
+        for (opI = 0; opI < symops.length; opI++) nearCells(seed, auI, opI, function (ci, cj, ck) {
+          var hKey = auI + ":" + opI + ":" + ci + ":" + cj + ":" + ck, hPos = generateSymmetryPosition(auI, opI, ci, cj, ck);
+          var dx = hPos.x - seed.x, dy = hPos.y - seed.y, dz = hPos.z - seed.z, d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 < HB_GROW_DMIN * HB_GROW_DMIN || d2 > HB_GROW_DMAX * HB_GROW_DMAX || !partsCanBond(hPos, seed)) return;
+          var best = null, bestD = Infinity; /* its donor, in the same copy of the molecule */
+          for (var dI = 0; dI < au.length; dI++) {
+            if (au[dI].deleted || !HBOND_ELEMENTS.hasOwnProperty(au[dI].el)) continue;
+            var dPos = generateSymmetryPosition(dI, opI, ci, cj, ck);
+            if (!bondedTo(hPos, dPos)) continue;
+            var dd = (dPos.x - hPos.x) * (dPos.x - hPos.x) + (dPos.y - hPos.y) * (dPos.y - hPos.y) + (dPos.z - hPos.z) * (dPos.z - hPos.z);
+            if (dd < bestD) { bestD = dd; best = { idx: dI, pos: dPos }; }
+          }
+          if (!best) return;
+          var gx = best.pos.x - seed.x, gy = best.pos.y - seed.y, gz = best.pos.z - seed.z; if (gx * gx + gy * gy + gz * gz < 0.09) return; /* the clicked atom is that donor */
+          if (hbGrowAngle(best.pos, hPos, seed) < HB_GROW_ANGLE) return;
+          add(auI, opI, ci, cj, ck); add(best.idx, opI, ci, cj, ck);
+        });
+      }
+    }
+    var out = [];
+    Object.keys(triples).forEach(function (k) { var t = triples[k]; out.push(generateSymmetryAtom(t[0], t[1], t[2], t[3], t[4])); });
+    var deduped = [];
+    for (i = 0; i < out.length; i++) if (!positionOccupied(out[i].x, out[i].y, out[i].z, deduped)) deduped.push(out[i]);
+    return deduped;
+  }
+  function growFromSeedHBonds(seedAtom) {
+    if (!(HBOND_ELEMENTS.hasOwnProperty(seedAtom.el) || seedAtom.el === "H")) { setStatus("Click an H-bond donor or acceptor: an N, O, S or Cl atom, or an H bonded to one.", true); return; }
+    syncGuestAsuRootsFromCurrentPositions();
+    var candidates = findHBondGrowthCandidates(seedAtom);
+    if (!candidates.length) { setStatus("No new symmetry-related atoms are H-bonded to this atom.", true); return; }
+    var added, label;
+    if (state.growUnit === "atom") { added = candidates; label = " (H-bonded atoms)"; }
+    else if (state.growUnit === "frag") { added = expandToConnectedFragment(candidates); label = " (H-bonded, connected fragments)"; }
+    else { added = expandToFragments(candidates); label = " (H-bonded, whole asymmetric units)"; }
+    var n = commitGrownAtoms(added);
+    setStatus("Grew " + n + " atom" + (n === 1 ? "" : "s") + label + ".", false);
+  }
   function growSphereOfInclusion(center, radius) {
     if (!state.isCif) { setStatus("Sphere of inclusion needs a CIF-based host.", true); return; }
     syncGuestAsuRootsFromCurrentPositions();
@@ -14958,11 +15167,12 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     var result = [];
     if (!state.molNeighborMode || !state.isCif || state.symmetryForgotten || !state.cifAsymUnit || !state.cifSymops || !state.cifFracToCart) return result;
     var radius = state.molNeighborRadius;
-    if (!isFinite(radius) || radius <= 0) return result;
+    if (!state.molNeighborHBonds && (!isFinite(radius) || radius <= 0)) return result;
     var current = (state.atoms || []).concat(state.guestAtoms || []);
     if (!current.length) return result;
     syncGuestAsuRootsFromCurrentPositions();
     var existing = existingCifKeySet();
+    if (state.molNeighborHBonds) return computeHBondNeighborhood(current, existing);
     /* Candidate search: for each currently-displayed atom (the "seed") and
        each (asymmetric-unit atom, symmetry operator) combination (computed
        ONCE via buildBaseSymmetryImages(), at cell (0,0,0), and shared
@@ -15079,12 +15289,86 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     }
     return result;
   }
+  /* The H-bond flavour of the preview: the symmetry-generated positions that are hydrogen-bonded to a displayed atom (same criterion as Show H bonds and
+     Grow > Mouse > H-bonds: an H on a donor N/O/S/Cl, an acceptor N/O/S/Cl 1.2 to 2.8 A from the H, D-H...A at least 120 degrees). A displayed H (with its
+     donor) finds the acceptors around it; a displayed acceptor finds the H and donor that point at it. Each candidate is joined by a dotted line to the
+     displayed atom it bonds to. Like the sphere version, only the single nearest image of each (atom, operator) pair is tested, which is all an H-bond needs. */
+  function computeHBondNeighborhood(current, existing) {
+    var baseImages = buildBaseSymmetryImages(), M = state.cifFracToCart, found = {}, byOp = {}, i, bi;
+    var M00 = M[0][0], M01 = M[0][1], M02 = M[0][2], M10 = M[1][0], M11 = M[1][1], M12 = M[1][2], M20 = M[2][0], M21 = M[2][1], M22 = M[2][2];
+    var dMin2 = HB_GROW_DMIN * HB_GROW_DMIN, dMax2 = HB_GROW_DMAX * HB_GROW_DMAX;
+    for (bi = 0; bi < baseImages.length; bi++) { var b0 = baseImages[bi]; if (b0.el === "Xx") continue; (byOp[b0.opIndex] || (byOp[b0.opIndex] = [])).push(b0); }
+    function bondedTo(a, b) { var dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z, d2 = dx * dx + dy * dy + dz * dz, lim = bondLimit(a, b); return d2 > 0.16 && d2 < lim * lim && partsCanBond(a, b); }
+    function reg(pos, contact) {
+      var key = pos.auIndex + ":" + pos.opIndex + ":" + pos.cellI + ":" + pos.cellJ + ":" + pos.cellK;
+      if (existing[key]) return;
+      var e = found[key] || (found[key] = { atom: pos, contacts: [] });
+      if (e.contacts.indexOf(contact) < 0) e.contacts.push(contact);
+    }
+    function near2(a, x, y, z) { return (a.x - x) * (a.x - x) + (a.y - y) * (a.y - y) + (a.z - z) * (a.z - z); }
+    for (i = 0; i < current.length; i++) {
+      var s = current[i];
+      if (s.el === "H") {
+        /* the seed as an H: its donor is the nearest bonded N/O/S/Cl on screen */
+        var donor = null, dBest = Infinity;
+        for (var k = 0; k < current.length; k++) { var c = current[k]; if (HBOND_ELEMENTS.hasOwnProperty(c.el) && bondedTo(s, c)) { var dd = near2(c, s.x, s.y, s.z); if (dd < dBest) { dBest = dd; donor = c; } } }
+        if (!donor) continue;
+        for (bi = 0; bi < baseImages.length; bi++) {
+          var b = baseImages[bi];
+          if (!HBOND_ELEMENTS.hasOwnProperty(b.el)) continue;
+          var ci = Math.round(s.fx - b.fx), cj = Math.round(s.fy - b.fy), ck = Math.round(s.fz - b.fz);
+          var px = b.x + (M00 * ci + M01 * cj + M02 * ck), py = b.y + (M10 * ci + M11 * cj + M12 * ck), pz = b.z + (M20 * ci + M21 * cj + M22 * ck);
+          var d2 = near2(s, px, py, pz);
+          if (d2 < dMin2 || d2 > dMax2) continue;
+          if (near2(donor, px, py, pz) < 0.09) continue; /* the donor itself */
+          if (hbGrowAngle(donor, s, { x: px, y: py, z: pz }) < HB_GROW_ANGLE) continue;
+          var pos = generateSymmetryPosition(b.auIndex, b.opIndex, ci, cj, ck);
+          if (!partsCanBond(pos, s)) continue;
+          reg(pos, s);
+        }
+      } else if (HBOND_ELEMENTS.hasOwnProperty(s.el)) {
+        /* the seed as an acceptor: the H atoms that point at it, each with its donor from the same copy of the molecule */
+        for (bi = 0; bi < baseImages.length; bi++) {
+          var hb = baseImages[bi];
+          if (hb.el !== "H") continue;
+          var hi = Math.round(s.fx - hb.fx), hj = Math.round(s.fy - hb.fy), hk = Math.round(s.fz - hb.fz);
+          var hx = hb.x + (M00 * hi + M01 * hj + M02 * hk), hy = hb.y + (M10 * hi + M11 * hj + M12 * hk), hz = hb.z + (M20 * hi + M21 * hj + M22 * hk);
+          var e2 = near2(s, hx, hy, hz);
+          if (e2 < dMin2 || e2 > dMax2) continue;
+          var hPos = generateSymmetryPosition(hb.auIndex, hb.opIndex, hi, hj, hk);
+          if (!partsCanBond(hPos, s)) continue;
+          var best = null, bestD = Infinity, cands = byOp[hb.opIndex] || [];
+          for (var q = 0; q < cands.length; q++) {
+            if (!HBOND_ELEMENTS.hasOwnProperty(cands[q].el)) continue;
+            var dPos = generateSymmetryPosition(cands[q].auIndex, cands[q].opIndex, hi, hj, hk);
+            if (!bondedTo(hPos, dPos)) continue;
+            var q2 = near2(dPos, hPos.x, hPos.y, hPos.z);
+            if (q2 < bestD) { bestD = q2; best = dPos; }
+          }
+          if (!best || near2(best, s.x, s.y, s.z) < 0.09) continue; /* no donor, or the seed is that donor */
+          if (hbGrowAngle(best, hPos, s) < HB_GROW_ANGLE) continue;
+          reg(hPos, s); reg(best, s);
+        }
+      }
+    }
+    var result = [], keys = Object.keys(found), placed = [];
+    for (i = 0; i < keys.length; i++) {
+      var ent = found[keys[i]];
+      if (positionOccupied(ent.atom.x, ent.atom.y, ent.atom.z) || positionOccupied(ent.atom.x, ent.atom.y, ent.atom.z, placed)) continue;
+      placed.push(ent.atom); result.push(ent);
+    }
+    return result;
+  }
+  function molNeighborStatusText() {
+    return molNeighborAtoms.length + " new position" + (molNeighborAtoms.length === 1 ? "" : "s") +
+      (state.molNeighborHBonds ? " H-bonded to the structure." : " within " + state.molNeighborRadius.toFixed(2) + " " + U.ang + ".");
+  }
   function refreshMolecularNeighborhood() {
     molNeighborAtoms = computeMolecularNeighborhood();
     renderStructure();
     if (state.molNeighborMode) {
       if (!state.isCif || state.symmetryForgotten) setStatus("Molecular neighbourhood needs a CIF-based host that still has its symmetry information.", true);
-      else setStatus("Molecular neighbourhood: " + molNeighborAtoms.length + " new position" + (molNeighborAtoms.length === 1 ? "" : "s") + " within " + state.molNeighborRadius.toFixed(2) + " " + U.ang + ".", false);
+      else setStatus("Molecular neighbourhood: " + molNeighborStatusText(), false);
     }
   }
   function renderMolecularNeighborhood(off) {
@@ -15179,9 +15463,16 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
        ADP/ellipsoid work -- see its own comment) is never what actually
        gets committed, only ever used to locate which position to
        regenerate properly. */
+    /* an H-bond preview click is recorded as NEIGHBOURHOOD_HB, naming the preview atom the same way every other macro line names an atom (see macroAtomRef) */
+    /* a sphere-of-inclusion preview click is recorded as NEIGHBOURHOOD_SPHERE radius name matrix (the radius decides which positions were on offer) */
+    var radiusNow = state.molNeighborRadius;
+    if (molNeighborCommit(seed)) recordMacroCommand(state.molNeighborHBonds ? "NEIGHBOURHOOD_HB " + macroAtomRef(seed) : "NEIGHBOURHOOD_SPHERE " + radiusNow + " " + macroAtomRef(seed));
+  }
+  /* Adds the whole fragment of one preview atom -- shared by a real click and by the NEIGHBOURHOOD_HB macro line. Returns the number of atoms added. */
+  function molNeighborCommit(seed) {
     var candidates = findGrowthCandidates(seed).concat([seed]);
     var grownCount = commitGrownAtoms(expandToConnectedFragment(candidates));
-    if (!grownCount) { setStatus("No new symmetry-connected atoms found from this position.", true); return; }
+    if (!grownCount) { setStatus("No new symmetry-connected atoms found from this position.", true); return 0; }
     /* the shell around the newly-displayed atoms is different now -- recompute
        it fresh, discarding whatever black atoms this click didn't touch and
        adding whatever new ones the bigger structure now borders (any of
@@ -15189,8 +15480,26 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
        since existingCifKeySet() now finds them among the real atoms). */
     molNeighborAtoms = computeMolecularNeighborhood();
     renderStructure();
-    setStatus("Grew " + grownCount + " atom" + (grownCount === 1 ? "" : "s") + " (connected fragment) -- molecular neighbourhood: " +
-      molNeighborAtoms.length + " new position" + (molNeighborAtoms.length === 1 ? "" : "s") + " within " + state.molNeighborRadius.toFixed(2) + " " + U.ang + ".", false);
+    setStatus("Grew " + grownCount + " atom" + (grownCount === 1 ? "" : "s") + " (connected fragment)" +
+      (state.molNeighborMode ? " -- molecular neighbourhood: " + molNeighborStatusText() : "."), false);
+    return grownCount;
+  }
+  /* NEIGHBOURHOOD_HB name  matrix: finds that atom among the H-bonded positions the molecular neighbourhood would preview right now (whether or not the mode is
+     on) and adds its fragment, exactly as clicking it would. */
+  function runNeighbourhoodHBMacro(ref, radius) {
+    /* radius given: the sphere version (NEIGHBOURHOOD_SPHERE radius name matrix); otherwise the H-bond version */
+    if (!state.isCif || state.symmetryForgotten) return false;
+    var savedMode = state.molNeighborMode, savedHB = state.molNeighborHBonds, savedR = state.molNeighborRadius, list;
+    var sphere = radius !== undefined;
+    if (sphere && !(isFinite(radius) && radius > 0)) return false;
+    state.molNeighborMode = true; state.molNeighborHBonds = !sphere; if (sphere) state.molNeighborRadius = radius;
+    try { list = computeMolecularNeighborhood(); } finally { state.molNeighborMode = savedMode; state.molNeighborHBonds = savedHB; state.molNeighborRadius = savedR; }
+    for (var i = 0; i < list.length; i++) {
+      if (macroAtomRef(list[i].atom) !== ref) continue;
+      molNeighborCommit(list[i].atom); /* with the user's own mode and preview type restored, so a preview already on screen is refreshed as that type */
+      return true;
+    }
+    return false;
   }
   var unitCellCylGeo = null, unitCellSphereGeo = null;
   function addUnitCellEdge(p0, p1, color) {
@@ -17177,6 +17486,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
         axisKeyZoom: state.axisKeyZoom, axisKeyProportional: state.axisKeyProportional, axisKeyLabels: state.axisKeyLabels,
         normHDist: state.normHDist,
         showAxisKey: state.showAxisKey, axisKeyOffsetX: state.axisKeyOffsetX, axisKeyOffsetY: state.axisKeyOffsetY,
+        showHBonds: state.showHBonds,
         showUnitCell: state.showUnitCell, unitCellColor: state.unitCellColor, unitCellThickness: state.unitCellThickness, unitCellAxisColors: state.unitCellAxisColors
         /* clipPlaneEnabled deliberately NOT persisted -- starting a fresh
            session with part of the structure invisible for no visible
@@ -17276,6 +17586,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
          it comes back exactly as it was for the next structure/session
          (position is re-clamped to the window on every use) */
       if (typeof data.showUnitCell === "boolean") state.showUnitCell = data.showUnitCell;
+      if (typeof data.showHBonds === "boolean") state.showHBonds = data.showHBonds; /* Display > Show H bonds is remembered between sessions */
       if (typeof data.unitCellColor === "number") state.unitCellColor = data.unitCellColor;
       if (data.hasOwnProperty("unitCellThickness")) state.unitCellThickness = clamp(data.unitCellThickness, 0.01, 0.15, state.unitCellThickness);
       if (typeof data.unitCellAxisColors === "boolean") state.unitCellAxisColors = data.unitCellAxisColors;
@@ -18177,7 +18488,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       guestBondColorMode: state.guestBondColorMode, guestBondColor: state.guestBondColor,
       hostBondRadius: state.hostBondRadius, guestBondRadius: state.guestBondRadius,
       hostGrowStyle: state.hostGrowStyle, guestGrowStyle: state.guestGrowStyle, autoCompleteMolecules: state.autoCompleteMolecules,
-      showHost: state.showHost, showGuest: state.showGuest, showHBonds: state.showHBonds, showHydrogens: state.showHydrogens,
+      showHost: state.showHost, showGuest: state.showGuest, showHydrogens: state.showHydrogens,
       centeringMode: state.centeringMode,
       videoAxis: state.videoAxis, videoSteps: state.videoSteps, videoScale: state.videoScale,
       videoDirection: state.videoDirection, videoFormat: state.videoFormat,
@@ -18411,7 +18722,8 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
 
     if (typeof data.showHost === "boolean") state.showHost = data.showHost;
     if (typeof data.showGuest === "boolean") state.showGuest = data.showGuest;
-    if (typeof data.showHBonds === "boolean") state.showHBonds = data.showHBonds;
+    /* showHBonds is deliberately NOT restored from the file: like the label look, it is a remembered display preference (see persistPreferences()), and a
+       project saved while it happened to be off must not switch it off again when opened. (Older project files still carry the field; it is ignored.) */
     if (typeof data.showHydrogens === "boolean") state.showHydrogens = data.showHydrogens;
     if (data.videoAxis === "x" || data.videoAxis === "y" || data.videoAxis === "z") state.videoAxis = data.videoAxis;
     if (typeof data.videoSteps === "number" && isFinite(data.videoSteps)) state.videoSteps = data.videoSteps;
@@ -21242,15 +21554,15 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<p>Builds out the structure from the asymmetric unit using the crystal symmetry. It needs a CIF or SHELX file with its symmetry; an XYZ file has none.</p>" +
       "<h3>Mouse</h3><ul>" +
       "<li>The large button switches grow mode on; then click an atom.</li>" +
-      "<li><b>Bonds</b> adds what is covalently bonded to the clicked atom. <b>Sphere of inclusion</b> adds every symmetry-equivalent atom within a radius, bonded or not, which is what you want for neighbours or a solvent shell.</li>" +
+      "<li><b>Bonds</b> adds what is covalently bonded to the clicked atom. <b>H-bonds</b> adds the symmetry-related atoms that are hydrogen-bonded to it: click a donor (or its H) for the acceptors, or an acceptor for the donors. <b>Sphere of inclusion</b> adds every symmetry-equivalent atom within a radius, bonded or not, which is what you want for neighbours or a solvent shell.</li>" +
       "<li><b>Atoms</b> adds only the new atom, <b>Fragment</b> (the default) adds its whole molecule, and <b>ASU</b> adds the entire asymmetric unit.</li>" +
       "<li>To surround a molecule with its neighbours: Sphere of inclusion, Fragment, radius 4&ndash;5 &Aring;, and click each non-hydrogen atom in turn.</li></ul>" +
       "<h3>The other tabs</h3><ul>" +
-      "<li><b>Pack</b> grows by a range of fractional coordinates instead of a click.</li>" +
+      "<li><b>Pack</b> grows by a range of fractional coordinates instead of a click; it can keep only the copies that are H-bonded to the structure, and repeat until none more are.</li>" +
       "<li><b>Symmetry</b> applies one chosen symmetry operation to the selected atoms.</li>" +
-      "<li><b>Molecular neighbourhood</b> shows small preview spheres for what lies within a radius; clicking one adds its whole fragment.</li></ul>" +
+      "<li><b>Molecular neighbourhood</b> shows small preview spheres for what lies within a radius, or for what is H-bonded to the structure; clicking one adds its whole fragment.</li></ul>" +
       "<h3>Helpers</h3><ul>" +
-      "<li><b>Extend fragment(s)</b> and <b>Complete molecule(s)</b> grow every atom in view at once.</li>" +
+      "<li><b>Extend fragment(s)</b> and <b>Complete molecule(s)</b> grow every atom in view at once; Extend fragment(s) and Complete molecule(s) can follow H-bonds instead of covalent bonds.</li>" +
       "<li><b>Delete all symmetry-generated atoms</b> returns to the bare asymmetric unit.</li>" +
       "<li><b>Forget symmetry</b> discards the symmetry for good and asks first.</li></ul>" },
     voidch: { title: "Void / Channel Analysis", html:
@@ -22233,7 +22545,8 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     var hRow = el("div", "toggle-row2");
     var showHTg = toggle(hRow, "Show hydrogen atoms", state.showHydrogens !== false, function () { toggleHydrogenDisplay(); });
     showHTg.id = "showHTg";
-    toggle(hRow, "Show H bonds", state.showHBonds, function (b) { state.showHBonds = b; renderStructure(); });
+    var showHBondsTg = toggle(hRow, "Show H bonds", state.showHBonds, function (b) { state.showHBonds = b; renderStructure(); persistPreferences(); });
+    showHBondsTg.setAttribute("data-sync-key", "showHBonds");
     cifDispC.appendChild(hRow);
     var lockRow = el("div", "toggle-row2");
     var lockTg = toggle(lockRow, "Immobilise view", !!state.viewLocked, function (b) { state.viewLocked = b; lockTg.blur(); /* hand the keyboard back to the model window, so the cursor keys and - / = keep working */ });
@@ -22672,11 +22985,15 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     var autoCompleteCb = toggle(symC, "Generate whole molecules", state.autoCompleteMolecules, function (v) { state.autoCompleteMolecules = v; });
     autoCompleteCb.id = "autoCompleteMoleculesCheckbox";
     autoCompleteCb.parentElement.title = "Whenever Mouse, Pack, Extend fragment(s), or Sphere of inclusion would leave a partial molecule, automatically complete it by symmetry (same test as \"Complete molecule(s)\"). Polymeric/framework fragments are left as-is, exactly like that button.";
+    var extendHBChk = toggle(symC, "Extend through H-bonds", false, function (b) { state.extendByHBonds = b; });
+    extendHBChk.parentElement.title = "Extend fragment(s) follows hydrogen bonds (the criterion of Show H bonds) instead of covalent bonds: the symmetry-related molecules that are H-bonded to anything in the view are added, each as a whole connected fragment.";
     var extendRow = el("div", "btnrow");
-    button(extendRow, "Extend fragment(s)", "ghost", function () { extendAllFragments(); });
+    button(extendRow, "Extend fragment(s)", "ghost", function () { extendAllFragments(null, state.extendByHBonds); });
     symC.appendChild(extendRow);
+    var completeHBChk = toggle(symC, "Complete through H-bonds", false, function (b) { state.completeByHBonds = b; });
+    completeHBChk.parentElement.title = "Complete molecule(s) closes H-bonded assemblies instead of covalent molecules: the molecules H-bonded to what is in view are added, then those H-bonded to them, until nothing new turns up. A chain, sheet or network that never closes is completed only as far as one copy of each molecule.";
     var completeRow = el("div", "btnrow");
-    button(completeRow, "Complete molecule(s)", "ghost", function () { completeMoleculeFragments(); });
+    button(completeRow, "Complete molecule(s)", "ghost", function () { completeMoleculeFragments(null, state.completeByHBonds); });
     symC.appendChild(completeRow);
     var resetGrowRow = el("div", "btnrow");
     var delSymBtn = button(resetGrowRow, "Delete all symmetry-generated atoms", "ghost", deleteSymmetryGeneratedAtoms);
@@ -22711,19 +23028,32 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       if (isOpen) closeOtherGrowSubs(molNeighborTab.parentElement);
     });
     molNeighborTab.parentElement.id = "molNeighborSection";
-    var molNeighborRadiusRow = el("div", "ctl-inline");
-    molNeighborRadiusRow.appendChild(el("label", "plain", "Sphere of inclusion"));
+    /* which neighbours are previewed: everything within a radius (Sphere of inclusion, radius box beside its radio) or what is H-bonded to the structure */
+    function molNeighborConnRadio(kind, text, tip) {
+      var lbl = el("label", "radio"), inp = document.createElement("input"); inp.type = "radio"; inp.name = "molNeighborConn"; inp.value = kind;
+      inp.checked = (kind === "hbonds") === !!state.molNeighborHBonds;
+      inp.addEventListener("change", function () { if (inp.checked) setMolNeighborConn(kind); });
+      lbl.appendChild(inp); lbl.appendChild(el("span", null, text)); lbl.title = tip; lbl.style.whiteSpace = "nowrap"; lbl.style.gap = "5px";
+      molNeighborTab.appendChild(lbl); return { lbl: lbl, radio: inp };
+    }
+    function setMolNeighborConn(kind) {
+      state.molNeighborHBonds = kind === "hbonds";
+      if (state.molNeighborMode) refreshMolecularNeighborhood();
+    }
+    var molNeighborSph = molNeighborConnRadio("sphere", "Sphere of inclusion", "Preview every symmetry-generated atom within this radius of an atom in the view.");
     var molNeighborRadiusInp = document.createElement("input");
     molNeighborRadiusInp.type = "number"; molNeighborRadiusInp.className = "num"; molNeighborRadiusInp.id = "molNeighborRadiusInp";
-    molNeighborRadiusInp.step = "0.1"; molNeighborRadiusInp.value = state.molNeighborRadius;
+    molNeighborRadiusInp.step = "0.1"; molNeighborRadiusInp.value = state.molNeighborRadius; molNeighborRadiusInp.style.width = "68px"; molNeighborRadiusInp.style.minWidth = "0";
+    molNeighborRadiusInp.title = "Radius of the sphere of inclusion";
     molNeighborRadiusInp.addEventListener("input", function () {
       var v = parseFloat(molNeighborRadiusInp.value);
       if (!isFinite(v) || v <= 0) return;
       state.molNeighborRadius = v;
       if (state.molNeighborMode) refreshMolecularNeighborhood();
     });
-    molNeighborRadiusRow.appendChild(molNeighborRadiusInp); molNeighborRadiusRow.appendChild(el("span", "unit", U.ang));
-    molNeighborTab.appendChild(molNeighborRadiusRow);
+    molNeighborRadiusInp.addEventListener("focus", function () { if (!molNeighborSph.radio.checked) { molNeighborSph.radio.checked = true; setMolNeighborConn("sphere"); } }); /* working on the radius means the sphere is wanted */
+    molNeighborSph.lbl.appendChild(molNeighborRadiusInp); molNeighborSph.lbl.appendChild(el("span", "unit", U.ang));
+    molNeighborConnRadio("hbonds", "H-bonds", "Preview the symmetry-generated atoms that are hydrogen-bonded to an atom in the view (the criterion of Show H bonds): the acceptors around its donors, and the donors that point at its acceptors.");
     var molNeighborBlackLbl = el("label", "toggle");
     var molNeighborBlackChk = document.createElement("input"); molNeighborBlackChk.type = "checkbox";
     molNeighborBlackChk.checked = state.molNeighborBlackNodes;
@@ -22748,12 +23078,12 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
 
     /* two side-by-side vertical groups, divided by a line: which atoms
        qualify (Atoms/Fragment/ASU) on the left, how a click finds them
-       (Bonds/Sphere of inclusion) on the right. Built by hand rather than via
-       radioRow() so the sphere radius can sit on its own line under "Sphere
-       of inclusion", indented to match its text rather than its radio
-       circle. */
+       (Bonds/H-bonds/Sphere of inclusion) on the right. The left column
+       shrinks to its content so the divider sits well to the left, which
+       leaves the right column wide enough for the sphere radius to sit
+       beside its own radio button. */
     var growCols = el("div", "two-col-row");
-    var growUnitCol = el("div", "ctl-col col-flex");
+    var growUnitCol = el("div", "ctl-col");
     var growConnCol = el("div", "ctl-col col-flex");
 
     var growUnitInputs = {};
@@ -22767,26 +23097,19 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       growUnitInputs[opt[0]] = inp;
     });
 
-    var bondsLbl = el("label", "radio");
-    var bondsRadio = document.createElement("input"); bondsRadio.type = "radio"; bondsRadio.name = "growConn"; bondsRadio.value = "bonds";
-    bondsRadio.checked = !state.growBySphere;
-    bondsRadio.addEventListener("change", function () { if (bondsRadio.checked) state.growBySphere = false; });
-    bondsLbl.appendChild(bondsRadio); bondsLbl.appendChild(el("span", null, "Bonds"));
-    growConnCol.appendChild(bondsLbl);
-
-    var sphereLbl = el("label", "radio");
-    var sphereRadio = document.createElement("input"); sphereRadio.type = "radio"; sphereRadio.name = "growConn"; sphereRadio.value = "sphere";
-    sphereRadio.checked = state.growBySphere;
-    sphereRadio.addEventListener("change", function () { if (sphereRadio.checked) state.growBySphere = true; });
-    sphereLbl.appendChild(sphereRadio); sphereLbl.appendChild(el("span", null, "Sphere of inclusion"));
-    growConnCol.appendChild(sphereLbl);
-
-    var sphSubrow = el("div", "radio-subrow");
-    var sphInp = document.createElement("input"); sphInp.type = "number"; sphInp.className = "num"; sphInp.id = "sphRadius"; sphInp.step = "0.1"; sphInp.value = state.sphereRadius;
+    function setGrowConn(kind) { state.growBySphere = kind === "sphere"; state.growByHBonds = kind === "hbonds"; }
+    function growConnRadio(kind, text, checked, tip) {
+      var lbl = el("label", "radio"), inp = document.createElement("input"); inp.type = "radio"; inp.name = "growConn"; inp.value = kind; inp.checked = checked;
+      inp.addEventListener("change", function () { if (inp.checked) setGrowConn(kind); });
+      lbl.appendChild(inp); lbl.appendChild(el("span", null, text)); if (tip) lbl.title = tip; growConnCol.appendChild(lbl); return { lbl: lbl, radio: inp };
+    }
+    growConnRadio("bonds", "Bonds", !state.growBySphere && !state.growByHBonds, "Grow the symmetry-related atoms that are covalently bonded to the atom you click.");
+    growConnRadio("hbonds", "H-bonds", state.growByHBonds, "Grow the symmetry-related atoms that are hydrogen-bonded to the atom you click: click a donor (or its H) to add its acceptors, or an acceptor to add the donors that H-bond to it. The criterion is that of Show H bonds.");
+    var sph = growConnRadio("sphere", "Sphere of inclusion", state.growBySphere, "Grow every symmetry-related atom within this radius of the atom you click.");
+    var sphInp = document.createElement("input"); sphInp.type = "number"; sphInp.className = "num"; sphInp.id = "sphRadius"; sphInp.step = "0.1"; sphInp.value = state.sphereRadius; sphInp.style.width = "68px"; sphInp.style.minWidth = "0"; sphInp.title = "Radius of the sphere of inclusion"; sph.lbl.style.whiteSpace = "nowrap"; sph.lbl.style.gap = "5px";
     sphInp.addEventListener("input", function () { var v = parseFloat(sphInp.value); if (isFinite(v) && v > 0) state.sphereRadius = v; });
-    sphSubrow.appendChild(sphInp); sphSubrow.appendChild(el("span", "unit", U.ang));
-    growConnCol.appendChild(sphSubrow);
-
+    sphInp.addEventListener("focus", function () { sph.radio.checked = true; setGrowConn("sphere"); }); /* working on the radius means the sphere is wanted */
+    sph.lbl.appendChild(sphInp); sph.lbl.appendChild(el("span", "unit", U.ang));
     growCols.appendChild(growUnitCol);
     growCols.appendChild(el("div", "vdivider"));
     growCols.appendChild(growConnCol);
@@ -22816,11 +23139,17 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       var vals = [limits.aMin, limits.aMax, limits.bMin, limits.bMax, limits.cMin, limits.cMax];
       if (vals.some(function (v) { return !isFinite(v); })) { setStatus("Enter numeric limits for a, b, and c.", true); return; }
       if (limits.aMin > limits.aMax || limits.bMin > limits.bMax || limits.cMin > limits.cMax) { setStatus("Each axis's minimum must not exceed its maximum.", true); return; }
-      growByPackRange(limits, packCondition);
+      growByPackRange(limits, packCondition, { hb: packHB, repeat: packHB && packHBRepeat });
     });
     packTab.appendChild(packLayout);
-    var packCondition = "any";
+    var packCondition = "any", packHB = false, packHBRepeat = false;
     radioRow(packTab, "packCondition", [["any", "fragment atom in limits"], ["centroid", "fragment centroid in limits"]], "any", function (v) { packCondition = v; });
+    /* only copies that have an H-bond to the structure (the criterion of Show H bonds); with repeat, round after round until none more qualify */
+    var packHBChk = toggle(packTab, "Only copies H-bonded to the structure", false, function (b) { packHB = b; packHBRepeatChk.disabled = !b; packHBRepeatChk.parentElement.style.opacity = b ? "" : "0.5"; });
+    packHBChk.parentElement.title = "Of the copies inside the limits, add only those that have a hydrogen bond (the criterion of Show H bonds) to an atom already in the view.";
+    var packHBRepeatChk = toggle(packTab, "Repeat until no more are found", false, function (b) { packHBRepeat = b; });
+    packHBRepeatChk.disabled = true; packHBRepeatChk.parentElement.style.opacity = "0.5";
+    packHBRepeatChk.parentElement.title = "Count each copy just added as part of the structure and look again, round after round, until no further copy inside the limits is H-bonded to anything: an H-bonded chain or network confined to the box.";
     var symOpSelect = document.createElement("select"); symOpSelect.className = "sel"; symOpSelect.id = "symOpSelect"; symOpSelect.style.width = "100%";
     symOpTab.appendChild(symOpSelect);
 
@@ -23679,11 +24008,11 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<h3>CIF and symmetry (Symmetry panel)</h3>" +
       "<p>Dropping a CIF reads the unit cell, the symmetry operators (from the file's own symmetry loop), and the asymmetric unit, then displays just the asymmetric unit -- not a complete molecule -- as the starting point. If the file actually contains more atoms than the true asymmetric unit (Mercury sometimes exports a whole completed molecule this way), the extra symmetry-equivalent copies are automatically detected and removed first, so what's displayed is always just the independent set. An atom sitting exactly on a special position (a mirror plane, an inversion centre, a rotation axis) is never duplicated when a symmetry operation maps it onto itself or onto another copy already present -- this is handled automatically throughout, not something to manage by hand.</p>" +
       "<p>The <b>Grow</b> section appears once a CIF has been loaded, with the asymmetric unit and current atom count shown at the top, and its controls split into four submenus -- <b>Mouse</b>, <b>Pack</b>, <b>Symmetry</b>, and <b>Molecular neighbourhood</b>.</p>" +
-      "<p>On the <b>Mouse</b> tab, the large button turns grow mode on or off -- solid when on, a visual reminder alongside the crosshair cursor that a plain click will grow rather than select. Two independent radio choices control how: <b>Bonds</b> requires the new atom to be covalently bonded to the one clicked, searched up to 5 unit cells away; <b>Sphere of inclusion</b> adds every symmetry-equivalent atom within the radius given next to it, regardless of bonding -- useful for filling out a coordination sphere or a solvent shell that isn't covalently continuous. Separately, <b>Atoms</b> adds just the one newly-connected atom; <b>Fragment</b> (the default) adds the whole covalently-connected molecule the new atom belongs to within its asymmetric unit, leaving the rest of that asymmetric unit alone; <b>ASU</b> adds the entire asymmetric unit instead, generated under whatever symmetry operation connects it -- everything in it, not just the connected molecule. The Fragment/ASU distinction matters when the asymmetric unit contains more than one physically separate molecule (say, a host and a guest together, or two independent solvent molecules): ASU would grow both together since they share the same symmetry transform, where Fragment grows only the one actually connected to what was clicked. Whether you click a host or a guest atom makes no difference to any of this.</p>" +
-      "<p>The <b>Pack</b> tab grows by an explicit fractional-coordinate range instead of a click: set limits for a, b, and c (each defaults to 0 to 1, one full unit cell, and can range from -5 to 5), choose whether a fragment qualifies when <b>a fragment atom</b> falls within those limits or only when its <b>centroid</b> does, then press <b>Pack</b>. Every symmetry-related copy of the asymmetric unit meeting that condition is added in one step, each still a whole covalently-connected fragment (not split by Atoms/Fragment/ASU, which are Mouse-tab-only concepts).</p>" +
+      "<p>On the <b>Mouse</b> tab, the large button turns grow mode on or off -- solid when on, a visual reminder alongside the crosshair cursor that a plain click will grow rather than select. Two independent radio choices control how: <b>Bonds</b> requires the new atom to be covalently bonded to the one clicked, searched up to 5 unit cells away; <b>H-bonds</b> adds the symmetry-related atoms that are hydrogen-bonded to the one clicked (click a donor N, O, S or Cl, or its H, for the acceptors around it; click an acceptor for the donors that H-bond to it), by the criterion of Show H bonds; <b>Sphere of inclusion</b> adds every symmetry-equivalent atom within the radius given next to it, regardless of bonding -- useful for filling out a coordination sphere or a solvent shell that isn't covalently continuous. Separately, <b>Atoms</b> adds just the one newly-connected atom; <b>Fragment</b> (the default) adds the whole covalently-connected molecule the new atom belongs to within its asymmetric unit, leaving the rest of that asymmetric unit alone; <b>ASU</b> adds the entire asymmetric unit instead, generated under whatever symmetry operation connects it -- everything in it, not just the connected molecule. The Fragment/ASU distinction matters when the asymmetric unit contains more than one physically separate molecule (say, a host and a guest together, or two independent solvent molecules): ASU would grow both together since they share the same symmetry transform, where Fragment grows only the one actually connected to what was clicked. Whether you click a host or a guest atom makes no difference to any of this.</p>" +
+      "<p>The <b>Pack</b> tab grows by an explicit fractional-coordinate range instead of a click: set limits for a, b, and c (each defaults to 0 to 1, one full unit cell, and can range from -5 to 5), choose whether a fragment qualifies when <b>a fragment atom</b> falls within those limits or only when its <b>centroid</b> does, then press <b>Pack</b>. Every symmetry-related copy of the asymmetric unit meeting that condition is added in one step, each still a whole covalently-connected fragment (not split by Atoms/Fragment/ASU, which are Mouse-tab-only concepts). With <b>Only copies H-bonded to the structure</b> ticked, a copy inside the limits is added only if it has a hydrogen bond (the criterion of <b>Show H bonds</b>: an H on a donor N, O, S or Cl, an acceptor 1.2 to 2.8&nbsp;&Aring; from the H, D&ndash;H&middot;&middot;&middot;A angle of at least 120&deg;) to an atom already in the view; with <b>Repeat until no more are found</b> as well, each copy just chosen counts as part of the structure and the search is run again, round after round, until no further copy inside the limits is H-bonded to anything &mdash; an H-bonded chain or network confined to the box. The status line gives the number of rounds. One Undo reverts the whole Pack.</p>" +
       "<p>The <b>Symmetry</b> tab applies one specific, explicitly chosen symmetry operation to whichever atoms are currently selected, rather than growing by proximity or by range. The dropdown lists every operator of this structure's space group exactly as the CIF itself expresses them (e.g. <span class='mono'>x,y,z</span> for identity, <span class='mono'>-x,y+0.5,-z</span> for a 2-fold screw axis parallel to b); choosing one fills in the 3x4 matrix beside it -- three rows of a rotation coefficient triple plus a translation, e.g. a c-glide perpendicular to b would read as rows (1,0,0,0), (0,-1,0,0), (0,0,-1,0.5). The rotation coefficients (always -1, 0, or 1 for any real symmetry operation) step through those three values with the small up/down arrows; the translations accept any typed value, since a screw or glide component is usually a fraction but there's no reason to restrict it to one. Apply doesn't reset any of this afterwards -- the matrix stays exactly as set until deliberately changed again, whether by picking a different operator from the dropdown or editing a box directly. Each row also has its own <b>-a/+a</b>, <b>-b/+b</b>, or <b>-c/+c</b> pair alongside it; pressing one always applies a fresh, plain +1 or -1 cell translation along that one axis to whatever's currently selected -- not a further nudge on top of whatever the matrix happened to already show -- and, unlike the rest of the matrix, does so immediately without needing Apply, since the point of a cell shift is usually to walk straight to a neighbouring copy one step at a time (it does overwrite the displayed matrix to show that plain translation, though, so what's about to happen is always visible first). With <b>Use M<sup>-1</sup></b> checked, Apply and the shift buttons alike carry out the matrix as given in reverse instead. Each selected atom is mapped through the operation to find its image; if that image is a position not already displayed, the atom is added there (correctly tracked for further growth or symmetry-aware deletion, exactly like any other grown atom), and if it's already present, that one atom is simply left alone rather than duplicated. With <b>Select new</b> checked, the originally-selected atoms are deselected once Apply runs and each one's image -- newly added or already there -- is selected in their place, which is what makes stepping a shift button repeatedly walk outward one cell at a time rather than needing to reselect anything by hand in between. With <b>Keep source format</b> checked, each newly-generated image copies the exact display colour and radius of the specific selected atom it was generated from, atom-by-atom, instead of whatever the \"Settings for new host/guest atoms\" dropdown would otherwise give it -- distinct from that dropdown's generic brush, and scoped only to Symmetry's own Apply and shift buttons, never Mouse or Pack growth.</p>" +
-      "<p>All of this only ever adds atoms; nothing is removed automatically, and everything added this way can be deleted, selected, or undone exactly like any other atom in the app. <b>Extend fragment(s)</b>, visible above the tabs regardless of which one is open, applies the Mouse tab's Bonds+Frag behaviour all at once: it snapshots every atom currently displayed and grows the connected fragment attached to each one that has a new symmetry-connected neighbour, in a single step. Only atoms present at the moment it's pressed are used as starting points -- atoms it adds during that same pass are never themselves used to grow further, which is what keeps something like a polymer or chain from running away indefinitely. \"Delete all symmetry-generated atoms\", just below it, removes everything growth has added in one step back to just the original asymmetric unit -- a guest designation on an asymmetric unit atom survives this, only the grown copies are removed.</p>" +
-      "<p><b>Complete molecule(s)</b>, next to Extend fragment(s), fills out any fragment that's only partly present into a whole discrete molecule by symmetry -- e.g. an inversion centre or a rotation axis relating one asymmetric-unit piece to the rest of the molecule. It tests each fragment first (a real molecule never needs the same asymmetric-unit-atom-plus-operator pair twice; a polymer or framework always does eventually), so it never runs away trying to complete something that's genuinely infinite -- a fragment that's fully polymeric is left alone with a note to use Extend fragment(s) for it instead, and one that's partly molecular and partly extended is completed as far as it can be, with the rest reported as continuing like a polymer. For a coordination polymer or MOF specifically, it also tops up any bridging ligand (e.g. a pyrazine ring) left truncated by ordinary growth, stopping cleanly at the metal it coordinates to rather than adding that metal itself -- so a ligand cut in half at a Pack box boundary comes back whole without also pulling in a new metal centre.</p>" +
+      "<p>All of this only ever adds atoms; nothing is removed automatically, and everything added this way can be deleted, selected, or undone exactly like any other atom in the app. <b>Extend fragment(s)</b>, visible above the tabs regardless of which one is open, applies the Mouse tab's Bonds+Frag behaviour all at once: it snapshots every atom currently displayed and grows the connected fragment attached to each one that has a new symmetry-connected neighbour, in a single step. Only atoms present at the moment it's pressed are used as starting points -- atoms it adds during that same pass are never themselves used to grow further, which is what keeps something like a polymer or chain from running away indefinitely. With <b>Extend through H-bonds</b> ticked (the checkbox just above the button), it follows hydrogen bonds instead of covalent bonds: every symmetry-related atom that is H-bonded to anything in view (the criterion of <b>Show H bonds</b>) is found, and each is completed to its whole connected fragment. As with bonds it is one step outward from what is there when the button is pressed; press it again for the next shell. \"Delete all symmetry-generated atoms\", just below it, removes everything growth has added in one step back to just the original asymmetric unit -- a guest designation on an asymmetric unit atom survives this, only the grown copies are removed.</p>" +
+      "<p><b>Complete molecule(s)</b>, next to Extend fragment(s), fills out any fragment that's only partly present into a whole discrete molecule by symmetry -- e.g. an inversion centre or a rotation axis relating one asymmetric-unit piece to the rest of the molecule. It tests each fragment first (a real molecule never needs the same asymmetric-unit-atom-plus-operator pair twice; a polymer or framework always does eventually), so it never runs away trying to complete something that's genuinely infinite -- a fragment that's fully polymeric is left alone with a note to use Extend fragment(s) for it instead, and one that's partly molecular and partly extended is completed as far as it can be, with the rest reported as continuing like a polymer. With <b>Complete through H-bonds</b> ticked (the checkbox just above its button), it closes H-bonded assemblies instead: the molecules H-bonded to what is in view are added, then those H-bonded to them, and so on until nothing new turns up &mdash; a hydrogen-bonded dimer or ring is completed, such as the hexamer of Dianin's compound. As with covalent completion, an assembly that never closes (a chain, sheet or network, recognised by needing the same molecule again only translated by a unit cell) is completed only as far as one copy of each molecule, and the rest is reported as continuing. One Undo reverts the whole step. For a coordination polymer or MOF specifically, it also tops up any bridging ligand (e.g. a pyrazine ring) left truncated by ordinary growth, stopping cleanly at the metal it coordinates to rather than adding that metal itself -- so a ligand cut in half at a Pack box boundary comes back whole without also pulling in a new metal centre.</p>" +
       "<p><b>Generate whole molecules</b>, the checkbox just above those two buttons, makes this automatic: whenever Mouse-click growth, Pack, Extend fragment(s), or Sphere of inclusion would otherwise leave a partial molecule or a truncated ligand, the same completion runs immediately afterward, silently, with its own follow-up status message only appearing when it actually added something. Off by default -- growth then leaves fragments exactly as it finds them, same as if this checkbox didn't exist.</p>" +
       "<p>The <b>Grow</b> section has a <b>Settings for new host atoms</b> and a <b>Settings for new guest atoms</b> dropdown (just under Forget symmetry), which decides the radius and colour a newly grown atom starts with in that layer. <b>Default</b> leaves no override at all -- a newly grown atom renders with the plain ball-and-stick default, exactly like a freshly loaded one. <b>Current style</b> snapshots whatever Style &gt; Atoms' Colour and Radii checkboxes are currently set to (defaulting to ball-and-stick radius and CPK colour if neither Radii option is ticked) and gives every newly grown atom in that layer exactly that look. <b>Same as ASU</b> instead gives each newly grown atom the look of its own asymmetric-unit parent atom -- its colour (CPK or custom), radius setting, and sphere-or-ellipsoid choice -- so a symmetry copy always matches however its parent has been styled (a parent that has since been moved to the guest layer is still found; an atom with no parent to copy from just gets the Default look). Whichever option is chosen, this only ever sets an override at the moment an atom is grown -- it never revisits atoms already present when the dropdown is changed.</p>" +
       "<p>Guests inherit their host or guest membership from the asymmetric unit position they came from, which normally makes sense -- but there are times a guest that's currently linked to others this way needs to move independently, or join the host, without dragging its symmetry-related copies along. \"Forget symmetry\", below that, makes this possible: it permanently discards this structure's symmetry information. Afterwards, every atom present -- asymmetric unit and grown copies alike -- stays exactly where it is, but each one can be edited, deleted, reassigned, or moved between host and guest completely independently, with no symmetry tracking. Growth, ASU only, and the automatic symmetry-linked cascades (an element or host/guest change spreading to related atoms, a cut bond applying to its symmetry images) all stop -- the entire Grow panel disappears, since none of it applies any more. The Display panel's Unit cell tab is unaffected and stays fully controllable, since it doesn't depend on any of this. This cannot be undone, and asks for confirmation before doing anything.</p>" +
@@ -23691,7 +24020,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<p>If part of the asymmetric unit has been moved to a guest (e.g. an included CO<sub>2</sub>, moved there via \"Move selection to\" in Structure &gt; Edit atoms, the same way as in Mode 1), growth remembers that: every future symmetry-generated copy of that same asymmetric unit atom is added as a guest too, not host, from then on -- joining the same guest component it was already part of, rather than starting a new one each time. Clicking a guest atom in grow mode works exactly like clicking a host atom; there's no distinction between them for growth purposes.</p>" +
       "<p>The unit cell's colour and line thickness are both adjustable; edges are drawn the same way bonds are (as shaded cylinders, not flat lines), so they respond to lighting rather than looking flat. Its three edges from the origin can optionally be coloured in the deepest possible red/green/blue for a, b, c respectively, following the usual crystallographic convention, instead of the single default colour. The a, b, c edges are always labelled in italic, in whichever of black or white contrasts better with the current background (the same approach the lasso outline uses), so the labels stay readable regardless of colour scheme. All of this is purely visual and has no effect on growth.</p>" +
       "<h3>Molecular neighbourhood</h3>" +
-      "<p>A different way of growing: rather than adding atoms outright, it previews what's nearby first, so a direction can be chosen before committing to it -- useful for a framework or polymer that could otherwise be extended in several different directions at once. Enter a <b>Sphere of inclusion</b> radius, then press the button below it (solid red while active, exactly like Mouse's own grow-mode button). Every symmetry-generated atom not currently displayed, but within that radius of at least one atom that already is (host or guest, whichever layer it would belong to), is shown as a small unbonded sphere, joined by a dotted line to each real atom it's close enough to -- these are a preview only, never added to the model, and cost nothing to leave on screen since they're recomputed only when the mode is turned on, the radius changes, or a fragment is added, not on every frame. <b>Black nodes</b> (ticked by default) shows every one of these preview spheres in plain black, keeping them visually distinct from anything already in the model; unticking it instead colours each one the same as the real atom it represents (its usual CPK or custom colour), which makes it far easier to judge what a given preview position actually is -- e.g. picking out a lone counter-ion's own colour among a crowd of hydrogens -- at the cost of that “obviously still just a preview” distinctness black gives. Either way, the dotted contact lines themselves stay black, and the preview spheres' own radii still scale with each atom's own display radius, exactly like a real atom would.</p>" +
+      "<p>A different way of growing: rather than adding atoms outright, it previews what's nearby first, so a direction can be chosen before committing to it -- useful for a framework or polymer that could otherwise be extended in several different directions at once. Choose <b>Sphere of inclusion</b> (and enter its radius in the box beside it) or <b>H-bonds</b>, then press the button below (solid red while active, exactly like Mouse's own grow-mode button). With the sphere, every symmetry-generated atom not currently displayed, but within that radius of at least one atom that already is (host or guest, whichever layer it would belong to), is shown as a small unbonded sphere, joined by a dotted line to each real atom it's close enough to. With H-bonds the spheres are instead the symmetry-generated atoms that are hydrogen-bonded to an atom already in the view (the criterion of Show H bonds): the acceptors around each displayed donor H, and the H and donor atoms that point at each displayed acceptor, each joined by a dotted line to the atom it bonds to. These are a preview only, never added to the model, and cost nothing to leave on screen since they're recomputed only when the mode is turned on, the radius changes, or a fragment is added, not on every frame. <b>Black nodes</b> (ticked by default) shows every one of these preview spheres in plain black, keeping them visually distinct from anything already in the model; unticking it instead colours each one the same as the real atom it represents (its usual CPK or custom colour), which makes it far easier to judge what a given preview position actually is -- e.g. picking out a lone counter-ion's own colour among a crowd of hydrogens -- at the cost of that “obviously still just a preview” distinctness black gives. Either way, the dotted contact lines themselves stay black, and the preview spheres' own radii still scale with each atom's own display radius, exactly like a real atom would.</p>" +
       "<p>Clicking one of these black spheres adds the whole connected fragment it belongs to -- the same Fragment-unit growth Mouse's own grow mode uses -- and the preview then refreshes around the newly-larger structure: any black sphere the new fragment happened to reach simply stops being previewed (it's a real atom now), and a fresh ring of black spheres appears around whatever's now the edge of the structure. Repeating this lets a structure be built out one fragment at a time, following whichever direction actually looks interesting, rather than growing everything within reach at once. Leaving Molecular neighbourhood -- pressing its button again, closing its own tab, switching to Mouse/Pack/Symmetry, or opening a different section entirely -- discards whatever black spheres are still on screen; nothing about them is ever kept. Like grow mode, it needs a CIF that still has its symmetry information.</p>" +
       "<p>The <b>Display</b> section, just below Grow, is always available. Its own general settings hold <b>Show ASU only</b> paired with <b>Show atom labels</b>, then <b>Show unit cell</b> paired with <b>Show axis key</b>, then <b>Show hydrogen atoms</b> paired with <b>Show H bonds</b>, then <b>Immobilise view</b> (see View controls); a <b>Background colour</b> swatch; <b>Centering</b> (All/Visible/Selected atoms, with an Apply button that only appears for \"Selected atoms\", since that mode is otherwise frozen at whatever it was last applied to, plus a <b>Recenter</b> button that returns the rotation centre to its default position after any Shift + Ctrl + left-drag panning); <b>Set scale</b>, an arbitrary whole-number reference for the current zoom level -- bigger means more zoomed in, updates live as you zoom, and can be typed into directly (it carries no physical unit; its purpose is matching the same apparent zoom between different structures rather than measuring anything); and duplicate <b>Select all</b> / <b>Clear selection</b> / <b>Hide selection</b> / <b>Unhide all</b> buttons for convenience, identical to the ones in Structure &gt; Edit atoms. Nested inside Display: <b>Direction</b>, a <b>View direction</b> set of crystallographic view shortcuts -- buttons for looking straight down each cell axis (a, b, c) and perpendicular to each pair-wise plane (bc, ac, ab), a general <b>[hkl]</b> field for viewing along any specific direction entered as its own three numbers, and <b>View along vector</b> / <b>View perpendicular to plane</b> (see \"Viewing along a vector or a plane\" below), which orient the camera from a selection of atoms instead. The appearance of the unit cell, the axis key and the atom labels lives in Style (see \"Unit cell, axis key and atomic labels (Style)\" below).</p>" +
       "<h3>Unit cell, axis key and atomic labels (Style)</h3>" +
@@ -23722,7 +24051,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<p>\"Delete matching bonds\" does the same thing in bulk: choose two elements (either can be \"Any\" to match regardless of what it's bonded to), a distance range, and whether to cut bonds outside or inside that range, and every current bond between an atom of each chosen element (across host and guest together) meeting that criterion is cut in one action. This needs care -- it's easy to remove bonds you meant to keep if the range is too narrow, or miss the ones you meant to cut if it's too wide. If nothing gets cut, the status message says why: either matching bonds exist but sit outside the range given (showing their actual distance), or no such bond exists at all -- which can happen even when two atoms look close enough, since a minimum realistic bond length is always enforced and anything closer than that is never treated as a bond in the first place, in rendering or in this cleanup, consistently. \"Undo\" reverses a cut like any other edit if the result isn't what was intended.</p>" +
       "<p><b>Interactive bond editor</b> (Structure &gt; Edit bonds) is a second way to reach the same cut behaviour, plus the one thing plain bond-clicking can't do: force a bond into existence between two atoms that aren't actually close enough to bond. Turn it on, then click two atoms in sequence -- clicking the same pending atom again un-picks it; once a second, different atom is picked, the pair resolves immediately, cutting the bond between them if one already exists or forcing one into existence (regardless of distance) if not, and the pending pair clears either way, ready for a fresh pick. For a CIF-based structure, a forced bond is cascaded to every symmetry-equivalent pair the same way a cut is -- present now or grown later. \"Clear all enforced bonds\" is the dedicated opposite of this (distinct from \"Reinstate all bonds\", which only undoes cuts): it removes every manually-forced bond in one step, leaving any bond that's also genuinely distance-based unaffected, since that one is found on its own merits regardless. Turning on grow mode (Grow &gt; Mouse) automatically turns this off and vice versa, since both hijack a plain click for their own purpose.</p>" +
       "<h3>Show H bonds</h3>" +
-      "<p>Unchecked by default. When on, every currently-displayed atom (host and guest together, whichever layers are visible) is scanned for probable hydrogen bonds and each one found is drawn as a short red dashed line. This is a geometric estimate, not a quantum-mechanical one: a hydrogen counts as a candidate donor if it's covalently bonded to exactly one N, O, S, or Cl atom, and a bond is drawn to any other N, O, S, or Cl atom that sits within a plausible contact distance of that hydrogen and roughly in line with its own donor -- the same two criteria (distance and near-linearity) tools like Mercury use for a first pass, so \"probable\" is the right word for what's shown rather than a certainty. It updates automatically whenever the structure changes, the same as ordinary bonds.</p>" +
+      "<p>Unchecked by default, and remembered when the app is closed and reopened. When on, every currently-displayed atom (host and guest together, whichever layers are visible) is scanned for probable hydrogen bonds and each one found is drawn as a short red dashed line. This is a geometric estimate, not a quantum-mechanical one: a hydrogen counts as a candidate donor if it's covalently bonded to exactly one N, O, S, or Cl atom, and a bond is drawn to any other N, O, S, or Cl atom that sits within a plausible contact distance of that hydrogen and roughly in line with its own donor -- the same two criteria (distance and near-linearity) tools like Mercury use for a first pass, so \"probable\" is the right word for what's shown rather than a certainty. It updates automatically whenever the structure changes, the same as ordinary bonds.</p>" +
       "<h3>Mode buttons</h3>" +
       "<p>A few buttons do not act once but switch an interactive mode on and off: <b>Interactive bond editor</b>, <b>Click to add atom</b> and <b>Move atom</b> (Create/Move atoms), <b>Drag/reorient guest</b>, <b>Interactive grow mode</b> (in Mouse, and again in Molecular neighbourhood), <b>Move</b>, <b>Copy</b> and <b>Recolour</b> (Void/Channel Analysis) <b>Walk through structure</b> (Display &gt; Walk mode), and <b>Record</b> and <b>Pause</b> (Macro; one of the two is always on). They are shaded warm grey with a small hollow ring in front of the text, unlike the plain outlined buttons that act at once. While a mode is on the button turns red and the ring is filled; press it again, or another mode button, to leave the mode.</p>" +
       "<h3>Undo</h3>" +
@@ -23814,9 +24143,15 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<ul>" +
       "<li><span class='mono'>GROW_ATOM name matrix</span> / <span class='mono'>GROW_FRAG name matrix</span> / <span class='mono'>GROW_ASU name matrix</span> &mdash; a plain click in grow mode (Grow &gt; Mouse), for whichever of Atoms/Fragment/ASU is currently selected there.</li>" +
       "<li><span class='mono'>GROW_SPHERE_ATOM # name matrix</span> / <span class='mono'>GROW_SPHERE_FRAG # name matrix</span> / <span class='mono'>GROW_SPHERE_ASU # name matrix</span> &mdash; a click in grow mode with Sphere of inclusion selected (<span class='mono'>#</span> is the radius in " + U.ang + ").</li>" +
+      "<li><span class='mono'>NEIGHBOURHOOD_SPHERE radius name matrix</span> &mdash; a click on a preview atom in Grow &gt; Molecular neighbourhood with Sphere of inclusion selected; the radius is the one in the box when you clicked (works even with the mode off).</li>" +
+      "<li><span class='mono'>NEIGHBOURHOOD_HB name matrix</span> &mdash; a click on an H-bonded preview atom in Grow &gt; Molecular neighbourhood (works even with the mode off).</li>" +
+      "<li><span class='mono'>GROW_HB_ATOM name matrix</span> / <span class='mono'>GROW_HB_FRAG name matrix</span> / <span class='mono'>GROW_HB_ASU name matrix</span> &mdash; a click in grow mode with H-bonds selected.</li>" +
       "<li><span class='mono'>PACK_FRAGATOMS amin amax bmin bmax cmin cmax</span> / <span class='mono'>PACK_FRAGCENTROID amin amax bmin bmax cmin cmax</span> &mdash; the Pack tab's own Pack button, for its \"fragment atom in limits\" / \"fragment centroid in limits\" condition.</li>" +
+      "<li><span class='mono'>PACK_FRAGATOMS_HB amin amax bmin bmax cmin cmax [REPEAT]</span> / <span class='mono'>PACK_FRAGCENTROID_HB amin amax bmin bmax cmin cmax [REPEAT]</span> &mdash; the same with \"Only copies H-bonded to the structure\" ticked; the word REPEAT also ticks \"Repeat until no more are found\".</li>" +
       "<li><span class='mono'>GROW_SYM matrix</span> &mdash; the Symmetry tab's Apply button, or one of its own -a/+a/-b/+b/-c/+c shift buttons; always the matrix as set at the time (before any \"Use M<sup>-1</sup>\" inversion), and always honours whatever the Use M<sup>-1</sup>/Select new/Keep source format checkboxes are set to at the moment it's replayed, not whatever they happened to be at record time.</li>" +
       "<li><span class='mono'>EXTEND_FRAGS</span> / <span class='mono'>COMPLETE_MOLS</span> &mdash; \"Extend fragment(s)\" / \"Complete molecule(s)\", both global rather than selection-scoped.</li>" +
+      "<li><span class='mono'>EXTEND_FRAGS_HB</span> &mdash; \"Extend fragment(s)\" with \"Extend through H-bonds\" ticked.</li>" +
+      "<li><span class='mono'>COMPLETE_MOLS_HB</span> &mdash; \"Complete molecule(s)\" with \"Complete through H-bonds\" ticked.</li>" +
       "</ul>" +
       "<p><b>Atom display style</b> -- these eight are always recorded together, as one batch reflecting the complete current state of Style &gt; Atoms' own checkboxes, only when its <b>Apply</b> button is actually pressed (not one line per checkbox click along the way):</p>" +
       "<ul>" +
