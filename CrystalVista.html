@@ -1859,7 +1859,8 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
         var iCartZ = iCartX >= 0 ? hh.indexOf("_atom_site.Cartn_z") : -1;
         var cartToFracM = iCartX >= 0 ? fracToCartMatrix(cell) : null;
         var iOcc = hcol("_atom_site_occupancy", "_atom_site.occupancy");
-        var iId = hh.indexOf("_atom_site.id"); /* DDL2 only -- links to _atom_site_anisotrop.id below, since DDL2's own aniso loop has no shared label to join on */
+        var iDG = hcol("_atom_site_disorder_group", "_atom_site.disorder_group"); /* the CIF counterpart of a SHELX PART number: kept as .dgroup, for the atom-properties hover only (never .part, which switches on the PART-aware bonding) */
+        var iId =hh.indexOf("_atom_site.id"); /* DDL2 only -- links to _atom_site_anisotrop.id below, since DDL2's own aniso loop has no shared label to join on */
         /* CIF tags are nominally case-insensitive, and _atom_site_aniso_U_11
            in particular is very commonly written with an uppercase U (it's
            the symbol for the physical quantity) even in files that use
@@ -1901,6 +1902,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
               occ: occ, uiso: uiso, uij: null
             };
           }
+          if (iDG >= 0) { var dgv = (row[iDG] || "").trim(); if (dgv && dgv !== "." && dgv !== "?") atomObj.dgroup = dgv; }
           if (!isFinite(atomObj.fx) || !isFinite(atomObj.fy) || !isFinite(atomObj.fz)) { skippedAtoms.push(label); continue; } /* a missing or unreadable coordinate (?, ., text): the atom cannot be placed */
           atoms.push(atomObj);
           byLabel[label] = atomObj;
@@ -2985,7 +2987,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
        across as many Play presses (or batch-folder runs) as the user wants
        before reading/exporting it. */
     voidBatchTable: [],
-    normHDist: { C: 1.083, N: 1.009, O: 0.983, B: 1.19, S: 1.34 },
+    normHDist: { C: 1.083, N: 1.009, O: 0.983, B: 1.19, S: 1.34 }, normHHB: false, normHHBMode: "axis", showBondLengths: false, showAtomProps: false,
     viewLocked: false /* Display > Immobilise view */
   };
   state.clipPlanes.push(clipDefaults("Plane 1"));
@@ -3917,8 +3919,29 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
   }
   var lassoPoints = [], lassoFragMode = false;
   var clickMods = { shift: false, ctrl: false, alt: false };
-  function tryGrabAtomForMove(clientX, clientY) {
-    /* "Move atom" mode grabs whichever atom is under the cursor, taking
+  /* "Move selection" mode (Create/Move Atoms): pressing on one of the SELECTED atoms grabs the whole selection, which then moves in the plane of the screen
+     exactly as one atom does in Move atom (depth locked to the grabbed atom, one undo step, bonds live while dragging). Pressing anywhere else falls through
+     to the normal select / rotate behaviour, so atoms can still be selected and the view turned without leaving the mode. In a symmetry-tracked structure
+     every move is made on the asymmetric-unit site (see moveAtomTo), so one atom per asymmetric-unit site is moved by the drag and its symmetry copies follow
+     it; further selected copies of the same site are not dragged separately. */
+  var draggedSel = null, draggedSelMoved = false;
+  function tryGrabSelectionForMove(clientX, clientY) {
+    var hit = resolveClickTarget(clientX, clientY);
+    if (!hit || !hit.atom || !hit.atom.selected) return false;
+    var sel = getSelectedAtomObjects(), seen = {}, reps = [], dup = 0, tracked = state.isCif && !state.symmetryForgotten;
+    sel.sort(function (p, q) { return (q === hit.atom ? 1 : 0) - (p === hit.atom ? 1 : 0); }); /* the grabbed atom first, so it is the one that stands for its site */
+    sel.forEach(function (a) {
+      if (tracked && a.auIndex !== undefined) { if (seen[a.auIndex]) { dup++; return; } seen[a.auIndex] = true; }
+      reps.push({ atom: a, x: a.x, y: a.y, z: a.z });
+    });
+    dragMode = "selMove"; draggedSelMoved = false;
+    draggedSel = { reps: reps, n: sel.length, dup: dup, start: [hit.atom.x, hit.atom.y, hit.atom.z] };
+    var off = centroid(), world = new THREE.Vector3(hit.atom.x + off[0], hit.atom.y + off[1], hit.atom.z + off[2]);
+    draggedAtomDepth = world.clone().project(activeCam).z;
+    draggedAtomGrabOffset = world.clone().sub(ndcToWorldAtDepth(clientX, clientY, draggedAtomDepth));
+    return true;
+  }
+  function tryGrabAtomForMove(clientX, clientY) {    /* "Move atom" mode grabs whichever atom is under the cursor, taking
        priority over the label pick and the default rotate/roll drag -- an
        explicitly active mode should win over those defaults. Returns false
        (grabbing nothing) if the click didn't land on an atom, so the
@@ -4021,6 +4044,8 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       } else if (state.atomEditUiMode === "move" && tryGrabAtomForMove(e.clientX, e.clientY)) {
         /* handled entirely inside tryGrabAtomForMove() -- dragMode is
            already set to "atomMove" */
+      } else if (state.atomEditUiMode === "moveSel" && tryGrabSelectionForMove(e.clientX, e.clientY)) {
+        /* handled entirely inside tryGrabSelectionForMove() -- dragMode is already "selMove" */
       } else if (state.guestDragMode && tryGrabGuestForDrag(e.clientX, e.clientY, e.ctrlKey)) {
         /* handled entirely inside tryGrabGuestForDrag() -- dragMode is
            already set to "guestMove" or "guestRotate" */
@@ -4058,6 +4083,93 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     else { dragMode = null; return; }
     lastX = e.clientX; lastY = e.clientY;
     e.preventDefault();
+  }
+  /* ---------------- Display > Show bond lengths ----------------
+   * With the tick box on, pointing the mouse at a bond (a ball-and-stick or stick bond) shows its length in a small label that follows the pointer. Atoms in
+   * front of a bond hide it, as they hide it in the picture; nothing is drawn or changed in the structure. */
+  var bondTipEl = null, bondTipPending = null;
+  function bondTip() {
+    if (!bondTipEl) {
+      bondTipEl = document.createElement("div"); bondTipEl.id = "bondLengthTip";
+      bondTipEl.style.cssText = "position:fixed;z-index:480;pointer-events:none;display:none;padding:3px 7px;border-radius:4px;font:11px/1.3 var(--mono, monospace);background:rgba(250,246,238,.96);color:var(--ink, #222);border:1px solid var(--border, #bbb);box-shadow:0 1px 4px rgba(0,0,0,.25);white-space:pre";
+      document.body.appendChild(bondTipEl);
+    }
+    return bondTipEl;
+  }
+  function hideBondTip() { if (bondTipEl) bondTipEl.style.display = "none"; }
+  /* ---------------- Display > Show atom properties ----------------
+   * The same pointer label, for an atom: name, PART and SOF; the symmetry operator of THIS copy (X, Y, Z = the asymmetric-unit atom) and U(iso) -- or U(eq) when
+   * the atom is anisotropic; its fractional coordinates; and the six U(ij) of this copy (the asymmetric-unit tensor turned by the operator's rotation, the same
+   * tensor the ellipsoid is drawn from). Whatever the structure does not have is simply left out. */
+  function hoverFracText(t) { /* a translation as a signed fraction: +1/2, -1/3, +3/2 */
+    var s = t < 0 ? "-" : "+", v = Math.abs(t), dens = [1, 2, 3, 4, 6, 8, 12];
+    for (var i = 0; i < dens.length; i++) { var n = Math.round(v * dens[i]); if (Math.abs(v - n / dens[i]) < 2e-3) return s + (dens[i] === 1 ? String(n) : n + "/" + dens[i]); }
+    return s + String(+v.toFixed(4));
+  }
+  function hoverSymopText(op, ci, cj, ck) { /* the operator with this copy's whole-cell shift folded in, written like 1/2-X,... but with the translation last: -X+1/2,Y+1/2,-Z */
+    var V = ["X", "Y", "Z"], sh = [ci || 0, cj || 0, ck || 0];
+    return [0, 1, 2].map(function (i) {
+      var s = "";
+      for (var j = 0; j < 3; j++) {
+        var c = op.rot[i][j]; if (Math.abs(c) < 1e-6) continue;
+        var m = Math.abs(c), cs = Math.abs(m - 1) < 1e-6 ? "" : String(+m.toFixed(4));
+        s += (c < 0 ? "-" : (s ? "+" : "")) + cs + V[j];
+      }
+      var t = op.trans[i] + sh[i];
+      if (Math.abs(t) > 1e-6) { var ft = hoverFracText(t); s += s ? ft : ft.replace(/^\+/, ""); }
+      return s || "0";
+    }).join(",");
+  }
+  function hoverNum(v, n) { var s = v.toFixed(n); if (/^-0\.0*$/.test(s)) s = s.slice(1); return s.charAt(0) === "-" ? s : " " + s; }
+  function atomPropsText(a) {
+    if (!a) return null;
+    var au = (a.auIndex !== undefined && state.cifAsymUnit) ? state.cifAsymUnit[a.auIndex] : null, op = (a.opIndex !== undefined && state.cifSymops) ? state.cifSymops[a.opIndex] : null;
+    var L = [], part = a.part !== undefined ? a.part : (au && au.part !== undefined ? au.part : (au && au.dgroup !== undefined ? au.dgroup : undefined));
+    var l1 = atomLabelText(a);
+    if (op) l1 += "   " + hoverSymopText(op, a.cellI, a.cellJ, a.cellK);
+    L.push(l1);
+    if (state.isCif && state.cifFracToCart) { var f = K.cartToFrac(state.cifFracToCart, [a.x, a.y, a.z]); L.push("x " + hoverNum(f[0], 5) + "  y " + hoverNum(f[1], 5) + "  z " + hoverNum(f[2], 5)); }
+    else L.push("x " + hoverNum(a.x, 4) + "  y " + hoverNum(a.y, 4) + "  z " + hoverNum(a.z, 4) + "  (" + U.ang + ")");
+    var aniso = !!(au && au.uij), u = a.uiso != null ? a.uiso : a.ueq, l3 = [];
+    if (part !== undefined) l3.push("PART " + part);
+    if (au && au.occ != null && isFinite(au.occ)) l3.push("SOF " + String(+(+au.occ).toFixed(4)));
+    if (u != null && isFinite(u)) l3.push((aniso ? "U(eq) " : "U(iso) ") + (+u).toFixed(4));
+    if (l3.length) L.push(l3.join("   "));
+    if (aniso) {
+      var u6 = op ? K.adpRotateUij(op.rot, au.uij) : au.uij;
+      L.push("U11 " + hoverNum(u6[0], 4) + "  U22 " + hoverNum(u6[1], 4) + "  U33 " + hoverNum(u6[2], 4));
+      L.push("U23 " + hoverNum(u6[3], 4) + "  U13 " + hoverNum(u6[4], 4) + "  U12 " + hoverNum(u6[5], 4));
+    }
+    return L.join("\n");
+  }
+  function bondHoverMove(e) {
+    if (!state.showBondLengths && !state.showAtomProps) return;
+    if (dragMode || e.buttons) { hideBondTip(); return; } /* rotating, panning or dragging: no label */
+    var already = !!bondTipPending; bondTipPending = [e.clientX, e.clientY];
+    if (already) return; /* one look per frame, at the latest pointer position */
+    requestAnimationFrame(function () { var p = bondTipPending; bondTipPending = null; if (p) updateBondTip(p[0], p[1]); });
+  }
+  function updateBondTip(x, y) {
+    if ((!state.showBondLengths && !state.showAtomProps) || !renderer) { hideBondTip(); return; }
+    var rect = renderer.domElement.getBoundingClientRect();
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) { hideBondTip(); return; }
+    if (!raycaster) raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2(((x - rect.left) / rect.width) * 2 - 1, -((y - rect.top) / rect.height) * 2 + 1), activeCam);
+    var hits = raycaster.intersectObjects(atomsGroup.children.concat(guestAtomsGroup.children, bondsGroup.children, guestBondsGroup.children), false);
+    var hit = hits.length ? hits[0] : null, h = hit ? hit.object : null, ids = h && h.userData ? h.userData.bondUids : null, text = null;
+    if (ids) { /* a bond is under the pointer */
+      if (state.showBondLengths) {
+        var A = null, B = null, all = (state.atoms || []).concat(state.guestAtoms || []);
+        for (var i = 0; i < all.length && !(A && B); i++) { if (all[i].uid === ids[0]) A = all[i]; else if (all[i].uid === ids[1]) B = all[i]; }
+        if (A && B) { var d = Math.sqrt((A.x - B.x) * (A.x - B.x) + (A.y - B.y) * (A.y - B.y) + (A.z - B.z) * (A.z - B.z)); text = atomLabelText(A) + " \u2013 " + atomLabelText(B) + "   " + d.toFixed(3) + " " + U.ang; }
+      }
+    } else if (h && state.showAtomProps && hit.instanceId !== undefined && h.userData && h.userData.atoms) text = atomPropsText(h.userData.atoms[hit.instanceId]);
+    if (text === null) { hideBondTip(); return; }
+    var tip = bondTip();
+    tip.textContent = text;
+    tip.style.display = "block";
+    var tx = x + 14, ty = y + 18; if (tx + tip.offsetWidth > window.innerWidth - 4) tx = x - tip.offsetWidth - 10; if (ty + tip.offsetHeight > window.innerHeight - 4) ty = y - tip.offsetHeight - 10;
+    tip.style.left = tx + "px"; tip.style.top = ty + "px";
   }
   function onWindowPointerMove(e) {
     if (state.videoExporting) return;
@@ -4099,6 +4211,16 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       var off2 = centroid();
       moveAtomTo(draggedAtom, world.x - off2[0], world.y - off2[1], world.z - off2[2]);
       renderStructure(); /* recomputes bonds from the atom's new position every frame, so bonding updates live while dragging */
+      if (Math.abs(e.clientX - pickDownX) > 4 || Math.abs(e.clientY - pickDownY) > 4) pickMoved = true;
+      return;
+    }
+    if (dragMode === "selMove") {
+      /* the same depth-locked drag as atomMove, applied as one screen-plane shift to every atom that stands for the selection */
+      if (!draggedSelMoved) { pushUndo(); draggedSelMoved = true; }
+      var worldS = ndcToWorldAtDepth(e.clientX, e.clientY, draggedAtomDepth).add(draggedAtomGrabOffset), offS = centroid();
+      var sdx = worldS.x - offS[0] - draggedSel.start[0], sdy = worldS.y - offS[1] - draggedSel.start[1], sdz = worldS.z - offS[2] - draggedSel.start[2];
+      draggedSel.reps.forEach(function (r) { moveAtomTo(r.atom, r.x + sdx, r.y + sdy, r.z + sdz); });
+      renderStructure();
       if (Math.abs(e.clientX - pickDownX) > 4 || Math.abs(e.clientY - pickDownY) > 4) pickMoved = true;
       return;
     }
@@ -4231,6 +4353,13 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
         setStatus("Moved " + draggedAtom.el + " atom.", false);
       }
       draggedAtom = null; draggedAtomGrabOffset = null;
+    } else if (dragMode === "selMove") {
+      if (draggedSelMoved) {
+        updateHostInfo(); updateGuestInfo(); buildRadiiEditor(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
+        repositionLabels();
+        setStatus("Moved the selection (" + draggedSel.n + " atom" + (draggedSel.n === 1 ? "" : "s") + ")" + (draggedSel.dup ? "; " + draggedSel.dup + " selected symmetry cop" + (draggedSel.dup === 1 ? "y" : "ies") + " followed " + (draggedSel.dup === 1 ? "its" : "their") + " asymmetric-unit atom" : "") + ".", false);
+      } else handleLeftClick(e.clientX, e.clientY, clickMods); /* a press without a drag is an ordinary click */
+      draggedSel = null; draggedAtomGrabOffset = null;
     } else if (dragMode === "guestMove" || dragMode === "guestRotate") {
       if (draggedGuestMoved) {
         updateGuestInfo(); refreshBondCleanupElements(); updateSelectionInfo();
@@ -4294,6 +4423,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     syncControllerFromCamera();
     applyController();
     renderer.domElement.addEventListener("mousedown", onCanvasPointerDown);
+    renderer.domElement.addEventListener("mousemove", bondHoverMove); renderer.domElement.addEventListener("mouseleave", hideBondTip); /* Display > Show bond lengths */
     renderer.domElement.addEventListener("contextmenu", function (e) { e.preventDefault(); });
     renderer.domElement.addEventListener("wheel", function (e) {
       e.preventDefault();
@@ -7015,7 +7145,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
        snapping between compass directions as the dragged atom sweeps past
        others. That one case already has its own proper settle point at
        drag-release instead (onWindowPointerUp's atomMove branch). */
-    if (dragMode !== "atomMove" && dragMode !== "guestMove" && dragMode !== "guestRotate") repositionLabels();
+    if (dragMode !== "atomMove" && dragMode !== "selMove" && dragMode !== "guestMove" && dragMode !== "guestRotate") repositionLabels();
     updateClipPlane(); /* fresh label sprites just got created -- reapply the current clip plane to them */
   }
   function updateLabelScales() {
@@ -12251,9 +12381,10 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     syncAtomEditButtons();
   }
   function syncAtomEditButtons() {
-    var createBtn = document.getElementById("createAtomBtn"), moveBtn = document.getElementById("moveAtomBtn");
+    var createBtn = document.getElementById("createAtomBtn"), moveBtn = document.getElementById("moveAtomBtn"), moveSelBtn = document.getElementById("moveSelBtn");
     if (createBtn) createBtn.className = "btn mode-btn" + (state.atomEditUiMode === "create" ? " grow-active" : " ghost");
     if (moveBtn) moveBtn.className = "btn mode-btn" + (state.atomEditUiMode === "move" ? " grow-active" : " ghost");
+    if (moveSelBtn) moveSelBtn.className = "btn mode-btn" + (state.atomEditUiMode === "moveSel" ? " grow-active" : " ghost");
   }
   function exitAtomEditMode() {
     if (!state.atomEditUiMode) return;
@@ -12441,6 +12572,77 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
    * structure the change is made on the asymmetric-unit position, so every symmetry copy
    * moves together and the symmetry stays exact. Acts on the selected H atoms; with no H
    * atom selected it acts on every H atom of the structure (host and guest). Undo restores. */
+  /* ---- distance-dependent positions for hydrogen-bonded H atoms ----
+   * M. Lusi and L. J. Barbour, Cryst. Growth Des. 11, 5515 (2011): neutron data show that the D-H and H...A distances of a hydrogen bond depend on the D...A
+   * distance (x), which X-ray diffraction measures accurately, while X-ray H positions (and a fixed "neutron-normalised" X-H distance) are wrong for an H
+   * that takes part in a hydrogen bond. Table 3 of the paper gives, for six donor-acceptor pairs, D-H and H...A as polynomials in x (coefficients below,
+   * highest power first). The paper gives the distances only. Here the H is put on the plane through D, A and its present position, on its present side:
+   * "axis" (the default) moves it along its present D-H direction to D-H only; "plane" places it at both distances (the angle at D follows from the cosine law, which the paper warns is unreliable).
+   * The cubic fits are meaningful only inside the range of the neutron data (the paper plots O-H...O and N-H...O for D...A < 2.80 A; outside it they
+   * give unphysical distances), so a result is used only when D-H and H...A are sensible and the triangle D, H, A closes; otherwise the H keeps the ordinary
+   * normalisation. Acceptors: O, N or Cl at 2.3 A or more from D and less than the sum of the van der Waals radii, with H...A under 2.9 A and the present
+   * D-H...A angle at least 100 degrees; with several, the one nearest the H. */
+  var NORMH_HB = {
+    "O>O": { dh: [-6.0990, 49.8309, -135.8206, 124.4715], ha: [7.2512, -58.6376, 159.2668, -143.5384], xmax: 2.80 },
+    "N>O": { dh: [-20.5863, 168.0642, -457.4145, 416.0801], ha: [-4.2718, 24.4210, -33.1052], xmax: 2.80 },
+    "O>N": { dh: [-3.5974, 31.6627, -92.9293, 91.9034], ha: [2.1699, -19.7600, 60.9661, -61.5666], xmax: 9 },
+    "N>N": { dh: [0.7770, -4.7164, 8.1749], ha: [-0.9805, 6.9476, -10.0157], xmax: 9 },
+    "O>Cl": { dh: [-0.1900, 1.5595], ha: [-2.1935, 15.0415, -23.3696], xmax: 9 },
+    "N>Cl": { dh: [-0.1532, 1.5148], ha: [1.7342, -3.3214], xmax: 9 }
+  };
+  var NORMH_VDW = { O: 1.52, N: 1.55, Cl: 1.75 };
+  function normHPoly(c, x) { var r = 0; for (var i = 0; i < c.length; i++) r = r * x + c[i]; return r; }
+  /* D-H and H...A (Angstrom) for a donor element, an acceptor element and the D...A distance x, or null where the fit does not apply */
+  function normHHBondDistances(donor, acc, x) {
+    var P = NORMH_HB[donor + ">" + acc]; if (!P || x > P.xmax) return null;
+    var dh = normHPoly(P.dh, x), ha = normHPoly(P.ha, x);
+    if (!(dh >= 0.9 && dh <= 1.3 && ha >= 1.0 && ha <= 2.5)) return null;
+    if (dh + ha < x - 0.05 || Math.abs(dh - ha) > x) return null; /* the triangle D, H, A does not close */
+    return { dh: dh, ha: ha };
+  }
+  /* H is the origin; vD is the vector to its donor and accs are {v: vector to an acceptor, el}. Returns the new H position as a vector from the old one (with the distances used), or null */
+  function normHHBondPlace(vD, accs, donorEl, mode) {
+    function dot(p, q) { return p[0] * q[0] + p[1] * q[1] + p[2] * q[2]; }
+    function len(p) { return Math.sqrt(dot(p, p)); }
+    var dn = len(vD), best = null;
+    accs.forEach(function (c) {
+      if (!NORMH_VDW[c.el]) return;
+      var hA = len(c.v), uv = [c.v[0] - vD[0], c.v[1] - vD[1], c.v[2] - vD[2]], x = len(uv);
+      if (x < 2.3 || x >= NORMH_VDW[donorEl] + NORMH_VDW[c.el] || hA > 2.9) return;
+      if (dot(vD, c.v) / (dn * hA) > -0.1736) return; /* D-H...A below 100 degrees: not a hydrogen bond */
+      if (!best || hA < best.hA) best = { hA: hA, x: x, uv: uv, el: c.el };
+    });
+    if (!best) return null;
+    var r = normHHBondDistances(donorEl, best.el, best.x); if (!r) return null;
+    var u = [best.uv[0] / best.x, best.uv[1] / best.x, best.uv[2] / best.x], hv = [-vD[0], -vD[1], -vD[2]], hl = len(hv); /* hv: from the donor to the present H */
+    var w;
+    if (mode === "axis") w = null;
+    else { var hu = dot(hv, u); w = [hv[0] - hu * u[0], hv[1] - hu * u[1], hv[2] - hu * u[2]]; var wl = len(w); if (wl < 1e-6) w = null; else w = [w[0] / wl, w[1] / wl, w[2] / wl]; }
+    var dirv;
+    if (w) { var cosA = Math.max(-1, Math.min(1, (r.dh * r.dh + best.x * best.x - r.ha * r.ha) / (2 * r.dh * best.x))), sinA = Math.sqrt(1 - cosA * cosA); dirv = [cosA * u[0] + sinA * w[0], cosA * u[1] + sinA * w[1], cosA * u[2] + sinA * w[2]]; }
+    else dirv = [hv[0] / hl, hv[1] / hl, hv[2] / hl];
+    return { d: [vD[0] + r.dh * dirv[0], vD[1] + r.dh * dirv[1], vD[2] + r.dh * dirv[2]], dh: r.dh, ha: r.ha, x: best.x, acc: best.el };
+  }
+  /* for a hydrogen on an asymmetric-unit site: the acceptors are every symmetry image of every asymmetric-unit atom within 3.2 A of the H */
+  function normHHBondAsu(fH, parent, mode) {
+    var M = state.cifFracToCart, vD = K.fracToCart(M, parent.df), accs = [], b, s, ti, tj, tk;
+    for (b = 0; b < state.cifAsymUnit.length; b++) {
+      var ab = state.cifAsymUnit[b]; if (ab.deleted || !NORMH_VDW[ab.el]) continue;
+      for (s = 0; s < state.cifSymops.length; s++) {
+        var fp = K.applySymop(state.cifSymops[s], [ab.fx, ab.fy, ab.fz]), d0 = [fp[0] - fH[0], fp[1] - fH[1], fp[2] - fH[2]];
+        d0 = [d0[0] - Math.round(d0[0]), d0[1] - Math.round(d0[1]), d0[2] - Math.round(d0[2])];
+        for (ti = -1; ti <= 1; ti++) for (tj = -1; tj <= 1; tj++) for (tk = -1; tk <= 1; tk++) {
+          var v = K.fracToCart(M, [d0[0] + ti, d0[1] + tj, d0[2] + tk]), L = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+          if (L > 3.2 || Math.abs(v[0] - vD[0]) + Math.abs(v[1] - vD[1]) + Math.abs(v[2] - vD[2]) < 0.3) continue; /* too far, or the donor itself */
+          accs.push({ v: v, el: ab.el });
+        }
+      }
+    }
+    var r = normHHBondPlace(vD, accs, parent.el, mode); if (!r) return null;
+    var df = K.cartToFrac(M, r.d);
+    r.frac = [fH[0] + df[0], fH[1] + df[1], fH[2] + df[2]];
+    return r;
+  }
   var NORMH_DEFAULTS = { C: 1.083, N: 1.009, O: 0.983, B: 1.19, S: 1.34 };
   function normaliseHAtoms() {
     if (!state.atoms || !state.atoms.length) { setStatus("Load a structure first.", true); return; }
@@ -12448,7 +12650,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     var selH = all.filter(function (a) { return a.selected && isH(a); }), scopeAll = !selH.length, targets = scopeAll ? all.filter(isH) : selH;
     if (!targets.length) { setStatus("There are no hydrogen atoms to normalise.", true); return; }
     var table = state.normHDist, useAsu = state.isCif && !state.symmetryForgotten && state.cifFracToCart && state.cifAsymUnit && state.cifSymops;
-    var auDone = {}, changes = [], skipped = { ambiguous: 0, noParent: 0, noValue: 0 }, sumDelta = 0, MAXD = 1.45;
+    var auDone = {}, changes = [], skipped = { ambiguous: 0, noParent: 0, noValue: 0 }, sumDelta = 0, MAXD = 1.45, hbN = 0, hbTried = 0, hbMode = state.normHHBMode === "plane" ? "plane" : "axis";
     function nonH(el) { return el !== "H" && el !== "D" && el !== "Xx"; }
     targets.forEach(function (a) {
       if (useAsu && a.auIndex !== undefined && state.cifAsymUnit[a.auIndex]) {
@@ -12471,6 +12673,11 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
         var first = cand[0], second = null;
         for (var ci = 1; ci < cand.length; ci++) if (cand[ci].key !== first.key || Math.abs(cand[ci].L - first.L) > 0.05) { second = cand[ci]; break; }
         if (second && second.L < 1.35 * first.L) { skipped.ambiguous++; return; }
+        if (state.normHHB && (first.el === "O" || first.el === "N")) {
+          hbTried++;
+          var hbA = normHHBondAsu(fH, first, hbMode);
+          if (hbA) { hbN++; changes.push({ au: a.auIndex, frac: hbA.frac, delta: hbA.dh - first.L }); return; }
+        }
         var target = table[first.el];
         if (!(target > 0)) { skipped.noValue++; return; }
         var scale = 1 - target / first.L;
@@ -12485,6 +12692,13 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
         });
         if (!best) { skipped.noParent++; return; }
         if (second2 && second2.L < 1.35 * best.L) { skipped.ambiguous++; return; }
+        if (state.normHHB && (best.p.el === "O" || best.p.el === "N")) {
+          hbTried++;
+          var vDp = [best.p.x - a.x, best.p.y - a.y, best.p.z - a.z], accs2 = [];
+          all.forEach(function (q) { if (q === a || q === best.p || q.isCentroid || !NORMH_VDW[q.el]) return; var vq = [q.x - a.x, q.y - a.y, q.z - a.z]; if (Math.sqrt(vq[0] * vq[0] + vq[1] * vq[1] + vq[2] * vq[2]) <= 3.2) accs2.push({ v: vq, el: q.el }); });
+          var hbB = normHHBondPlace(vDp, accs2, best.p.el, hbMode);
+          if (hbB) { hbN++; changes.push({ atom: a, pos: [a.x + hbB.d[0], a.y + hbB.d[1], a.z + hbB.d[2]], delta: hbB.dh - best.L }); return; }
+        }
         var t2 = table[best.p.el];
         if (!(t2 > 0)) { skipped.noValue++; return; }
         var sc = t2 / best.L;
@@ -12510,12 +12724,13 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     });
     recomputeViewOffset();
     renderStructure(); renderSelection(); updateSelectionInfo(); updateHostInfo(); updateGuestInfo();
-    recordMacroCommand("NORMALISE_H");
+    recordMacroCommand("NORMALISE_H" + (state.normHHB ? (hbMode === "plane" ? " HB_PLANE" : " HB") : ""));
     var parts = [];
+    var hbNote = (state.normHHB && hbTried > hbN) ? "; " + (hbTried - hbN) + " O\u2013H/N\u2013H without a usable H-bond within the range of the fits got the fixed distance" : "";
     if (skipped.ambiguous) parts.push(skipped.ambiguous + " bridging/ambiguous");
     if (skipped.noParent) parts.push(skipped.noParent + " with no parent within " + MAXD + " " + U.ang);
     if (skipped.noValue) parts.push(skipped.noValue + " on a parent element with no distance set");
-    setStatus("Normalised " + changes.length + " hydrogen position" + (changes.length === 1 ? "" : "s") + (useAsu ? " (asymmetric-unit sites; every symmetry copy moved with them)" : "") + ", mean change " + (sumDelta / changes.length >= 0 ? "+" : "") + (sumDelta / changes.length).toFixed(3) + " " + U.ang + (scopeAll ? " -- no H atom was selected, so all H atoms were treated" : "") + (parts.length ? "; left alone: " + parts.join(", ") : "") + ".", false);
+    setStatus("Normalised " + changes.length + " hydrogen position" + (changes.length === 1 ? "" : "s") + (hbN ? " (" + hbN + " by the distance-dependent H-bond method)" : "") + (useAsu ? " (asymmetric-unit sites; every symmetry copy moved with them)" : "") + ", mean change " + (sumDelta / changes.length >= 0 ? "+" : "") + (sumDelta / changes.length).toFixed(3) + " " + U.ang + (scopeAll ? " -- no H atom was selected, so all H atoms were treated" : "") + hbNote + (parts.length ? "; left alone: " + parts.join(", ") : "") + ".", false);
   }
 
   function reassignSelectedElement(newEl) {
@@ -13112,7 +13327,11 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
         return true;
       case "SELECTED_TO_ASU": moveSelectedAtomsToAsu(); return true;
       case "DELETE_SELECTED_ATOMS": deleteSelectedAtoms(); return true;
-      case "NORMALISE_H": normaliseHAtoms(); return true;
+      case "NORMALISE_H": { /* a bare NORMALISE_H is the fixed-distance method; HB / HB_AXIS add the distance-dependent H-bond method for the run */
+        var nhSave = [state.normHHB, state.normHHBMode];
+        state.normHHB = /^HB/i.test(rest); if (state.normHHB) state.normHHBMode = /PLANE/i.test(rest) ? "plane" : "axis";
+        try { normaliseHAtoms(); } finally { state.normHHB = nhSave[0]; state.normHHBMode = nhSave[1]; }
+        return true; }
       case "CREATE_CENTROID": generateCentroid(); return true;
       case "DELETE_SYM_ATOMS": deleteSymmetryGeneratedAtoms(); return true;
       case "REASSIGN_ELEMENT":
@@ -14837,7 +15056,28 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       }
     }
   }
+  /* A symmetry copy of an atom on a special position (an atom an operator maps onto itself or onto another atom of the same molecule, such as the carbon of a
+     CO2 on an inversion centre) lands on top of an atom that is already there. The (asymmetric-unit atom, operator, cell) keys differ, so the "already
+     displayed" tests miss it, and the CIF's rounding leaves the copies a few micro-angstroms apart. Pack and Complete molecule(s) used to add them. This
+     returns only the atoms that are not within 0.01 A of an atom in "existingList" or of an earlier atom of the list itself (a grid of 0.05 A buckets keeps it fast). */
+  function dropCoincidentAtoms(list, existingList) {
+    var tol2 = 1e-4, cell = 0.05, grid = {}, keep = [];
+    function put(a) { var k = Math.floor(a.x / cell) + "," + Math.floor(a.y / cell) + "," + Math.floor(a.z / cell); (grid[k] || (grid[k] = [])).push(a); }
+    function hit(a) {
+      var ix = Math.floor(a.x / cell), iy = Math.floor(a.y / cell), iz = Math.floor(a.z / cell);
+      for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) for (var dz = -1; dz <= 1; dz++) {
+        var b = grid[(ix + dx) + "," + (iy + dy) + "," + (iz + dz)]; if (!b) continue;
+        for (var i = 0; i < b.length; i++) { var ex = b[i].x - a.x, ey = b[i].y - a.y, ez = b[i].z - a.z; if (ex * ex + ey * ey + ez * ez < tol2) return true; }
+      }
+      return false;
+    }
+    (existingList || []).forEach(put);
+    list.forEach(function (a) { if (hit(a)) return; put(a); keep.push(a); });
+    return keep;
+  }
   function commitGrownAtoms(newAtoms, skipGrowStyle) {
+    if (!newAtoms.length) return 0;
+    newAtoms = dropCoincidentAtoms(newAtoms, (state.atoms || []).concat(state.guestAtoms || []));
     if (!newAtoms.length) return 0;
     /* while a completion pass (manual button or the auto-complete-after-growth
        hook below) is committing its own findings fragment by fragment, every
@@ -17484,9 +17724,9 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
         compressModelAsZip: state.compressModelAsZip,
         showUnitCellLabels: state.showUnitCellLabels,
         axisKeyZoom: state.axisKeyZoom, axisKeyProportional: state.axisKeyProportional, axisKeyLabels: state.axisKeyLabels,
-        normHDist: state.normHDist,
+        normHDist: state.normHDist, normHHB: state.normHHB, normHHBMode: state.normHHBMode,
         showAxisKey: state.showAxisKey, axisKeyOffsetX: state.axisKeyOffsetX, axisKeyOffsetY: state.axisKeyOffsetY,
-        showHBonds: state.showHBonds,
+        showHBonds: state.showHBonds, showBondLengths: state.showBondLengths, showAtomProps: state.showAtomProps,
         showUnitCell: state.showUnitCell, unitCellColor: state.unitCellColor, unitCellThickness: state.unitCellThickness, unitCellAxisColors: state.unitCellAxisColors
         /* clipPlaneEnabled deliberately NOT persisted -- starting a fresh
            session with part of the structure invisible for no visible
@@ -17579,6 +17819,8 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       if (typeof data.compressModelAsZip === "boolean") state.compressModelAsZip = data.compressModelAsZip;
       if (typeof data.showUnitCellLabels === "boolean") state.showUnitCellLabels = data.showUnitCellLabels;
       if (data.hasOwnProperty("axisKeyZoom")) state.axisKeyZoom = clamp(data.axisKeyZoom, 0.4, 3, state.axisKeyZoom);
+      if (typeof data.normHHB === "boolean") state.normHHB = data.normHHB;
+      if (data.normHHBMode === "plane" || data.normHHBMode === "axis") state.normHHBMode = data.normHHBMode;
       if (data.normHDist && typeof data.normHDist === "object") Object.keys(NORMH_DEFAULTS).forEach(function (k) { var v = data.normHDist[k]; if (typeof v === "number" && isFinite(v) && v > 0.5 && v < 2) state.normHDist[k] = v; });
       if (typeof data.axisKeyProportional === "boolean") state.axisKeyProportional = data.axisKeyProportional;
       if (typeof data.axisKeyLabels === "boolean") state.axisKeyLabels = data.axisKeyLabels;
@@ -17587,6 +17829,8 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
          (position is re-clamped to the window on every use) */
       if (typeof data.showUnitCell === "boolean") state.showUnitCell = data.showUnitCell;
       if (typeof data.showHBonds === "boolean") state.showHBonds = data.showHBonds; /* Display > Show H bonds is remembered between sessions */
+      if (typeof data.showBondLengths === "boolean") state.showBondLengths = data.showBondLengths; /* so is Display > Show bond lengths */
+      if (typeof data.showAtomProps === "boolean") state.showAtomProps = data.showAtomProps; /* and Display > Show atom properties */
       if (typeof data.unitCellColor === "number") state.unitCellColor = data.unitCellColor;
       if (data.hasOwnProperty("unitCellThickness")) state.unitCellThickness = clamp(data.unitCellThickness, 0.01, 0.15, state.unitCellThickness);
       if (typeof data.unitCellAxisColors === "boolean") state.unitCellAxisColors = data.unitCellAxisColors;
@@ -19210,7 +19454,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
   var ORB = {
     dir: null, dirName: "", pairDir: null, molDir: null,
     cfg: { command: "orca", preset: "B3LYP D3BJ def2-SVP", keywords: "B3LYP D3BJ def2-SVP TightSCF RIJCOSX def2/J", cp: true, cores: 1, maxcore: 2000, charge: 0, cutoff: 4.0, grid: 60,
-      fwShow: false, fwRadius: 0.25, fwMin: 5, fwLambda: 1.2, fwOnMol: true, fwOnVoid: true, espRedPos: false,
+      fwShow: false, fwRadius: 0.25, fwMin: 5, fwLambda: 1.2, fwOnMol: true, fwOnVoid: true, espRedPos: false, espColNeg: "#ff0000", espColMid: "#ffffff", espColPos: "#0000ff",
       fwAxis: 2, fwCells: 3, fwClRadius: 8, fwKeywords: "PBE def2-SVP def2/J RI", fwCharge: 0, fwMaxPts: 60000 },
     dimers: null, results: null, fwGroup: null, mol: { dens: true, frontier: false, esp: false }, molRun: null,
     cubes: [], cubeGroup: null, esp: null, espRange: 0.03, espSource: "", ui: {}
@@ -19223,7 +19467,13 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     ["r2SCAN-3c", "r2SCAN-3c TightSCF", false],
     ["PBEh-3c", "PBEh-3c TightSCF", false]
   ];
-  function orbLoadCfg() { try { var raw = localStorage.getItem(ORB_KEY); if (raw) { var d = JSON.parse(raw); Object.keys(ORB.cfg).forEach(function (k) { if (d[k] !== undefined && typeof d[k] === typeof ORB.cfg[k]) ORB.cfg[k] = d[k]; }); } } catch (e) { /* no stored settings */ } }
+  function orbLoadCfg() { try { var raw = localStorage.getItem(ORB_KEY); if (raw) { var d = JSON.parse(raw); Object.keys(ORB.cfg).forEach(function (k) { if (d[k] !== undefined && typeof d[k] === typeof ORB.cfg[k]) ORB.cfg[k] = d[k]; });
+      /* the old "Red = positive" tick box is now the three colours: a browser that had it ticked keeps blue for negative and red for positive */
+      if (d.espColNeg === undefined && d.espRedPos === true) { ORB.cfg.espColNeg = "#0000ff"; ORB.cfg.espColPos = "#ff0000"; }
+    } } catch (e) { /* no stored settings */ }
+    var dflt = { espColNeg: "#ff0000", espColMid: "#ffffff", espColPos: "#0000ff" };
+    Object.keys(dflt).forEach(function (k) { if (!/^#[0-9a-f]{6}$/i.test(ORB.cfg[k])) ORB.cfg[k] = dflt[k]; });
+  }
   function orbSaveCfg() { try { localStorage.setItem(ORB_KEY, JSON.stringify(ORB.cfg)); } catch (e) { /* not saved */ } }
   orbLoadCfg();
   function orbSym(el) { return (el === "D" || el === "T") ? "H" : el; }
@@ -19243,7 +19493,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
   function orbMolecules() {
     var mols = [];
     [[state.atoms, "host"], [state.guestAtoms, "guest"]].forEach(function (L) {
-      var arr = (L[0] || []).filter(function (a) { return !a.isCentroid && a.el !== "Xx"; });
+      var arr = dropCoincidentAtoms((L[0] || []).filter(function (a) { return !a.isCentroid && a.el !== "Xx"; }));
       if (!arr.length) return;
       var bonds = computeBondsWithOverrides(arr), parent = arr.map(function (_, i) { return i; });
       function find(i) { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; }
@@ -19497,6 +19747,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     var atoms = getSelectedAtomObjects().filter(function (a) { return !a.isCentroid && a.el !== "Xx"; }), fromSurface = false;
     if (!atoms.length && ORB.mol.esp) { atoms = orbSurfaceAtoms(); fromSurface = atoms.length > 0; }
     if (!atoms.length) { setStatus("Select the atoms of the molecule first (building a molecular surface clears the selection).", true); return; }
+    var nBefore = atoms.length; atoms = dropCoincidentAtoms(atoms); var merged = nBefore - atoms.length; /* atoms on top of each other make Orca stop with a zero-distance error */
     var cfg = ORB.cfg, M = ORB.mol, q = cfg.charge, mult = orbMult(atoms, q), nEl = orbElectrons(atoms, q);
     if (!(await orbEnsureDir())) { setStatus("No folder chosen.", true); return; }
     var sp = null;
@@ -19521,11 +19772,13 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       }
       await orbWrite(dir, "mol_manifest.json", JSON.stringify(man, null, 1));
       var bat = ["@echo off", 'cd /d "%~dp0"', "echo Running Orca on " + base + " ...", orbCmd() + " " + base + '.inp > ' + base + ".out"];
+      /* stop here if Orca failed: running orca_vpot on a wavefunction that was never written only adds a second, misleading error */
+      bat.push('findstr /c:"ORCA TERMINATED NORMALLY" ' + base + '.out >nul 2>&1 || (echo. & echo Orca did not finish normally. The last lines of ' + base + '.out say why. & pause & exit /b 1)');
       if (sp) bat.push("echo Evaluating the electrostatic potential ...", orbVpotCmd() + " " + base + ".gbw " + base + ".scfp " + base + "_points.txt " + base + "_esp.txt");
       bat.push("del /q " + base + ".bibtex " + base + ".bas* " + base + "*.tmp " + base + ".citations* 2>nul", "echo.", "echo Done. Return to CrystalVista and press Read results.", "pause");
       await orbWrite(dir, "run_mol.bat", bat.join("\r\n") + "\r\n");
       ORB.molDir = dir;
-      setStatus("Wrote " + base + ".inp" + (sp ? ", the surface points" : "") + " and run_mol.bat to " + ORB.dirName + "/" + dir.name + (fromSurface ? " (molecule taken from the molecular surface)" : "") + (mult === 2 ? " (odd number of electrons: multiplicity 2)" : "") + ". Run run_mol.bat, then press Read results." + orbCoreNote(), false);
+      setStatus("Wrote " + base + ".inp" + (sp ? ", the surface points" : "") + " and run_mol.bat to " + ORB.dirName + "/" + dir.name + (fromSurface ? " (molecule taken from the molecular surface)" : "") + (merged ? " (" + merged + " atom" + (merged === 1 ? "" : "s") + " lying on top of another atom left out)" : "") + (mult === 2 ? " (odd number of electrons: multiplicity 2)" : "") + ". Run run_mol.bat, then press Read results." + orbCoreNote(), false);
     } catch (e) { setStatus("Could not write the files: " + e.message, true); }
   }
   async function orbReadMol() {
@@ -19677,9 +19930,9 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     if (!ORB.esp) { if (L) L.style.display = "none"; return; }
     if (!L) { L = document.createElement("div"); L.id = "espLegend"; host.appendChild(L); }
     var kc = !!ORB.esp.fw, r = kc ? ORB.espRange * HARTREE_KCAL : ORB.espRange, txt = kc ? r.toFixed(r < 10 ? 1 : 0) : r.toPrecision(2), unit = kc ? "kcal/mol" : "a.u.";
-    var neg = ORB.cfg.espRedPos ? "#2f5fb3" : "#d33a2c", pos = ORB.cfg.espRedPos ? "#d33a2c" : "#2f5fb3";
+    var neg = ORB.cfg.espColNeg, pos = ORB.cfg.espColPos;
     L.style.display = "";
-    L.innerHTML = "<div class='eleg-t'>" + (ORB.esp.label || "Potential") + " (" + unit + ")</div><div class='eleg-bar' style='background:linear-gradient(to right," + neg + ",#ffffff," + pos + ")'></div><div class='eleg-l'><span>&minus;" + txt + "</span><span>0</span><span>+" + txt + "</span></div>";
+    L.innerHTML = "<div class='eleg-t'>" + (ORB.esp.label || "Potential") + " (" + unit + ")</div><div class='eleg-bar' style='background:linear-gradient(to right," + neg + "," + ORB.cfg.espColMid + "," + pos + ")'></div><div class='eleg-l'><span>&minus;" + txt + "</span><span>0</span><span>+" + txt + "</span></div>";
   }
   function fwDoCharges() {
     try {
@@ -19717,9 +19970,17 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
   }
   function orbEspColor(v, range, out, o) {
     if (!isFinite(v)) { out[o] = out[o + 1] = out[o + 2] = 0.8; return; }
-    var t = Math.max(-1, Math.min(1, v / range));
-    if (ORB.cfg.espRedPos) t = -t; /* red for positive, as in the framework-potential figures of the literature */
-    if (t < 0) { out[o] = 1; out[o + 1] = 1 + t; out[o + 2] = 1 + t; } else { out[o] = 1 - t; out[o + 1] = 1 - t; out[o + 2] = 1; }
+    var t = Math.max(-1, Math.min(1, v / range)), P = orbEspPalette(), e = P.m, s = t < 0 ? P.n : P.p, w = Math.abs(t);
+    out[o] = e[0] + (s[0] - e[0]) * w; out[o + 1] = e[1] + (s[1] - e[1]) * w; out[o + 2] = e[2] + (s[2] - e[2]) * w; /* from the zero colour towards the negative or the positive colour */
+  }
+  /* the three colours of the potential map (negative, zero, positive) as 0..1 triples, parsed again only when one of them changes */
+  function orbEspPalette() {
+    var C = ORB.cfg, k = C.espColNeg + C.espColMid + C.espColPos;
+    if (!ORB.espPal || ORB.espPal.k !== k) {
+      var rgb = function (h) { return [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255]; };
+      ORB.espPal = { k: k, n: rgb(C.espColNeg), m: rgb(C.espColMid), p: rgb(C.espColPos) };
+    }
+    return ORB.espPal;
   }
   /* called by renderMolSurfaceMeshes for every surface it draws */
   function orcaEspPaint(id, geo, meshes) {
@@ -19924,7 +20185,16 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       orbSetEspFromCube(c);
     });
     button(er, "Clear colours", "ghost", orbClearEsp); espSub.appendChild(er);
-    toggle(espSub, "Red = positive", C.espRedPos, function (v) { C.espRedPos = v; orbSaveCfg(); if (ORB.esp) orbRepaintSurfaces(); }).parentNode.title = "Reverses the colours: red for positive potential, blue for negative, as in many framework-potential figures.";
+    /* the three colours of every potential map (Orca ESP, cube ESP, framework potential): most negative, zero, most positive; remembered in the browser */
+    var colRow = el("div", "ctl-inline"); colRow.appendChild(el("label", "plain", "colours")); colRow.title = "The colours of the potential map: negative, zero and positive. Right-click a swatch for the favourite colours.";
+    var colSw = {};
+    [["espColNeg", "−", "Colour of the most negative potential"], ["espColMid", "0", "Colour of zero potential"], ["espColPos", "+", "Colour of the most positive potential"]].forEach(function (d) {
+      colRow.appendChild(el("span", "unit", d[1]));
+      var sw = colorSwatch(cssToHex(C[d[0]]), function (hex) { C[d[0]] = hexToCss(hex); orbSaveCfg(); if (ORB.esp) orbRepaintSurfaces(); }); sw.title = d[2]; colRow.appendChild(sw); colSw[d[0]] = sw;
+    });
+    var swapBtn = el("button", "btn ghost", "Reverse"); swapBtn.type = "button"; swapBtn.style.width = "auto"; swapBtn.title = "Swaps the negative and the positive colour.";
+    swapBtn.addEventListener("click", function () { var t = C.espColNeg; C.espColNeg = C.espColPos; C.espColPos = t; colSw.espColNeg.value = C.espColNeg; colSw.espColPos.value = C.espColPos; orbSaveCfg(); if (ORB.esp) orbRepaintSurfaces(); });
+    colRow.appendChild(swapBtn); espSub.appendChild(colRow);
     var rs = slider(espSub, "colour range ±", 0.001, 0.2, 0.001, ORB.espRange, "a.u.", function (v) { ORB.espRange = v; if (ORB.esp) orbRepaintSurfaces(); }); U1.espRange = rs;
     /* the same setting as "surface opacity" in Molecular Surface, kept in step with it */
     U1.espOp = slider(espSub, "surface opacity", 0.05, 1.0, 0.05, state.molSurfaceOpacity, "", function (v) {
@@ -20035,11 +20305,11 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
         var c2 = K.fracToCart(M, f); atoms.push({ el: au.el, f: f, x: c2[0], y: c2[1], z: c2[2], au: +ks, label: au.label || au.el, op: opi, sh: [-Math.floor(f0[0]), -Math.floor(f0[1]), -Math.floor(f0[2])] }); /* op and sh: this site is symmetry operation op of the asymmetric-unit atom, moved by sh cells into the unit cell */
       });
     });
-    /* two atoms that close are overlapping disorder components: EQeq is not meaningful for them */
+    /* two atoms practically on top of each other (less than 0.5 A: no bond is that short, not even an X-ray O-H or C-H) are overlapping disorder components, for which EQeq is not meaningful */
     for (var i = 0; i < atoms.length; i++) for (var j = i + 1; j < atoms.length; j++) {
       var d = [atoms[i].f[0] - atoms[j].f[0], atoms[i].f[1] - atoms[j].f[1], atoms[i].f[2] - atoms[j].f[2]]; d = [d[0] - Math.round(d[0]), d[1] - Math.round(d[1]), d[2] - Math.round(d[2])];
       var cc = K.fracToCart(M, d);
-      if (cc[0] * cc[0] + cc[1] * cc[1] + cc[2] * cc[2] < 0.81) throw new Error(atoms[i].label + " and " + atoms[j].label + " are less than 0.9 " + U.ang + " apart (disorder components?): remove one of them from the host first");
+      if (cc[0] * cc[0] + cc[1] * cc[1] + cc[2] * cc[2] < 0.25) throw new Error(atoms[i].label + " and " + atoms[j].label + " are less than 0.5 " + U.ang + " apart (disorder components?): remove one of them from the host first");
     }
     return atoms;
   }
@@ -20312,7 +20582,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
   }
   /* the caps for the host atoms now selected in the view (whatever way they were chosen) */
   function fwClusterFromSelection() {
-    var sel = (state.atoms || []).filter(function (a) { return a.selected && !a.isCentroid && a.el !== "Xx"; });
+    var sel = dropCoincidentAtoms((state.atoms || []).filter(function (a) { return a.selected && !a.isCentroid && a.el !== "Xx"; })); /* an atom on top of another one (a copy on a special position) would make Orca stop with a zero-distance error */
     if (!sel.length) throw new Error("select the host atoms of the cluster first (Build cluster does it)");
     var cell = fwHostCell(), lat = fwLattice(), lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
     sel.forEach(function (a) { var p = [a.x, a.y, a.z]; for (var d = 0; d < 3; d++) { if (p[d] < lo[d]) lo[d] = p[d]; if (p[d] > hi[d]) hi[d] = p[d]; } });
@@ -21502,10 +21772,801 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
   }
   /* ---- FCF-END ---- */
 
+  /* ---- QE-BEGIN: Quantum ESPRESSO (pw.x) input writer and output reader ----
+   * One self-contained menu. A browser cannot run a program, so (like the Orca bridge) this writes the input files and a small run script into a folder
+   * you choose, you copy that folder to the machine that has Quantum ESPRESSO and run the script there, and later you copy the results back and read them.
+   *  - Setup: the pseudopotential folder (a path on the machine that runs QE), the pseudopotential file of each element, spin and Hubbard U.
+   *  - Calculation: single point (scf), relax, vc-relax, with the functional, dispersion correction, cutoff, k-points, smearing and thresholds.
+   *  - Convergence tests: a series of scf jobs over the cutoff or over the k-point spacing.
+   *  - Results: reads pw.x output (energies, forces, pressure, steps, gap) and loads any step's structure back into the viewer.
+   * The cell contents come from the asymmetric unit and the symmetry operators (all atoms fully occupied), written as a P1 cell with ibrav = 0.
+   * Everything lives in this block and in the QE object; the only lines outside it are buildQeUi() in buildUI, the "qe" entry of FEATURES, the QE help text,
+   * and the QE branch of the viewport drop handler. */
+  var QE_BOHR = 0.529177210903, QE_RY = 13.605693122994, QE_RYBOHR = 25.71104309541616, QE_KEY = "CrystalVista_qe";
+  var QE = {
+    dir: null, dirName: "", jobDir: null, res: null, upf: {}, cell: null, ui: {},
+    cfg: { pseudoDir: "./pseudo", pseudoFiles: {}, mag: {}, hubU: {},
+      calc: "relax", func: "auto", vdw: "d3bj", ecut: 80, kMode: "spacing", kSpacing: 0.3, kMesh: [2, 2, 2], occ: "fixed", smear: "mv", smearEv: 0.2, spin: false,
+      convPerAtom: 1e-8, mixBeta: 0.4, elecSteps: 200, forceEv: 0.02, nstep: 100, pressGPa: 0, dofree: "all", pressThrKbar: 0.5, fixSel: false,
+      mpirun: "mpirun", cores: 8, pools: 1, pw: "pw.x", slurm: false, slurmTime: "24:00:00", slurmPart: "", slurmModule: "",
+      convKind: "ecut", convEcut: "40, 60, 80, 100, 120", convK: "0.5, 0.4, 0.3, 0.25, 0.2" }
+  };
+  var QE_MASS = { H: 1.008, He: 4.0026, Li: 6.94, Be: 9.0122, B: 10.81, C: 12.011, N: 14.007, O: 15.999, F: 18.998, Ne: 20.180, Na: 22.990, Mg: 24.305, Al: 26.982, Si: 28.085, P: 30.974, S: 32.06, Cl: 35.45, Ar: 39.948,
+    K: 39.098, Ca: 40.078, Sc: 44.956, Ti: 47.867, V: 50.942, Cr: 51.996, Mn: 54.938, Fe: 55.845, Co: 58.933, Ni: 58.693, Cu: 63.546, Zn: 65.38, Ga: 69.723, Ge: 72.630, As: 74.922, Se: 78.971, Br: 79.904, Kr: 83.798,
+    Rb: 85.468, Sr: 87.62, Y: 88.906, Zr: 91.224, Nb: 92.906, Mo: 95.95, Tc: 98, Ru: 101.07, Rh: 102.91, Pd: 106.42, Ag: 107.87, Cd: 112.41, In: 114.82, Sn: 118.71, Sb: 121.76, Te: 127.60, I: 126.90, Xe: 131.29,
+    Cs: 132.91, Ba: 137.33, La: 138.91, Ce: 140.12, Pr: 140.91, Nd: 144.24, Pm: 145, Sm: 150.36, Eu: 151.96, Gd: 157.25, Tb: 158.93, Dy: 162.50, Ho: 164.93, Er: 167.26, Tm: 168.93, Yb: 173.05, Lu: 174.97,
+    Hf: 178.49, Ta: 180.95, W: 183.84, Re: 186.21, Os: 190.23, Ir: 192.22, Pt: 195.08, Au: 196.97, Hg: 200.59, Tl: 204.38, Pb: 207.2, Bi: 208.98, Th: 232.04, U: 238.03 };
+  function qeLoadCfg() {
+    try { var raw = localStorage.getItem(QE_KEY); if (raw) { var d = JSON.parse(raw); Object.keys(QE.cfg).forEach(function (k) { if (d[k] !== undefined && typeof d[k] === typeof QE.cfg[k]) QE.cfg[k] = d[k]; }); } } catch (e) { /* no stored settings */ }
+    if (!(QE.cfg.kMesh instanceof Array) || QE.cfg.kMesh.length !== 3) QE.cfg.kMesh = [2, 2, 2];
+  }
+  function qeSaveCfg() { try { localStorage.setItem(QE_KEY, JSON.stringify(QE.cfg)); } catch (e) { /* not saved */ } }
+  qeLoadCfg();
+
+  /* ---- small helpers ---- */
+  function qeSym(el) { return (el === "D" || el === "T") ? "H" : el; }
+  function qeIsEl(s) { return !!s && K.ELEMENTS.indexOf(s) > 0; }
+  /* element of a species label such as "C", "Fe1", "Ow" */
+  function qeElOf(label) {
+    var m = /^([A-Za-z]{1,2})/.exec(label || ""); if (!m) return "X";
+    var s = m[1], c2 = s.charAt(0).toUpperCase() + s.slice(1).toLowerCase(), c1 = s.charAt(0).toUpperCase();
+    if (s.length === 2 && qeIsEl(c2)) return c2;
+    return qeIsEl(c1) ? c1 : c2;
+  }
+  function qeStem(s) { return String(s || "structure").replace(/\.[^.]+$/, "").replace(/[^A-Za-z0-9_\-]+/g, "_").slice(0, 40).replace(/_QE(_step\d+)?$/i, "") || "structure"; }
+  function qeBase() { return qeStem(state.name); }
+  function qeCross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+  function qeDot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+  function qeNorm(a) { return Math.sqrt(qeDot(a, a)); }
+  function qeVol(A) { return Math.abs(qeDot(A[0], qeCross(A[1], A[2]))); }
+  /* the rows of A are the lattice vectors: p = f0*A0 + f1*A1 + f2*A2 */
+  function qeCartToFrac(A, p) {
+    var V = qeDot(A[0], qeCross(A[1], A[2]));
+    return [qeDot(p, qeCross(A[1], A[2])) / V, qeDot(p, qeCross(A[2], A[0])) / V, qeDot(p, qeCross(A[0], A[1])) / V];
+  }
+  function qeFracToCart(A, f) { return [f[0] * A[0][0] + f[1] * A[1][0] + f[2] * A[2][0], f[0] * A[0][1] + f[1] * A[1][1] + f[2] * A[2][1], f[0] * A[0][2] + f[1] * A[1][2] + f[2] * A[2][2]]; }
+  function qeAngle(u, v) { return Math.acos(Math.max(-1, Math.min(1, qeDot(u, v) / (qeNorm(u) * qeNorm(v))))) * 180 / Math.PI; }
+  function qeCellParams(A) { return { a: qeNorm(A[0]), b: qeNorm(A[1]), c: qeNorm(A[2]), alpha: qeAngle(A[1], A[2]), beta: qeAngle(A[0], A[2]), gamma: qeAngle(A[0], A[1]) }; }
+  function qeRecipLens(A) { var s = 2 * Math.PI / qeVol(A); return [qeNorm(qeCross(A[1], A[2])) * s, qeNorm(qeCross(A[2], A[0])) * s, qeNorm(qeCross(A[0], A[1])) * s]; }
+  function qeKMeshFor(A, spacing) { return qeRecipLens(A).map(function (x) { return Math.max(1, Math.ceil(x / spacing - 1e-6)); }); }
+  function qeKMesh(cell) {
+    var C = QE.cfg;
+    if (C.kMode === "gamma") return [1, 1, 1];
+    if (C.kMode === "manual") return C.kMesh.map(function (x) { return Math.max(1, Math.round(x) || 1); });
+    return qeKMeshFor(cell.A, C.kSpacing);
+  }
+  /* the Hubbard manifold of an element that usually needs a U (transition metals and lanthanides), else null */
+  function qeHubOrb(el) { var z = K.ELEMENTS.indexOf(el); if (z >= 21 && z <= 30) return "3d"; if (z >= 39 && z <= 48) return "4d"; if (z >= 58 && z <= 71) return "4f"; if (z >= 72 && z <= 80) return "5d"; return null; }
+  function qeMagDefault(el) { return qeHubOrb(el) ? 0.5 : 0; }
+  function qeExp(x) { return x.toExponential(3).replace("e+", "e"); }
+  function qeFix(x, d) { var s = x.toFixed(d); return /^-0\.0*$/.test(s) ? s.slice(1) : s; }
+
+  /* ---- the cell contents: every symmetry copy of every asymmetric-unit atom, wrapped into the cell ---- */
+  function qeBuildCell() {
+    if (!state.isCif || state.symmetryForgotten || !state.cifAsymUnit || !state.cifSymops || !state.cifCell || !state.cifFracToCart)
+      return { error: "This needs a CIF or SHELX structure that still has its symmetry information: the cell contents are built from the asymmetric unit and the symmetry operators." };
+    syncGuestAsuRootsFromCurrentPositions();
+    var M = state.cifFracToCart, A = [[M[0][0], M[1][0], M[2][0]], [M[0][1], M[1][1], M[2][1]], [M[0][2], M[1][2], M[2][2]]];
+    var au = state.cifAsymUnit, ops = state.cifSymops, i, j, k, atoms = [], partial = 0, species = [], spIdx = {}, sel = {}, nSelAu = 0;
+    (state.atoms || []).concat(state.guestAtoms || []).forEach(function (a) { if (a.selected && a.auIndex !== undefined && !sel[a.auIndex]) { sel[a.auIndex] = true; nSelAu++; } });
+    function wrap(x) { var w = x - Math.floor(x); if (w > 1 - 1e-7 || w < 1e-9) w = 0; return w; }
+    function nearD(f1, f2) { var d = [f2[0] - f1[0], f2[1] - f1[1], f2[2] - f1[2]]; d = d.map(function (x) { return x - Math.round(x); }); return qeNorm(qeFracToCart(A, d)); }
+    for (i = 0; i < au.length; i++) {
+      var a0 = au[i]; if (a0.deleted || a0.el === "Xx") continue;
+      var el = qeSym(a0.el); if (!qeIsEl(el)) continue;
+      if (a0.occ != null && a0.occ < 0.999) partial++;
+      if (spIdx[el] === undefined) { spIdx[el] = species.length; species.push(el); }
+      var kept = [];
+      for (k = 0; k < ops.length; k++) {
+        var f = K.applySymop(ops[k], [a0.fx, a0.fy, a0.fz]).map(wrap), dup = false;
+        for (j = 0; j < kept.length && !dup; j++) if (nearD(kept[j], f) < 0.05) dup = true;
+        if (dup) continue;
+        kept.push(f);
+        atoms.push({ el: el, sp: spIdx[el], au: i, f: f, label: (a0.label || (el + (i + 1))) + (kept.length > 1 ? "_" + kept.length : ""), fixed: !!sel[i] });
+      }
+    }
+    if (!atoms.length) return { error: "There are no atoms to write." };
+    atoms.forEach(function (a, n) { a.ord = n; });
+    atoms.sort(function (p, q) { return (p.sp - q.sp) || (p.ord - q.ord); });
+    var counts = {}; atoms.forEach(function (a) { counts[a.el] = (counts[a.el] || 0) + 1; });
+    /* the closest pair of atoms in the periodic cell: two atoms on top of each other mean disorder components that must not both be written */
+    var minD = Infinity, minPair = null, n = atoms.length, A00 = A[0][0], A01 = A[0][1], A02 = A[0][2], A10 = A[1][0], A11 = A[1][1], A12 = A[1][2], A20 = A[2][0], A21 = A[2][1], A22 = A[2][2];
+    for (i = 0; i < n; i++) {
+      var fi = atoms[i].f;
+      for (j = i + 1; j < n; j++) {
+        var fj = atoms[j].f, d0 = fj[0] - fi[0], d1 = fj[1] - fi[1], d2 = fj[2] - fi[2];
+        d0 -= Math.round(d0); d1 -= Math.round(d1); d2 -= Math.round(d2);
+        var x = d0 * A00 + d1 * A10 + d2 * A20, y = d0 * A01 + d1 * A11 + d2 * A21, z = d0 * A02 + d1 * A12 + d2 * A22, dd = x * x + y * y + z * z;
+        if (dd < minD) { minD = dd; minPair = [atoms[i], atoms[j]]; }
+      }
+    }
+    minD = Math.sqrt(minD);
+    var warnings = [];
+    if (partial) warnings.push(partial + " asymmetric-unit atom" + (partial === 1 ? " has" : "s have") + " an occupancy below 1; every atom is written as fully occupied.");
+    if (minD < 0.7 && minPair) warnings.push("Atoms " + minPair[0].label + " and " + minPair[1].label + " are only " + minD.toFixed(2) + " " + U.ang + " apart (disorder components?).");
+    var formula = species.map(function (s) { return s + (counts[s] > 1 ? counts[s] : ""); }).join("");
+    return { A: A, atoms: atoms, species: species, counts: counts, nat: atoms.length, V: qeVol(A), minD: minD, minPair: minPair, warnings: warnings, formula: formula, nSel: nSelAu, error: null, blocking: (minD < 0.5) };
+  }
+  /* total valence electrons from the pseudopotential files that have been read, or null if any element has no file read */
+  function qeElectrons(cell) {
+    var tot = 0;
+    for (var s = 0; s < cell.species.length; s++) {
+      var el = cell.species[s], u = qeUpfOf(el); if (!u || u.z == null) return null;
+      tot += u.z * cell.counts[el];
+    }
+    return tot;
+  }
+  function qeUpfOf(el) { var list = QE.upf[el], want = QE.cfg.pseudoFiles[el]; if (!list || !list.length) return null; for (var i = 0; i < list.length; i++) if (list[i].name === want) return list[i]; return null; }
+
+  /* ---- the pw.x input ---- */
+  function qeFuncName(f) { return { pbe: "pbe", pbesol: "pbesol", pw: "pw", blyp: "blyp" }[f] || null; }
+  function qeInputText(cell, over) {
+    over = over || {};
+    var C = QE.cfg, calc = over.calc || C.calc, ecut = over.ecut || C.ecut, mesh = over.mesh || qeKMesh(cell), prefix = over.prefix || (qeBase() + "_" + calc);
+    var relax = calc === "relax" || calc === "vc-relax", spin = !!C.spin, smear = C.occ === "smearing" || spin, L = [], s, i;
+    L.push("&CONTROL", "  calculation = '" + calc + "'", "  prefix = '" + prefix + "'", "  outdir = './tmp_" + prefix + "'", "  pseudo_dir = '" + C.pseudoDir + "'", "  tprnfor = .true.", "  tstress = .true.");
+    if (over.diskNone) L.push("  disk_io = 'none'");
+    if (relax) L.push("  forc_conv_thr = " + qeExp(C.forceEv / QE_RYBOHR), "  etot_conv_thr = 1.0e-5", "  nstep = " + Math.round(C.nstep));
+    L.push("/", "&SYSTEM", "  ibrav = 0", "  nat = " + cell.nat, "  ntyp = " + cell.species.length, "  ecutwfc = " + ecut);
+    if (smear) L.push("  occupations = 'smearing'", "  smearing = '" + C.smear + "'", "  degauss = " + qeExp(C.smearEv / QE_RY));
+    else L.push("  occupations = 'fixed'");
+    if (spin) { L.push("  nspin = 2"); for (s = 0; s < cell.species.length; s++) { var mg = C.mag[cell.species[s]]; L.push("  starting_magnetization(" + (s + 1) + ") = " + (mg !== undefined ? mg : qeMagDefault(cell.species[s]))); } }
+    var fn = qeFuncName(C.func); if (fn) L.push("  input_dft = '" + fn + "'");
+    if (C.vdw === "d2") L.push("  vdw_corr = 'grimme-d2'");
+    else if (C.vdw === "d3") L.push("  vdw_corr = 'grimme-d3'", "  dftd3_version = 3");
+    else if (C.vdw === "d3bj") L.push("  vdw_corr = 'grimme-d3'", "  dftd3_version = 4");
+    L.push("/", "&ELECTRONS", "  conv_thr = " + qeExp(C.convPerAtom * cell.nat), "  mixing_beta = " + C.mixBeta, "  electron_maxstep = " + Math.round(C.elecSteps), "/");
+    if (relax) L.push("&IONS", "  ion_dynamics = 'bfgs'", "/");
+    if (calc === "vc-relax") L.push("&CELL", "  cell_dynamics = 'bfgs'", "  press = " + (+(C.pressGPa * 10).toFixed(4)),"  press_conv_thr = " + C.pressThrKbar, "  cell_dofree = '" + C.dofree + "'", "/");
+    L.push("ATOMIC_SPECIES");
+    for (s = 0; s < cell.species.length; s++) { var el = cell.species[s]; L.push(el.padEnd(3) + " " + (QE_MASS[el] || 1).toFixed(4).padStart(10) + "  " + (C.pseudoFiles[el] || (el + ".upf"))); }
+    L.push("ATOMIC_POSITIONS crystal");
+    var fixAny = C.fixSel && relax && cell.nSel > 0;
+    for (i = 0; i < cell.atoms.length; i++) {
+      var a = cell.atoms[i];
+      L.push(a.el.padEnd(3) + " " + qeFix(a.f[0], 10).padStart(14) + " " + qeFix(a.f[1], 10).padStart(14) + " " + qeFix(a.f[2], 10).padStart(14) + (fixAny && a.fixed ? "   0 0 0" : ""));
+    }
+    if (mesh[0] === 1 && mesh[1] === 1 && mesh[2] === 1) L.push("K_POINTS gamma"); else L.push("K_POINTS automatic", "  " + mesh.join(" ") + "  0 0 0");
+    L.push("CELL_PARAMETERS angstrom");
+    for (i = 0; i < 3; i++) L.push("  " + qeFix(cell.A[i][0], 10).padStart(14) + " " + qeFix(cell.A[i][1], 10).padStart(14) + " " + qeFix(cell.A[i][2], 10).padStart(14));
+    var hub = [];
+    for (s = 0; s < cell.species.length; s++) { var h = qeHubOrb(cell.species[s]), u = C.hubU[cell.species[s]]; if (h && u > 0) hub.push("  U " + cell.species[s] + "-" + h + " " + u); }
+    if (hub.length) L = L.concat(["HUBBARD (ortho-atomic)"], hub);
+    return L.join("\n") + "\n";
+  }
+  /* the run script: every job is run unless its output is complete for exactly this input (a checksum is kept in <job>.done) */
+  function qeRunScript(jobs) {
+    var C = QE.cfg, mpi = (C.cores > 1) ? (C.mpirun || "mpirun") + " -np " + Math.round(C.cores) : "", nk = C.pools > 1 ? " -nk " + Math.round(C.pools) : "";
+    var L = ["#!/bin/bash", "# Written by CrystalVista. Run it with:  bash run_qe.sh   (from any directory)", 'cd "$(dirname "$0")" || exit 1', "export OMP_NUM_THREADS=1",
+      'PW="' + (C.pw || "pw.x") + '"', 'MPI="' + mpi + '"', "",
+      "run_job() {", '  job="$1"', '  sum=$(md5sum "$job.in" | cut -d" " -f1)',
+      '  if [ -f "$job.done" ] && [ "$(cat "$job.done")" = "$sum" ]; then echo "$job: already done with this input"; return; fi',
+      '  echo "Running $job ..."', '  $MPI $PW' + nk + ' -in "$job.in" > "$job.out" 2> "$job.err"',
+      '  if grep -q "JOB DONE" "$job.out"; then echo "$sum" > "$job.done"; echo "$job: finished"; else echo "$job: DID NOT FINISH - see $job.out and $job.err"; fi', "}", ""];
+    jobs.forEach(function (j) { L.push('run_job "' + j + '"'); });
+    L.push('echo "All done. Copy this folder back and press Read results in CrystalVista."');
+    return L.join("\n") + "\n";
+  }
+  function qeSlurmScript() {
+    var C = QE.cfg, L = ["#!/bin/bash", "#SBATCH --job-name=crystalvista_qe", "#SBATCH --ntasks=" + Math.round(C.cores), "#SBATCH --time=" + (C.slurmTime || "24:00:00"), "#SBATCH --output=slurm-%j.out"];
+    if (C.slurmPart) L.push("#SBATCH --partition=" + C.slurmPart);
+    L.push("# Submit with:  sbatch submit.slurm");
+    if (C.slurmModule) L.push(C.slurmModule);
+    L.push('cd "$SLURM_SUBMIT_DIR" || exit 1', "bash run_qe.sh");
+    return L.join("\n") + "\n";
+  }
+
+  /* ---- folder access (the Orca bridge's file helpers do the reading and writing) ---- */
+  async function qePickDir() {
+    if (!window.showDirectoryPicker) { setStatus("This needs a browser that can write to a folder (Chrome or Edge).", true); return false; }
+    var opts = { mode: "readwrite" }; if (state.lastSourceHandle) opts.startIn = state.lastSourceHandle; else if (QE.dir) opts.startIn = QE.dir;
+    try { QE.dir = await window.showDirectoryPicker(opts); } catch (e) { return false; }
+    QE.dirName = QE.dir.name; QE.jobDir = null; qeSyncDirLabel(); return true;
+  }
+  async function qeEnsureDir() {
+    if (QE.dir) {
+      try { var p = await QE.dir.queryPermission({ mode: "readwrite" }); if (p === "granted") return true; if ((await QE.dir.requestPermission({ mode: "readwrite" })) === "granted") return true; } catch (e) { /* ask again below */ }
+    }
+    return qePickDir();
+  }
+  function qeSyncDirLabel() { if (QE.ui.dirLabel) QE.ui.dirLabel.textContent = QE.dirName || "no folder chosen"; }
+  /* the job folder to read: the chosen folder itself if it holds a manifest, else its newest qe_ subfolder that does, else the chosen folder if it holds .out files */
+  async function qeFindJobDir() {
+    try { await QE.dir.getFileHandle("qe_manifest.json"); return QE.dir; } catch (e) { /* not a job folder itself */ }
+    var cands = [], any = false;
+    for await (var ent of QE.dir.values()) {
+      if (ent.kind === "file" && /\.out$/i.test(ent.name)) any = true;
+      if (ent.kind !== "directory" || ent.name.indexOf("qe_") !== 0) continue;
+      try { var f = await (await ent.getFileHandle("qe_manifest.json")).getFile(); cands.push({ dir: ent, t: f.lastModified }); } catch (e) { /* no job here */ }
+    }
+    if (cands.length) { cands.sort(function (a, b) { return b.t - a.t; }); return cands[0].dir; }
+    return any ? QE.dir : null;
+  }
+
+  /* ---- writing jobs ---- */
+  function qeCheckBeforeWrite(cell) {
+    if (cell.error) { setStatus(cell.error, true); return false; }
+    if (cell.blocking) { setStatus("Atoms " + cell.minPair[0].label + " and " + cell.minPair[1].label + " are only " + cell.minD.toFixed(2) + " " + U.ang + " apart, which would crash the calculation. Remove one of the disorder components first.", true); return false; }
+    return true;
+  }
+  function qeNotes(cell) {
+    var notes = [], C = QE.cfg, ne = qeElectrons(cell);
+    notes = notes.concat(cell.warnings);
+    if (ne !== null && Math.abs(ne - Math.round(ne)) < 1e-6 && Math.round(ne) % 2 === 1 && !C.spin && C.occ === "fixed") notes.push("The valence electron count (" + Math.round(ne) + ") is odd, so fixed occupations without spin will fail: use smearing or spin.");
+    cell.species.forEach(function (el) { var u = qeUpfOf(el); if (u && !u.nc) notes.push("The pseudopotential for " + el + " (" + u.name + ") is not norm-conserving."); if (u && C.hubU[el] > 0 && qeHubOrb(el) && !u.pswfc) notes.push("The pseudopotential for " + el + " has no atomic wavefunctions, which the Hubbard U needs."); });
+    return notes;
+  }
+  async function qeWriteFiles(dir, jobs, manifest) {
+    for (var i = 0; i < jobs.length; i++) await orbWrite(dir, jobs[i].name + ".in", jobs[i].text);
+    await orbWrite(dir, "run_qe.sh", qeRunScript(jobs.map(function (j) { return j.name; })));
+    if (QE.cfg.slurm) await orbWrite(dir, "submit.slurm", qeSlurmScript());
+    await orbWrite(dir, "qe_manifest.json", JSON.stringify(manifest, null, 1));
+  }
+  function qeManifest(cell, kind, extra) {
+    var m = { kind: kind, version: 1, structure: state.name || "", calc: QE.cfg.calc, nat: cell.nat, formula: cell.formula, volume: cell.V, atoms: cell.atoms.map(function (a) { return { el: a.el, label: a.label, fixed: !!a.fixed }; }) };
+    Object.keys(extra || {}).forEach(function (k) { m[k] = extra[k]; });
+    return m;
+  }
+  async function qeWriteJob() {
+    var cell = qeBuildCell(); if (!qeCheckBeforeWrite(cell)) return;
+    if (!(await qeEnsureDir())) { setStatus("No folder chosen.", true); return; }
+    try {
+      var C = QE.cfg, base = qeBase(), name = base + "_" + C.calc, mesh = qeKMesh(cell), dir = await QE.dir.getDirectoryHandle("qe_" + base + "_" + C.calc, { create: true });
+      await qeWriteFiles(dir, [{ name: name, text: qeInputText(cell, { prefix: name }) }], qeManifest(cell, "job", { jobs: [{ file: name }], kmesh: mesh, ecut: C.ecut }));
+      QE.jobDir = dir; QE.cell = cell; qeSyncInfo(cell);
+      var notes = qeNotes(cell);
+      setStatus("Wrote " + name + ".in and run_qe.sh" + (C.slurm ? " and submit.slurm" : "") + " to " + QE.dirName + "/" + dir.name + " (" + cell.nat + " atoms, k-mesh " + mesh.join("x") + "). Copy the folder to the QE machine and run: bash run_qe.sh." + (notes.length ? " Check: " + notes.join(" ") : ""), notes.length > 0);
+    } catch (e) { setStatus("Could not write the files: " + e.message, true); }
+  }
+  function qeParseList(s) { return String(s).split(/[\s,;]+/).map(parseFloat).filter(function (v) { return isFinite(v) && v > 0; }); }
+  async function qeWriteConv() {
+    var cell = qeBuildCell(); if (!qeCheckBeforeWrite(cell)) return;
+    var C = QE.cfg, isEc = C.convKind === "ecut", vals = qeParseList(isEc ? C.convEcut : C.convK);
+    if (vals.length < 2) { setStatus("Give at least two values for the series.", true); return; }
+    if (!(await qeEnsureDir())) { setStatus("No folder chosen.", true); return; }
+    try {
+      var base = qeBase(), kind = isEc ? "conv_ecut" : "conv_k", dir = await QE.dir.getDirectoryHandle("qe_" + base + "_" + kind, { create: true }), jobs = [], mjobs = [];
+      vals.forEach(function (v, i) {
+        var tag = isEc ? "ec" + String(Math.round(v)).padStart(3, "0") : "k" + String(i + 1).padStart(2, "0"), name = base + "_" + tag, mesh = isEc ? qeKMesh(cell) : qeKMeshFor(cell.A, v), ec = isEc ? v : C.ecut;
+        jobs.push({ name: name, text: qeInputText(cell, { calc: "scf", prefix: name, ecut: ec, mesh: mesh, diskNone: true }) });
+        mjobs.push({ file: name, param: v, ecut: ec, kmesh: mesh });
+      });
+      await qeWriteFiles(dir, jobs, qeManifest(cell, "conv", { paramKind: isEc ? "ecut" : "kspacing", jobs: mjobs }));
+      QE.jobDir = dir; QE.cell = cell; qeSyncInfo(cell);
+      var notes = qeNotes(cell);
+      setStatus("Wrote " + jobs.length + " scf inputs (" + (isEc ? "cutoff " : "k-point spacing ") + vals.join(", ") + ") and run_qe.sh to " + QE.dirName + "/" + dir.name + ". Run it on the QE machine, copy the folder back and press Read results." + (notes.length ? " Check: " + notes.join(" ") : ""), notes.length > 0);
+    } catch (e) { setStatus("Could not write the files: " + e.message, true); }
+  }
+  function qeCopyInput() {
+    var cell = qeBuildCell(); if (!qeCheckBeforeWrite(cell)) return;
+    var text = qeInputText(cell, {});
+    navigator.clipboard.writeText(text).then(function () { setStatus("Copied the " + QE.cfg.calc + " input (" + cell.nat + " atoms) to the clipboard.", false); }, function () { setStatus("The clipboard is not available.", true); });
+    QE.cell = cell; qeSyncInfo(cell);
+  }
+
+  /* ---- pseudopotential files ---- */
+  function qeParseUpf(text, name) {
+    function attr(k) { var m = new RegExp("\\b" + k + "\\s*=\\s*\"([^\"]*)\"", "i").exec(text.slice(0, 60000)); return m ? m[1].trim() : null; }
+    var o = { name: name, el: null, z: null, nc: true, func: "", pswfc: /<PP_PSWFC|<PP_CHI|PP_PSWFC/.test(text) }, m;
+    var el = attr("element");
+    if (el) {
+      o.el = qeElOf(el); var z = parseFloat(attr("z_valence")); o.z = isFinite(z) ? z : null;
+      var pt = (attr("pseudo_type") || "").toUpperCase(); o.func = attr("functional") || "";
+      o.nc = !(pt === "US" || pt === "PAW" || /^T/i.test(attr("is_ultrasoft") || "") || /^T/i.test(attr("is_paw") || ""));
+    } else if ((m = /^\s*(\w+)\s+Element/m.exec(text))) {
+      o.el = qeElOf(m[1]); var zm = /([\d.]+)\s+Z valence/.exec(text); o.z = zm ? parseFloat(zm[1]) : null;
+      o.nc = !/Ultrasoft|PAW/i.test(text.slice(0, 3000));
+      var fm = /^\s*(.+?)\s+Exchange-Correlation functional/m.exec(text); o.func = fm ? fm[1].trim() : "";
+    }
+    return o.el && qeIsEl(o.el) ? o : null;
+  }
+  async function qeReadUpfFiles(files) {
+    var got = [], bad = 0;
+    for (var i = 0; i < files.length; i++) {
+      try { var u = qeParseUpf(await files[i].text(), files[i].name); if (u) got.push(u); else bad++; } catch (e) { bad++; }
+    }
+    got.forEach(function (u) {
+      var list = QE.upf[u.el] || (QE.upf[u.el] = []);
+      for (var k = list.length - 1; k >= 0; k--) if (list[k].name === u.name) list.splice(k, 1);
+      list.push(u);
+      var cur = QE.cfg.pseudoFiles[u.el];
+      if (!cur || !list.some(function (x) { return x.name === cur; })) QE.cfg.pseudoFiles[u.el] = u.name;
+    });
+    qeSaveCfg(); qeSyncSpecies(); if (QE.cell) qeSyncInfo(QE.cell);
+    var els = got.map(function (u) { return u.el + (u.z != null ? " (" + u.z + " e)" : ""); });
+    setStatus("Read " + got.length + " pseudopotential file" + (got.length === 1 ? "" : "s") + (els.length ? ": " + els.join(", ") : "") + (bad ? "; " + bad + " could not be read as UPF" : "") + ".", got.length === 0);
+  }
+
+  /* ---- reading pw.x output ---- */
+  function qeNum(s) { return parseFloat(String(s).replace(/[dD]/, "e")); }
+  function qeToEl(label) { return qeElOf(label); }
+  /* a block of atom lines "Label x y z [flags]" starting at lines[i]; returns the atoms and the index after the block */
+  function qeReadAtomLines(lines, i, nat) {
+    var out = [];
+    while (i < lines.length && out.length < nat) {
+      var t = lines[i].trim().split(/\s+/);
+      if (t.length >= 4 && /^[A-Za-z]/.test(t[0]) && isFinite(qeNum(t[1])) && isFinite(qeNum(t[2])) && isFinite(qeNum(t[3]))) { out.push({ sp: t[0], p: [qeNum(t[1]), qeNum(t[2]), qeNum(t[3])] }); i++; } else break;
+    }
+    return { atoms: out, next: i };
+  }
+  function qeParseOutput(text) {
+    var R = { isPw: /Program PWSCF/.test(text), done: /JOB DONE/.test(text), energies: [], maxF: [], totF: [], press: [], iters: [], notConv: 0, geoms: [], finalGeom: null, initGeom: null, error: null,
+      version: "", nat: 0, nelec: null, ecut: null, nk: null, fermi: null, homo: null, lumo: null, mag: null, wall: "", finalEnergy: null, finalKind: "", bfgsConv: false, maxSteps: false, volInit: null, volFinal: null, bfgsSteps: null };
+    if (!R.isPw) return R;
+    var lines = text.split(/\r?\n/), n = lines.length, i, m, alat = null, A = null, inFinal = false, siteDone = false, axesDone = false, siteAtoms = null;
+    var vm = /Program PWSCF v\.?\s*([^\s]+)/.exec(text); if (vm) R.version = vm[1];
+    function toGeom(atoms, unit, alatNow, Acell) {
+      if (!Acell || !atoms.length) return null;
+      var out = [];
+      for (var k = 0; k < atoms.length; k++) {
+        var p = atoms[k].p, f;
+        if (unit === "crystal") f = p;
+        else { var s = unit === "alat" ? (alatNow || alat) * QE_BOHR : unit === "bohr" ? QE_BOHR : 1; if (unit === "alat" && !(alatNow || alat)) return null; f = qeCartToFrac(Acell, [p[0] * s, p[1] * s, p[2] * s]); }
+        out.push({ sp: atoms[k].sp, el: qeToEl(atoms[k].sp), f: f });
+      }
+      return { A: [Acell[0].slice(), Acell[1].slice(), Acell[2].slice()], atoms: out };
+    }
+    for (i = 0; i < n; i++) {
+      var ln = lines[i];
+      if (ln.length < 4) continue;
+      var c0 = ln.charAt(0);
+      if (c0 === "!") { if ((m = /^!\s+total energy\s+=\s+(-?[\d.]+)/.exec(ln))) R.energies.push(parseFloat(m[1])); continue; }
+      if (c0 === "A" && ln.indexOf("ATOMIC_POSITIONS") === 0) {
+        var um = /ATOMIC_POSITIONS\s*[({]?\s*(\w+)/i.exec(ln), unit = um ? um[1].toLowerCase() : "alat", blk = qeReadAtomLines(lines, i + 1, R.nat || 1e9);
+        var g = toGeom(blk.atoms, unit, alat, A);
+        if (g) { if (inFinal) R.finalGeom = g; else R.geoms.push(g); }
+        i = blk.next - 1; continue;
+      }
+      if (c0 === "C" && ln.indexOf("CELL_PARAMETERS") === 0) {
+        var cm = /CELL_PARAMETERS\s*[({]?\s*(?:alat\s*=\s*([\d.]+)|(angstrom|bohr|alat))/i.exec(ln), v = [];
+        for (var q = 1; q <= 3 && i + q < n; q++) { var t = lines[i + q].trim().split(/\s+/); if (t.length >= 3) v.push([qeNum(t[0]), qeNum(t[1]), qeNum(t[2])]); }
+        if (cm && v.length === 3) {
+          var sc = cm[1] ? parseFloat(cm[1]) * QE_BOHR : (cm[2] || "").toLowerCase() === "bohr" ? QE_BOHR : (cm[2] || "").toLowerCase() === "alat" ? (alat || 0) * QE_BOHR : 1;
+          if (cm[1]) alat = parseFloat(cm[1]);
+          if (sc > 0) A = v.map(function (r) { return [r[0] * sc, r[1] * sc, r[2] * sc]; });
+        }
+        continue;
+      }
+      if (ln.indexOf("Begin final coordinates") >= 0) { inFinal = true; continue; }
+      if (ln.indexOf("End final coordinates") >= 0) { inFinal = false; continue; }
+      if (ln.indexOf("lattice parameter (alat)") >= 0) { if ((m = /=\s*([\d.]+)\s*a\.u\./.exec(ln)) && alat === null) alat = parseFloat(m[1]); continue; }
+      if (ln.indexOf("crystal axes:") >= 0 && !axesDone) {
+        var ax = [];
+        for (var r = 1; r <= 3 && i + r < n; r++) { var am = /a\(\s*\d\)\s*=\s*\(\s*(\S+)\s+(\S+)\s+(\S+)\s*\)/.exec(lines[i + r]); if (am) ax.push([parseFloat(am[1]), parseFloat(am[2]), parseFloat(am[3])]); }
+        if (ax.length === 3 && alat) { A = ax.map(function (w) { return [w[0] * alat * QE_BOHR, w[1] * alat * QE_BOHR, w[2] * alat * QE_BOHR]; }); axesDone = true; }
+        continue;
+      }
+      if (ln.indexOf("site n.") >= 0 && ln.indexOf("positions") >= 0 && !siteDone && R.nat) {
+        var sa = [];
+        for (var s2 = 1; s2 <= R.nat && i + s2 < n; s2++) { var sm = /^\s*\d+\s+(\S+)\s+tau\(\s*\d+\)\s*=\s*\(\s*(\S+)\s+(\S+)\s+(\S+)\s*\)/.exec(lines[i + s2]); if (!sm) break; sa.push({ sp: sm[1], p: [parseFloat(sm[2]), parseFloat(sm[3]), parseFloat(sm[4])] }); }
+        if (sa.length === R.nat) { siteDone = true; siteAtoms = sa; R.initGeom = toGeom(sa, "alat", alat, A); if (R.initGeom) R.volInit = qeVol(A); }
+        continue;
+      }
+      if (ln.indexOf("Forces acting on atoms") >= 0) {
+        var fmax = 0, any = false, j = i + 1;
+        for (; j < n; j++) {
+          var fl = lines[j]; if (!fl.trim()) { if (any) { /* a blank after the atoms: keep scanning for "Total force" only */ } continue; }
+          var fm = /atom\s+\d+\s+type\s+\d+\s+force\s*=\s*(\S+)\s+(\S+)\s+(\S+)/.exec(fl);
+          if (!fm) break; any = true;
+          var fx = qeNum(fm[1]), fy = qeNum(fm[2]), fz = qeNum(fm[3]); fmax = Math.max(fmax, Math.sqrt(fx * fx + fy * fy + fz * fz));
+        }
+        if (any) R.maxF.push(fmax);
+        if ((m = /Total force\s*=\s*([\d.]+)/.exec(lines[j] || ""))) R.totF.push(parseFloat(m[1]));
+        i = j - 1; continue;
+      }
+      if (ln.indexOf("total   stress") >= 0) { if ((m = /P=\s*(-?[\d.]+)/.exec(ln))) R.press.push(parseFloat(m[1])); continue; }
+      if (ln.indexOf("convergence has been achieved in") >= 0) { if ((m = /in\s+(\d+)\s+iterations/.exec(ln))) R.iters.push(parseInt(m[1], 10)); continue; }
+      if (ln.indexOf("convergence NOT achieved") >= 0) { R.notConv++; continue; }
+      if (ln.indexOf("number of atoms/cell") >= 0) { if ((m = /=\s*(\d+)/.exec(ln))) R.nat = parseInt(m[1], 10); continue; }
+      if (ln.indexOf("number of electrons") >= 0 && R.nelec === null) { if ((m = /=\s*([\d.]+)/.exec(ln))) R.nelec = parseFloat(m[1]); continue; }
+      if (ln.indexOf("kinetic-energy cutoff") >= 0) { if ((m = /=\s*([\d.]+)\s*Ry/.exec(ln))) R.ecut = parseFloat(m[1]); continue; }
+      if (ln.indexOf("number of k points") >= 0) { if ((m = /=\s*(\d+)/.exec(ln))) R.nk = parseInt(m[1], 10); continue; }
+      if (ln.indexOf("the Fermi energy is") >= 0) { if ((m = /is\s+(-?[\d.]+)\s*ev/i.exec(ln))) R.fermi = parseFloat(m[1]); continue; }
+      if (ln.indexOf("highest occupied") >= 0) {
+        if ((m = /highest occupied, lowest unoccupied level \(ev\):\s+(-?[\d.]+)\s+(-?[\d.]+)/.exec(ln))) { R.homo = parseFloat(m[1]); R.lumo = parseFloat(m[2]); }
+        else if ((m = /highest occupied level \(ev\):\s+(-?[\d.]+)/.exec(ln))) { R.homo = parseFloat(m[1]); R.lumo = null; }
+        continue;
+      }
+      if (ln.indexOf("total magnetization") >= 0) { if ((m = /=\s*(-?[\d.]+)\s*Bohr/.exec(ln))) R.mag = parseFloat(m[1]); continue; }
+      if (ln.indexOf("new unit-cell volume") >= 0) { if ((m = /=\s*([\d.]+)\s*a\.u\.\^3\s*\(\s*([\d.]+)\s*Ang/.exec(ln))) R.volFinal = parseFloat(m[2]); continue; }
+      if (ln.indexOf("bfgs converged in") >= 0) { R.bfgsConv = true; if ((m = /and\s+(\d+)\s+bfgs steps/.exec(ln))) R.bfgsSteps = parseInt(m[1], 10); continue; }
+      if (ln.indexOf("maximum number of steps has been reached") >= 0) { R.maxSteps = true; continue; }
+      if ((m = /^\s*Final (energy|enthalpy)\s*=\s*(-?[\d.]+)\s*Ry/.exec(ln))) { R.finalEnergy = parseFloat(m[2]); R.finalKind = m[1]; continue; }
+      if (ln.indexOf("Error in routine") >= 0 && !R.error) { var em = /Error in routine\s+(\S+)/.exec(ln), msg = ""; for (var e2 = 1; e2 <= 3 && i + e2 < n; e2++) if (lines[i + e2].trim() && lines[i + e2].indexOf("%%%%") < 0) { msg = lines[i + e2].trim(); break; } R.error = (em ? em[1] + ": " : "") + msg; continue; }
+      if (ln.indexOf("PWSCF") >= 0 && /CPU\s+.*WALL/.test(ln)) { if ((m = /PWSCF\s*:\s*(.+?)\s+CPU\s+(.+?)\s+WALL/.exec(ln))) R.wall = m[2]; continue; }
+    }
+    R.nE = R.energies.length;
+    return R;
+  }
+  /* the geometry at which the i-th energy (1-based) was computed; the last energy of a finished run is at the final coordinates */
+  function qeStepGeom(R, i) {
+    if (i === R.nE && R.finalGeom) return R.finalGeom;
+    if (i <= 1) return R.initGeom || R.geoms[0] || null;
+    return R.geoms[i - 2] || R.finalGeom || R.geoms[R.geoms.length - 1] || null;
+  }
+  /* geoms[k] is printed after energy k+1 and is the geometry of energy k+2; the geometry of energy 1 is the initial one */
+  function qeStateOf(R) {
+    if (!R.isPw) return "not a pw.x output";
+    if (R.error) return "failed";
+    if (R.done) return R.notConv ? "finished (SCF not converged)" : "finished";
+    return "unfinished";
+  }
+
+  /* ---- reading a pw.x input (ibrav = 0 or the simple Bravais lattices) ---- */
+  function qeParseInput(text) {
+    var clean = text.split(/\r?\n/).map(function (l) { return l.replace(/[!#].*$/, ""); }).join("\n");
+    var nl = {}, m, re = /&(\w+)([\s\S]*?)^\s*\/\s*$/gim;
+    while ((m = re.exec(clean))) {
+      var body = m[2], kv = /([A-Za-z_]\w*(?:\(\s*\d+\s*\))?)\s*=\s*('[^']*'|"[^"]*"|[^,\s]+)/g, mm, d = {};
+      while ((mm = kv.exec(body))) d[mm[1].toLowerCase().replace(/\s+/g, "")] = mm[2].replace(/^['"]|['"]$/g, "");
+      nl[m[1].toLowerCase()] = d;
+    }
+    var sys = nl.system; if (!sys) return { error: "No &SYSTEM namelist found: this does not look like a pw.x input." };
+    var nat = parseInt(sys.nat, 10), ibrav = parseInt(sys.ibrav, 10);
+    if (!(nat > 0)) return { error: "nat is missing in &SYSTEM." };
+    var lines = clean.split(/\r?\n/), A = null, alat = null;
+    var celldm1 = sys["celldm(1)"] !== undefined ? qeNum(sys["celldm(1)"]) : null, aA = sys.a !== undefined ? qeNum(sys.a) : null;
+    if (celldm1) alat = celldm1 * QE_BOHR; else if (aA) alat = aA;
+    function cd(k) { return sys["celldm(" + k + ")"] !== undefined ? qeNum(sys["celldm(" + k + ")"]) : null; }
+    var ba, ca, cosA, cosB, cosG;
+    if (aA) { ba = sys.b !== undefined ? qeNum(sys.b) / aA : null; ca = sys.c !== undefined ? qeNum(sys.c) / aA : null; cosA = sys.cosbc !== undefined ? qeNum(sys.cosbc) : null; cosB = sys.cosac !== undefined ? qeNum(sys.cosac) : null; cosG = sys.cosab !== undefined ? qeNum(sys.cosab) : null; }
+    else { ba = cd(2); ca = cd(3); cosA = cd(4); cosB = cd(5); cosG = cd(6); }
+    var s3 = Math.sqrt(3);
+    if (ibrav === 0) {
+      for (var i = 0; i < lines.length; i++) if (/^\s*CELL_PARAMETERS/i.test(lines[i])) {
+        var um = /CELL_PARAMETERS\s*[({]?\s*(\w+)?/i.exec(lines[i]), unit = um && um[1] ? um[1].toLowerCase() : (alat ? "alat" : "bohr"), v = [];
+        for (var q = 1; q <= 3; q++) { var t = (lines[i + q] || "").trim().split(/\s+/); v.push([qeNum(t[0]), qeNum(t[1]), qeNum(t[2])]); }
+        var sc = unit === "angstrom" ? 1 : unit === "bohr" ? QE_BOHR : alat; if (!sc) return { error: "CELL_PARAMETERS needs the lattice parameter (celldm(1) or A)." };
+        A = v.map(function (r) { return [r[0] * sc, r[1] * sc, r[2] * sc]; }); break;
+      }
+      if (!A) return { error: "ibrav = 0 but no CELL_PARAMETERS card was found." };
+    } else {
+      if (!alat) return { error: "celldm(1) or A is needed to build the cell." };
+      var a = alat, V;
+      if (ibrav === 1) V = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+      else if (ibrav === 2) V = [[-.5, 0, .5], [0, .5, .5], [-.5, .5, 0]];
+      else if (ibrav === 3) V = [[.5, .5, .5], [-.5, .5, .5], [-.5, -.5, .5]];
+      else if (ibrav === 4 && ca) V = [[1, 0, 0], [-.5, s3 / 2, 0], [0, 0, ca]];
+      else if (ibrav === 6 && ca) V = [[1, 0, 0], [0, 1, 0], [0, 0, ca]];
+      else if (ibrav === 8 && ba && ca) V = [[1, 0, 0], [0, ba, 0], [0, 0, ca]];
+      else if (ibrav === 12 && ba && ca && cosG !== null) { var sg = Math.sqrt(1 - cosG * cosG); V = [[1, 0, 0], [ba * cosG, ba * sg, 0], [0, 0, ca]]; }
+      else if (ibrav === 14 && ba && ca && cosA !== null && cosB !== null && cosG !== null) {
+        var sg2 = Math.sqrt(1 - cosG * cosG), rt = Math.sqrt(Math.max(0, 1 + 2 * cosA * cosB * cosG - cosA * cosA - cosB * cosB - cosG * cosG));
+        V = [[1, 0, 0], [ba * cosG, ba * sg2, 0], [ca * cosB, ca * (cosA - cosB * cosG) / sg2, ca * rt / sg2]];
+      } else return { error: "ibrav = " + ibrav + " is not read directly (supported: 0, 1, 2, 3, 4, 6, 8, 12, 14). Open the .out file of a run instead, or write the input with ibrav = 0." };
+      A = V.map(function (r) { return [r[0] * a, r[1] * a, r[2] * a]; });
+    }
+    var atoms = null, unitP = "alat";
+    for (var k = 0; k < lines.length; k++) if (/^\s*ATOMIC_POSITIONS/i.test(lines[k])) {
+      var pm = /ATOMIC_POSITIONS\s*[({]?\s*(\w+)?/i.exec(lines[k]); unitP = pm && pm[1] ? pm[1].toLowerCase() : "alat";
+      atoms = qeReadAtomLines(lines, k + 1, nat).atoms; break;
+    }
+    if (!atoms || atoms.length !== nat) return { error: "Could not read " + nat + " atoms from the ATOMIC_POSITIONS card." };
+    var out = atoms.map(function (at) {
+      var p = at.p, f;
+      if (unitP === "crystal") f = p; else { var s = unitP === "alat" ? alat : unitP === "bohr" ? QE_BOHR : 1; if (!s) return null; f = qeCartToFrac(A, [p[0] * s, p[1] * s, p[2] * s]); }
+      return { sp: at.sp, el: qeToEl(at.sp), f: f };
+    });
+    if (out.some(function (x) { return !x; })) return { error: "The atom positions need the lattice parameter (celldm(1) or A)." };
+    return { A: A, atoms: out, calc: (nl.control && nl.control.calculation) || "" };
+  }
+
+  /* ---- geometry <-> viewer ---- */
+  function qeGeomToCif(geom, labels) {
+    var P = qeCellParams(geom.A), L = ["data_qe_structure", "_symmetry_space_group_name_H-M 'P 1'", "_symmetry_Int_Tables_number 1", "loop_", "_symmetry_equiv_pos_as_xyz", "'x, y, z'",
+      "_cell_length_a " + P.a.toFixed(6), "_cell_length_b " + P.b.toFixed(6), "_cell_length_c " + P.c.toFixed(6), "_cell_angle_alpha " + P.alpha.toFixed(5), "_cell_angle_beta " + P.beta.toFixed(5), "_cell_angle_gamma " + P.gamma.toFixed(5),
+      "loop_", "_atom_site_label", "_atom_site_type_symbol", "_atom_site_fract_x", "_atom_site_fract_y", "_atom_site_fract_z", "_atom_site_occupancy"], cnt = {};
+    geom.atoms.forEach(function (a, i) {
+      var lab = (labels && labels.length === geom.atoms.length && labels[i]) ? labels[i] : a.el + (cnt[a.el] = (cnt[a.el] || 0) + 1);
+      var f = a.f.map(function (x) { var w = x - Math.floor(x); return w > 1 - 1e-9 ? 0 : w; });
+      L.push(lab + " " + a.el + " " + f[0].toFixed(8) + " " + f[1].toFixed(8) + " " + f[2].toFixed(8) + " 1");
+    });
+    return L.join("\n") + "\n";
+  }
+  function qeLoadGeom(geom, tag, labels, base) {
+    if (!geom) { setStatus("That step has no structure in the output.", true); return false; }
+    var name = (base || qeBase()) + "_QE" + (tag ? "_" + tag : "") + ".cif";
+    loadCIFText(qeGeomToCif(geom, labels), name);
+    return true;
+  }
+  /* a dropped or chosen QE file: an output (the final structure) or an input */
+  function qeImportText(text, fname) {
+    if (/Program PWSCF/.test(text)) {
+      var R = qeParseOutput(text), g = qeStepGeom(R, R.nE) || R.initGeom;
+      if (!g) { setStatus("No structure could be read from this pw.x output.", true); return true; }
+      qeLoadGeom(g, "", null, qeStem(fname)); setStatus("Loaded the " + (R.finalGeom ? "final" : "last") + " structure of " + fname + " (" + g.atoms.length + " atoms, P1 cell).", false); return true;
+    }
+    if (/&\s*system/i.test(text) && /ATOMIC_POSITIONS/i.test(text)) {
+      var r = qeParseInput(text); if (r.error) { setStatus(r.error, true); return true; }
+      qeLoadGeom(r.atoms ? r : null, "", null, qeStem(fname)); setStatus("Loaded the structure of " + fname + " (" + r.atoms.length + " atoms, P1 cell).", false); return true;
+    }
+    return false;
+  }
+
+  /* ---- results: read, show ---- */
+  function qeEv(ry) { return ry * QE_RY; }
+  async function qeReadResults() {
+    if (!(await qeEnsureDir())) { setStatus("No folder chosen.", true); return; }
+    try {
+      var dir = QE.jobDir || (await qeFindJobDir());
+      if (!dir) { setStatus("No qe_ job folder or .out file found in " + QE.dirName + ".", true); return; }
+      var man = null, items = [], i;
+      try { man = JSON.parse(await orbRead(dir, "qe_manifest.json")); } catch (e) { man = null; }
+      if (man) { items = man.jobs.map(function (j) { return { name: j.file, param: j.param, ecut: j.ecut, kmesh: j.kmesh }; }); }
+      else { for await (var ent of dir.values()) if (ent.kind === "file" && /\.out$/i.test(ent.name)) items.push({ name: ent.name.replace(/\.out$/i, "") }); items.sort(function (a, b) { return a.name < b.name ? -1 : 1; }); }
+      var ok = 0, missing = 0;
+      for (i = 0; i < items.length; i++) {
+        try { var txt = await orbRead(dir, items[i].name + ".out"); items[i].R = qeParseOutput(txt); if (items[i].R.isPw) ok++; } catch (e) { items[i].R = null; missing++; }
+      }
+      QE.res = { man: man, items: items, sel: 0, dirName: dir.name }; qeSyncResults();
+      setStatus("Read " + ok + " of " + items.length + " output file" + (items.length === 1 ? "" : "s") + " from " + dir.name + (missing ? " (" + missing + " not found: not run, or not copied back yet)" : "") + ".", ok === 0);
+    } catch (e) { setStatus("Could not read the results: " + e.message, true); }
+  }
+  async function qeOpenOutputs(files) {
+    var items = [];
+    for (var i = 0; i < files.length; i++) { try { items.push({ name: files[i].name.replace(/\.[^.]+$/, ""), R: qeParseOutput(await files[i].text()) }); } catch (e) { /* skipped */ } }
+    items.sort(function (a, b) { return a.name < b.name ? -1 : 1; });
+    QE.res = { man: null, items: items, sel: 0, dirName: "" }; qeSyncResults();
+    var ok = items.filter(function (x) { return x.R && x.R.isPw; }).length;
+    setStatus("Read " + ok + " of " + files.length + " file" + (files.length === 1 ? "" : "s") + " as pw.x output.", ok === 0);
+  }
+  /* a small line chart in SVG: xs, ys; log scale on y when asked; an optional horizontal guide */
+  function qeChart(xs, ys, o) {
+    o = o || {}; var W = 260, H = 110, ml = 40, mr = 8, mt = 8, mb = 22, ns = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(ns, "svg"); svg.setAttribute("viewBox", "0 0 " + W + " " + H); svg.setAttribute("width", "100%"); svg.style.maxWidth = "320px";
+    function mk(t, at) { var e = document.createElementNS(ns, t); Object.keys(at).forEach(function (k) { e.setAttribute(k, at[k]); }); svg.appendChild(e); return e; }
+    var pts = []; for (var i = 0; i < xs.length; i++) if (isFinite(xs[i]) && isFinite(ys[i]) && (!o.log || ys[i] > 0)) pts.push([xs[i], o.log ? Math.log(ys[i]) / Math.LN10 : ys[i]]);
+    if (pts.length < 1) return svg;
+    var x0 = Math.min.apply(null, pts.map(function (p) { return p[0]; })), x1 = Math.max.apply(null, pts.map(function (p) { return p[0]; }));
+    var y0 = Math.min.apply(null, pts.map(function (p) { return p[1]; })), y1 = Math.max.apply(null, pts.map(function (p) { return p[1]; }));
+    if (o.guide !== undefined && o.log && o.guide > 0) { y0 = Math.min(y0, Math.log(o.guide) / Math.LN10); y1 = Math.max(y1, Math.log(o.guide) / Math.LN10); }
+    if (x1 === x0) { x0 -= 1; x1 += 1; } if (y1 === y0) { y0 -= 1; y1 += 1; }
+    function px(x) { return ml + (x - x0) / (x1 - x0) * (W - ml - mr); } function py(y) { return H - mb - (y - y0) / (y1 - y0) * (H - mt - mb); }
+    mk("rect", { x: ml, y: mt, width: W - ml - mr, height: H - mt - mb, fill: "none", stroke: "currentColor", "stroke-opacity": "0.35" });
+    if (o.guide !== undefined && o.log && o.guide > 0) { var gy = py(Math.log(o.guide) / Math.LN10); mk("line", { x1: ml, x2: W - mr, y1: gy, y2: gy, stroke: "currentColor", "stroke-opacity": "0.4", "stroke-dasharray": "3 3" }); }
+    mk("polyline", { points: pts.map(function (p) { return px(p[0]).toFixed(1) + "," + py(p[1]).toFixed(1); }).join(" "), fill: "none", stroke: "var(--accent, #3E6EA8)", "stroke-width": "1.5" });
+    pts.forEach(function (p) { mk("circle", { cx: px(p[0]).toFixed(1), cy: py(p[1]).toFixed(1), r: "2.6", fill: "var(--accent, #3E6EA8)" }); });
+    function fmt(r) { var a = Math.abs(r); return (a !== 0 && (a < 0.01 || a >= 10000)) ? r.toExponential(1) : (+r.toPrecision(3)).toString(); }
+    function fmtY(v) { return fmt(o.log ? Math.pow(10, v) : v); }
+    [[ml - 3, py(y0) + 3, fmtY(y0)], [ml - 3, py(y1) + 3, fmtY(y1)]].forEach(function (t) { var e = mk("text", { x: t[0], y: t[1], "text-anchor": "end", "font-size": "9", fill: "currentColor" }); e.textContent = t[2]; });
+    [[px(x0), H - 10, fmt(x0), "start"], [px(x1), H - 10, fmt(x1), "end"]].forEach(function (t) { var e = mk("text", { x: t[0], y: t[1], "text-anchor": t[3], "font-size": "9", fill: "currentColor" }); e.textContent = t[2]; });
+    if (o.xlabel) { var xl = mk("text", { x: (ml + W - mr) / 2, y: H - 1, "text-anchor": "middle", "font-size": "9", fill: "currentColor" }); xl.textContent = o.xlabel; }
+    if (o.title) { var tl = mk("text", { x: ml + 3, y: mt + 9, "font-size": "9", fill: "currentColor", "fill-opacity": "0.8" }); tl.textContent = o.title; }
+    return svg;
+  }
+  function qeFmtE(ry) { return ry === null || ry === undefined ? "\u2014" : qeEv(ry).toFixed(4); }
+  function qeSyncResults() {
+    var U1 = QE.ui, box = U1.resBox; if (!box) return;
+    box.innerHTML = ""; var RS = QE.res; if (!RS || !RS.items.length) return;
+    var conv = !!(RS.man && RS.man.kind === "conv"), t = document.createElement("table"); t.className = "orb-table";
+    var nat = RS.man ? RS.man.nat : null, lastOk = null, i;
+    if (conv) for (i = RS.items.length - 1; i >= 0; i--) { var Ri = RS.items[i].R; if (Ri && Ri.isPw && Ri.done && Ri.energies.length) { lastOk = Ri; break; } }
+    t.innerHTML = "<thead><tr><th>" + (conv ? (RS.man.paramKind === "ecut" ? "Ry" : "k sp.") : "job") + "</th><th>status</th><th>E (eV)</th>" + (conv ? "<th>\u0394E<br>meV/at</th>" : "<th>F<br>eV/" + U.ang + "</th>") + "<th>P<br>GPa</th></tr></thead>";
+    var tb = document.createElement("tbody"), pts = { x: [], d: [], p: [] };
+    RS.items.forEach(function (it, idx) {
+      var R = it.R, tr = document.createElement("tr"); tr.className = "orb-row" + (R && R.isPw ? "" : " dim"); if (idx === RS.sel) tr.style.background = "var(--accent-soft)";
+      var st = R ? qeStateOf(R) : "no output yet", e = R && R.energies.length ? R.energies[R.energies.length - 1] : null, mf = R && R.maxF.length ? R.maxF[R.maxF.length - 1] * QE_RYBOHR : null, pr = R && R.press.length ? R.press[R.press.length - 1] / 10 : null, d3 = "\u2014";
+      if (conv && e !== null && lastOk && nat) { var dE = (qeEv(e) - qeEv(lastOk.energies[lastOk.energies.length - 1])) / nat * 1000; d3 = dE.toFixed(2); if (R.done) { pts.x.push(it.param); pts.d.push(Math.abs(dE)); pts.p.push(pr); } }
+      var stShort = { "finished": "done", "finished (SCF not converged)": "done*", "unfinished": "unfinished", "failed": "failed", "no output yet": "none", "not a pw.x output": "not pw.x" }[st] || st;
+      var cells = [conv ? it.param : it.name, stShort, qeFmtE(e), conv ? d3 : (mf === null ? "\u2014" : mf.toFixed(3)), pr === null ? "\u2014" : pr.toFixed(2)];
+      cells.forEach(function (v, ci) { var td = document.createElement("td"); td.textContent = v; if (ci === 0 && !conv) { td.style.maxWidth = "64px"; td.style.overflow = "hidden"; td.style.textOverflow = "ellipsis"; } if (ci === 1) td.title = st + (R && R.error ? ": " + R.error : ""); if (ci === 0) td.title = it.name; tr.appendChild(td); });
+      tr.addEventListener("click", function () { RS.sel = idx; qeSyncResults(); });
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb); var sc = el("div", "orb-scroll"); sc.style.overflowX = "auto"; sc.appendChild(t); box.appendChild(sc);
+    if (conv && pts.x.length > 1) {
+      var ch = el("div", null); ch.style.color = "var(--ink-mid)"; ch.appendChild(qeChart(pts.x, pts.d, { log: true, guide: 1, title: "|\u0394E| in meV/atom against the last point (dashed: 1)", xlabel: RS.man.paramKind === "ecut" ? "cutoff (Ry)" : "k-point spacing (" + U.ang + "\u207B\u00B9)" })); box.appendChild(ch);
+      var hasP = pts.p.some(function (v) { return v !== null; });
+      if (hasP) { var ch2 = el("div", null); ch2.style.color = "var(--ink-mid)"; ch2.appendChild(qeChart(pts.x, pts.p, { title: "pressure (GPa)", xlabel: RS.man.paramKind === "ecut" ? "cutoff (Ry)" : "k-point spacing" })); box.appendChild(ch2); }
+    }
+    var it0 = RS.items[RS.sel]; if (!it0 || !it0.R || !it0.R.isPw) return;
+    var R0 = it0.R, S = el("div", "orb-sum"); S.style.whiteSpace = "normal"; S.style.lineHeight = "1.5";
+    var lines = [], eLast = R0.energies.length ? R0.energies[R0.energies.length - 1] : null;
+    lines.push("<b>" + it0.name + "</b>: " + qeStateOf(R0) + (R0.version ? " (pw.x " + R0.version + ")" : ""));
+    if (R0.error) lines.push("Error: " + R0.error);
+    if (R0.notConv) lines.push("The SCF did not converge in " + R0.notConv + " step" + (R0.notConv === 1 ? "" : "s") + ".");
+    if (R0.bfgsConv) lines.push("BFGS converged" + (R0.bfgsSteps !== null ? " in " + R0.bfgsSteps + " steps" : "") + "."); else if (R0.maxSteps) lines.push("The maximum number of ionic steps was reached without convergence.");
+    var ef = R0.finalEnergy !== null ? R0.finalEnergy : eLast; if (ef !== null) lines.push((R0.finalKind ? "Final " + R0.finalKind : "Last energy") + ": " + qeEv(ef).toFixed(5) + " eV (" + ef.toFixed(8) + " Ry)" + (R0.nat ? "; " + (qeEv(ef) / R0.nat).toFixed(5) + " eV/atom" : ""));
+    if (R0.maxF.length) lines.push("Largest force on an atom: " + (R0.maxF[R0.maxF.length - 1] * QE_RYBOHR).toFixed(4) + " eV/" + U.ang);
+    if (R0.press.length) lines.push("Pressure: " + (R0.press[R0.press.length - 1] / 10).toFixed(3) + " GPa");
+    if (R0.volInit !== null) lines.push("Cell volume: " + R0.volInit.toFixed(2) + " " + U.ang + "\u00B3" + (R0.volFinal !== null ? " \u2192 " + R0.volFinal.toFixed(2) + " " + U.ang + "\u00B3" : ""));
+    if (R0.homo !== null && R0.lumo !== null) lines.push("HOMO " + R0.homo.toFixed(3) + " eV, LUMO " + R0.lumo.toFixed(3) + " eV, gap " + (R0.lumo - R0.homo).toFixed(3) + " eV"); else if (R0.fermi !== null) lines.push("Fermi energy " + R0.fermi.toFixed(3) + " eV");
+    if (R0.mag !== null) lines.push("Total magnetisation " + R0.mag.toFixed(2) + " \u03BC\u0042 per cell");
+    if (R0.wall) lines.push("Wall time " + R0.wall + (R0.iters.length ? "; SCF iterations per step: " + R0.iters.join(", ") : ""));
+    S.innerHTML = lines.join("<br>"); box.appendChild(S);
+    if (R0.energies.length > 1) {
+      var xs = [], ye = [], yf = [], e0 = R0.energies[R0.energies.length - 1];
+      R0.energies.forEach(function (e, k) { xs.push(k + 1); ye.push((e - e0) * QE_RY * 1000); yf.push(R0.maxF[k] !== undefined ? R0.maxF[k] * QE_RYBOHR : NaN); });
+      var c1 = el("div", null); c1.style.color = "var(--ink-mid)"; c1.appendChild(qeChart(xs, ye, { title: "energy (meV, relative to the last step)", xlabel: "step" })); box.appendChild(c1);
+      if (yf.some(isFinite)) { var c2 = el("div", null); c2.style.color = "var(--ink-mid)"; c2.appendChild(qeChart(xs, yf, { title: "largest force (eV/" + U.ang + ")", xlabel: "step" })); box.appendChild(c2); }
+    }
+    /* which structure to load */
+    var opts = [["final", R0.finalGeom ? "Final structure" : "Last structure"]]; for (var s = 1; s <= R0.nE; s++) if (qeStepGeom(R0, s)) opts.push([String(s), "Step " + s + (s === 1 ? " (input)" : "")]);
+    var row = el("div", "ctl-inline"), sel = document.createElement("select"); sel.className = "sel"; sel.id = "qeStepSel";
+    opts.forEach(function (o) { var op = document.createElement("option"); op.value = o[0]; op.textContent = o[1]; sel.appendChild(op); });
+    var bt = el("button", "btn ghost", "Load structure"); bt.type = "button"; bt.style.width = "auto"; bt.title = "Replaces the structure in view by this step of the calculation (a P1 cell with every atom of the cell).";
+    bt.addEventListener("click", function () {
+      var v = sel.value, g = v === "final" ? qeStepGeom(R0, R0.nE) : qeStepGeom(R0, parseInt(v, 10)), labels = RS.man ? RS.man.atoms.map(function (a) { return a.label; }) : null;
+      if (qeLoadGeom(g, v === "final" ? "" : "step" + v, labels, RS.man ? qeStem(RS.man.structure) : null)) setStatus("Loaded " + (v === "final" ? "the final" : "step " + v) + " structure of " + it0.name + " as a new structure (P1 cell, " + g.atoms.length + " atoms).", false);
+    });
+    row.appendChild(sel); row.appendChild(bt); box.appendChild(row);
+  }
+  function qeSyncInfo(cell) {
+    var box = QE.ui.infoBox; if (!box) return;
+    if (!cell || cell.error) { box.innerHTML = ""; if (cell && cell.error) box.textContent = cell.error; return; }
+    var C = QE.cfg, P = qeCellParams(cell.A), mesh = qeKMesh(cell), ne = qeElectrons(cell), lines = [];
+    lines.push("Cell " + P.a.toFixed(3) + " " + P.b.toFixed(3) + " " + P.c.toFixed(3) + " " + U.ang + ", " + P.alpha.toFixed(2) + " " + P.beta.toFixed(2) + " " + P.gamma.toFixed(2) + "\u00B0, volume " + cell.V.toFixed(1) + " " + U.ang + "\u00B3");
+    lines.push(cell.nat + " atoms in the cell (" + cell.formula + ")");
+    lines.push("k-points: " + (mesh[0] === 1 && mesh[1] === 1 && mesh[2] === 1 ? "Gamma only" : mesh.join(" \u00D7 ")));
+    if (ne !== null) lines.push("Valence electrons: " + ne + " (from the pseudopotential files)");
+    if (cell.nSel && C.fixSel) lines.push(cell.nSel + " selected asymmetric-unit atom" + (cell.nSel === 1 ? "" : "s") + " (and their symmetry copies) held fixed");
+    qeNotes(cell).forEach(function (n) { lines.push("\u26A0 " + n); });
+    box.innerHTML = ""; lines.forEach(function (l) { box.appendChild(el("div", null, l)); });
+  }
+  function qeSyncSpecies() {
+    var box = QE.ui.speciesBox; if (!box) return;
+    box.innerHTML = "";
+    var cell = QE.cell; if (!cell || cell.error) return;
+    var C = QE.cfg;
+    cell.species.forEach(function (elm) {
+      var row = el("div", "ctl-inline"); row.style.flexWrap = "wrap"; row.style.gap = "5px";
+      var nm = el("span", "hint", elm); nm.style.minWidth = "22px"; nm.style.fontWeight = "600"; row.appendChild(nm);
+      var inp = document.createElement("input"); inp.type = "text"; inp.className = "num orb-text"; inp.style.textAlign = "left"; inp.style.minWidth = "90px"; inp.value = C.pseudoFiles[elm] || (elm + ".upf"); inp.title = "The pseudopotential file of " + elm + ", as named in the pseudopotential folder on the QE machine.";
+      var dl = document.createElement("datalist"); dl.id = "qeDl_" + elm; (QE.upf[elm] || []).forEach(function (u) { var o = document.createElement("option"); o.value = u.name; dl.appendChild(o); }); inp.setAttribute("list", dl.id);
+      inp.addEventListener("change", function () { C.pseudoFiles[elm] = inp.value.trim(); qeSaveCfg(); if (QE.cell) qeSyncInfo(QE.cell); });
+      row.appendChild(inp); row.appendChild(dl);
+      if (C.spin) {
+        var mg = document.createElement("input"); mg.type = "number"; mg.className = "num"; mg.style.width = "52px"; mg.step = "0.1"; mg.min = "-1"; mg.max = "1"; mg.value = C.mag[elm] !== undefined ? C.mag[elm] : qeMagDefault(elm); mg.title = "Starting magnetisation of " + elm + " (between -1 and 1).";
+        mg.addEventListener("change", function () { var v = parseFloat(mg.value); if (isFinite(v) && v >= -1 && v <= 1) { C.mag[elm] = v; qeSaveCfg(); } else mg.value = C.mag[elm] !== undefined ? C.mag[elm] : qeMagDefault(elm); });
+        row.appendChild(el("span", "unit", "m")); row.appendChild(mg);
+      }
+      var orb = qeHubOrb(elm);
+      if (orb) {
+        var uu = document.createElement("input"); uu.type = "number"; uu.className = "num"; uu.style.width = "52px"; uu.step = "0.1"; uu.min = "0"; uu.max = "20"; uu.value = C.hubU[elm] || 0; uu.title = "Hubbard U on the " + orb + " shell of " + elm + ", in eV (0 = none).";
+        uu.addEventListener("change", function () { var v = parseFloat(uu.value); if (isFinite(v) && v >= 0 && v <= 20) { C.hubU[elm] = v; qeSaveCfg(); if (QE.cell) qeSyncInfo(QE.cell); } else uu.value = C.hubU[elm] || 0; });
+        row.appendChild(el("span", "unit", "U " + orb)); row.appendChild(uu);
+      }
+      box.appendChild(row);
+    });
+  }
+  function qeReadStructure() {
+    var cell = qeBuildCell(); QE.cell = cell; qeSyncSpecies(); qeSyncInfo(cell);
+    if (cell.error) setStatus(cell.error, true); else setStatus("Read the structure: " + cell.nat + " atoms in the cell (" + cell.formula + ").", cell.warnings.length > 0);
+  }
+
+  /* ---- the menu ---- */
+  function buildQeUi(left) {
+    orbInjectStyle();
+    var C = QE.cfg, U1 = QE.ui, qs = section(left, "Quantum ESPRESSO", false);
+    function numRow(p, label, key, min, max, step, unit, tip, after) {
+      var row = el("div", "ctl-inline"); row.appendChild(el("label", "plain", label));
+      var i = document.createElement("input"); i.type = "number"; i.className = "num"; i.style.width = "78px"; i.min = min; i.max = max; i.step = step; i.value = C[key]; if (tip) row.title = tip;
+      i.addEventListener("change", function () { var v = parseFloat(i.value); if (isFinite(v) && v >= min && v <= max) { C[key] = v; qeSaveCfg(); if (after) after(); } else i.value = C[key]; });
+      row.appendChild(i); if (unit) row.appendChild(el("span", "unit", unit)); p.appendChild(row); return row;
+    }
+    function textRow(p, label, key, tip, grow) {
+      var row = el("div", "ctl-inline"); row.appendChild(el("label", "plain", label));
+      var i = document.createElement("input"); i.type = "text"; i.className = "num orb-text"; i.style.textAlign = "left"; i.value = C[key]; if (tip) row.title = tip;
+      i.addEventListener("input", function () { C[key] = i.value; qeSaveCfg(); }); row.appendChild(i); p.appendChild(row); return i;
+    }
+    var refreshInfo = function () { if (QE.cell && !QE.cell.error) qeSyncInfo(QE.cell); };
+
+    /* ---- Setup ---- */
+    var setup = subsection(qs, "Setup", false);
+    var dirRow = el("div", "ctl-inline");
+    button(dirRow, "Choose folder...", "ghost", function () { qePickDir(); }).style.flex = "0 0 auto";
+    U1.dirLabel = el("span", "hint orb-text", QE.dirName || "no folder chosen"); dirRow.appendChild(U1.dirLabel); dirRow.querySelector("button").style.width = "auto";
+    dirRow.title = "The folder where the input files are written and the results are read from. Each job gets its own subfolder."; setup.appendChild(dirRow);
+    textRow(setup, "pseudo folder", "pseudoDir", "The folder holding the pseudopotential (.upf) files, as a path on the machine that runs Quantum ESPRESSO.");
+    var upfIn = document.createElement("input"); upfIn.type = "file"; upfIn.accept = ".upf,.UPF"; upfIn.multiple = true; upfIn.style.display = "none";
+    upfIn.addEventListener("change", function () { qeReadUpfFiles(Array.prototype.slice.call(upfIn.files)); upfIn.value = ""; });
+    var upfRow = el("div", "btnrow"); button(upfRow, "Read pseudopotentials...", "ghost", function () { upfIn.click(); }).title = "Choose .upf files (any number) to read the element and the valence electrons of each. Only the names and numbers are used; the files stay on this computer.";
+    upfRow.appendChild(upfIn); button(upfRow, "Read structure", "ghost", qeReadStructure).title = "Builds the cell contents from the structure in view and lists its elements below.";
+    setup.appendChild(upfRow);
+    U1.speciesBox = el("div", null); U1.speciesBox.style.display = "flex"; U1.speciesBox.style.flexDirection = "column"; U1.speciesBox.style.gap = "4px"; setup.appendChild(U1.speciesBox);
+    U1.infoBox = el("div", "orb-sum"); U1.infoBox.style.whiteSpace = "normal"; setup.appendChild(U1.infoBox);
+
+    /* ---- Calculation ---- */
+    var calc = subsection(qs, "Calculation", false);
+    var vcBox = el("div"), relaxBox = el("div");
+    function syncCalc() { relaxBox.style.display = C.calc === "scf" ? "none" : ""; vcBox.style.display = C.calc === "vc-relax" ? "" : "none"; }
+    select(calc, "Calculation", [["scf", "Single point (scf)"], ["relax", "Relax the atoms (relax)"], ["vc-relax", "Relax atoms and cell (vc-relax)"]], C.calc, function (v) { C.calc = v; qeSaveCfg(); syncCalc(); }).title = "scf: energy, forces and stress of the structure as it is. relax: move the atoms to the minimum energy. vc-relax: also change the cell.";
+    select(calc, "Functional", [["auto", "From the pseudopotentials"], ["pbe", "PBE"], ["pbesol", "PBEsol"], ["pw", "LDA (PW)"], ["blyp", "BLYP"]], C.func, function (v) { C.func = v; qeSaveCfg(); }).title = "Leave it on 'From the pseudopotentials' unless you know the files were made for another functional.";
+    select(calc, "Dispersion", [["none", "None"], ["d2", "Grimme D2"], ["d3", "Grimme D3 (zero damping)"], ["d3bj", "Grimme D3 (BJ damping)"]], C.vdw, function (v) { C.vdw = v; qeSaveCfg(); }).title = "A van der Waals correction. D3(BJ) with PBE is the usual choice for molecular crystals, hydrates and frameworks.";
+    numRow(calc, "cutoff", "ecut", 10, 400, 5, "Ry", "Plane-wave kinetic-energy cutoff. Norm-conserving pseudopotentials need roughly 70 to 90 Ry for first-row elements: check it with Convergence tests.", refreshInfo);
+    var kRow = select(calc, "k-points", [["spacing", "By spacing"], ["manual", "Mesh"], ["gamma", "Gamma only"]], C.kMode, function (v) { C.kMode = v; qeSaveCfg(); syncK(); refreshInfo(); });
+    var kSpRow = numRow(calc, "spacing", "kSpacing", 0.05, 2, 0.05, U.ang + "\u207B\u00B9", "The largest distance between k-points (2\u03C0 included). Smaller means a denser mesh: 0.3 is a good start for an insulator, and a large cell may need only Gamma.", refreshInfo);
+    var kMeshRow = el("div", "ctl-inline"); kMeshRow.appendChild(el("label", "plain", "mesh"));
+    [0, 1, 2].forEach(function (ix) { var i = document.createElement("input"); i.type = "number"; i.className = "num"; i.style.width = "44px"; i.min = 1; i.max = 40; i.step = 1; i.value = C.kMesh[ix]; i.addEventListener("change", function () { var v = Math.round(parseFloat(i.value)); if (v >= 1 && v <= 40) { C.kMesh[ix] = v; qeSaveCfg(); refreshInfo(); } else i.value = C.kMesh[ix]; }); kMeshRow.appendChild(i); });
+    calc.appendChild(kMeshRow);
+    function syncK() { kSpRow.style.display = C.kMode === "spacing" ? "" : "none"; kMeshRow.style.display = C.kMode === "manual" ? "" : "none"; }
+    var smRow, smWidthRow;
+    function syncOcc() { var on = C.occ === "smearing" || C.spin; smRow.style.display = on ? "" : "none"; smWidthRow.style.display = on ? "" : "none"; }
+    select(calc, "Occupations", [["fixed", "Fixed (insulator)"], ["smearing", "Smearing (metal)"]], C.occ, function (v) { C.occ = v; qeSaveCfg(); syncOcc(); refreshInfo(); }).title = "Use smearing for metals, and whenever the system is spin-polarised (that is written automatically).";
+    smRow = select(calc, "Smearing", [["mv", "Marzari-Vanderbilt"], ["mp", "Methfessel-Paxton"], ["gaussian", "Gaussian"], ["fd", "Fermi-Dirac"]], C.smear, function (v) { C.smear = v; qeSaveCfg(); }).parentNode.parentNode;
+    smWidthRow = numRow(calc, "width", "smearEv", 0.01, 2, 0.05, "eV", "The smearing width.");
+    var spinTg = toggle(calc, "Spin-polarised", C.spin, function (v) { C.spin = v; qeSaveCfg(); syncOcc(); qeSyncSpecies(); refreshInfo(); }); syncOcc(); spinTg.parentNode.title = "Writes nspin = 2 with smearing, and a starting magnetisation for each element (set in Setup).";
+    numRow(calc, "SCF threshold per atom", "convPerAtom", 1e-12, 1e-4, 1e-9, "Ry", "conv_thr is this value times the number of atoms.");
+    numRow(calc, "mixing beta", "mixBeta", 0.05, 1, 0.05, "", "A smaller value (0.2 to 0.3) helps a stubborn SCF.");
+    numRow(calc, "most SCF steps", "elecSteps", 20, 2000, 10, "", "electron_maxstep.");
+    numRow(relaxBox, "force threshold", "forceEv", 0.001, 0.5, 0.005, "eV/" + U.ang, "The relaxation stops when every force is below this.");
+    numRow(relaxBox, "most ionic steps", "nstep", 1, 2000, 10, "", "nstep.");
+    var fixTg = toggle(relaxBox, "Keep the selected atoms fixed", C.fixSel, function (v) { C.fixSel = v; qeSaveCfg(); refreshInfo(); }); fixTg.parentNode.title = "The atoms selected in the view (and their symmetry copies) are not moved by the relaxation.";
+    calc.appendChild(relaxBox);
+    numRow(vcBox, "pressure", "pressGPa", -50, 500, 0.1, "GPa", "The external pressure the cell relaxes towards.");
+    select(vcBox, "Cell moves", [["all", "All of it"], ["shape", "Shape, volume fixed"], ["volume", "Volume only"], ["xyz", "Axis lengths only"], ["2Dxy", "x and y only"]], C.dofree, function (v) { C.dofree = v; qeSaveCfg(); });
+    numRow(vcBox, "pressure threshold", "pressThrKbar", 0.01, 50, 0.1, "kbar", "press_conv_thr.");
+    calc.appendChild(vcBox);
+    syncCalc(); syncK();
+
+    /* ---- Run ---- */
+    var run = subsection(qs, "Run", false);
+    textRow(run, "pw.x command", "pw", "How the run script starts pw.x on the QE machine: 'pw.x' if it is on the PATH, otherwise the full path.");
+    textRow(run, "MPI launcher", "mpirun", "The command that starts parallel programs, for example mpirun or mpiexec. It is used only when the number of processes is above 1.");
+    numRow(run, "processes", "cores", 1, 1024, 1, "", "The number of MPI processes (-np).");
+    numRow(run, "pools", "pools", 1, 256, 1, "", "k-point pools (-nk). Use up to the number of k-points when there is enough memory.");
+    var slTg = toggle(run, "Also write a SLURM script", C.slurm, function (v) { C.slurm = v; qeSaveCfg(); }); slTg.parentNode.title = "Writes submit.slurm, which asks for the processes above and runs run_qe.sh. Submit it with sbatch.";
+    textRow(run, "SLURM time", "slurmTime", "The wall-time request, as hh:mm:ss.");
+    textRow(run, "SLURM partition", "slurmPart", "Leave empty for the default partition.");
+    textRow(run, "module line", "slurmModule", "A line to put before the run, for example: module load quantum-espresso");
+    var wr = el("div", "btnrow");
+    button(wr, "Write inputs", "ghost", qeWriteJob).title = "Writes the input of the calculation chosen above, run_qe.sh and a manifest into a subfolder of the chosen folder.";
+    button(wr, "Copy input", "ghost", qeCopyInput).title = "Copies the pw.x input text to the clipboard, for a browser that cannot write to a folder.";
+    run.appendChild(wr);
+
+    /* ---- Convergence tests ---- */
+    var cv = subsection(qs, "Convergence tests", false);
+    select(cv, "Series over", [["ecut", "Cutoff"], ["k", "k-point spacing"]], C.convKind, function (v) { C.convKind = v; qeSaveCfg(); syncConv(); });
+    var ecRow = textRow(cv, "cutoffs (Ry)", "convEcut", "The cutoffs to try, separated by commas. The k-points stay as set in Calculation.");
+    var kvRow = textRow(cv, "spacings", "convK", "The k-point spacings to try, separated by commas. The cutoff stays as set in Calculation.");
+    function syncConv() { ecRow.parentNode.style.display = C.convKind === "ecut" ? "" : "none"; kvRow.parentNode.style.display = C.convKind === "k" ? "" : "none"; }
+    syncConv();
+    var cr = el("div", "btnrow"); button(cr, "Write inputs", "ghost", qeWriteConv).title = "Writes one single-point input per value, and the run script."; button(cr, "Read results", "ghost", qeReadResults).title = "Reads the outputs and plots the energy difference against the last point.";
+    cv.appendChild(cr);
+
+    /* ---- Results ---- */
+    var res = subsection(qs, "Results", false);
+    var rr = el("div", "btnrow");
+    button(rr, "Read results", "ghost", qeReadResults).title = "Reads the output files of the job folder written last (or the newest qe_ folder in the chosen folder).";
+    var outIn = document.createElement("input"); outIn.type = "file"; outIn.accept = ".out,.pwo,.txt,.log"; outIn.multiple = true; outIn.style.display = "none";
+    outIn.addEventListener("change", function () { qeOpenOutputs(Array.prototype.slice.call(outIn.files)); outIn.value = ""; });
+    button(rr, "Open output file...", "ghost", function () { outIn.click(); }).title = "Reads one or more pw.x output files directly, without the folder.";
+    rr.appendChild(outIn); res.appendChild(rr);
+    U1.resBox = el("div", null); U1.resBox.style.display = "flex"; U1.resBox.style.flexDirection = "column"; U1.resBox.style.gap = "6px"; res.appendChild(U1.resBox);
+    var imp = el("div", "btnrow");
+    var impIn = document.createElement("input"); impIn.type = "file"; impIn.accept = ".in,.pwi,.out,.pwo,.txt"; impIn.style.display = "none";
+    impIn.addEventListener("change", function () { var f = impIn.files[0]; impIn.value = ""; if (!f) return; var rd = new FileReader(); rd.onload = function () { if (!qeImportText(rd.result, f.name)) setStatus("This does not look like a pw.x input or output.", true); }; rd.readAsText(f); });
+    button(imp, "Read pw.x file as structure...", "ghost", function () { impIn.click(); }).title = "Loads the structure of a pw.x input or output file (the final structure, for an output). The file can also be dropped on the 3D view.";
+    imp.appendChild(impIn); res.appendChild(imp);
+    qeSyncDirLabel(); qeSyncResults();
+  }
+  /* ---- QE-END ---- */
+
   /* ---- HELPBUTTONS-BEGIN: a small "?" in the title bar of the menus below opens a short, task-focused help panel (looks like the Guide, but floats beside the 3D view without dimming it, so it can stay open while you work). The text lives only here; the Guide and the Manual stay the full reference. ---- */
   var HELP_TITLES = { "Orca bridge": "orca", "Cube & ESP": "cube", "Macro": "macro", "Grow": "grow", "Void / Channel Analysis": "voidch", "Molecular Surface": "molsurf",
-    "Add guest": "addguest", "Walk mode": "walk", "Clipping Planes": "clip", "Video": "video", "Difference density": "fcf" };
+    "Add guest": "addguest", "Walk mode": "walk", "Clipping Planes": "clip", "Video": "video", "Difference density": "fcf", "Quantum ESPRESSO": "qe" };
   var HELP = {
+    qe: { title: "Quantum ESPRESSO", html:
+      "<p>Writes input files for the plane-wave program <b>Quantum ESPRESSO</b> (pw.x) and reads its output back. Quantum ESPRESSO has to be installed separately, on the machine that runs it: CrystalVista writes the files, you copy the folder there, run the script, copy the folder back, and CrystalVista reads the results. The structure must be a CIF or SHELX file that still has its symmetry; the whole cell is written, with every atom fully occupied.</p>" +
+      "<h3>Once, in Setup</h3><ul>" +
+      "<li><b>Choose folder...</b> &mdash; the working folder. Each job gets its own subfolder.</li>" +
+      "<li><b>pseudo folder</b> &mdash; where the .upf files are on the machine that runs Quantum ESPRESSO (a path there, not here).</li>" +
+      "<li><b>Read pseudopotentials...</b> &mdash; choose the .upf files so that the element and the number of valence electrons of each are known. Norm-conserving files are expected. <b>Read structure</b> then lists the elements, each with its file name; a transition metal also has a Hubbard U box, and with <b>Spin-polarised</b> a starting magnetisation.</li></ul>" +
+      "<h3>One calculation</h3><ol>" +
+      "<li><b>Calculation</b>: single point, relax the atoms, or relax the atoms and the cell. A good start for an organic crystal or a framework is PBE with Grimme D3 (BJ damping) and a k-point spacing of 0.3. Check the cutoff with a convergence test first.</li>" +
+      "<li><b>Run</b>: the pw.x command and the number of MPI processes on the QE machine. <b>Write inputs</b> writes the input, <b>run_qe.sh</b> and a manifest (and <b>submit.slurm</b> if ticked). <b>Copy input</b> puts the input text on the clipboard.</li>" +
+      "<li>Copy the folder to the QE machine and run <b>bash run_qe.sh</b> there (or sbatch submit.slurm). A job that has already finished for the same input is skipped.</li>" +
+      "<li>Copy the folder back and press <b>Results &gt; Read results</b>.</li></ol>" +
+      "<h3>Convergence tests</h3><ul>" +
+      "<li>Choose the cutoff or the k-point spacing, list the values, and <b>Write inputs</b>. After the run, <b>Read results</b> tabulates the energy difference in meV per atom against the last point and plots it; a few meV per atom or less is converged for energies, and the pressure should also settle.</li></ul>" +
+      "<h3>Results</h3><ul>" +
+      "<li>The table gives each job's status, final energy, ionic steps, largest force and pressure. Click a row for the detail: the energy and force against the step, the cell volume, the HOMO&ndash;LUMO gap and the wall time.</li>" +
+      "<li><b>Load structure</b> replaces the structure in view by the final structure, or any step, of the selected job (a P1 cell with every atom of the cell).</li>" +
+      "<li><b>Open output file...</b> reads pw.x outputs directly. <b>Read pw.x file as structure...</b>, or dropping a pw.x input or output on the 3D view, loads its structure.</li></ul>" +
+      "<h3>Things to know</h3><ul>" +
+      "<li>Atoms from different disorder components that sit on top of each other stop the writing: remove one component first.</li>" +
+      "<li>With fixed occupations the number of valence electrons must be even; otherwise use smearing or spin.</li>" +
+      "<li>Spin-polarised jobs are written with smearing, and a Hubbard U is written as a HUBBARD (ortho-atomic) card.</li></ul>" },
     orca: { title: "Orca bridge", html:
       "<p>Uses the free quantum-chemistry program <b>Orca</b> as a number cruncher. CrystalVista writes the input files, you start a small run script by double-clicking it, and CrystalVista reads the results back. Orca has to be installed separately (it is free for academic use); for more than one core it also needs Microsoft MPI.</p>" +
       "<h3>Once, in Setup</h3><ul>" +
@@ -21524,7 +22585,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<li>The host must be a CIF or SHELX structure that still has its symmetry, with any guest moved to a guest group (Structure &gt; Edit atoms &gt; Move selection to). Only host atoms count. Remove one component of any disorder first.</li>" +
       "<li><b>Calculate charges</b> gives point charges (EQeq) for the whole periodic host. No Orca run is needed.</li>" +
       "<li>Build the surfaces to colour: a molecular surface over the guest, or over the host atoms around a channel (grow them first), and/or run Void / Channel Analysis.</li>" +
-      "<li><b>Map potential</b> colours them in kcal/mol, with a colour bar in the corner of the view. <b>Red = positive</b> in Cube &amp; ESP switches to the convention used in the literature.</li></ol>" +
+      "<li><b>Map potential</b> colours them in kcal/mol, with a colour bar in the corner of the view. The three colours of the map (negative, zero, positive) are chosen in Cube &amp; ESP &gt; ESP colouring.</li></ol>" +
       "<p>The point-charge map is a quick model: use it to compare sites and frameworks, not as an absolute value.</p>" +
       "<p>For a more accurate map, <b>Build cluster</b> (axis, cells along it, radius) selects a cluster of the host around the channel, <b>Write cluster job</b> writes the Orca input and <b>run_fw.bat</b>, and after you run it <b>Read cluster results</b> colours the surfaces. Build the surfaces first; the size and time estimate is shown under the buttons.</p>" +
       "<p>A surface built <i>after</i> the job was run (for example over the guest) has no values yet: build it, press <b>Add surfaces</b>, double-click <b>run_vpot.bat</b> (it reuses the finished wavefunction and takes minutes) and press <b>Read cluster results</b> again.</p>" +
@@ -21538,7 +22599,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<h3>ESP colouring</h3><ul>" +
       "<li>It needs a molecular surface in view (Molecular Surface &gt; Calculate).</li>" +
       "<li>Potential from Orca: use Orca bridge &gt; Molecule job &gt; Read results, which colours the surface at once. Potential from a cube: load the ESP cube, choose it in the list and press <b>Colour surface</b>.</li>" +
-      "<li>Red is negative, white zero, blue positive. <b>colour range</b> sets the span in atomic units, <b>surface opacity</b> makes the surface see-through, and <b>Clear colours</b> restores the plain surface.</li></ul>" },
+      "<li>The three <b>colours</b> (negative, zero and positive; red, white and blue to start with) are set with the swatches, <b>Reverse</b> swaps the negative and positive colours, and the choice is remembered. <b>colour range</b> sets the span in atomic units, <b>surface opacity</b> makes the surface see-through, and <b>Clear colours</b> restores the plain surface.</li></ul>" },
     macro: { title: "Macro", html:
       "<p>A macro is a list of commands, one per line, recorded from your clicks or typed in. It can be replayed on the same structure or on a whole folder of similar ones.</p>" +
       "<h3>Recording and playing</h3><ul>" +
@@ -21715,12 +22776,13 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     { key: "walk", label: "Walk mode", desc: "The Walk mode submenu of Display.", titles: ["Walk mode"] },
     { key: "macro", label: "Macro and batch", desc: "The Macro menu.", titles: ["Macro"] },
     { key: "orca", label: "Quantum chemistry (Orca)", desc: "The Orca bridge and Cube &amp; ESP menus.", titles: ["Orca bridge", "Cube & ESP"] },
+    { key: "qe", label: "Quantum ESPRESSO", desc: "The Quantum ESPRESSO menu: writes pw.x inputs (single point, relax, vc-relax, convergence tests) and reads the results.", titles: ["Quantum ESPRESSO"] },
     { key: "fcf", label: "Difference density (FCF)", desc: "The Difference density menu: electron density maps from a SHELXL .fcf file. It appears only while a .fcf has been loaded with the structure.", titles: ["Difference density"], needs: function () { return !!FCF.data; } }
   ];
   var FEATURE_PRESETS = [
     { name: "Viewer", on: {} },
     { name: "Void / channel", on: { void: 1, molsurf: 1, clip: 1, guest: 1 } },
-    { name: "Everything", on: { void: 1, molsurf: 1, clip: 1, guest: 1, walk: 1, macro: 1, orca: 1, fcf: 1 } }
+    { name: "Everything", on: { void: 1, molsurf: 1, clip: 1, guest: 1, walk: 1, macro: 1, orca: 1, qe: 1, fcf: 1 } }
   ];
   var IFACE_KEY = "CrystalVista_interface";
   var IFACE = { features: {}, probe: 1.0, help: true };
@@ -21871,6 +22933,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     var paramsTab = subsection(structC, "Metadata", false);
     var atomsTab = subsection(structC, "Edit atoms", false);
     var bondsTab = subsection(structC, "Edit bonds", false, function (isOpen) { if (!isOpen) exitBondEditMode(); });
+    var neutronTab = subsection(structC, "Neutron normalisation", false);
     var hostTab = subsection(structC, "Host", false);
     var guestTab = subsection(structC, "Guest", false);
     var atomEditTab = subsection(structC, "Create/Move Atoms", false, function (isOpen) { if (!isOpen) exitAtomEditMode(); });
@@ -22117,6 +23180,13 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     moveBtn.addEventListener("click", function () { setAtomEditUiMode("move"); });
     moveRow.appendChild(moveBtn);
     atomEditTab.appendChild(moveRow);
+    /* Move selection: the same drag, applied to the whole selection (press on one of the selected atoms) */
+    var moveSelRow = el("div", "btnrow");
+    var moveSelBtn = document.createElement("button"); moveSelBtn.type = "button"; moveSelBtn.className = "btn mode-btn ghost"; moveSelBtn.textContent = "Move selection"; moveSelBtn.id = "moveSelBtn";
+    moveSelBtn.title = "Drag one of the selected atoms to move the whole selection in the plane of the screen. Press again, or leave this submenu, to turn it off.";
+    moveSelBtn.addEventListener("click", function () { setAtomEditUiMode("moveSel"); });
+    moveSelRow.appendChild(moveSelBtn);
+    atomEditTab.appendChild(moveSelRow);
     refreshReassignElementOptions(); /* populates createAtomEl too, now that it exists */
 
     /* ---- Metadata ---- */
@@ -22502,9 +23572,8 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       cleanupBondsByDistance(el1, el2, lo, hi, mode);
     });
     bondsTab.appendChild(cbRow);
-    /* Normalise H atoms (Edit bonds: it is the X-H bonds that get adjusted) -- moves H atoms along their X-H direction to typical neutron X-H distances (editable here); acts on the selected H atoms, or every H atom when none is selected */
-    bondsTab.appendChild(el("hr", "divider"));
-    bondsTab.appendChild(el("div", "hint", "X–H distance (" + U.ang + ")"));
+    /* Normalise H atoms (Neutron normalisation: it is the X-H bonds that get adjusted) -- moves H atoms along their X-H direction to typical neutron X-H distances (editable here); acts on the selected H atoms, or every H atom when none is selected */
+    neutronTab.appendChild(el("div", "hint", "X–H distance (" + U.ang + ")"));
     var normHRow = el("div", "ctl-inline"); normHRow.style.gap = "3px";
     ["C", "N", "O", "B", "S"].forEach(function (elSym) {
       var inp = document.createElement("input"); inp.type = "text"; inp.setAttribute("inputmode", "decimal"); inp.className = "num"; inp.style.width = "46px"; inp.style.minWidth = "0"; inp.style.padding = "3px 2px"; inp.style.textAlign = "center"; inp.value = state.normHDist[elSym]; inp.id = "normH_" + elSym;
@@ -22513,11 +23582,18 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       var lab = el("label", "plain", elSym); lab.style.marginLeft = "5px"; lab.style.marginRight = "0";
       normHRow.appendChild(lab); normHRow.appendChild(inp);
     });
-    bondsTab.appendChild(normHRow);
+    neutronTab.appendChild(normHRow);
+    /* distance-dependent positions for hydrogen-bonded H atoms (Lusi & Barbour, Cryst. Growth Des. 11, 5515, 2011): see the NORMH_HB block */
+    var normHBTg = toggle(neutronTab, "H-bonded O\u2013H and N\u2013H: distance-dependent", state.normHHB, function (b) { state.normHHB = b; persistPreferences(); syncNormHB(); });
+    normHBTg.id = "normHHBTg"; normHBTg.parentNode.title = "For an O\u2013H or N\u2013H that donates a hydrogen bond to O, N or Cl, take the D\u2013H and H\u00B7\u00B7\u00B7A distances from the D\u00B7\u00B7\u00B7A distance with the polynomials of Lusi & Barbour (Cryst. Growth Des. 11, 5515, 2011) instead of the fixed distance above. Every other H keeps the fixed distances.";
+    var normHModeSel = select(neutronTab, "place the H", [["axis", "along D\u2013H (D\u2013H only)"], ["plane", "at D\u2013H and H\u00B7\u00B7\u00B7A"]], state.normHHBMode, function (v) { state.normHHBMode = v; persistPreferences(); });
+    normHModeSel.id = "normHHBMode"; normHModeSel.title = "at D\u2013H and H\u00B7\u00B7\u00B7A: the H goes where both distances are right, in the plane of D, A and its present position. along D\u2013H: it stays on its present D\u2013H line and only the D\u2013H distance changes (the safer choice: the paper warns that angles worked out from the three distances are unreliable). at D\u2013H and H\u00B7\u00B7\u00B7A also puts H\u00B7\u00B7\u00B7A right, and so changes the D\u2013H\u00B7\u00B7\u00B7A angle.";
+    function syncNormHB() { normHModeSel.parentNode.parentNode.style.display = state.normHHB ? "" : "none"; }
+    syncNormHB();
     var normHBtnRow = el("div", "btnrow");
     var normHBtn = button(normHBtnRow, "Normalise H atoms", "ghost", normaliseHAtoms); normHBtn.id = "normaliseHBtn";
     normHBtn.title = "Move each hydrogen along its X–H direction to the distance above (X-ray H positions are too close to X). Acts on the selected H atoms, or on every H atom if none is selected. Undo restores. Atoms in a P1 or symmetry-expanded model move with their asymmetric-unit site.";
-    bondsTab.appendChild(normHBtnRow);
+    neutronTab.appendChild(normHBtnRow);
 
     var cifDispC = section(left, "Display", false, function (isOpen) { if (!isOpen) exitWalkMode(); });
     cifDispC.parentElement.id = "cifDisplaySection";
@@ -22548,6 +23624,12 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     var showHBondsTg = toggle(hRow, "Show H bonds", state.showHBonds, function (b) { state.showHBonds = b; renderStructure(); persistPreferences(); });
     showHBondsTg.setAttribute("data-sync-key", "showHBonds");
     cifDispC.appendChild(hRow);
+    var hoverRow = el("div", "toggle-row2");
+    var atomPropsTg = toggle(hoverRow, "Show atom properties", !!state.showAtomProps, function (b) { state.showAtomProps = b; if (!b) hideBondTip(); persistPreferences(); atomPropsTg.blur(); });
+    atomPropsTg.id = "showAtomPropsTg"; atomPropsTg.parentNode.title = "Point the mouse at an atom to see its name, PART, SOF, the symmetry operator of that copy, U(iso), fractional coordinates and the six U(ij) (whatever is available). Remembered between sessions.";
+    var bondLenTg = toggle(hoverRow, "Show bond lengths", !!state.showBondLengths, function (b) { state.showBondLengths = b; if (!b) hideBondTip(); persistPreferences(); bondLenTg.blur(); });
+    bondLenTg.id = "showBondLengthsTg"; bondLenTg.parentNode.title = "Point the mouse at a bond (ball-and-stick or stick) to see its length next to the pointer. Remembered between sessions.";
+    cifDispC.appendChild(hoverRow);
     var lockRow = el("div", "toggle-row2");
     var lockTg = toggle(lockRow, "Immobilise view", !!state.viewLocked, function (b) { state.viewLocked = b; lockTg.blur(); /* hand the keyboard back to the model window, so the cursor keys and - / = keep working */ });
     lockTg.id = "viewLockTg";
@@ -23295,6 +24377,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
 
     buildOrcaBridgeUi(left); /* the Orca bridge and Cube & ESP menus (see the ORCABRIDGE block) */
     buildFcfUi(left); /* the Difference density menu (see the FCF block) */
+    buildQeUi(left); /* the Quantum ESPRESSO menu (see the QE block) */
     var sgC = section(left, "Selection & geometry", false);
     var lastClickedInfo = el("div", "readout"); lastClickedInfo.id = "lastClickedInfo"; sgC.appendChild(lastClickedInfo);
     var selInfo = el("div", "readout"); selInfo.id = "selInfo"; selInfo.innerHTML = "<div class='dim'>No atoms selected.</div>"; sgC.appendChild(selInfo);
@@ -23887,6 +24970,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
         var item = items[0];
         if (item && item.getAsFileSystemHandle) item.getAsFileSystemHandle().then(function (h) { state.lastSourceHandle = h; }).catch(function () {});
         if (/\.cub(e)?$/i.test(f.name)) { orbLoadCubeFile(f); return; } /* a Gaussian cube file goes to Cube & ESP */
+        if (/\.(in|out|pwi|pwo)$/i.test(f.name)) { var qr = new FileReader(); qr.onload = function () { if (!qeImportText(qr.result, f.name)) handleStructureFileText(qr.result, f.name); }; qr.readAsText(f); return; } /* a pw.x input or output (Quantum ESPRESSO) gives its structure */
         if (/\.fcf$/i.test(f.name)) { var fr = new FileReader(); fr.onload = function () { fcfAttachText(fr.result, f.name); }; fr.readAsText(f); return; } /* a reflection file goes to the structure that is loaded */
         if (isJson) { handleModelFileSelected(f); return; }
         var rd = new FileReader();
@@ -23971,9 +25055,9 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     body.innerHTML =
       "<h2>Guide</h2>" +
       "<h3>Help buttons</h3>" +
-      "<p>A small <b>?</b> in the title bar of some menus and submenus (Structure Navigator, Add guest, Clipping Planes, Walk mode, Grow, Void / Channel Analysis, Molecular Surface, Orca bridge, Cube &amp; ESP, Macro and Video) opens a short help panel for just that menu: what it is for, the steps, and the common snags. The panel floats beside the 3D view without dimming it, so it can stay open while you work. Drag its title bar to move it; press the <b>?</b> again, the &times; or <b>Esc</b> to close it; the link at its foot opens this full Guide. Clicking the <b>?</b> does not open or close the menu, and clicking in the panel does not cancel an interactive mode that is on.</p>" +
+      "<p>A small <b>?</b> in the title bar of some menus and submenus (Structure Navigator, Add guest, Clipping Planes, Walk mode, Grow, Void / Channel Analysis, Molecular Surface, Orca bridge, Cube &amp; ESP, Quantum ESPRESSO, Macro and Video) opens a short help panel for just that menu: what it is for, the steps, and the common snags. The panel floats beside the 3D view without dimming it, so it can stay open while you work. Drag its title bar to move it; press the <b>?</b> again, the &times; or <b>Esc</b> to close it; the link at its foot opens this full Guide. Clicking the <b>?</b> does not open or close the menu, and clicking in the panel does not cancel an interactive mode that is on.</p>" +
       "<h3>Settings</h3>" +
-      "<p>The <b>Settings</b> button in the title bar (next to Elements) chooses which menus are shown, so the panel can stay simple. <b>Void / channel analysis</b>, <b>Molecular surface</b>, <b>Clipping planes</b>, <b>Host&ndash;guest tools</b> (the Host, Guest and Add guest submenus), <b>Walk mode</b>, <b>Macro and batch</b> and <b>Quantum chemistry (Orca)</b> (Orca bridge and Cube &amp; ESP) and <b>Difference density (FCF)</b> (shown only while a .fcf reflection file is loaded with the structure) can each be switched on or off, or set together with the presets <b>Viewer</b>, <b>Void / channel</b> and <b>Everything</b>. Every other menu is always shown. Hiding only removes the menu: nothing is switched off, shortcuts and macros keep working, and a menu that the loaded model uses (void results, molecular surfaces, a clipping plane that is on, guests, a cube, a macro, Walk mode) is shown again for as long as it is needed, with a brief highlight, whatever the setting. Settings also holds the <b>default probe radius</b> for molecular surfaces and a switch for the ? help buttons. A browser with no saved choice starts with the Void / channel preset, except that a browser that already holds CrystalVista preferences keeps Everything. The choices are remembered in the browser and are not saved in model files. Menus always start collapsed, and when several structures are loaded (a folder, a zip or a CIF with several structures) the Structure Navigator opens by itself.</p>" +
+      "<p>The <b>Settings</b> button in the title bar (next to Elements) chooses which menus are shown, so the panel can stay simple. <b>Void / channel analysis</b>, <b>Molecular surface</b>, <b>Clipping planes</b>, <b>Host&ndash;guest tools</b> (the Host, Guest and Add guest submenus), <b>Walk mode</b>, <b>Macro and batch</b>, <b>Quantum chemistry (Orca)</b> (Orca bridge and Cube &amp; ESP), <b>Quantum ESPRESSO</b> and <b>Difference density (FCF)</b> (shown only while a .fcf reflection file is loaded with the structure) can each be switched on or off, or set together with the presets <b>Viewer</b>, <b>Void / channel</b> and <b>Everything</b>. Every other menu is always shown. Hiding only removes the menu: nothing is switched off, shortcuts and macros keep working, and a menu that the loaded model uses (void results, molecular surfaces, a clipping plane that is on, guests, a cube, a macro, Walk mode) is shown again for as long as it is needed, with a brief highlight, whatever the setting. Settings also holds the <b>default probe radius</b> for molecular surfaces and a switch for the ? help buttons. A browser with no saved choice starts with the Void / channel preset, except that a browser that already holds CrystalVista preferences keeps Everything. The choices are remembered in the browser and are not saved in model files. Menus always start collapsed, and when several structures are loaded (a folder, a zip or a CIF with several structures) the Structure Navigator opens by itself.</p>" +
       "<h3>View controls</h3>" +
       "<ul>" +
       "<li><b>Left drag</b> &mdash; rotate. Free rotation about the camera's own axes; there is no limit, and it stops the instant the mouse does. \"Rotation sensitivity\" (Visual Effects panel, Scene tab) can slow this down for lining up a precise view -- it only ever slows down, never speeds up past the default, and resets to full speed the next time the file is opened rather than being remembered.</li>" +
@@ -23984,6 +25068,8 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<li>Lasso selection works on screen position only, not true depth: an atom behind another one, as long as its projected position falls inside the outline, is selected too, even though it's obscured from view by whatever's in front of it. Rotating to a clearer angle before lassoing avoids surprises in a dense structure. This is separate from an atom that's actually hidden (individually hidden, a hydrogen with display switched off, or excluded by \"Show ASU only\") -- those are never selected by lasso, or by any other selection method, while they're not displayed.</li>" +
       "<li><b>Right drag, vertical</b> &mdash; zoom (up = in, down = out). The mouse wheel is disabled.</li>" +
       "<li><b>Immobilise view</b> (Display, a tick box) switches off left-drag rotation and right-drag zoom, so a view you have set up cannot be nudged by accident; a plain click still selects atoms. Shift + left drag (roll), Shift + Ctrl + left drag (pan), the cursor and Page Up/Down keys and the <b>-</b> and <b>=</b> keys all keep working, so the view can still be adjusted deliberately.</li>" +
+      "<li><b>Show bond lengths</b> (Display, a tick box above Immobilise view). Point the mouse at a bond (ball-and-stick or stick) and its length appears in a small label beside the pointer, with the labels of the two atoms; the label hides while you drag, when the pointer is over an atom or empty space, and when the tick box is off. Hydrogen bonds (the dashed lines) are not measured. The setting is remembered between sessions.</li>" +
+      "<li><b>Show atom properties</b> (Display, the tick box beside Show bond lengths). Point the mouse at an atom and a small label beside the pointer lists, where the structure has them, on separate lines: the atom name followed by the symmetry operator of the copy you are pointing at, written with X, Y, Z standing for the asymmetric-unit atom and translations as fractions (for example -X+1/2,Y+1/2,-Z+3/2); the fractional coordinates x, y, z of that copy; the PART number (a SHELX PART, or the CIF disorder group), SOF (site occupancy factor) and U(iso), or U(eq) for an anisotropic atom; and, on two further lines, U11, U22, U33 and U23, U13, U12 of that copy (the asymmetric-unit tensor turned by the operator's rotation, which is the tensor its ellipsoid is drawn from). Items a structure does not carry are left out, and for a structure without a unit cell the coordinates are Cartesian. The label hides while you drag and when the tick box is off. The setting is remembered between sessions.</li>" +
       "<li><b>Arrow keys</b> &mdash; rotate in fixed 5&deg; steps: left/right about the vertical axis, up/down about the horizontal axis. <b>Page Up / Page Down</b> roll in 5&deg; steps. Holding <b>Shift</b> with any of the six turns that same 5&deg; nudge into an exact 90&deg; turn instead -- handy for snapping to a face-on view along whichever axis the key already rotates about (Ctrl was tried for this first, but Ctrl+Page Up/Page Down are already claimed by the browser's own previous/next-tab shortcut, so Shift is used instead throughout). <b>-</b> and <b>=</b>/<b>+</b> zoom out and in, one fixed step at a time, the same as dragging the Set scale number down or up (Display panel). <b>Delete</b> (or Backspace) deletes the selected atoms, or cuts the selected bond(s) if no atoms are selected. <b>Ctrl-C</b> generates a centroid from the selected atoms. <b>Escape</b> clears the whole selection; plain <b>spacebar</b> selects everything if nothing is selected, or clears it if anything is. <b>Shift+spacebar</b> inverts the atom selection; <b>Ctrl+spacebar</b> inverts the bond selection. <b>Ctrl-Z</b> hides the selected atoms (Structure &gt; Edit atoms' \"Hide selected\"); <b>Ctrl-U</b> unhides everything. For a CIF-based structure: <b>a</b> toggles between showing only the asymmetric unit and showing everything currently grown; <b>c</b> toggles the unit cell; <b>k</b> toggles the axis key; <b>h</b> toggles hydrogen display; <b>l</b> toggles atom labels. <b>p</b> creates a least-squares plane through the selected atoms (3 or more) and clears the selection -- the same as Style &gt; L.S. Planes' \"New plane\". The checkboxes for the unit cell, axis key and atom labels each exist twice (in Display and in the matching Style submenu) and always agree with one another and with these keys. These only respond while focus isn't in a text box, dropdown, or button.</li>" +
       "<li><b>Orthographic / Pseudo-orthographic / Depth scaling</b> (Visual Effects panel, Scene tab) &mdash; three mutually exclusive camera modes. <b>Orthographic</b> (default) is a true orthographic projection: exact parallel projection, so e.g. unit cell edges viewed straight down an axis overlay exactly, at the cost of a known artifact where zooming in close enough can clip through the middle of a solid atom (an inherent property of orthographic projection, not a bug -- a true orthographic camera has no single eye point for the near/far clipping planes to be tuned around). <b>Pseudo-orthographic</b> and <b>Depth scaling</b> both trade that off the other way, using the exact same mechanism -- a genuine perspective camera at a narrow angle, parked correspondingly far away, which eliminates the clipping entirely at the cost of some perspective convergence (near/far cell edges no longer overlay exactly edge-on-edge) -- the only difference between them is the angle: Pseudo-orthographic fixes it at a very small, usually-imperceptible value, while Depth scaling exposes it as its own slider (from that same small value up to 25&deg;), for a deliberately stronger, adjustable sense of depth -- useful for judging a large structure's own 3D shape at a glance, where a true orthographic view can read as flat. The slider stays disabled, at whatever it was last set to, unless Depth scaling is the selected mode. The chosen mode and angle, the background colour and the whole lighting setup (Visual Effects > Lighting) are remembered between structures and when the app is closed and reopened, and loading a saved project file does not change any of them.</li>" +
       "</ul>" +
@@ -24022,7 +25108,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<h3>Molecular neighbourhood</h3>" +
       "<p>A different way of growing: rather than adding atoms outright, it previews what's nearby first, so a direction can be chosen before committing to it -- useful for a framework or polymer that could otherwise be extended in several different directions at once. Choose <b>Sphere of inclusion</b> (and enter its radius in the box beside it) or <b>H-bonds</b>, then press the button below (solid red while active, exactly like Mouse's own grow-mode button). With the sphere, every symmetry-generated atom not currently displayed, but within that radius of at least one atom that already is (host or guest, whichever layer it would belong to), is shown as a small unbonded sphere, joined by a dotted line to each real atom it's close enough to. With H-bonds the spheres are instead the symmetry-generated atoms that are hydrogen-bonded to an atom already in the view (the criterion of Show H bonds): the acceptors around each displayed donor H, and the H and donor atoms that point at each displayed acceptor, each joined by a dotted line to the atom it bonds to. These are a preview only, never added to the model, and cost nothing to leave on screen since they're recomputed only when the mode is turned on, the radius changes, or a fragment is added, not on every frame. <b>Black nodes</b> (ticked by default) shows every one of these preview spheres in plain black, keeping them visually distinct from anything already in the model; unticking it instead colours each one the same as the real atom it represents (its usual CPK or custom colour), which makes it far easier to judge what a given preview position actually is -- e.g. picking out a lone counter-ion's own colour among a crowd of hydrogens -- at the cost of that “obviously still just a preview” distinctness black gives. Either way, the dotted contact lines themselves stay black, and the preview spheres' own radii still scale with each atom's own display radius, exactly like a real atom would.</p>" +
       "<p>Clicking one of these black spheres adds the whole connected fragment it belongs to -- the same Fragment-unit growth Mouse's own grow mode uses -- and the preview then refreshes around the newly-larger structure: any black sphere the new fragment happened to reach simply stops being previewed (it's a real atom now), and a fresh ring of black spheres appears around whatever's now the edge of the structure. Repeating this lets a structure be built out one fragment at a time, following whichever direction actually looks interesting, rather than growing everything within reach at once. Leaving Molecular neighbourhood -- pressing its button again, closing its own tab, switching to Mouse/Pack/Symmetry, or opening a different section entirely -- discards whatever black spheres are still on screen; nothing about them is ever kept. Like grow mode, it needs a CIF that still has its symmetry information.</p>" +
-      "<p>The <b>Display</b> section, just below Grow, is always available. Its own general settings hold <b>Show ASU only</b> paired with <b>Show atom labels</b>, then <b>Show unit cell</b> paired with <b>Show axis key</b>, then <b>Show hydrogen atoms</b> paired with <b>Show H bonds</b>, then <b>Immobilise view</b> (see View controls); a <b>Background colour</b> swatch; <b>Centering</b> (All/Visible/Selected atoms, with an Apply button that only appears for \"Selected atoms\", since that mode is otherwise frozen at whatever it was last applied to, plus a <b>Recenter</b> button that returns the rotation centre to its default position after any Shift + Ctrl + left-drag panning); <b>Set scale</b>, an arbitrary whole-number reference for the current zoom level -- bigger means more zoomed in, updates live as you zoom, and can be typed into directly (it carries no physical unit; its purpose is matching the same apparent zoom between different structures rather than measuring anything); and duplicate <b>Select all</b> / <b>Clear selection</b> / <b>Hide selection</b> / <b>Unhide all</b> buttons for convenience, identical to the ones in Structure &gt; Edit atoms. Nested inside Display: <b>Direction</b>, a <b>View direction</b> set of crystallographic view shortcuts -- buttons for looking straight down each cell axis (a, b, c) and perpendicular to each pair-wise plane (bc, ac, ab), a general <b>[hkl]</b> field for viewing along any specific direction entered as its own three numbers, and <b>View along vector</b> / <b>View perpendicular to plane</b> (see \"Viewing along a vector or a plane\" below), which orient the camera from a selection of atoms instead. The appearance of the unit cell, the axis key and the atom labels lives in Style (see \"Unit cell, axis key and atomic labels (Style)\" below).</p>" +
+      "<p>The <b>Display</b> section, just below Grow, is always available. Its own general settings hold <b>Show ASU only</b> paired with <b>Show atom labels</b>, then <b>Show unit cell</b> paired with <b>Show axis key</b>, then <b>Show hydrogen atoms</b> paired with <b>Show H bonds</b>, then <b>Immobilise view</b> (see View controls) paired with <b>Show bond lengths</b>; a <b>Background colour</b> swatch; <b>Centering</b> (All/Visible/Selected atoms, with an Apply button that only appears for \"Selected atoms\", since that mode is otherwise frozen at whatever it was last applied to, plus a <b>Recenter</b> button that returns the rotation centre to its default position after any Shift + Ctrl + left-drag panning); <b>Set scale</b>, an arbitrary whole-number reference for the current zoom level -- bigger means more zoomed in, updates live as you zoom, and can be typed into directly (it carries no physical unit; its purpose is matching the same apparent zoom between different structures rather than measuring anything); and duplicate <b>Select all</b> / <b>Clear selection</b> / <b>Hide selection</b> / <b>Unhide all</b> buttons for convenience, identical to the ones in Structure &gt; Edit atoms. Nested inside Display: <b>Direction</b>, a <b>View direction</b> set of crystallographic view shortcuts -- buttons for looking straight down each cell axis (a, b, c) and perpendicular to each pair-wise plane (bc, ac, ab), a general <b>[hkl]</b> field for viewing along any specific direction entered as its own three numbers, and <b>View along vector</b> / <b>View perpendicular to plane</b> (see \"Viewing along a vector or a plane\" below), which orient the camera from a selection of atoms instead. The appearance of the unit cell, the axis key and the atom labels lives in Style (see \"Unit cell, axis key and atomic labels (Style)\" below).</p>" +
       "<h3>Unit cell, axis key and atomic labels (Style)</h3>" +
       "<p><b>Style &gt; Unit cell</b> starts with a <b>Show unit cell</b> checkbox that echoes Display's checkbox of the same name and the <b>c</b> key -- change any one and the others follow. Below it: a <b>Label axes</b> toggle for the a/b/c corner labels, a <b>RGB axes</b> option to colour the a/b/c edges red/green/blue, the cell's own <b>Cell colour</b>, and <b>line thickness</b> -- all of these, plus whether the cell is shown, are remembered between structures and when the app is closed and reopened. Each corner label sits genuinely at that corner in 3D and is occluded normally by anything nearer the camera (an atom, an L.S. plane, ...), not painted on top of everything regardless of what's actually in front of it. A divider then separates the cell's settings from the <b>axis key's</b> own: a <b>Show axis key</b> checkbox (echoing Display's, and the <b>k</b> key), the key's <b>zoom</b> (scales the whole key -- arrow length and thickness, arrowheads and letters alike), <b>proportional lengths</b> (arrow lengths follow the real a/b/c edge lengths, or all equal when off), <b>show labels a, b, c</b> (a letter beside each arrow tip, in the arrow's own red/green/blue on a transparent background, scaling with the key's zoom and positioned smoothly so it never jumps as the model rotates; on by default, remembered between sessions, and included in exported images along with the key itself), and <b>Reset key position</b>. All of the key's settings -- whether it is shown, where you dragged it, its zoom, proportional lengths and labels -- are remembered between structures and when the app is closed and reopened (a saved project file still restores its own).</p>" +
       "<p><b>Style &gt; Atomic labels</b> (moved here from Display, where it was called Labels) holds <b>Show atom labels</b> -- again echoing Display's checkbox of the same name and the <b>l</b> key -- plus <b>Contrasting outline</b>, <b>Font</b>, <b>Colour</b>, <b>Size</b>, and the buttons that label or unlabel the selected atoms and unfix dragged labels.</p>" +
@@ -24053,7 +25139,8 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<h3>Show H bonds</h3>" +
       "<p>Unchecked by default, and remembered when the app is closed and reopened. It belongs to the app rather than to a saved project: opening a project keeps the setting as it is, whatever it was when the project was saved. When on, every currently-displayed atom (host and guest together, whichever layers are visible) is scanned for probable hydrogen bonds and each one found is drawn as a short red dashed line. This is a geometric estimate, not a quantum-mechanical one: a hydrogen counts as a candidate donor if it's covalently bonded to exactly one N, O, S, or Cl atom, and a bond is drawn to any other N, O, S, or Cl atom that sits within a plausible contact distance of that hydrogen and roughly in line with its own donor -- the same two criteria (distance and near-linearity) tools like Mercury use for a first pass, so \"probable\" is the right word for what's shown rather than a certainty. It updates automatically whenever the structure changes, the same as ordinary bonds.</p>" +
       "<h3>Mode buttons</h3>" +
-      "<p>A few buttons do not act once but switch an interactive mode on and off: <b>Interactive bond editor</b>, <b>Click to add atom</b> and <b>Move atom</b> (Create/Move atoms), <b>Drag/reorient guest</b>, <b>Interactive grow mode</b> (in Mouse, and again in Molecular neighbourhood), <b>Move</b>, <b>Copy</b> and <b>Recolour</b> (Void/Channel Analysis) <b>Walk through structure</b> (Display &gt; Walk mode), and <b>Record</b> and <b>Pause</b> (Macro; one of the two is always on). They are shaded warm grey with a small hollow ring in front of the text, unlike the plain outlined buttons that act at once. While a mode is on the button turns red and the ring is filled; press it again, or another mode button, to leave the mode.</p>" +
+      "<p>A few buttons do not act once but switch an interactive mode on and off: <b>Interactive bond editor</b>, <b>Click to add atom</b>, <b>Move atom</b> and <b>Move selection</b> (Create/Move atoms), <b>Drag/reorient guest</b>, <b>Interactive grow mode</b> (in Mouse, and again in Molecular neighbourhood), <b>Move</b>, <b>Copy</b> and <b>Recolour</b> (Void/Channel Analysis) <b>Walk through structure</b> (Display &gt; Walk mode), and <b>Record</b> and <b>Pause</b> (Macro; one of the two is always on). They are shaded warm grey with a small hollow ring in front of the text, unlike the plain outlined buttons that act at once. While a mode is on the button turns red and the ring is filled; press it again, or another mode button, to leave the mode.</p>" +
+      "<p><b>Move selection</b> (Create/Move Atoms, just below Move atom) is Move atom for a whole selection: with the mode on, press on one of the selected atoms and drag, and every selected atom moves together in the plane of the screen, in one undo step, exactly as one atom does in Move atom. Pressing anywhere else still selects atoms and turns the view, so the selection can be made or changed without leaving the mode. In a structure with symmetry the move is made on the asymmetric-unit sites, as for Move atom, so the symmetry copies of the moved atoms follow them; if the selection holds several copies of the same site, only one of them is dragged and the others follow it by symmetry. Press the button again, or leave the Create/Move Atoms submenu, to turn it off.</p>" +
       "<h3>Undo</h3>" +
       "<p>\"Undo\" (Structure &gt; Edit atoms) and \"Undo\" (Structure &gt; Edit bonds) both trigger the same single shared history, so either one steps back through moving atoms, deleting atoms, and cutting bonds, in that order, one step at a time -- whichever of the two happens to be at hand works, regardless of which kind of edit is actually being undone. <b>Ctrl + Z</b> does the same thing from the keyboard (the Windows convention). It does not cover loading files or changing element/display settings, which have their own separate reset controls.</p>" +
       "<h3>Keeping symmetry consistent</h3>" +
@@ -24063,7 +25150,8 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<h3>Centroids and reassigning elements</h3>" +
       "<p>Select two or more atoms and \"Generate centroid\" (or Ctrl-C) adds a marker at their average position -- useful as a reference point for measuring or for defining a plane or vector that isn't sitting on a real atom. A centroid always renders as a small white sphere (0.2 &Aring; radius), regardless of the current display style, and doesn't affect bonding in any way -- it's a geometric reference, not a real atom. Its clickable area is a bit larger than it looks, since a sphere that small would otherwise be hard to hit precisely; this doesn't change how big it appears. It can be selected, moved between host and guest, and deleted exactly like any other atom. For a CIF-based structure, a centroid becomes part of the asymmetric unit, so it can be grown by symmetry the same way as everything else.</p>" +
       "<p>\"Reassign element to\", just below \"Move selection to\", changes the element of the selected atom(s) to any element in the periodic table, whether or not that element was already present in the structure -- a new one is picked up automatically, with its own colour and radius, the moment it's assigned. Reassigning a centroid turns it into a real atom of that element from then on: it stops being a fixed white marker and starts looking and behaving like any other atom in whichever layer it belongs to.</p>" +
-      "<p><b>Normalise H atoms</b>, at the foot of <b>Structure &gt; Edit bonds</b> (it is the X&ndash;H bonds that it adjusts), corrects the hydrogen positions of an X-ray structure. X-ray H atoms sit about 0.1 &Aring; too close to their parent atom, which matters for anything that measures space next to H (voids, channels, close contacts). Each H atom is moved along its existing X&ndash;H direction to a typical neutron-diffraction distance (C&ndash;H 1.083, N&ndash;H 1.009, O&ndash;H 0.983, B&ndash;H 1.19, S&ndash;H 1.34 &Aring;; after Allen &amp; Bruno, <i>Acta Cryst.</i> B66, 380 (2010)); the five boxes above the button hold these values and can be edited, and are remembered between sessions. The parent is the nearest non-H atom within 1.45 &Aring; (symmetry images included). An H with two parents at similar distances (a bridging H), one with no parent in range, or one on a parent element with no distance set is left alone, and the status line says how many. It acts on the selected H atoms, or on <b>every</b> H atom when none is selected, and <b>Undo</b> restores the old positions. For a CIF-based structure the change is made on the asymmetric-unit site, so every symmetry copy moves together and the symmetry stays exact. As a macro command it is <span class='mono'>NORMALISE_H</span> (it uses whatever distances are currently set).</p>" +
+      "<p><b>Normalise H atoms</b>, in the <b>Structure &gt; Neutron normalisation</b> submenu (below Edit bonds), corrects the hydrogen positions of an X-ray structure. X-ray H atoms sit about 0.1 &Aring; too close to their parent atom, which matters for anything that measures space next to H (voids, channels, close contacts). Each H atom is moved along its existing X&ndash;H direction to a typical neutron-diffraction distance (C&ndash;H 1.083, N&ndash;H 1.009, O&ndash;H 0.983, B&ndash;H 1.19, S&ndash;H 1.34 &Aring;; after Allen &amp; Bruno, <i>Acta Cryst.</i> B66, 380 (2010)); the five boxes above the button hold these values and can be edited, and are remembered between sessions. The parent is the nearest non-H atom within 1.45 &Aring; (symmetry images included). An H with two parents at similar distances (a bridging H), one with no parent in range, or one on a parent element with no distance set is left alone, and the status line says how many. It acts on the selected H atoms, or on <b>every</b> H atom when none is selected, and <b>Undo</b> restores the old positions. For a CIF-based structure the change is made on the asymmetric-unit site, so every symmetry copy moves together and the symmetry stays exact. As a macro command it is <span class='mono'>NORMALISE_H</span> (it uses whatever distances are currently set).</p>" +
+      "<p><b>Hydrogen-bonded O&ndash;H and N&ndash;H: distance-dependent.</b> This tick box, below the five distance boxes, applies the method of Lusi and Barbour (<i>Cryst. Growth Des.</i> <b>11</b>, 5515 (2011)) to the H atoms of O&ndash;H and N&ndash;H groups that donate a hydrogen bond to O, N or Cl. Neutron data show that the D&ndash;H and H&middot;&middot;&middot;A distances of a hydrogen bond depend on the D&middot;&middot;&middot;A distance, which X-ray diffraction measures well, so one fixed neutron-normalised distance is wrong for such an H. The paper gives both distances as polynomials of D&middot;&middot;&middot;A for six pairs (O&ndash;H&middot;&middot;&middot;O, N&ndash;H&middot;&middot;&middot;O, O&ndash;H&middot;&middot;&middot;N, N&ndash;H&middot;&middot;&middot;N, O&ndash;H&middot;&middot;&middot;Cl and N&ndash;H&middot;&middot;&middot;Cl; its Table 3), and these are what is used. The acceptor is an O, N or Cl atom (symmetry images included) at least 2.3&nbsp;&Aring; from the donor and closer than the sum of the van der Waals radii, within 2.9&nbsp;&Aring; of the H, with a D&ndash;H&middot;&middot;&middot;A angle of at least 100&deg;; if there are several, the one nearest the H counts. The polynomials are fits to neutron data and give nonsense outside it, so they are used only where they give a sensible D&ndash;H (0.9 to 1.3&nbsp;&Aring;) and H&middot;&middot;&middot;A (1.0 to 2.5&nbsp;&Aring;) and the triangle D, H, A closes, and for O&ndash;H&middot;&middot;&middot;O and N&ndash;H&middot;&middot;&middot;O only up to D&middot;&middot;&middot;A = 2.80&nbsp;&Aring;, the range plotted in the paper. Any other O&ndash;H or N&ndash;H keeps the fixed distance, and the status line says how many did. <b>place the H</b> chooses where the H goes: <b>along D&ndash;H</b> (the default) keeps its present D&ndash;H direction and changes only the D&ndash;H distance; <b>at D&ndash;H and H&middot;&middot;&middot;A</b> also puts it at the H&middot;&middot;&middot;A distance, in the plane of D, A and its present position, which changes the D&ndash;H&middot;&middot;&middot;A angle. The paper gives the distances only, so the placement is this program&rsquo;s own choice, and it warns that angles worked out from the three distances are unreliable: check the result. The tick box and the choice are remembered between sessions, and the macro command then reads <span class='mono'>NORMALISE_H HB</span> or <span class='mono'>NORMALISE_H HB_PLANE</span>.</p>" +
       "<h3>Viewing along a vector or a plane</h3>" +
       "<p>Select exactly two atoms and \"View along vector\" (Display &gt; Direction) becomes available, orienting the camera to look straight along the line through them. Select exactly three and \"View perpendicular to plane\" becomes available instead, orienting the camera face-on to the plane they define. Both only ever rotate the view -- they never move the zoom level or what the camera is centred on -- and each is disabled again the moment the selection count isn't exactly right for it.</p>" +
       "<h3>L.S. planes (Style)</h3>" +
@@ -24093,10 +25181,21 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<h3>Orca bridge (quantum-chemistry calculations)</h3>" +
       "<p>The <b>Orca bridge</b> menu writes input files for the free quantum-chemistry program Orca into a folder you choose, and reads its output files back. It never runs anything itself (a browser cannot): each job comes with a small run script (<span class='mono'>run_pairs.bat</span> or <span class='mono'>run_mol.bat</span>) that you start by double-clicking, and when Orca has finished you press <b>Read results</b>. Orca is not part of CrystalVista; it must be installed on the computer (the script starts it with the <b>Orca command</b>, by default <span class='mono'>orca</span>, which works when Orca is on the PATH). <b>Setup</b> holds the folder (<b>Choose folder...</b>, which opens in the folder the structure was dropped from; needs Chrome or Edge), the <b>Method</b> and its editable Orca keyword line, <b>Counterpoise correction</b>, the number of <b>cores</b> (more than 1 needs Microsoft MPI to be installed), the memory per core, and the <b>charge</b> of each molecule. These settings are remembered.</p>" +
       "<p><b>Pair energies.</b> Grow the neighbouring molecules around one molecule first (Grow), select the central molecule (any atom of it, or Ctrl-click for the whole molecule) and press <b>Find dimers</b>. Every molecule in the view that has an atom within the <b>contact cutoff</b> of the central one is a neighbour; pairs that are the same by symmetry are listed once, with how often they occur (&times;), the centroid distance, the shortest contact and the neighbour&rsquo;s formula. Tick the ones to calculate (a neighbour of a different formula starts unticked, since a partial molecule at the edge of what you grew would give a wrong energy); clicking a row selects that neighbour in the view. <b>Write inputs</b> creates a <span class='mono'>pairs_&lt;name&gt;</span> folder holding <span class='mono'>dimer_01.inp</span>, ..., <span class='mono'>run_pairs.bat</span> and <span class='mono'>pairs_manifest.json</span>. Each input is three Orca jobs, the dimer and each molecule alone, giving the interaction energy E(dimer) &minus; E(A) &minus; E(B); with counterpoise on, each molecule is computed with its partner as ghost atoms. The script skips jobs that already finished and removes Orca&rsquo;s large scratch files. <b>Read results</b> fills the table in kJ/mol and a line &frac12;&Sigma;n&middot;E, half the sum of the pair energies of the central molecule with its neighbours, each counted as often as it occurs: a rough lattice energy per molecule that leaves out many-body terms and depends on the method and on how many neighbours were grown. For hydrogen atoms from X-ray data, use Normalise H atoms first. <b>Energy framework</b> draws tubes between the centres of every pair of molecules in the view that matches a calculated dimer, as thick as the energy (blue attractive, red repulsive), above a chosen smallest |E|.</p>" +
-      "<p><b>Molecule job</b> uses the selected atoms as one molecule and writes <span class='mono'>mol_&lt;name&gt;.inp</span> (a single-point calculation), with any of: an <b>electron density cube</b>, <b>HOMO and LUMO cubes</b> (closed-shell molecules), and the <b>electrostatic potential at every vertex of the molecular surfaces now in the view</b>, for which Orca&rsquo;s <span class='mono'>orca_vpot</span> is run by the same script. For the ESP, build the molecular surface first (Molecular Surface). Building a surface clears the selection, so with the ESP box ticked and nothing selected the job uses the atoms the surfaces were built from; select atoms yourself to use a different set. <b>Read results</b> loads the cubes into <b>Cube &amp; ESP</b> and colours the surfaces by the potential; a surface that is deleted and rebuilt with the same atoms and probe radius is coloured again automatically. The coordinates written are exactly those in the view, so the results fall on the atoms.</p>" +
+      "<p><b>Molecule job</b> uses the selected atoms as one molecule and writes <span class='mono'>mol_&lt;name&gt;.inp</span> (a single-point calculation), with any of: an <b>electron density cube</b>, <b>HOMO and LUMO cubes</b> (closed-shell molecules), and the <b>electrostatic potential at every vertex of the molecular surfaces now in the view</b>, for which Orca&rsquo;s <span class='mono'>orca_vpot</span> is run by the same script. For the ESP, build the molecular surface first (Molecular Surface). Building a surface clears the selection, so with the ESP box ticked and nothing selected the job uses the atoms the surfaces were built from; select atoms yourself to use a different set. <b>Read results</b> loads the cubes into <b>Cube &amp; ESP</b> and colours the surfaces by the potential; a surface that is deleted and rebuilt with the same atoms and probe radius is coloured again automatically. The coordinates written are exactly those in the view, so the results fall on the atoms. Atoms that lie on top of another atom (copies of an atom on a special position) are left out, since Orca cannot start with two atoms at the same point, and <span class='mono'>run_mol.bat</span> stops with a message if Orca did not finish normally.</p>" +
       "<h3>Cube &amp; ESP</h3>" +
-      "<p><b>Framework potential</b> (Orca bridge) shows how the electrostatic potential of a host framework varies over a surface, for example the wall of a channel or the surface of a guest molecule in it. <b>Calculate charges</b> assigns EQeq point charges to every host atom of the periodic structure (the host layer only, so move any guest to a guest group first; remove all but one component of a disorder). <b>Map potential</b> then evaluates the potential of those charges, with the periodic sum done by Ewald summation, at every vertex of the molecular surfaces in the view and/or of the void and channel surfaces, and colours them: negative red and positive blue unless <b>Red = positive</b> (Cube &amp; ESP) is ticked. A colour bar in kcal/mol appears in the 3D view, the table lists the highest and lowest values on each surface, and <b>dielectric screening</b> is the EQeq parameter (1.2). The point-charge model is quick and needs no Orca run. For a better potential, <b>Build cluster</b> cuts a cluster of the host (a number of cells along the channel, within a radius of its axis) from the crystal, adds it to the view and selects it; <b>Write cluster job</b> writes an Orca input for it, closed-shell and neutral with hydrogen caps on any cut carbon-carbon bond, plus the surface points and run_fw.bat; and after you run the script, <b>Read cluster results</b> colours the surfaces by the potential Orca calculated from the real electron density. The line under the buttons estimates the size and time of the job before you write it. Surfaces built after the job was run have no values: <b>Add surfaces</b> writes their points and <b>run_vpot.bat</b>, which evaluates them from the finished job's wavefunction in minutes, and a second <b>Read cluster results</b> colours them together with the first.</p>" +
-      "<p><b>Load cube file...</b> (or drop a <span class='mono'>.cube</span> file on the 3D view) shows a Gaussian cube file (density, orbital, potential) as an isosurface; each file gets a card with its grid and value range, an <b>isovalue</b> (shown to three decimals; its spin buttons move by 0.001, or by a finer step for a cube whose values are all very small), colour swatches for the positive and (for signed data such as orbitals) negative lobes, each with its own tick box to show or hide that lobe, and an <b>opacity</b> (1, fully solid, to begin with; a translucent surface is drawn back faces first, then front faces); untick the card to hide the whole cube and use &times; to remove it, or <b>Clear cubes</b> to remove them all; loading a new structure removes them too. Surfaces are lightly smoothed to hide the steps of a coarse grid. A cube whose atoms do not coincide with the atoms in view is drawn in its own frame and says so. <b>ESP colouring</b> paints the molecular surfaces by the electrostatic potential, either from the Orca results read by the bridge or from a loaded cube (<b>Colour surface</b>): red where the potential is negative, white at zero and blue where it is positive, over the chosen <b>colour range</b> (atomic units; the default covers 95% of the values). <b>Clear colours</b> restores the plain surface colours. The <b>surface opacity</b> slider here is the same setting as in Molecular Surface.</p>" +
+      "<p><b>Framework potential</b> (Orca bridge) shows how the electrostatic potential of a host framework varies over a surface, for example the wall of a channel or the surface of a guest molecule in it. <b>Calculate charges</b> assigns EQeq point charges to every host atom of the periodic structure (the host layer only, so move any guest to a guest group first; remove all but one component of a disorder). <b>Map potential</b> then evaluates the potential of those charges, with the periodic sum done by Ewald summation, at every vertex of the molecular surfaces in the view and/or of the void and channel surfaces, and colours them with the three colours chosen in Cube &amp; ESP (red for negative, white for zero and blue for positive to start with). A colour bar in kcal/mol appears in the 3D view, the table lists the highest and lowest values on each surface, and <b>dielectric screening</b> is the EQeq parameter (1.2). The point-charge model is quick and needs no Orca run. For a better potential, <b>Build cluster</b> cuts a cluster of the host (a number of cells along the channel, within a radius of its axis) from the crystal, adds it to the view and selects it; <b>Write cluster job</b> writes an Orca input for it, closed-shell and neutral with hydrogen caps on any cut carbon-carbon bond, plus the surface points and run_fw.bat; and after you run the script, <b>Read cluster results</b> colours the surfaces by the potential Orca calculated from the real electron density. The line under the buttons estimates the size and time of the job before you write it. Surfaces built after the job was run have no values: <b>Add surfaces</b> writes their points and <b>run_vpot.bat</b>, which evaluates them from the finished job's wavefunction in minutes, and a second <b>Read cluster results</b> colours them together with the first.</p>" +
+      "<p><b>Load cube file...</b> (or drop a <span class='mono'>.cube</span> file on the 3D view) shows a Gaussian cube file (density, orbital, potential) as an isosurface; each file gets a card with its grid and value range, an <b>isovalue</b> (shown to three decimals; its spin buttons move by 0.001, or by a finer step for a cube whose values are all very small), colour swatches for the positive and (for signed data such as orbitals) negative lobes, each with its own tick box to show or hide that lobe, and an <b>opacity</b> (1, fully solid, to begin with; a translucent surface is drawn back faces first, then front faces); untick the card to hide the whole cube and use &times; to remove it, or <b>Clear cubes</b> to remove them all; loading a new structure removes them too. Surfaces are lightly smoothed to hide the steps of a coarse grid. A cube whose atoms do not coincide with the atoms in view is drawn in its own frame and says so. <b>ESP colouring</b> paints the molecular surfaces by the electrostatic potential, either from the Orca results read by the bridge or from a loaded cube (<b>Colour surface</b>): in the three colours chosen with the <b>colours</b> swatches (negative, zero and positive: red, white and blue to start with; <b>Reverse</b> swaps the negative and the positive one, and the choice is remembered when the app is closed), over the chosen <b>colour range</b> (atomic units; the default covers 95% of the values). <b>Clear colours</b> restores the plain surface colours. The <b>surface opacity</b> slider here is the same setting as in Molecular Surface.</p>" +
+      "<h3>Quantum ESPRESSO</h3>" +
+      "<p>The <b>Quantum ESPRESSO</b> menu writes input files for the plane-wave program Quantum ESPRESSO (pw.x) into a folder you choose, and reads its output files back. Like the Orca bridge it never runs anything itself (a browser cannot). The calculations are meant to run on another machine, usually a Linux computer or cluster: you write the inputs here, copy the folder across, run the script that comes with it there, copy the folder back, and press <b>Read results</b>. The menu is off until <b>Quantum ESPRESSO</b> is ticked in <b>Settings</b>. Quantum ESPRESSO and its pseudopotentials are not part of CrystalVista and must be installed separately; the input follows the Quantum ESPRESSO 7.x documentation, with norm-conserving pseudopotentials in mind.</p>" +
+      "<p><b>Setup.</b> <b>Choose folder...</b> picks the working folder; each job gets its own subfolder. <b>pseudo folder</b> is where the .upf files are on the machine that runs Quantum ESPRESSO: it is written as pseudo_dir and is a path there, not here. <b>Read pseudopotentials...</b> takes any number of .upf files from this computer and reads the element, the number of valence electrons, the functional and whether the file is norm-conserving; nothing else is used and the files are not copied. <b>Read structure</b> builds the cell contents from the structure in view and lists its elements, each with the file name of its pseudopotential (the files read are offered as a list) and, for transition metals and lanthanides, a Hubbard U in eV (0 means none) and, when <b>Spin-polarised</b> is on, a starting magnetisation between -1 and 1. A summary shows the cell, the atoms in it, the k-point mesh, the valence electrons (once every element has a file read) and any warnings.</p>" +
+      "<p><b>What is written.</b> The structure must be a CIF or SHELX structure that still has its symmetry. Every atom of the asymmetric unit is expanded by every symmetry operator, wrapped into the cell, and merged with a copy that coincides with it (within 0.05 &Aring;), so the whole unit cell is written as a P1 cell with <span class='mono'>ibrav = 0</span>, the cell vectors in <span class='mono'>CELL_PARAMETERS angstrom</span> and the atoms in <span class='mono'>ATOMIC_POSITIONS crystal</span>, grouped by element. Every atom is treated as fully occupied, so keep only one component of any disorder: two atoms closer than 0.5 &Aring; stop the writing, and a pair closer than 0.7 &Aring; or an occupancy below 1 gives a warning. Guest atoms are part of the cell like any other. The atomic masses are the standard atomic weights. The charge-density cutoff is left at its default, four times the wavefunction cutoff, which is right for norm-conserving files.</p>" +
+      "<p><b>Calculation.</b> <b>Single point (scf)</b> gives the energy, the forces and the stress of the structure as it is. <b>Relax the atoms</b> moves them to the minimum of the energy (BFGS). <b>Relax atoms and cell</b> also changes the cell, towards an external <b>pressure</b> in GPa, and you choose which parts of the cell may move: all of it, the shape only, the volume only, the axis lengths only, or x and y only. The <b>functional</b> is normally left on the one the pseudopotentials were made for. The <b>dispersion</b> correction is none, Grimme D2, D3 with zero damping, or D3 with Becke&ndash;Johnson damping; PBE with D3(BJ) is the usual choice for molecular crystals, hydrates and frameworks. The <b>cutoff</b> is the wavefunction cutoff in Ry: norm-conserving files need roughly 70 to 90 Ry for the first-row elements, so check it with a convergence test.</p>" +
+      "<p><b>k-points.</b> <b>By spacing</b> chooses, along each reciprocal axis, the smallest mesh whose points are no further apart than the spacing (in 1/&Aring;, with the 2&pi; included): 0.3 is a good start for an insulator, and a large cell may need nothing more than <b>Gamma only</b>, which also runs faster. <b>Mesh</b> sets the three numbers by hand. The mesh is written as a Gamma-centred automatic mesh.</p>" +
+      "<p><b>Occupations, spin and thresholds.</b> Fixed occupations are for insulators and need an even number of valence electrons. <b>Smearing</b> (Marzari&ndash;Vanderbilt, Methfessel&ndash;Paxton, Gaussian or Fermi&ndash;Dirac, with its width in eV) is for metals. <b>Spin-polarised</b> writes nspin = 2 with smearing and a starting magnetisation for each element; a Hubbard U is written as a <span class='mono'>HUBBARD (ortho-atomic)</span> card, which needs atomic wavefunctions in the pseudopotential file. The <b>SCF threshold</b> is per atom (conv_thr is it times the number of atoms), <b>mixing beta</b> can be lowered for a stubborn SCF, and for a relaxation the <b>force threshold</b> is given in eV/&Aring; and converted to Ry/bohr. <b>Keep the selected atoms fixed</b> holds the atoms selected in the view, and their symmetry copies, in place during a relaxation.</p>" +
+      "<p><b>Run.</b> The <b>pw.x command</b>, the <b>MPI launcher</b>, the number of <b>processes</b> and the k-point <b>pools</b> go into <span class='mono'>run_qe.sh</span>. <b>Also write a SLURM script</b> adds <span class='mono'>submit.slurm</span>, with the time, the partition and a module line that you give. <b>Write inputs</b> writes the input of the calculation chosen in Calculation, the run script and a manifest into a subfolder named after the structure and the calculation. <b>Copy input</b> puts the input text on the clipboard instead, for a browser that cannot write to a folder. On the Quantum ESPRESSO machine run <span class='mono'>bash run_qe.sh</span> in the folder (or <span class='mono'>sbatch submit.slurm</span>). A job whose output is complete for exactly this input is skipped, so the script can be run again after an interruption or after more jobs are added.</p>" +
+      "<p><b>Convergence tests.</b> Choose a series over the <b>cutoff</b> or over the <b>k-point spacing</b>, list the values, and <b>Write inputs</b> writes one single-point input per value, with everything else as set in Calculation. After the run, and copying the folder back, <b>Read results</b> tabulates the energy of each job against the last one in meV per atom, with the pressure, and plots both. A few meV per atom or less is converged for energies; if you will optimise the cell, check that the pressure has settled as well.</p>" +
+      "<p><b>Results.</b> <b>Read results</b> reads the outputs of the job folder written last, or of the newest qe_ folder in the chosen folder. <b>Open output file...</b> reads one or more pw.x output files directly. The table gives, for each job, whether it finished, its final energy in eV, the largest force on an atom in eV/&Aring; and the pressure in GPa. Click a row for the detail: the status (including any error Quantum ESPRESSO reported and whether the SCF converged), the final energy or enthalpy, the cell volume before and after, the HOMO, LUMO and gap, the magnetisation, the wall time, and plots of the energy and the largest force against the step. <b>Load structure</b> replaces the structure in view by the final structure, or by any step, of the selected job, as a P1 cell with every atom of the cell; the atoms keep their labels. <b>Read pw.x file as structure...</b>, or dropping a pw.x input or output file on the 3D view, loads the structure of that file (the final structure of an output). An input is read when it uses ibrav = 0 or one of the simple Bravais lattices 1, 2, 3, 4, 6, 8, 12 and 14; for any other lattice open the .out file of a run instead.</p>" +
+      "<p><b>Limits.</b> This menu was written without a Quantum ESPRESSO installation to test against. The inputs follow the 7.x input documentation, and the output reader was tested on outputs from Quantum ESPRESSO&rsquo;s own test suite, but a first run on your machine is the real test: if pw.x rejects an input, the message is in the .out and .err files. Only pw.x calculations (single point, relax and variable-cell relax) are supported so far, and the pseudopotentials are not bundled.</p>" +
       "<h3>Difference density</h3>" +
       "<p>The <b>Difference density</b> menu draws the <b>difference electron density</b> (Fo &minus; Fc) of a SHELXL refinement as surfaces, for example to find a guest that was left out of the model. Refine the structure without the guest, with <span class='mono'>LIST 6</span> in the instructions so that the <span class='mono'>.fcf</span> holds the phases, and drop the CIF and the .fcf <b>together</b> on the 3D view (several files, or a folder or zip; a .fcf goes with the structure file of the same name, and a .fcf dropped alone goes with the structure that is loaded). The menu is an optional one: it is shown only when <b>Difference density (FCF)</b> is switched on in Settings <i>and</i> a .fcf is loaded with the structure. The <b>map</b> is the difference map (Fo &minus; Fc) or the 2Fo &minus; Fc map, each with its own levels and colours. It draws up to three surfaces at three levels (blue, green, red, each with its own checkbox, with the negative density at the lowest level that is switched on, in a fourth colour), each drawn as a wire mesh (adjustable spacing and line width) or as a transparent solid with its own opacity, so that the surfaces can be seen through each other; the levels are in multiples of the r.m.s. of the map or in e/&Aring;&sup3;, and the surfaces are drawn in a box around the atoms in view (Grow first, then Redraw), in a box around the selected atoms (select the atoms around a void), or only within a radius of the visible or of the selected atoms. <b>Clear</b> removes the surfaces but keeps the map and the menu. <b>Erase</b> hides parts of the display with the mouse (hide the blob under the pointer, keep only that blob, or hide a ball, for this copy only or all copies in the neighbouring cells); what is hidden is stored as rules about the map, so it still applies after a change of level, spacing or region, and <b>Undo</b> and <b>Reset all</b> bring it back. <b>Count electrons</b>, a separate subsection with its own red Count mode button, counts electrons: click a blob or a ball (a table gives its volume and electrons), or press <b>Count voids</b> for each void of the structure. The guest density is refined inside the voids, as in SQUEEZE, and the count is less certain when low-angle reflections are missing (the share present is shown under the table). <b>Peaks and holes</b> lists the highest peaks and deepest holes with their coordinates and nearest atom. The highest, lowest and r.m.s. values are shown next to those SHELXL put in the CIF, as a check. Only LIST 6 files are read; the reflections are not kept in saved model files.</p>" +
       "<h3>Macro</h3>" +
@@ -24164,7 +25263,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<p><b>Void/channel analysis</b>:</p>" +
       "<ul>" +
       "<li><span class='mono'>CALCULATE_VOID</span> / <span class='mono'>CALCULATE_VOID_Q</span> &mdash; \"Calculate\" under Void/Channel Analysis, forcing Accurate volumes on/off respectively. No arguments -- see above for exactly what it does when played, including why the accurate-volumes setting is forced and the batch results table.</li>" +
-      "<li><span class='mono'>NORMALISE_H</span> &mdash; &quot;Normalise H atoms&quot; (Structure &gt; Edit bonds): the selected H atoms, or every H atom if none is selected, moved to the X&ndash;H distances currently set there.</li>" +
+      "<li><span class='mono'>NORMALISE_H</span> &mdash; &quot;Normalise H atoms&quot; (Structure &gt; Neutron normalisation): the selected H atoms, or every H atom if none is selected, moved to the X&ndash;H distances currently set there. <span class='mono'>NORMALISE_H HB</span> and <span class='mono'>NORMALISE_H HB_PLANE</span> add the distance-dependent method for hydrogen-bonded O&ndash;H and N&ndash;H (placed along D&ndash;H, or at both D&ndash;H and H&middot;&middot;&middot;A), whatever the tick box says at that moment.</li>" +
       "</ul>" +
       "<p><b>Export</b>:</p>" +
       "<ul>" +
