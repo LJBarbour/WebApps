@@ -4057,8 +4057,50 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     }
     return true;
   }
+  /* ---------------- right-click menu on the model view ----------------
+   * A right press that is released without having moved (more than 3 px) opens a small menu at the pointer with the two image commands of Export > Image
+   * (Copy image to clipboard, Export image (PNG)). A right press that moves is the zoom drag (or the strafe in walk mode) exactly as before: the menu only
+   * opens on release, and only when nothing was dragged. The menu closes on a click elsewhere, Esc, a wheel turn, or a resize. */
+  var viewMenuEl = null, rightPending = false, rightDownX = 0, rightDownY = 0;
+  function closeViewMenu() {
+    if (viewMenuEl) { viewMenuEl.remove(); viewMenuEl = null; }
+    document.removeEventListener("mousedown", viewMenuOutside, true);
+    document.removeEventListener("keydown", viewMenuKey, true);
+    window.removeEventListener("wheel", closeViewMenu, true);
+    window.removeEventListener("resize", closeViewMenu);
+    window.removeEventListener("blur", closeViewMenu);
+  }
+  function viewMenuOutside(e) { if (viewMenuEl && !viewMenuEl.contains(e.target)) closeViewMenu(); }
+  function viewMenuKey(e) { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeViewMenu(); } }
+  function openViewMenu(x, y) {
+    closeViewMenu();
+    if (!document.getElementById("viewMenuStyle")) {
+      var st = document.createElement("style"); st.id = "viewMenuStyle";
+      st.textContent = "#viewContextMenu{position:fixed;z-index:600;min-width:200px;padding:4px;border-radius:6px;background:var(--bg,#FAF6EE);color:var(--ink,#2C2416);border:1px solid var(--border,#CEC3AA);box-shadow:0 3px 12px rgba(0,0,0,.28);font:13px var(--sans,system-ui,sans-serif);user-select:none}" +
+        "#viewContextMenu button{display:block;width:100%;text-align:left;padding:6px 12px;border:0;border-radius:4px;background:transparent;color:inherit;font:inherit;cursor:pointer}" +
+        "#viewContextMenu button:hover,#viewContextMenu button:focus{background:var(--accent-soft,#EEF3FA);outline:none}";
+      document.head.appendChild(st);
+    }
+    var m = document.createElement("div"); m.id = "viewContextMenu"; m.setAttribute("role", "menu");
+    [["Copy image to clipboard", copyImageToClipboard], ["Export image (PNG)", exportImage]].forEach(function (it) {
+      var b = document.createElement("button"); b.type = "button"; b.textContent = it[0]; b.setAttribute("role", "menuitem");
+      b.addEventListener("click", function () { closeViewMenu(); it[1](); });
+      m.appendChild(b);
+    });
+    m.addEventListener("contextmenu", function (ev) { ev.preventDefault(); });
+    document.body.appendChild(m); viewMenuEl = m;
+    var w = m.offsetWidth, h = m.offsetHeight;
+    m.style.left = Math.max(4, Math.min(x + 2, window.innerWidth - w - 4)) + "px";
+    m.style.top = Math.max(4, Math.min(y + 2, window.innerHeight - h - 4)) + "px";
+    document.addEventListener("mousedown", viewMenuOutside, true);
+    document.addEventListener("keydown", viewMenuKey, true);
+    window.addEventListener("wheel", closeViewMenu, true);
+    window.addEventListener("resize", closeViewMenu);
+    window.addEventListener("blur", closeViewMenu);
+  }
   function onCanvasPointerDown(e) {
     if (state.videoExporting) return;
+    if (e.button === 2) { rightPending = true; rightDownX = e.clientX; rightDownY = e.clientY; } /* a right press that never moves opens the menu on release (see onWindowPointerUp) */
     if (state.autoRotating) stopAutoRotate(); /* manual interaction always wins over the auto-spin */
     /* a control (e.g. the atom style dropdown) can be left focused after use;
        without this, spacebar after rotating would reopen that dropdown
@@ -4220,6 +4262,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
   }
   function onWindowPointerMove(e) {
     if (state.videoExporting) return;
+    if (rightPending && (Math.abs(e.clientX - rightDownX) > 3 || Math.abs(e.clientY - rightDownY) > 3)) rightPending = false; /* it is a drag (zoom), not a click */
     if (!dragMode) return;
     if (dragMode === "axisKey") { dragAxisKeyTo(e.clientX, e.clientY); return; }
     if (dragMode === "lasso") {
@@ -4377,6 +4420,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     applyController();
   }
   function onWindowPointerUp(e) {
+    if (e.button === 2 && rightPending) { rightPending = false; if (!state.videoExporting) openViewMenu(e.clientX, e.clientY); } /* a right click that did not move */
     if (dragMode === "lasso") {
       showLassoOverlay(false);
       if (pickMoved) finishLasso(); else handleLeftClick(e.clientX, e.clientY, clickMods);
@@ -6632,6 +6676,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     renderMeasurements();
     renderSelection();
     syncNoAtomsOverlay();
+    scheduleAddHRefresh(); /* the "Add missing H atoms" button follows what is on the screen */
     updateClipPlane(); /* atoms/bonds/labels just got rebuilt with fresh materials -- reapply per-component clip planes to them, see updateClipPlane's own comment */
   }
   function syncNoAtomsOverlay() {
@@ -12651,6 +12696,516 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     }
     atom.x = x; atom.y = y; atom.z = z;
   }
+  /* ---------------- Add missing H atoms (Structure > Create/Move Atoms) ----------------
+   * The geometry is that of SHELX_GUI's H-atoms > Automatic (itself modelled on SHELXL's HFIX/AFIX rules), minus everything that only matters to SHELXL (AFIX/HFIX
+   * cards, rigid groups, riding refinement): every C, N, O or B atom without an H atom is looked at together with its bonded neighbours (symmetry images and
+   * cell translations included) and, from the bond lengths against the covalent radii and the angles between the bonds, given the H atoms its environment
+   * calls for -- tertiary C-H, CH2, aromatic C-H (also N-H), terminal =CH2, staggered methyl, acetylenic C-H, B-H, an N-H of an amide or similar, an O-H
+   * (turned towards an acceptor when one is within reach, otherwise staggered). Distances are SHELXL's defaults for room temperature, or for low temperature
+   * when the CIF gives 223 K or less. The H atom's Uiso is 1.2 (1.5 for methyl and O-H) times the parent's Ueq, and it takes the parent's occupancy and
+   * disorder group. An ambiguous case (R2NH or R2NH2+, a pyridine-type N, a carboxylic acid O, an N with three bonds, a water O) is NOT guessed: it is left alone
+   * and named in the message. For a CIF with symmetry the work is done on the asymmetric unit: each new H atom becomes an asymmetric-unit atom and is
+   * generated at every position where its parent is currently displayed, so the symmetry stays exact. Anything else (a mol/xyz file, guest atoms,
+   * a structure whose symmetry was forgotten) is built in Cartesian space from the atoms displayed. Undo removes the lot. */
+  var AddH = (function () {
+    var TOL = 0.5; /* bond tolerance over the covalent-radius sum, as SHELX_GUI */
+    var DIST = { C13: [0.98, 1.00], C23: [0.97, 0.99], C137: [0.96, 0.98], C43: [0.93, 0.95], C93: [0.93, 0.95], C163: [0.93, 0.95], B153: [1.10, 1.12],
+      N13: [0.91, 0.93], N23: [0.90, 0.92], N43: [0.86, 0.88], N93: [0.86, 0.88], N137: [0.89, 0.91], O83: [0.82, 0.84], O147: [0.82, 0.84] };
+    var LABEL = { 13: "tertiary C-H", 23: "CH2", 43: "aromatic C-H or N-H", 93: "terminal =CH2 or =NH2", 137: "methyl or NH3", 123: "methyl in two positions", 153: "B-H", 163: "acetylenic C-H", 83: "O-H", 147: "O-H" };
+    var LABEL_LONG = { 13: "tertiary C-H", 23: "CH2", 43: "aromatic C-H / N-H", 93: "terminal =CH2 / =NH2", 137: "methyl", 123: "methyl in two positions", 153: "B-H", 163: "acetylenic C-H", 83: "staggered O-H", 147: "O-H towards an acceptor" };
+    function sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+    function add(a, b) { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
+    function mul(a, s) { return [a[0] * s, a[1] * s, a[2] * s]; }
+    function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+    function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+    function unit(a) { var l = Math.sqrt(dot(a, a)) || 1; return [a[0] / l, a[1] / l, a[2] / l]; }
+    function neg(a) { return [-a[0], -a[1], -a[2]]; }
+    function sum(L) { var s = [0, 0, 0]; for (var i = 0; i < L.length; i++) s = add(s, L[i]); return s; }
+    function dist(a, b) { var d = sub(a, b); return Math.sqrt(dot(d, d)); }
+    function angDeg(u, v) { return Math.acos(Math.max(-1, Math.min(1, dot(u, v)))) * 180 / Math.PI; }
+    function isMetalEl(e) { return isMetalElement(e); }
+    function partBlocks(pa, pb, viaSym) { /* SHELX's PART rule: atoms of different non-zero parts do not bond; a negative part also stops bonds to symmetry images */
+      pa = pa || 0; pb = pb || 0;
+      if (!pa || !pb) return false;
+      if (pa !== pb) return true;
+      return !!(viaSym && (pa < 0 || pb < 0));
+    }
+    function partOfAu(au) { if (au.part !== undefined) return au.part || 0; var p = parseInt(au.dgroup, 10); return isFinite(p) ? p : 0; }
+    function tempLow() {
+      var t = state.cifTags ? (state.cifTags["_diffrn_ambient_temperature"] || state.cifTags["_cell_measurement_temperature"]) : null, v = t ? parseFloat(t) : NaN;
+      return isFinite(v) && (v - 273.15) <= -50;
+    }
+    /* ---- neighbour searches: near(P, rad) = every atom within rad of P, as {el, isH, p, d, part, sym} ---- */
+    function auSearch() {
+      var M = state.cifFracToCart, ops = state.cifSymops, rc = K.cellReciprocalLengths(state.cifCell), star = [rc.astar, rc.bstar, rc.cstar], imgs = [];
+      for (var i = 0; i < state.cifAsymUnit.length; i++) {
+        var au = state.cifAsymUnit[i];
+        if (au.deleted || au.el === "Xx" || au.el === "Q" || !isFinite(au.fx + au.fy + au.fz)) continue;
+        var f = [au.fx, au.fy, au.fz], pt = partOfAu(au), h = (au.el === "H" || au.el === "D");
+        for (var s = 0; s < ops.length; s++) imgs.push({ f0: K.applySymop(ops[s], f), el: au.el, isH: h, part: pt, ident: s === 0, idx: i, opi: s });
+      }
+      return function near(P, rad) {
+        var fP = K.cartToFrac(M, P), out = [], w0 = rad * star[0], w1 = rad * star[1], w2 = rad * star[2];
+        for (var n = 0; n < imgs.length; n++) {
+          var im = imgs[n], f0 = im.f0, d0 = fP[0] - f0[0], d1 = fP[1] - f0[1], d2 = fP[2] - f0[2];
+          var l0 = Math.ceil(d0 - w0), h0 = Math.floor(d0 + w0), l1 = Math.ceil(d1 - w1), h1 = Math.floor(d1 + w1), l2 = Math.ceil(d2 - w2), h2 = Math.floor(d2 + w2);
+          if (l0 > h0 || l1 > h1 || l2 > h2) continue;
+          for (var a = l0; a <= h0; a++) for (var b = l1; b <= h1; b++) for (var c = l2; c <= h2; c++) {
+            var p = K.fracToCart(M, [f0[0] + a, f0[1] + b, f0[2] + c]), d = dist(p, P);
+            if (d <= rad) out.push({ el: im.el, isH: im.isH, p: p, d: d, part: im.part, sym: !(im.ident && !a && !b && !c), idx: im.idx, sh: [a, b, c], ident: im.ident });
+          }
+        }
+        return out;
+      };
+    }
+    function cartSearch(atoms) {
+      var G = 3.3, grid = {}, pts = [];
+      function key(i, j, k) { return i + "," + j + "," + k; }
+      for (var n = 0; n < atoms.length; n++) {
+        var a = atoms[n]; if (a.isCentroid || a.el === "Xx" || a.el === "Q") continue;
+        var e = { el: a.el, isH: (a.el === "H" || a.el === "D"), p: [a.x, a.y, a.z], part: a.part || 0 };
+        var k = key(Math.floor(a.x / G), Math.floor(a.y / G), Math.floor(a.z / G));
+        (grid[k] || (grid[k] = [])).push(e); pts.push(e);
+      }
+      return function near(P, rad) {
+        var out = [], ci = Math.floor(P[0] / G), cj = Math.floor(P[1] / G), ck = Math.floor(P[2] / G), r = Math.ceil(rad / G);
+        for (var i = ci - r; i <= ci + r; i++) for (var j = cj - r; j <= cj + r; j++) for (var k = ck - r; k <= ck + r; k++) {
+          var cell = grid[key(i, j, k)]; if (!cell) continue;
+          for (var q = 0; q < cell.length; q++) { var d = dist(cell[q].p, P); if (d <= rad) out.push({ el: cell[q].el, isH: cell[q].isH, p: cell[q].p, d: d, part: cell[q].part, sym: false }); }
+        }
+        return out;
+      };
+    }
+    /* ---- the geometry (parent = {el, p, part}); returns {mn, dirs, d, U} / {skip} / {have} / null ---- */
+    function engine(near, low) {
+      function neigh(P, el, part) {
+        var out = [], hp = [], hpId = [], dups = 0, list = near(P, 3.2);
+        for (var i = 0; i < list.length; i++) {
+          var n = list[i];
+          if (n.d < 0.35) continue;
+          if (n.isH) { if (n.d <= 1.3) { var dup = false; for (var q = 0; q < hp.length; q++) if (dist(hp[q], n.p) < 0.05) dup = true; if (!dup) hp.push(n.p); if (n.ident === undefined || (n.ident && !n.sh[0] && !n.sh[1] && !n.sh[2])) { var dup2 = false; for (var q2 = 0; q2 < hpId.length; q2++) if (dist(hpId[q2], n.p) < 0.05) dup2 = true; if (!dup2) hpId.push(n.p); } } continue; }
+          if (n.d > K.cov(el) + K.cov(n.el) + TOL) continue;
+          if (partBlocks(part, n.part, n.sym)) continue;
+          var seen = false; for (var o = 0; o < out.length; o++) if (dist(out[o].p, n.p) < 0.05) seen = true;
+          if (!seen) out.push({ el: n.el, p: n.p, d: n.d }); else dups++;
+        }
+        out.nH = hp.length; out.hp = hp; out.hpId = hpId; out.dups = dups; return out;
+      }
+      function farY(xp, xel, Ppos) { /* a neighbour of the atom at xp other than the one at Ppos: the reference for torsions */
+        var best = null, list = near(xp, 3.2);
+        for (var i = 0; i < list.length; i++) {
+          var n = list[i];
+          if (n.isH || n.d < 0.35 || dist(n.p, Ppos) < 0.3) continue;
+          if (n.d > K.cov(xel) + K.cov(n.el) + TOL) continue;
+          if (!best || n.d < best.d) best = n;
+        }
+        return best ? best.p : null;
+      }
+      function rotor(P, Xp, Yp, ang, tau) { /* unit vector from P making angle ang with P->X and torsion tau against X->Y */
+        var u = unit(sub(Xp, P)), e2 = null;
+        if (Yp) { var y = sub(Yp, Xp); e2 = sub(y, mul(u, dot(y, u))); if (Math.sqrt(dot(e2, e2)) < 1e-3) e2 = null; }
+        if (!e2) { var t = Math.abs(u[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]; e2 = sub(t, mul(u, dot(t, u))); }
+        e2 = unit(e2);
+        var e3 = cross(u, e2), A = ang * Math.PI / 180, T = tau * Math.PI / 180, out = [];
+        for (var k = 0; k < 3; k++) out.push(Math.cos(A) * u[k] + Math.sin(A) * (Math.cos(T) * e2[k] + Math.sin(T) * e3[k]));
+        return out;
+      }
+      function amideLike(x) { /* an N next to a C=O, or an S with two O */
+        var list = near(x.p, 1.7), near_ = [];
+        for (var i = 0; i < list.length; i++) if (list[i].el === "O" && list[i].d > 0.5) near_.push(list[i]);
+        if (x.el === "C") { for (var a = 0; a < near_.length; a++) if (near_[a].d < 1.30) return true; return false; }
+        if (x.el === "S") { var c = 0; for (var b = 0; b < near_.length; b++) if (near_[b].d < 1.55) c++; return c >= 2; }
+        return false;
+      }
+      function ch2Dirs(U, th) {
+        var b = unit(neg(add(U[0], U[1]))), nrm = unit(cross(U[0], U[1])), h = Math.max(102, Math.min(112, 109.5 - (th - 109.5) * 0.7)) * Math.PI / 360;
+        return [1, -1].map(function (sg) { return unit(add(mul(b, Math.cos(h)), mul(nrm, sg * Math.sin(h)))); });
+      }
+      function ohPlan(P, x, lo, mode) { /* an acceptor within reach decides the torsion (147); otherwise the H is staggered (83). mode "83" always staggers; "147" says so when no acceptor was found */
+        var Y = farY(x.p, x.el, P), best = null, list = mode === "83" ? [] : near(P, 3.3);
+        for (var i = 0; i < list.length; i++) {
+          var n2 = list[i];
+          if (n2.isH || !/^(N|O|F|Cl|Br|S)$/.test(n2.el) || n2.d < 2.45 || n2.d > 3.2) continue;
+          for (var t = 0; t < 360; t += 5) {
+            var dir = rotor(P, x.p, Y, 109.5, t), Hp = add(P, mul(dir, DIST.O147[lo])), dd = dist(Hp, n2.p);
+            if (dd > 2.4) continue;
+            var v1 = sub(P, Hp), v2 = sub(n2.p, Hp), cs = dot(v1, v2) / (Math.sqrt(dot(v1, v1)) * Math.sqrt(dot(v2, v2)));
+            if (Math.acos(Math.max(-1, Math.min(1, cs))) * 180 / Math.PI < 120) continue;
+            if (!best || dd < best.dd) best = { dd: dd, t: t };
+          }
+        }
+        if (best) return { mn: 147, dirs: [rotor(P, x.p, Y, 109.5, best.t)], d: DIST.O147[lo], U: -1.5 };
+        return { mn: 83, dirs: [rotor(P, x.p, Y, 109.5, 180)], d: DIST.O83[lo], U: -1.5, note: mode === "147" ? "no acceptor in reach, staggered" : null };
+      }
+      var curDups = false;
+      function plan(a) { /* a plan that would put H atoms on a special position next to a neighbour on the same symmetry element is not made: they would be disordered */
+        curDups = false; var p = plan0(a, false);
+        if (p && p.have) return completion(a, p.have) || p; /* some H atoms there: all of them? (one deleted from a methyl group, say) */
+        if (p && p.dirs && curDups) return { skip: "on a special position with a neighbour on the same symmetry element: the H atoms would be disordered, add them by hand" };
+        return p;
+      }
+      function rotAbout(v, k, deg) { /* v turned by deg about the unit vector k */
+        var c = Math.cos(deg * Math.PI / 180), s = Math.sin(deg * Math.PI / 180), kv = dot(k, v), kx = cross(k, v), out = [];
+        for (var i = 0; i < 3; i++) out.push(v[i] * c + kx[i] * s + k[i] * kv * (1 - c));
+        return out;
+      }
+      /* an atom with some, but fewer than the geometry calls for: the missing H atoms of a methyl/NH3 (3), a CH2/NH2 (2) or a =CH2 (2) are put where the group needs them, from the H atoms already there */
+      function completion(a, h) {
+        var ex = plan0(a, true);
+        if (!ex || !ex.dirs || ex.dirs.length <= h) return null;
+        var nb = neigh(a.p, a.el, a.part), P = a.p, i, uN = [], uH = [];
+        for (i = 0; i < nb.length; i++) uN.push(unit(sub(nb[i].p, P)));
+        var hpList = a.special ? nb.hpId : nb.hp; for (i = 0; i < hpList.length; i++) uH.push(unit(sub(hpList[i], P)));
+        var dirs = null;
+        if (ex.mn === 137 && uN.length === 1) { dirs = h === 2 ? [unit(neg(sum(uN.concat(uH))))] : (h === 1 ? [rotAbout(uH[0], uN[0], 120), rotAbout(uH[0], uN[0], -120)] : null); }
+        else if (ex.mn === 23 && h === 1 && uN.length === 2) dirs = [unit(neg(sum(uN.concat(uH))))];
+        else if (ex.mn === 93 && h === 1 && uN.length === 1) dirs = [unit(neg(add(uN[0], uH[0])))];
+        if (!dirs || dirs.length !== ex.dirs.length - h) return null;
+        for (i = 0; i < dirs.length; i++) { /* not on top of another atom */
+          var Hp = add(P, mul(dirs[i], ex.d)), near2 = near(Hp, 1.3);
+          for (var k = 0; k < near2.length; k++) if (dist(near2[k].p, P) > 0.35 && near2[k].d < 1.3 && !near2[k].isH) return null;
+        }
+        return { mn: ex.mn, dirs: dirs, d: ex.d, U: ex.U, completes: true };
+      }
+      function plan0(a, ignoreH) {
+        var nb = neigh(a.p, a.el, a.part);
+        var hCount = a.special ? nb.hpId.length : nb.nH; if (hCount > 0 && !ignoreH) return { have: hCount };
+        curDups = !!(a.special && nb.dups);
+        var el = a.el, lo = low ? 1 : 0, nonM = [], mt = [], i;
+        for (i = 0; i < nb.length; i++) (isMetalEl(nb[i].el) ? mt : nonM).push(nb[i]);
+        var N;
+        if (el === "C") { if (nonM.length >= 2) N = nonM; else if (mt.length <= 1) N = nonM.concat(mt); else return { skip: "bonded to several metals" }; }
+        else if (el === "B") N = nb;
+        else { if (mt.length) return null; N = nonM; }
+        var n = N.length; if (!n) return null;
+        var P = a.p, U = N.map(function (x) { return unit(sub(x.p, P)); }), dl = N.map(function (x) { return K.cov(el) + K.cov(x.el) - x.d; });
+        function ang(p, q) { return angDeg(U[p], U[q]); }
+        function mk(mn, dirs, key, Uv) { return { mn: mn, dirs: dirs, d: DIST[key][lo], U: Uv }; }
+        function rotor3(x, key, mn) { var Y = farY(x.p, x.el, P); return mk(mn, [60, 180, 300].map(function (t) { return rotor(P, x.p, Y, 109.5, t); }), key, -1.5); }
+        function anyDl(v) { for (var k = 0; k < dl.length; k++) if (dl[k] > v) return true; return false; }
+        var x;
+        if (el === "C") {
+          if (n >= 4) return null;
+          if (n === 3) { if (ang(0, 1) + ang(0, 2) + ang(1, 2) >= 345) return null; return mk(13, [unit(neg(sum(U)))], "C13", -1.2); }
+          if (n === 2) {
+            var th = ang(0, 1); if (th >= 165) return null;
+            /* aromatic or alkene CH: a wide angle or a bond clearly shorter than a single bond; two full single bonds (both 1.48 A or longer for C-C) make a CH2 even when the angle is 116 to 123 degrees */
+            var allSingle = !anyDl(0.04);
+            if (th >= 123 || anyDl(0.08) || (th >= 116 && !allSingle)) return mk(43, [unit(neg(add(U[0], U[1])))], "C43", -1.2);
+            return mk(23, ch2Dirs(U, th), "C23", -1.2);
+          }
+          x = N[0];
+          if (isMetalEl(x.el) || dl[0] < 0.10) return rotor3(x, "C137", 137);
+          if (x.el === "C" && dl[0] < 0.27) { var Yc = farY(x.p, x.el, P); return mk(93, [0, 180].map(function (t) { return rotor(P, x.p, Yc, 120, t); }), "C93", -1.5); }
+          if (x.el === "C") return mk(163, [neg(U[0])], "C163", -1.2);
+          return null;
+        }
+        if (el === "B") { /* only a cage boron (five bonded neighbours, none a halogen) is taken to carry an H: BF4-, BH4- and BR4- have none; the B-H model button can still be used by hand */
+          if (n === 5 && !N.some(function (x) { return /^(F|Cl|Br|I)$/.test(x.el); })) return mk(153, [unit(neg(sum(U)))], "B153", -1.2);
+          return null;
+        }
+        if (el === "N") {
+          if (n >= 4) return null;
+          if (n === 3) return null; /* R3NH+ or a planar amine: without a residual-density peak to go on, an H cannot be decided */
+          if (n === 2) {
+            var th2 = ang(0, 1); if (th2 >= 165) return null;
+            if (anyDl(0.16)) return null;
+            var alk = 0, allC = true, anyAmide = false;
+            for (var k = 0; k < N.length; k++) { if (N[k].el === "C" && N[k].d >= 1.43) alk++; if (N[k].el !== "C") allC = false; if (amideLike(N[k])) anyAmide = true; }
+            var bis = unit(neg(add(U[0], U[1])));
+            if (alk === 2 && th2 < 117) return { skip: "two alkyl neighbours: R2NH or R2NH2+? add by hand" };
+            if (alk >= 1 || anyAmide || (allC && th2 <= 112)) return mk(43, [bis], "N43", -1.2);
+            return { skip: "two neighbours and no sign of an H: pyridine-type N or N-H? add by hand" };
+          }
+          x = N[0]; if (x.el !== "C") return null;
+          if (dl[0] < 0.10 && x.d >= 1.45) return rotor3(x, "N137", 137);
+          if (x.d >= 1.30 && x.d < 1.45) { var Yn = farY(x.p, x.el, P); return mk(93, [0, 180].map(function (t) { return rotor(P, x.p, Yn, 120, t); }), "N93", -1.5); }
+          return null;
+        }
+        if (el === "O") {
+          if (n !== 1) return null;
+          x = N[0]; if (x.el !== "C" && x.el !== "N" && x.el !== "Si") return null;
+          if (x.d < (x.el === "Si" ? 1.60 : 1.34)) return (x.el === "C" && x.d >= 1.28) ? { skip: "C-O of about 1.3 A: carboxylic acid O-H? add by hand" } : null;
+          return ohPlan(P, x, lo, "auto");
+        }
+        return null;
+      }
+      /* the model the user asked for on atom a (no guessing what the atom is): a plan or {skip:reason}. mn: 13 23 43 137 123 93 163 153 83 147 */
+      function force(a, mn) {
+        var el = a.el, lo = low ? 1 : 0;
+        if (!PARENT_EL.test(el)) return { skip: "only C, N, O and B atoms can carry H atoms here" };
+        var nb = neigh(a.p, el, a.part), nonM = [], mt = [], i;
+        for (i = 0; i < nb.length; i++) (isMetalEl(nb[i].el) ? mt : nonM).push(nb[i]);
+        var N = el === "C" ? (nonM.length >= 2 ? nonM : nonM.concat(mt)) : (el === "B" ? nb : nonM);
+        var n = N.length, P = a.p, U = N.map(function (x) { return unit(sub(x.p, P)); });
+        function dd(k) { return (DIST[el + k] || DIST["C" + k])[lo]; }
+        function need(k) { return n === k ? null : { skip: "needs " + k + " bonded neighbour" + (k > 1 ? "s" : "") + ", has " + n }; }
+        function out(dirs, k, Uv, extra) { return Object.assign({ mn: mn, dirs: dirs, d: dd(k), U: Uv }, extra || {}); }
+        function Y1() { return farY(N[0].p, N[0].el, P); }
+        function tri(ang, taus) { var Y = Y1(); return taus.map(function (t) { return rotor(P, N[0].p, Y, ang, t); }); }
+        var e;
+        switch (mn) {
+          case 13: if ((e = need(3))) return e; return out([unit(neg(sum(U)))], 13, -1.2);
+          case 23: if ((e = need(2))) return e; return out(ch2Dirs(U, angDeg(U[0], U[1])), 23, -1.2);
+          case 43: if ((e = need(2))) return e; return out([unit(neg(add(U[0], U[1])))], 43, -1.2);
+          case 137: if ((e = need(1))) return e; return out(tri(109.5, [60, 180, 300]), 137, -1.5);
+          case 123: if ((e = need(1))) return e; return out(tri(109.5, [60, 180, 300, 0, 120, 240]), 137, -1.5, { occFactor: 0.5 });
+          case 93: if ((e = need(1))) return e; return out(tri(120, [0, 180]), 93, -1.5);
+          case 163: if ((e = need(1))) return e; return out([neg(U[0])], 163, -1.2);
+          case 153: if (n < 3) return { skip: "needs at least 3 bonded neighbours, has " + n }; return out([unit(neg(sum(U)))], 153, -1.2);
+          case 83: case 147:
+            if (el !== "O") return { skip: "O-H models are for O atoms" };
+            if (n === 0) return { skip: "a water O has no neighbour to build from: add its H atoms by hand" };
+            if (n !== 1) return { skip: "has " + n + " bonded neighbours" };
+            return ohPlan(P, N[0], lo, String(mn));
+        }
+        return { skip: "unknown model" };
+      }
+      return { plan: plan, force: force };
+    }
+    /* ---- what is missing: {jobs, skips, haveN} ---- */
+    var PARENT_EL = /^(C|N|O|B)$/;
+    function onSpecial(au) { /* does some symmetry operator other than the identity map this atom onto itself (within 0.3 A, any cell translation)? */
+      var ops = state.cifSymops, f = [au.fx, au.fy, au.fz];
+      for (var s = 1; s < ops.length; s++) {
+        var g = K.applySymop(ops[s], f), d = [g[0] - f[0], g[1] - f[1], g[2] - f[2]];
+        d = K.fracToCart(state.cifFracToCart, [d[0] - Math.round(d[0]), d[1] - Math.round(d[1]), d[2] - Math.round(d[2])]);
+        if (Math.sqrt(dot(d, d)) < 0.3) return true;
+      }
+      return false;
+    }
+    function isTracked() { return !!(state.isCif && !state.symmetryForgotten && state.cifFracToCart && state.cifSymops && state.cifSymops.length && state.cifAsymUnit && state.cifCell); }
+    function allAtoms() { return (state.atoms || []).concat(state.guestAtoms || []); }
+    function copiesMap(all) { var m = {}; for (var i = 0; i < all.length; i++) if (all[i].auIndex !== undefined) (m[all[i].auIndex] || (m[all[i].auIndex] = [])).push(all[i]); return m; }
+    function auParent(i, copies) {
+      var au = state.cifAsymUnit[i];
+      return { kind: "au", auIndex: i, el: au.el, p: K.fracToCart(state.cifFracToCart, [au.fx, au.fy, au.fz]), part: partOfAu(au), name: au.label || (au.el + (i + 1)), copies: copies[i], special: onSpecial(au) };
+    }
+    function cartParent(a, all) { return { kind: "cart", atom: a, el: a.el, p: [a.x, a.y, a.z], part: a.part || 0, name: a.el + " (atom " + (all.indexOf(a) + 1) + ")" }; }
+    /* ---- what is missing: {jobs, skips, haveN} ---- */
+    function assess() {
+      var jobs = [], skips = [], haveN = 0, low = tempLow(), all = allAtoms();
+      if (!all.length) return { jobs: jobs, skips: skips, haveN: haveN, low: low };
+      var tracked = isTracked();
+      function take(pl, parent) {
+        if (!pl) return;
+        if (pl.have) { haveN++; return; }
+        if (pl.skip) { skips.push(parent.name + ": " + pl.skip); return; }
+        jobs.push({ parent: parent, pl: pl });
+      }
+      var cartParents = [], i;
+      if (tracked) {
+        var copies = copiesMap(all);
+        for (i = 0; i < all.length; i++) if (all[i].auIndex === undefined && !all[i].isCentroid && PARENT_EL.test(all[i].el)) cartParents.push(all[i]);
+        var srch = auSearch(), eng = engine(srch, low), keys = {};
+        for (i = 0; i < all.length; i++) if (all[i].auIndex !== undefined) keys[all[i].auIndex + ":" + all[i].opIndex + ":" + all[i].cellI + ":" + all[i].cellJ + ":" + all[i].cellK] = true;
+        for (i = 0; i < state.cifAsymUnit.length; i++) {
+          var au = state.cifAsymUnit[i];
+          if (au.deleted || !PARENT_EL.test(au.el) || !copies[i] || !isFinite(au.fx + au.fy + au.fz)) continue;
+          var parent = auParent(i, copies), pl0 = eng.plan(parent);
+          if (pl0 && pl0.have) { /* the asymmetric unit has its H atoms: are they all displayed on every displayed copy of the parent? (one deleted from a symmetry copy is still in the asymmetric unit) */
+            var near = srch(parent.p, 1.3), seen = {}, rs = [];
+            for (var k = 0; k < near.length; k++) {
+              var nn = near[k];
+              if (!nn.isH || nn.idx === undefined || !nn.ident || nn.sym || nn.d < 0.35 || seen[nn.idx]) continue;
+              seen[nn.idx] = true;
+              for (var c = 0; c < parent.copies.length; c++) {
+                var cp0 = parent.copies[c];
+                if (!keys[nn.idx + ":" + cp0.opIndex + ":" + cp0.cellI + ":" + cp0.cellJ + ":" + cp0.cellK]) rs.push({ idx: nn.idx, op: cp0.opIndex, cell: [cp0.cellI, cp0.cellJ, cp0.cellK], layerOf: cp0 });
+              }
+            }
+            if (rs.length) jobs.push({ parent: parent, pl: null, restore: rs });
+          }
+          take(pl0, parent);
+        }
+      } else {
+        for (var j = 0; j < all.length; j++) if (!all[j].isCentroid && PARENT_EL.test(all[j].el)) cartParents.push(all[j]);
+      }
+      if (cartParents.length) {
+        var engC = engine(cartSearch(all), low);
+        for (var m = 0; m < cartParents.length; m++) { var par = cartParent(cartParents[m], all); take(engC.plan(par), par); }
+      }
+      return { jobs: jobs, skips: skips, haveN: haveN, low: low };
+    }
+    /* the parent atoms behind the selection (a selected H atom stands for its parent), each once, with the H atoms they carry now */
+    function selectionJobs(mn) {
+      var all = allAtoms(), low = tempLow(), tracked = isTracked(), jobs = [], skips = [], seenAu = {}, seenCart = [], i;
+      var sel = all.filter(function (a) { return a.selected && !a.isCentroid; });
+      if (!sel.length) return null;
+      var copies = tracked ? copiesMap(all) : {}, searchA = tracked ? auSearch() : null, engA = tracked ? engine(searchA, low) : null, engC = null;
+      for (i = 0; i < sel.length; i++) {
+        var p = sel[i];
+        if (p.el === "H" || p.el === "D") {
+          var best = null, bd = 1.45;
+          for (var q = 0; q < all.length; q++) { var c = all[q]; if (c === p || c.isCentroid || c.el === "H" || c.el === "D") continue; var d = dist([c.x, c.y, c.z], [p.x, p.y, p.z]); if (d < bd) { bd = d; best = c; } }
+          if (!best) continue; p = best;
+        }
+        if (!PARENT_EL.test(p.el)) { skips.push(p.el + ": only C, N, O and B atoms can carry H atoms here"); continue; }
+        var job;
+        if (tracked && p.auIndex !== undefined) {
+          if (seenAu[p.auIndex]) continue; seenAu[p.auIndex] = true;
+          var par = auParent(p.auIndex, copies), rm = {}, near = searchA(par.p, 1.3), k;
+          for (k = 0; k < near.length; k++) if (near[k].isH && near[k].idx !== undefined) rm[near[k].idx] = true;
+          job = { parent: par, removeAu: Object.keys(rm).map(Number), removeAtoms: [] };
+          job.pl = mn ? engA.force(par, mn) : null;
+        } else {
+          if (seenCart.indexOf(p) >= 0) continue; seenCart.push(p);
+          if (!engC) engC = engine(cartSearch(all), low);
+          var cp = cartParent(p, all), rmA = [];
+          for (var h = 0; h < all.length; h++) if ((all[h].el === "H" || all[h].el === "D") && dist([all[h].x, all[h].y, all[h].z], cp.p) <= 1.3) rmA.push(all[h]);
+          job = { parent: cp, removeAu: [], removeAtoms: rmA };
+          job.pl = mn ? engC.force(cp, mn) : null;
+        }
+        if (job.pl && job.pl.skip) { skips.push(job.parent.name + ": " + job.pl.skip); continue; }
+        jobs.push(job);
+      }
+      return { jobs: jobs, skips: skips, low: low };
+    }
+    /* ---- adding ---- */
+    function nameList(label, n, used, noBare) { /* H + the number of the parent, then A, B, C when there are several (H12A, H12B) */
+      var m = /^[A-Za-z]{1,2}(\d*)([A-Za-z]?)(_\w+)?$/.exec(label || ""), dg = m ? m[1] : "", sf = m ? m[2] : "", rs = (m && m[3]) ? m[3] : "", L = "ABCDEFGHIJKLMNOPQRSTUVWXYZ", out = [], cands = [], i;
+      function ok(nm) { return nm.length <= 5 && !used[(nm + rs).toLowerCase()]; }
+      if (m) { if (n === 1 && !noBare) cands.push("H" + dg + sf); for (i = 0; i < L.length; i++) cands.push("H" + dg + L.charAt(i)); }
+      for (i = 1; i < 1000; i++) cands.push("H" + i);
+      for (i = 0; i < cands.length && out.length < n; i++) if (ok(cands[i])) { out.push(cands[i] + rs); used[(cands[i] + rs).toLowerCase()] = true; }
+      return out;
+    }
+    /* writes the jobs ({parent, pl or null, removeAu, removeAtoms}) into the structure as one undo step; returns {added, removed} */
+    function commit(jobs) {
+      pushUndo();
+      var guestUid = {}, g, used = {}, newHost = [], newGuest = [], added = 0, removed = 0, i, j, q;
+      var rmAu = {}, rmUid = {};
+      for (i = 0; i < jobs.length; i++) {
+        var ra = jobs[i].removeAu || [], rb = jobs[i].removeAtoms || [];
+        for (j = 0; j < ra.length; j++) rmAu[ra[j]] = true;
+        for (j = 0; j < rb.length; j++) rmUid[rb[j].uid] = true;
+      }
+      var rmKeys = Object.keys(rmAu);
+      if (rmKeys.length || Object.keys(rmUid).length) {
+        var before = (state.atoms ? state.atoms.length : 0) + (state.guestAtoms ? state.guestAtoms.length : 0);
+        for (j = 0; j < rmKeys.length; j++) state.cifAsymUnit[rmKeys[j]].deleted = true;
+        var gone = function (a) { return (a.auIndex !== undefined && rmAu[a.auIndex]) || rmUid[a.uid]; };
+        if (state.atoms) state.atoms = state.atoms.filter(function (a) { return !gone(a); });
+        if (state.guestAtoms) state.guestAtoms = state.guestAtoms.filter(function (a) { return !gone(a); });
+        removed = before - ((state.atoms ? state.atoms.length : 0) + (state.guestAtoms ? state.guestAtoms.length : 0));
+      }
+      if (state.guestAtoms) for (g = 0; g < state.guestAtoms.length; g++) guestUid[state.guestAtoms[g].uid] = true;
+      if (state.cifAsymUnit) for (g = 0; g < state.cifAsymUnit.length; g++) if (state.cifAsymUnit[g].label && !state.cifAsymUnit[g].deleted) used[String(state.cifAsymUnit[g].label).toLowerCase()] = true;
+      function occupied(h) { /* an atom already there (a parent on a special position would otherwise get its H twice) */
+        var lists = [state.atoms, state.guestAtoms, newHost, newGuest], l, n;
+        for (l = 0; l < lists.length; l++) if (lists[l]) for (n = 0; n < lists[l].length; n++) { var o = lists[l][n]; if (Math.abs(o.x - h.x) < 0.2 && Math.abs(o.y - h.y) < 0.2 && Math.abs(o.z - h.z) < 0.2 && dist([o.x, o.y, o.z], [h.x, h.y, h.z]) < 0.2) return true; }
+        return false;
+      }
+      function place(h, layerOf) { if (occupied(h)) return false; if (guestUid[layerOf.uid]) { if (layerOf.batch !== undefined) h.batch = layerOf.batch; newGuest.push(h); } else newHost.push(h); return true; }
+      for (i = 0; i < jobs.length; i++) {
+        var job = jobs[i], pl = job.pl, par = job.parent;
+        if (job.restore) { /* copies of asymmetric-unit H atoms that were deleted from a symmetry copy */
+          for (q = 0; q < job.restore.length; q++) {
+            var rr = job.restore[q], hr = generateSymmetryAtom(rr.idx, rr.op, rr.cell[0], rr.cell[1], rr.cell[2]);
+            hr.selected = false; hr.hidden = !!rr.layerOf.hidden;
+            if (place(hr, rr.layerOf)) added++;
+          }
+          continue;
+        }
+        if (!pl) continue;
+        var fac = -pl.U, ueq = null, names = null;
+        if (par.kind === "au") {
+          var au = state.cifAsymUnit[par.auIndex], c0 = par.copies[0];
+          ueq = c0.ueq != null ? c0.ueq : (c0.uiso != null ? c0.uiso : (au.uiso != null ? au.uiso : null));
+          names = nameList(au.label, pl.dirs.length, used, pl.completes);
+          for (j = 0; j < pl.dirs.length; j++) {
+            var f = K.cartToFrac(state.cifFracToCart, add(par.p, mul(pl.dirs[j], pl.d)));
+            var rec = { label: names[j], el: "H", fx: f[0], fy: f[1], fz: f[2], sfx: 0, sfy: 0, sfz: 0, occ: (au.occ != null ? au.occ : 1.0) * (pl.occFactor || 1), uiso: ueq != null ? fac * ueq : null, uij: null };
+            if (au.part !== undefined) rec.part = au.part;
+            if (au.dgroup !== undefined) rec.dgroup = au.dgroup;
+            if (au.isGuestAsu) rec.isGuestAsu = true;
+            var idx = state.cifAsymUnit.length; state.cifAsymUnit.push(rec);
+            for (q = 0; q < par.copies.length; q++) {
+              var cp = par.copies[q], h = generateSymmetryAtom(idx, cp.opIndex, cp.cellI, cp.cellJ, cp.cellK);
+              h.selected = false; h.hidden = !!cp.hidden;
+              if (place(h, cp)) added++;
+            }
+          }
+        } else {
+          var a = par.atom;
+          ueq = a.ueq != null ? a.ueq : (a.uiso != null ? a.uiso : null);
+          for (j = 0; j < pl.dirs.length; j++) {
+            var pos = add(par.p, mul(pl.dirs[j], pl.d));
+            var hc = { el: "H", x: pos[0], y: pos[1], z: pos[2], r: K.vdw("H"), cr: K.cov("H"), color: K.cpk("H"), isCentroid: false, selected: false, hidden: !!a.hidden };
+            if (a.part !== undefined) hc.part = a.part;
+            if (ueq != null) { hc.uiso = fac * ueq; hc.ueq = fac * ueq; }
+            if (place(hc, a)) added++;
+          }
+        }
+      }
+      assignUids(newHost); assignUids(newGuest);
+      if (newHost.length) { state.atoms = (state.atoms || []).concat(newHost); refreshHostAtomColors(newHost); }
+      if (newGuest.length) { state.guestAtoms = (state.guestAtoms || []).concat(newGuest); refreshGuestAtomColors(); }
+      renderStructure(); updateHostInfo(); updateGuestInfo(); buildRadiiEditor(); buildHostColorEditor(); buildGuestColorEditor(); refreshReassignElementOptions(); refreshBondCleanupElements(); updateSelectionInfo(); refreshSymmetryUI();
+      return { added: added, removed: removed };
+    }
+    function tail(skips) { return skips.length ? " " + skips.length + " atom" + (skips.length === 1 ? "" : "s") + " left for you to decide: " + skips.slice(0, 3).join("; ") + (skips.length > 3 ? "; ..." : "") + "." : ""; }
+    function hiddenNote() { return state.showHydrogens === false ? " (H atoms are hidden: press H to show them.)" : ""; }
+    /* the automatic button: every atom that seems to lack its H atoms */
+    function run() {
+      if (!state.atoms || !state.atoms.length) { setStatus("Load a structure first.", true); return false; }
+      var r = assess();
+      if (!r.jobs.length) { setStatus("No missing H atoms found." + tail(r.skips), false); return false; }
+      var counts = {}, total = 0, nPlan = 0, nRest = 0, i;
+      for (i = 0; i < r.jobs.length; i++) {
+        var jb = r.jobs[i];
+        if (jb.restore) { nRest += jb.restore.length; continue; }
+        nPlan++; counts[jb.pl.mn] = (counts[jb.pl.mn] || 0) + jb.pl.dirs.length; total += jb.pl.dirs.length;
+      }
+      var res = commit(r.jobs);
+      recordMacroCommand("ADD_MISSING_H");
+      var parts = []; for (var mn in counts) if (counts.hasOwnProperty(mn)) parts.push(counts[mn] + " " + LABEL[mn]);
+      var msg = "";
+      if (nPlan) msg += "Added " + total + " H atom" + (total === 1 ? "" : "s") + " to " + nPlan + " atom" + (nPlan === 1 ? "" : "s") + " (" + parts.join(", ") + (r.low ? "; low-temperature distances" : "") + ").";
+      if (nRest) msg += (msg ? " " : "") + "Restored " + nRest + " H atom" + (nRest === 1 ? "" : "s") + " that had been deleted from symmetry copies of atoms whose asymmetric-unit H atoms are still there.";
+      setStatus(msg + tail(r.skips) + hiddenNote(), false);
+      return true;
+    }
+    /* a model chosen by the user for the selected atoms (replacing the H atoms they carry now) */
+    function assign(mn) {
+      if (!state.atoms || !state.atoms.length) { setStatus("Load a structure first.", true); return false; }
+      var r = selectionJobs(mn);
+      if (!r) { setStatus("Select the atoms that carry the H atoms first (or select their H atoms).", true); return false; }
+      if (!r.jobs.length) { setStatus("Nothing was changed." + tail(r.skips), true); return false; }
+      var res = commit(r.jobs), notes = [];
+      for (var i = 0; i < r.jobs.length; i++) if (r.jobs[i].pl.note) notes.push(r.jobs[i].parent.name + ": " + r.jobs[i].pl.note);
+      recordMacroCommand("ADD_H_MODEL " + mn);
+      setStatus("Set " + (LABEL_LONG[mn] || LABEL[mn]) + " on " + r.jobs.length + " atom" + (r.jobs.length === 1 ? "" : "s") + ": " + res.added + " H atom" + (res.added === 1 ? "" : "s") + " added" + (res.removed ? ", " + res.removed + " replaced" : "") + (r.low ? "; low-temperature distances" : "") + "." + (notes.length ? " " + notes.join("; ") + "." : "") + tail(r.skips) + hiddenNote(), false);
+      return true;
+    }
+    function removeFromSelection() {
+      if (!state.atoms || !state.atoms.length) { setStatus("Load a structure first.", true); return false; }
+      var r = selectionJobs(null);
+      if (!r) { setStatus("Select the atoms (or their H atoms) first.", true); return false; }
+      var n = 0; for (var i = 0; i < r.jobs.length; i++) n += r.jobs[i].removeAu.length + r.jobs[i].removeAtoms.length;
+      if (!n) { setStatus("The selected atoms carry no H atoms.", true); return false; }
+      var res = commit(r.jobs);
+      recordMacroCommand("ADD_H_REMOVE");
+      setStatus("Removed " + res.removed + " H atom" + (res.removed === 1 ? "" : "s") + " from " + r.jobs.length + " atom" + (r.jobs.length === 1 ? "" : "s") + ".", false);
+      return true;
+    }
+    return { assess: assess, run: run, assign: assign, removeFromSelection: removeFromSelection };
+  })();
+  /* the button is enabled only while some H atoms are missing; the check is made when the submenu is opened and, while it is open, shortly after every redraw */
+  var addHOpen = false, addHTimer = null;
+  function refreshAddHButton() {
+    var b = document.getElementById("addMissingHBtn"); if (!b) return;
+    var r = null;
+    if (state.atoms && state.atoms.length) { try { r = AddH.assess(); } catch (err) { r = null; } }
+    var n = r ? r.jobs.length : 0;
+    b.disabled = n === 0;
+    b.title = n ? ("Adds H atoms in calculated positions to " + n + " atom" + (n === 1 ? "" : "s") + " (SHELXL's geometry and distances). Undo removes them." + (r.skips.length ? " Left for you to decide: " + r.skips.slice(0, 5).join("; ") + "." : ""))
+      : (r && r.skips.length ? "No H atoms can be added automatically. Left for you to decide: " + r.skips.slice(0, 5).join("; ") + "." : "No missing H atoms were found.");
+  }
+  function scheduleAddHRefresh() {
+    if (!addHOpen) return;
+    clearTimeout(addHTimer); addHTimer = setTimeout(refreshAddHButton, 300);
+  }
   /* ---------------- normalise X-H distances ----------------
    * X-ray structures put hydrogen atoms too close to their parent atom (the electron density
    * of H is pulled toward X), which matters for anything that measures space next to H atoms.
@@ -13856,6 +14411,9 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
         try { normaliseHAtoms(); } finally { state.normHHB = nhSave[0]; state.normHHBMode = nhSave[1]; }
         return true; }
       case "CREATE_CENTROID": generateCentroid(); return true;
+      case "ADD_MISSING_H": AddH.run(); return true;
+      case "ADD_H_MODEL": n = parseInt(rest, 10); if (!isFinite(n)) return false; AddH.assign(n); return true;
+      case "ADD_H_REMOVE": AddH.removeFromSelection(); return true;
       case "DELETE_SYM_ATOMS": deleteSymmetryGeneratedAtoms(); return true;
       case "REASSIGN_ELEMENT":
         n = parseInt(rest, 10);
@@ -23478,6 +24036,8 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     var guestTab = subsection(structC, "Guest", false);
     var atomEditTab = subsection(structC, "Create/Move Atoms", false, function (isOpen) { if (!isOpen) exitAtomEditMode(); });
     atomEditTab.parentElement.id = "atomEditSection";
+    var addHTab = subsection(structC, "Add missing H atoms", false, function (isOpen) { addHOpen = isOpen; if (isOpen) refreshAddHButton(); });
+    addHTab.parentElement.id = "addHSection";
 
     var styleC = section(left, "Style", false);
     var styleAtomsTab = subsection(styleC, "Atoms", false);
@@ -23731,6 +24291,39 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     moveSelBtn.addEventListener("click", function () { setAtomEditUiMode("moveSel"); });
     moveSelRow.appendChild(moveSelBtn);
     atomEditTab.appendChild(moveSelRow);
+    /* ---- Add missing H atoms ---- (see AddH): an automatic button, enabled only while some H atoms are missing, and one button per model for the selected atoms */
+    var addHRow = el("div", "btnrow");
+    var addHBtn = document.createElement("button"); addHBtn.type = "button"; addHBtn.className = "btn ghost"; addHBtn.textContent = "Add missing H atoms"; addHBtn.id = "addMissingHBtn"; addHBtn.disabled = true;
+    addHBtn.title = "Adds H atoms in calculated positions where some seem to be missing.";
+    addHBtn.addEventListener("click", function () { AddH.run(); });
+    addHRow.appendChild(addHBtn);
+    addHTab.appendChild(addHRow);
+    addHTab.appendChild(el("div", "dim", "Set the selected atoms to:"));
+    [[13, "Tertiary C-H", "C with three bonded neighbours: one H opposite the three bonds."],
+     [23, "CH2", "C with two bonded neighbours: two H atoms above and below the plane of the bonds."],
+     [43, "Aromatic C-H/N-H", "Two bonded neighbours: one H on the bisector, in the plane (aromatic or alkene C-H, amide or indole N-H)."],
+     [93, "=CH2 / =NH2", "Terminal =CH2 or =NH2 (one bonded neighbour): two H atoms in the plane of the double bond."],
+     [137, "Methyl", "One bonded neighbour: three H atoms, staggered against the neighbour's own substituent (also NH3)."],
+     [123, "Methyl, 2 positions", "Methyl disordered over two staggered orientations: six H atoms at half the parent's occupancy."],
+     [163, "Acetylenic C-H", "One bonded neighbour: one H along the bond axis, pointing away from it."],
+     [153, "B-H", "B with three or more bonded neighbours: one H opposite them."],
+     [83, "O-H, staggered", "O with one bonded neighbour: the H staggered against the neighbour's substituents."],
+     [147, "O-H to acceptor", "O with one bonded neighbour: the H turned towards a hydrogen-bond acceptor within reach; staggered if there is none."]
+    ].forEach(function (m, i, all) {
+      if (i % 2) return;
+      var r = el("div", "btnrow");
+      [m, all[i + 1]].forEach(function (mm) {
+        if (!mm) return;
+        var b = document.createElement("button"); b.type = "button"; b.className = "btn ghost"; b.textContent = mm[1]; b.title = mm[2] + " Replaces any H atoms the selected atoms already carry.";
+        b.addEventListener("click", function () { AddH.assign(mm[0]); });
+        r.appendChild(b);
+      });
+      addHTab.appendChild(r);
+    });
+    var addHRow2 = el("div", "btnrow");
+    button(addHRow2, "Remove H from selection", "ghost", function () { AddH.removeFromSelection(); }).title = "Removes the H atoms of the selected atoms (select the parent atoms, or the H atoms themselves).";
+    button(addHRow2, "Undo", "ghost", undoEdit);
+    addHTab.appendChild(addHRow2);
     refreshReassignElementOptions(); /* populates createAtomEl too, now that it exists */
 
     /* ---- Metadata ---- */
@@ -25616,6 +26209,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<li><b>Ctrl + Alt + left drag</b> &mdash; lasso select whole fragments: the same outline, but each atom it touches brings its entire bonded fragment into the selection, the same rule ctrl-click uses for a single atom.</li>" +
       "<li>Lasso selection works on screen position only, not true depth: an atom behind another one, as long as its projected position falls inside the outline, is selected too, even though it's obscured from view by whatever's in front of it. Rotating to a clearer angle before lassoing avoids surprises in a dense structure. This is separate from an atom that's actually hidden (individually hidden, a hydrogen with display switched off, or excluded by \"Show ASU only\") -- those are never selected by lasso, or by any other selection method, while they're not displayed.</li>" +
       "<li><b>Right drag, vertical</b> &mdash; zoom (up = in, down = out). The mouse wheel is disabled.</li>" +
+      "<li><b>Right click</b> (press and release without moving) &mdash; a small menu at the pointer with <b>Copy image to clipboard</b> and <b>Export image (PNG)</b>, the same two commands as in Export &gt; Image, with the same settings (resolution, transparent background). It closes on a click elsewhere, Esc, or a wheel turn. A right press that moves is still the zoom drag.</li>" +
       "<li><b>Immobilise view</b> (Display, a tick box) switches off left-drag rotation and right-drag zoom, so a view you have set up cannot be nudged by accident; a plain click still selects atoms. Shift + left drag (roll), Shift + Ctrl + left drag (pan), the cursor and Page Up/Down keys and the <b>-</b> and <b>=</b> keys all keep working, so the view can still be adjusted deliberately.</li>" +
       "<li><b>Show bond lengths</b> (Display, a tick box above Immobilise view). Point the mouse at a bond (ball-and-stick or stick) and its length appears in a small label beside the pointer, with the labels of the two atoms; the label hides while you drag, when the pointer is over an atom or empty space, and when the tick box is off. Hydrogen bonds (the dashed lines) are not measured. The setting is remembered between sessions.</li>" +
       "<li><b>Show atom properties</b> (Display, the tick box beside Show bond lengths). Point the mouse at an atom and a small label beside the pointer lists, where the structure has them, on separate lines: the atom name followed by the symmetry operator of the copy you are pointing at, written with X, Y, Z standing for the asymmetric-unit atom and translations as fractions (for example -X+1/2,Y+1/2,-Z+3/2); the fractional coordinates x, y, z of that copy; the PART number (a SHELX PART, or the CIF disorder group), SOF (site occupancy factor) and U(iso), or U(eq) for an anisotropic atom; and, on two further lines, U11, U22, U33 and U23, U13, U12 of that copy (the asymmetric-unit tensor turned by the operator's rotation, which is the tensor its ellipsoid is drawn from). Items a structure does not carry are left out, and for a structure without a unit cell the coordinates are Cartesian. The label hides while you drag and when the tick box is off. The setting is remembered between sessions.</li>" +
@@ -25694,6 +26288,9 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<h3>Mode buttons</h3>" +
       "<p>A few buttons do not act once but switch an interactive mode on and off: <b>Interactive bond editor</b>, <b>Click to add atom</b>, <b>Move atom</b> and <b>Move selection</b> (Create/Move atoms), <b>Drag/reorient guest</b>, <b>Interactive grow mode</b> (in Mouse, and again in Molecular neighbourhood), <b>Move</b>, <b>Copy</b> and <b>Recolour</b> (Void/Channel Analysis) <b>Walk through structure</b> (Display &gt; Walk mode), and <b>Record</b> and <b>Pause</b> (Macro; one of the two is always on). They are shaded warm grey with a small hollow ring in front of the text, unlike the plain outlined buttons that act at once. While a mode is on the button turns red and the ring is filled; press it again, or another mode button, to leave the mode.</p>" +
       "<p><b>Move selection</b> (Create/Move Atoms, just below Move atom) is Move atom for a whole selection: with the mode on, press on one of the selected atoms and drag, and every selected atom moves together in the plane of the screen, in one undo step, exactly as one atom does in Move atom. Pressing anywhere else still selects atoms and turns the view, so the selection can be made or changed without leaving the mode. In a structure with symmetry the move is made on the asymmetric-unit sites, as for Move atom, so the symmetry copies of the moved atoms follow them; if the selection holds several copies of the same site, only one of them is dragged and the others follow it by symmetry. Press the button again, or leave the Create/Move Atoms submenu, to turn it off.</p>" +
+      "<h3>Add missing H atoms</h3>" +
+      "<p>Structure &gt; Add missing H atoms puts H atoms in calculated positions on atoms that seem to lack them. The geometry is that of SHELX_GUI's H-atoms panel (SHELXL's HFIX geometry and standard distances); nothing is refined, and nothing is written as AFIX. The automatic button looks at every C, N, O and B atom and decides from the bond lengths and angles of its bonded neighbours (symmetry copies included) which of these it is: tertiary C-H, CH2, aromatic or alkene C-H, an amide or indole N-H, terminal =CH2, staggered methyl (also NH3), acetylenic C-H, B-H (a cage boron with five bonded neighbours, as in a carborane; never a BF4), or O-H (turned towards a hydrogen-bond acceptor within reach, otherwise staggered). It is enabled only while some H atoms seem to be missing, and an atom that has some but not all of the H atoms its geometry calls for (a methyl group with one H deleted, say) is completed, the missing ones being put where the group needs them. Its tooltip says how many atoms it would treat. Distances are SHELXL's room-temperature values, or its low-temperature ones when the CIF gives 223 K or lower; the Uiso of each new H is 1.2 times the parent's Ueq (1.5 for methyl and O-H), and it takes the parent's occupancy and disorder group. Doubtful cases are not guessed but named in the status line: R2NH or R2NH2+, a pyridine-type N, a carboxylic acid O, an N with three bonds, a water O, and an atom on a special position whose neighbour lies on the same symmetry element. In a CIF with symmetry each new H becomes an asymmetric-unit atom and is generated wherever its parent is displayed, so the symmetry stays exact; in other structures the H atoms are built from the atoms that are displayed. The whole addition is one undo step.</p>" +
+      "<p>When the automatic choice is wrong, select the parent atoms (or their H atoms) and press one of the model buttons: Tertiary C-H, CH2, Aromatic C-H/N-H, =CH2 / =NH2, Methyl, Methyl 2 positions (six H atoms at half the parent's occupancy), Acetylenic C-H, B-H, O-H staggered, O-H to acceptor. The model replaces whatever H atoms those atoms carry now; a model that does not fit the bonds of an atom (CH2 on a carbon with one bonded neighbour, say) is refused and the reason given. Remove H from selection deletes the H atoms of the selected atoms, and Undo undoes the last step. The macro commands are ADD_MISSING_H, ADD_H_MODEL # and ADD_H_REMOVE.</p>" +
       "<h3>Undo</h3>" +
       "<p>\"Undo\" (Structure &gt; Edit atoms) and \"Undo\" (Structure &gt; Edit bonds) both trigger the same single shared history, so either one steps back through moving atoms, deleting atoms, and cutting bonds, in that order, one step at a time -- whichever of the two happens to be at hand works, regardless of which kind of edit is actually being undone. <b>Ctrl + Z</b> does the same thing from the keyboard (the Windows convention). It does not cover loading files or changing element/display settings, which have their own separate reset controls.</p>" +
       "<h3>Keeping symmetry consistent</h3>" +
@@ -25787,6 +26384,9 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<li><span class='mono'>SELECTED_TO_ASU</span> &mdash; \"Move to ASU\".</li>" +
       "<li><span class='mono'>DELETE_SELECTED_ATOMS</span> &mdash; \"Delete selection\".</li>" +
       "<li><span class='mono'>CREATE_CENTROID</span> &mdash; \"Generate centroid\" (or Ctrl-C).</li>" +
+      "<li><span class='mono'>ADD_MISSING_H</span> &mdash; \"Add missing H atoms\" (the automatic button).</li>" +
+      "<li><span class='mono'>ADD_H_MODEL #</span> &mdash; one of the model buttons of Add missing H atoms, on the selected atoms (<span class='mono'>#</span> is 13, 23, 43, 137, 123, 93, 163, 153, 83 or 147: tertiary C-H, CH2, aromatic, methyl, methyl in two positions, =CH2, acetylenic, B-H, O-H staggered, O-H towards an acceptor).</li>" +
+      "<li><span class='mono'>ADD_H_REMOVE</span> &mdash; \"Remove H from selection\".</li>" +
       "<li><span class='mono'>DELETE_SYM_ATOMS</span> &mdash; \"Delete all symmetry-generated atoms\".</li>" +
       "<li><span class='mono'>REASSIGN_ELEMENT #</span> &mdash; \"Reassign element to\" (<span class='mono'>#</span> is the new element's atomic number).</li>" +
       "<li><span class='mono'>MOVE_SELECTION_TO Host</span> / <span class='mono'>MOVE_SELECTION_TO NewGuestGroup</span> / <span class='mono'>MOVE_SELECTION_TO Guest1</span> (etc.) &mdash; \"Move selection to\", for its three kinds of destination; an existing guest group is referred to by its current position in the Guest tab's own list (1st, 2nd, ...), which stays valid even if the app's own internal group numbering isn't consecutive.</li>" +
