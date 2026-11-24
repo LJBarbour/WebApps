@@ -173,6 +173,30 @@ main{flex:1 1 auto;display:flex;min-height:0}
 .btn.mode-btn.grow-active{color:#fff;border:1.5px solid transparent;padding:4.5px 9px}/* the same box as the off state (which has a border), so a button never changes size when it is switched */
 .btn.prominent.mode-btn.grow-active{padding:8px 12px}
 .btn.mode-btn.grow-active::before{background:#fff;border-color:#fff}
+/* Selection & geometry > Measure */
+.measgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px}
+.btn.measbtn{flex-direction:column;gap:2px;padding:6px 2px;text-align:center;font-size:11px}
+.btn.measbtn::before{display:none}
+.btn.measbtn svg{display:block}
+.measlist{min-height:70px;max-height:260px;overflow:auto;resize:vertical;border:1px solid var(--line);border-radius:4px;padding:0 0 22px;margin-bottom:6px;cursor:default}
+#measResultsTable{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px}
+#measResultsTable td{padding:3px 4px;border-bottom:1px solid var(--line);color:var(--ink);vertical-align:middle}
+#measResultsTable td:first-child{width:22px}
+#measResultsTable td.measname{cursor:pointer}
+#measResultsTable td.measname div{display:flex;justify-content:space-between;gap:10px}
+#measResultsTable td.measname b{font-weight:500;white-space:nowrap}
+#measResultsTable tr.void-row:hover{background:var(--accent-soft)}
+#measResultsTable tr.sel{background:var(--accent)}
+#measResultsTable tr.sel td{color:#fff}
+#measResultsTable tr.dim{opacity:.4}
+#measResultsTable button.measline{display:block;border:1px solid var(--border);border-radius:3px;background:transparent;color:var(--ink-faint);padding:2px 1px;cursor:pointer;line-height:0;position:relative}
+#measResultsTable button.measline.on{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
+#measResultsTable button.measline:not(.on)::after{content:"";position:absolute;left:1px;right:1px;top:50%;border-top:1.5px solid var(--danger);transform:rotate(-20deg)}
+#measResultsTable tr.sel button.measline{background:#fff}
+#measResultsTable input.swatch{width:22px;height:18px;padding:0;border:1px solid var(--border);border-radius:3px;background:none;cursor:pointer}
+.measempty{padding:8px;color:var(--ink-mid);font-size:11px}
+.measlegend{white-space:pre-wrap;font-family:var(--mono);font-size:10.5px;margin-bottom:6px}
+.meashead{font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--ink-mid);margin:2px 0 6px}
 .btn.mini.axis-nudge{padding:3px 4px;flex:0 0 auto;text-transform:none}
 .btn.mini.sel-group-btn{padding:3px 5px;flex:0 0 auto}
 
@@ -2544,7 +2568,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
 
   var scene, camera, trueOrthoCam, pseudoOrthoCam, walkCam, activeCam, renderer, walkHeadlamp;
   var clipPlaneObjs = []; /* one THREE.Plane per possible cutaway plane (CLIP_MAX), index = the plane's place in state.clipPlanes; each one's normal is recomputed in updateClipPlane() */
-  var atomsGroup, bondsGroup, surfaceGroup, guestAtomsGroup, guestBondsGroup, hbondsGroup, selectionGroup, unitCellGroup, bondEditGroup, voidGroup, ringGroup, molSurfaceGroup, labelGroup, coordPolyGroup, coordPolyGuestGroup, molNeighborGroup, lsPlaneGroup;
+  var atomsGroup, bondsGroup, surfaceGroup, guestAtomsGroup, guestBondsGroup, hbondsGroup, selectionGroup, unitCellGroup, bondEditGroup, voidGroup, ringGroup, molSurfaceGroup, labelGroup, coordPolyGroup, coordPolyGuestGroup, molNeighborGroup, lsPlaneGroup, measureGroup;
   /* Grow > Molecular neighbourhood's own preview shell -- NOT part of the
      model (never touches state.atoms/state.guestAtoms) and deliberately
      NOT recomputed on every render the way bonds/H-bonds are: the
@@ -2831,7 +2855,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     ellipsoidProb: "50", showPrincipalAxes: true, principalAxisColor: 0xFFFFFF, principalAxisWidth: 0.008,
     /* ---- labels (ported from MolecularGraphics, see its own history for
        the drag-to-place/repositionLabels() design) ---- */
-    showLabels: false, labelSize: 2.6, labelColor: 0x2C2416, labelHalo: true,
+    showLabels: false, labelSize: 2.6, labelColor: 0x2C2416, labelHalo: true, labelScaleModel: true,
     labelFont: "Arial, Helvetica, sans-serif",
     showUnitCell: true, growMode: false, growUnit: "frag", growBySphere: false, growByHBonds: false, sphereRadius: 4.0,
     /* Style > Unit cell > "Show axis key" -- a small a/b/c orientation
@@ -2911,6 +2935,11 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
        guestBatch's own role for guest groups) so a group's id is always
        unique even after others are deleted. */
     selectionGroups: [], selectionGroupSeq: 0,
+    /* Selection & geometry > Measure: the distances, angles and torsion angles kept in the model (each is a kind plus the uids of its atoms, so it
+       follows the atoms when they move and is saved with the model); measSet is how they are drawn (see the Measure block). */
+    measurements: [], measureSeq: 0, measureSelId: 0, measureMode: null, measurePick: [], measureShowLabels: true, measSet: measDefaults(),
+    /* what the user has chosen, remembered between sessions (measSet itself may hold a loaded model's own look): see measRemember() */
+    measPrefs: measDefaults(), measShowPref: true,
     bondSelectionEnabled: false, atomEditUiMode: null, lastClickedAtomUid: null, guestDragMode: false,
     /* Array of atom uids in the order they most recently BECAME selected --
        reconciled against the real .selected flags on every updateSelectionInfo()
@@ -3216,7 +3245,23 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       pseudoOrthoCam.updateProjectionMatrix();
     }
   }
+  /* With "Scale labels with the model" a label's size on the screen follows the zoom, so where it fits among the atoms changes with it: once a zoom has
+     stopped (a quarter of a second without a change) the labels are placed again, as they are after a rotation. */
+  var labelZoomRef = null, labelZoomTimer = null;
+  function noteLabelZoom() {
+    if (!state.labelScaleModel || !state.showLabels) { labelZoomRef = camDist; return; }
+    if (labelZoomRef == null) { labelZoomRef = camDist; return; }
+    if (Math.abs(camDist - labelZoomRef) / Math.max(camDist, 1e-6) < 0.01) return;
+    labelZoomRef = camDist;
+    if (labelZoomTimer) clearTimeout(labelZoomTimer);
+    labelZoomTimer = setTimeout(function () {
+      labelZoomTimer = null;
+      if (dragMode === "atomMove" || dragMode === "selMove" || dragMode === "guestMove" || dragMode === "guestRotate") return; /* those have their own settle point */
+      repositionLabels();
+    }, 250);
+  }
   function applyController() {
+    noteLabelZoom();
     var dir = new THREE.Vector3(0, 0, 1).applyQuaternion(camOrient);
     /* the pan: a parallel shift of the camera in its own right/up plane, so
        orientation and distance (and so everything about how the model
@@ -3748,6 +3793,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
   function capPlanesExcept(flag, pi) { return clipPlanesFor(flag).filter(function (p) { return p !== clipPlaneObjs[pi]; }); }
   /* every place that used to call renderer.render(scene, activeCam) calls this: the normal render, then (only when the option is on) the capping passes */
   function renderFrame() {
+    updateMeasurePointers(); /* a measurement's pointer ends at the edge of its label, which depends on the view */
     renderer.render(scene, activeCam);
     var anyCap = false, ci; for (ci = 0; ci < clipCount(); ci++) if (clipCapActive(ci)) anyCap = true;
     if (!anyCap) return;
@@ -4060,7 +4106,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
           draggedLabel = labelHit;
           var labelAtom = labelHit.userData.atom;
           var labelOff = centroid();
-          draggedLabelDepth = new THREE.Vector3(labelAtom.x + labelOff[0], labelAtom.y + labelOff[1], labelAtom.z + labelOff[2]).project(activeCam).z;
+          draggedLabelDepth = (labelAtom ? new THREE.Vector3(labelAtom.x + labelOff[0], labelAtom.y + labelOff[1], labelAtom.z + labelOff[2]) : labelHit.position.clone()).project(activeCam).z; /* (a measurement label has no atom: its own place gives the depth) */
           /* Fixes a jump-on-first-move bug: without this, moveDraggedLabel()
              snapped the label straight onto the unprojected cursor position,
              which almost never coincides with wherever on the sprite it was
@@ -4441,6 +4487,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
          at the plain default until the next drag settles -- a double-click
          is itself a settle point */
       var hit = pickLabelAt(e.clientX, e.clientY);
+      if (hit && hit.userData.measId) { var dmm = measById(hit.userData.measId); if (dmm && dmm.labelPinned) { delete dmm.labelPinned; delete dmm.labelOffset; renderMeasurements(); } return; } /* a measurement label goes back to its own place */
       if (!hit || !hit.userData.atom) return;
       var atom = hit.userData.atom;
       if (!atom.labelPinned) return;
@@ -4478,6 +4525,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     coordPolyGuestGroup = new THREE.Group(); scene.add(coordPolyGuestGroup);
     molNeighborGroup = new THREE.Group(); scene.add(molNeighborGroup);
     lsPlaneGroup = new THREE.Group(); scene.add(lsPlaneGroup);
+    measureGroup = new THREE.Group(); scene.add(measureGroup); /* the measurements are part of the scene, so every export (image, clipboard, video) carries them */
     window.addEventListener("resize", onResize); onResize(); animate();
   }
   function buildEnvironment() {
@@ -5457,7 +5505,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     if (next === state.walkMode) return;
     state.walkMode = next;
     if (state.walkMode) {
-      exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitGuestDragMode(); exitMolNeighborMode(); setVoidUiMode(null); fcfExitMode();
+      exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitGuestDragMode(); exitMolNeighborMode(); setVoidUiMode(null); fcfExitMode(); exitMeasureMode();
       invalidateWalkStaticGeom(); /* structure may have changed since the last time walk mode was on -- see walkCollisionGeometry's own comment */
       recenterWalkCamera();
       activeCam = walkCam;
@@ -6581,6 +6629,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     renderCoordinationPolyhedra(off);
     renderMolecularNeighborhood(off);
     renderLabels();
+    renderMeasurements();
     renderSelection();
     syncNoAtomsOverlay();
     updateClipPlane(); /* atoms/bonds/labels just got rebuilt with fresh materials -- reapply per-component clip planes to them, see updateClipPlane's own comment */
@@ -7008,6 +7057,33 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
    * the sprite, so it survives a full label rebuild the same way atom.hidden
    * already does. */
   var labelTexCache = {};
+  /* The texture of a label (atom label or measurement). A label is drawn on its canvas at a large size (64 px letters) and shown a few times smaller. A plain
+     texture with no mipmaps, sampled that much smaller, skips texels, so thin strokes break up into dots and patches -- most visible on plain letters (no
+     outline, whose thick edge hides it) and on some graphics hardware more than others. A mipmapped texture is filtered properly at every size. Mipmaps
+     average colours, and the canvas stores no colour in a transparent pixel, which would darken the edges of the letters: so the label is turned into a
+     plain RGBA texture whose transparent pixels carry the colour of the letters (bleed) instead. (Needs WebGL 2; otherwise the plain texture is used.) */
+  function makeLabelTexture(c, bleed) {
+    var tex;
+    if (renderer && renderer.capabilities && renderer.capabilities.isWebGL2) {
+      var w = c.width, h = c.height, src = c.getContext("2d").getImageData(0, 0, w, h).data, out = new Uint8Array(w * h * 4);
+      var br = bleed >> 16 & 255, bg = bleed >> 8 & 255, bb = bleed & 255;
+      for (var y = 0; y < h; y++) {
+        var s = (h - 1 - y) * w * 4, d = y * w * 4; /* rows are flipped: the first row of a texture is its bottom */
+        for (var x = 0; x < w * 4; x += 4) {
+          var a = src[s + x + 3];
+          out[d + x] = a ? src[s + x] : br; out[d + x + 1] = a ? src[s + x + 1] : bg; out[d + x + 2] = a ? src[s + x + 2] : bb; out[d + x + 3] = a;
+        }
+      }
+      tex = new THREE.DataTexture(out, w, h, THREE.RGBAFormat, THREE.UnsignedByteType);
+      tex.generateMipmaps = true; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.magFilter = THREE.LinearFilter;
+      tex.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+      tex.needsUpdate = true;
+    } else {
+      tex = new THREE.CanvasTexture(c); tex.minFilter = THREE.LinearFilter; tex.generateMipmaps = false;
+    }
+    if (THREE.sRGBEncoding) tex.encoding = THREE.sRGBEncoding;
+    return tex;
+  }
   function makeLabelSprite(text, colorInt, italic) {
     var key = text + "|" + colorInt + "|" + (italic ? 1 : 0) + "|" + (state.labelHalo ? 1 : 0) + "|" + state.labelFont;
     var entry = labelTexCache[key];
@@ -7034,14 +7110,12 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       }
       ctx.fillStyle = hexToCss(colorInt);
       ctx.fillText(text, c.width / 2, c.height / 2);
-      var tex = new THREE.CanvasTexture(c);
-      if (THREE.sRGBEncoding) tex.encoding = THREE.sRGBEncoding;
-      tex.minFilter = THREE.LinearFilter;
-      tex.generateMipmaps = false;
+      var bleedLum = ((colorInt >> 16 & 255) * 0.299 + (colorInt >> 8 & 255) * 0.587 + (colorInt & 255) * 0.114) / 255;
+      var tex = makeLabelTexture(c, state.labelHalo ? (bleedLum > 0.5 ? 0x14120C : 0xFFFFFF) : colorInt);
       entry = { tex: tex, aspect: c.width / c.height };
       labelTexCache[key] = entry;
     }
-    var spm = new THREE.SpriteMaterial({ map: entry.tex, transparent: true, depthWrite: false, sizeAttenuation: false, fog: false });
+    var spm = new THREE.SpriteMaterial({ map: entry.tex, transparent: true, depthWrite: false, sizeAttenuation: !!state.labelScaleModel, fog: false });
     var sp = new THREE.Sprite(spm);
     sp.userData.aspect = entry.aspect;
     return sp;
@@ -7171,25 +7245,37 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     var factor = activeCam !== trueOrthoCam
       ? (2 * Math.tan(activeCam.fov * Math.PI / 360))
       : (2 * camDist * Math.tan(camera.fov * Math.PI / 360));
+    /* "Scale labels with the model" (Style > Atomic labels): the sprites then have a size in the scene -- the same fraction of the view as above at a
+       reference zoom (a camera distance of 50 A, about where a structure is first framed) -- and grow and shrink as the view is zoomed, like the model */
+    var hLabel = f * (state.labelScaleModel ? 2 * 50 * Math.tan(camera.fov * Math.PI / 360) : factor);
     for (var i = 0; i < labelGroup.children.length; i++) {
       var sp = labelGroup.children[i];
       if (!sp.isSprite) continue;
-      var h = f * factor;
-      sp.scale.set(h * (sp.userData.aspect || 1), h, 1);
+      sp.scale.set(hLabel * (sp.userData.aspect || 1), hLabel, 1);
+    }
+    if (measureGroup) { /* the measurement labels follow the same rule, with their own size -- or, with "Scale with the model", a size in the scene that is the same fraction of the view at a reference zoom (a camera distance of 50 A, about where a structure is first framed) and then grows and shrinks with the model */
+      var fm = (state.measSet.labelSize / 100) * (state.measSet.scaleModel ? 2 * 50 * Math.tan(camera.fov * Math.PI / 360) : factor);
+      for (var mi = 0; mi < measureGroup.children.length; mi++) {
+        var ms = measureGroup.children[mi];
+        if (ms.isSprite) ms.scale.set(fm * (ms.userData.aspect || 1), fm, 1);
+      }
     }
   }
   /* Raycasts against the label sprites specifically -- separate from the
      atom/bond picking above, since a label is a distinct kind of target
      (grab-to-move, not click-to-select). */
   function pickLabelAt(clientX, clientY) {
-    if (!state.showLabels || !labelGroup || !labelGroup.children.length) return null;
+    /* atom labels and measurement labels (Selection & geometry > Measure) are grabbed the same way */
+    var targets = (state.showLabels && labelGroup) ? labelGroup.children.slice() : [];
+    if (state.measureShowLabels && measureGroup) for (var mi = 0; mi < measureGroup.children.length; mi++) if (measureGroup.children[mi].userData.measId) targets.push(measureGroup.children[mi]);
+    if (!targets.length) return null;
     var rect = renderer.domElement.getBoundingClientRect();
     var ndc = new THREE.Vector2(
       ((clientX - rect.left) / rect.width) * 2 - 1,
       -((clientY - rect.top) / rect.height) * 2 + 1);
     if (!raycaster) raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(ndc, activeCam);
-    var hits = raycaster.intersectObjects(labelGroup.children, false);
+    var hits = raycaster.intersectObjects(targets, false);
     return hits.length ? hits[0].object : null;
   }
   function ndcToWorldAtDepth(clientX, clientY, depth) {
@@ -7204,7 +7290,10 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
   function finalizeLabelDrag() {
     if (draggedLabel && pickMoved) {
       var atom = draggedLabel.userData.atom;
-      if (atom) {
+      if (draggedLabel.userData.measId) { /* a measurement label: remember where it was left, relative to where it would sit by itself */
+        var dm = measById(draggedLabel.userData.measId), anc = draggedLabel.userData.anchor;
+        if (dm && anc) { dm.labelPinned = true; dm.labelOffset = { x: draggedLabel.position.x - anc.x, y: draggedLabel.position.y - anc.y, z: draggedLabel.position.z - anc.z }; renderMeasurements(); }
+      } else if (atom) {
         var off = centroid();
         var atomPos = new THREE.Vector3(atom.x + off[0], atom.y + off[1], atom.z + off[2]);
         var offVec = draggedLabel.position.clone().sub(atomPos);
@@ -10595,7 +10684,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
   }
   function setVoidUiMode(mode) {
     state.voidUiMode = (state.voidUiMode === mode) ? null : mode;
-    if (state.voidUiMode) { exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode(); fcfExitMode(); } /* the click-hijacking modes are mutually exclusive */
+    if (state.voidUiMode) { exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode(); fcfExitMode(); exitMeasureMode(); } /* the click-hijacking modes are mutually exclusive */
     state.voidSelectedFragments = {};
     state.voidSelectedChannels = {};
     state.voidRecolourPending = null;
@@ -12189,6 +12278,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     if (state.molNeighborMode) { molecularNeighborhoodClick(clientX, clientY); return; }
     if (state.voidUiMode) { handleVoidSelectClick(clientX, clientY, mods); return; }
     if (state.atomEditUiMode === "create") { createAtomAtClick(clientX, clientY); return; }
+    if (state.measureMode) { measureClick(resolveClickTarget(clientX, clientY)); return; } /* Selection & geometry > Measure: clicks pick atoms to measure */
     var hit = resolveClickTarget(clientX, clientY);
     if (!hit) return;
     if (hit.atom) { state.lastClickedAtomUid = hit.atom.uid; updateSelectionInfo(); }
@@ -12378,7 +12468,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
    * cancel it (see exitAtomEditMode() and its call sites). */
   function setAtomEditUiMode(mode) {
     state.atomEditUiMode = (state.atomEditUiMode === mode) ? null : mode;
-    if (state.atomEditUiMode) { exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode(); fcfExitMode(); } /* the click-hijacking modes are mutually exclusive */
+    if (state.atomEditUiMode) { exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode(); fcfExitMode(); exitMeasureMode(); } /* the click-hijacking modes are mutually exclusive */
     syncAtomEditButtons();
   }
   function syncAtomEditButtons() {
@@ -12400,7 +12490,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
      their own call sites). */
   function setGuestDragMode(on) {
     state.guestDragMode = (typeof on === "boolean") ? on : !state.guestDragMode;
-    if (state.guestDragMode) { exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitMolNeighborMode(); exitWalkMode(); fcfExitMode(); }
+    if (state.guestDragMode) { exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitMolNeighborMode(); exitWalkMode(); fcfExitMode(); exitMeasureMode(); }
     var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = state.guestDragMode ? "move" : "";
     syncGuestDragButton();
   }
@@ -12418,7 +12508,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     var next = (typeof on === "boolean") ? on : !state.molNeighborMode;
     if (next === state.molNeighborMode) return;
     state.molNeighborMode = next;
-    if (state.molNeighborMode) { exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitGuestDragMode(); setVoidUiMode(null); exitWalkMode(); fcfExitMode(); }
+    if (state.molNeighborMode) { exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitGuestDragMode(); setVoidUiMode(null); exitWalkMode(); fcfExitMode(); exitMeasureMode(); }
     var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = state.molNeighborMode ? "crosshair" : "";
     updateMolNeighborBtnLabel();
     refreshMolecularNeighborhood(); /* computes+renders when turning on; renders nothing (see its own guard) when turning off, and clearGroup already ran inside renderMolecularNeighborhood either way */
@@ -12456,7 +12546,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
      partway through, e.g. loading each file in a folder batch) would be a
      real, unwanted behaviour change of its own. */
   function exitAllInteractiveModes() {
-    exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode(); fcfExitMode();
+    exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode(); fcfExitMode(); exitMeasureMode();
     setVoidUiMode(null);
   }
   function createAtomAtClick(clientX, clientY) {
@@ -13011,6 +13101,438 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     state.selectedBonds = {};
     renderSelection(); updateBondSelectionInfo();
   }
+  /* ================= Selection & geometry > Measure: distances, angles and torsion angles =================
+   * A measurement is kept in state.measurements as { id, k: "d"|"a"|"t", uids: [atom uids], names: [labels at the time it was made],
+   * labelPinned/labelOffset when its label was dragged }. Only the atoms' uids are stored, never their positions, so a measurement follows its
+   * atoms when they are moved or the structure is edited, shows nothing while one of them is hidden, and is saved with the model (the project .json
+   * keeps the atoms with their uids). It is drawn INTO THE SCENE (measureGroup: lines, an arc for an angle, and a sprite for the value), not as
+   * an overlay on the page, so the image, clipboard and video exports carry it exactly as it is on screen. How it is drawn (state.measSet) is
+   * remembered between sessions like the label look and is also saved with a model. */
+  function measDefaults() { return { colour: 0xC2410C, selColour: 0x1D4ED8, sameColour: false, scaleModel: true, leader: true, font: "", bold: false, halo: false, style: "dash", thick: 0, dash: 0.10, gap: 0.08, labelSize: 2.6, box: false, esd: true }; }
+  var MEAS_KINDS = { d: { need: 2, name: "Distance" }, a: { need: 3, name: "Angle" }, t: { need: 4, name: "Torsion angle" } };
+  var MEAS_ICONS = {
+    d: '<svg viewBox="0 0 32 32" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="6" cy="24" r="3"/><circle cx="26" cy="8" r="3"/><path d="M8.4 22.1L23.6 9.9" stroke-dasharray="3 2.6"/></svg>',
+    a: '<svg viewBox="0 0 32 32" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="7" cy="25" r="2.6"/><circle cx="27" cy="25" r="2.6"/><circle cx="21" cy="6" r="2.6"/><path d="M9.6 25H24.4M8.4 22.8L19.4 8.4" /><path d="M17 25a9 9 0 0 0-2.2-6"/></svg>',
+    t: '<svg viewBox="0 0 32 32" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="4.5" cy="9" r="2.4"/><circle cx="12" cy="22" r="2.4"/><circle cx="22" cy="22" r="2.4"/><circle cx="28" cy="9" r="2.4"/><path d="M5.7 11.1L10.8 19.9M14.4 22H19.6M23.2 19.9L26.8 11.1"/><path d="M17 15a5 5 0 0 1 0 5" stroke-dasharray="2 2"/></svg>'
+  };
+  var MEAS_LINE_ICON = '<svg viewBox="0 0 20 12" width="20" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 6h2.5M8.7 6h2.6M15.5 6H18"/></svg>';
+  var measRenderMats = [], measLabelCache = {}, measRodGeo = null, measUI = { list: null, legend: null, btns: {}, sync: null };
+  function measClamp(v, lo, hi, fallback) { return (typeof v === "number" && isFinite(v)) ? Math.max(lo, Math.min(hi, v)) : fallback; }
+  function measSanitizeSettings(o, base) {
+    var d = Object.assign({}, base || measDefaults());
+    if (!o || typeof o !== "object") return d;
+    if (typeof o.colour === "number") d.colour = o.colour & 0xFFFFFF;
+    if (typeof o.selColour === "number") d.selColour = o.selColour & 0xFFFFFF;
+    if (o.style === "dash" || o.style === "solid") d.style = o.style;
+    d.thick = measClamp(o.thick, 0, 0.1, d.thick); d.dash = measClamp(o.dash, 0.02, 0.5, d.dash); d.gap = measClamp(o.gap, 0.02, 0.5, d.gap);
+    d.labelSize = measClamp(o.labelSize, 1, 6, d.labelSize);
+    if (typeof o.sameColour === "boolean") d.sameColour = o.sameColour;
+    if (typeof o.scaleModel === "boolean") d.scaleModel = o.scaleModel;
+    if (typeof o.leader === "boolean") d.leader = o.leader;
+    if (typeof o.font === "string") d.font = o.font;
+    if (typeof o.bold === "boolean") d.bold = o.bold;
+    if (typeof o.halo === "boolean") d.halo = o.halo;
+    if (typeof o.box === "boolean") d.box = o.box;
+    if (typeof o.esd === "boolean") d.esd = o.esd;
+    return d;
+  }
+  function measSanitizeList(list) {
+    var out = [];
+    if (!Array.isArray(list)) return out;
+    list.forEach(function (m) {
+      if (!m || !MEAS_KINDS[m.k] || !Array.isArray(m.uids) || m.uids.length !== MEAS_KINDS[m.k].need) return;
+      if (!m.uids.every(function (u) { return typeof u === "number"; })) return;
+      var c = { id: typeof m.id === "number" ? m.id : out.length + 1, k: m.k, uids: m.uids.slice(), names: Array.isArray(m.names) ? m.names.map(String) : [] };
+      if (typeof m.colour === "number" && isFinite(m.colour)) c.colour = m.colour & 0xFFFFFF; /* a colour of its own, for its lines and its label */
+      if (m.visible === false) c.visible = false; /* switched off with its tick box: kept, not drawn */
+      if (m.noLine === true) c.noLine = true; /* its value only, without the dashed line (an angle's arms and arc, a torsion's three bonds) */
+      if (m.labelPinned && m.labelOffset && isFinite(m.labelOffset.x) && isFinite(m.labelOffset.y) && isFinite(m.labelOffset.z)) { c.labelPinned = true; c.labelOffset = { x: m.labelOffset.x, y: m.labelOffset.y, z: m.labelOffset.z }; }
+      out.push(c);
+    });
+    return out;
+  }
+  function measById(id) { for (var i = 0; i < state.measurements.length; i++) if (state.measurements[i].id === id) return state.measurements[i]; return null; }
+  function measPool() {
+    var map = {}, i, arr = state.atoms || [];
+    for (i = 0; i < arr.length; i++) map[arr[i].uid] = { a: arr[i], guest: false };
+    arr = state.guestAtoms || [];
+    for (i = 0; i < arr.length; i++) map[arr[i].uid] = { a: arr[i], guest: true };
+    return map;
+  }
+  /* the value as text, with its esd in the usual notation when the atoms carry coordinate esds (CIF atoms; a grown copy, a SHELX file or a guest has none) */
+  function measFormat(k, val, esd) {
+    if (val === null || val === undefined || !isFinite(val)) return "—";
+    var useEsd = state.measSet.esd && esd !== null && esd !== undefined && isFinite(esd) && esd > 0, n = (k === "d") ? 3 : 1, s;
+    if (useEsd) { n = 0; while (esd * Math.pow(10, n) < 1.95 && n < 6) n++; s = fmtEsd(val, esd, n); } else s = val.toFixed(n);
+    return s + (k === "d" ? " " + U.ang : "°");
+  }
+  function measCalc(m, pool) {
+    var ents = [], i;
+    for (i = 0; i < m.uids.length; i++) { var e = pool[m.uids[i]]; if (!e) return null; ents.push(e); }
+    var A = ents.map(function (e2) { return e2.a; }), fn = (m.k === "d") ? dist : (m.k === "a" ? angleAt : torsion);
+    var val = fn.apply(null, A), esd = geometryEsd(fn, A);
+    var vis = ents.every(function (e3) { return isSelectable(e3.a) && (e3.guest ? state.showGuest : state.showHost); });
+    return { m: m, A: A, val: val, txt: measFormat(m.k, val, esd), vis: vis };
+  }
+  /* every measurement worked out, with the names to list: a symmetry copy of an atom is written NAME_$n, and $n is explained in the legend */
+  function measCalcAll() {
+    var pool = measPool(), calcs = [], codes = {}, nCodes = 0, legend = [];
+    state.measurements.forEach(function (m) {
+      var c = measCalc(m, pool);
+      if (!c) { c = { m: m, A: null, gone: true, txt: "", vis: false }; }
+      var sep = (m.k === "d") ? " – " : "–";
+      if (c.A) {
+        c.name = c.A.map(function (a) {
+          var s = atomLabelText(a);
+          if (state.isCif && state.cifSymops && a.auIndex !== undefined && a.opIndex !== undefined && state.cifSymops[a.opIndex] && !isAsuAtom(a)) {
+            var key = a.opIndex + "|" + (a.cellI || 0) + "|" + (a.cellJ || 0) + "|" + (a.cellK || 0);
+            if (!codes[key]) {
+              codes[key] = ++nCodes;
+              var op = state.cifSymops[a.opIndex];
+              legend.push("$" + nCodes + ": " + K.symopToString({ rot: op.rot, trans: [op.trans[0] + (a.cellI || 0), op.trans[1] + (a.cellJ || 0), op.trans[2] + (a.cellK || 0)] }));
+            }
+            s += "_$" + codes[key];
+          }
+          return s;
+        }).join(sep);
+      } else c.name = (m.names || []).join(sep);
+      calcs.push(c);
+    });
+    return { calcs: calcs, legend: legend };
+  }
+  function lum2(c) { return ((c >> 16 & 255) * 0.299 + (c >> 8 & 255) * 0.587 + (c & 255) * 0.114) / 255; }
+  function measMakeLabel(text, colour) {
+    var S = state.measSet, font = S.font || state.labelFont, key = text + "|" + colour + "|" + (S.box ? 1 : 0) + "|" + font + "|" + (S.bold ? 1 : 0) + "|" + (S.halo ? 1 : 0);
+    var entry = measLabelCache[key];
+    if (!entry) {
+      if (Object.keys(measLabelCache).length > 400) { Object.keys(measLabelCache).forEach(function (k2) { measLabelCache[k2].tex.dispose(); }); measLabelCache = {}; }
+      var fontPx = 64, pad = S.box ? 22 : 14, c = document.createElement("canvas"), ctx = c.getContext("2d");
+      var cssFont = (S.bold ? "700 " : "400 ") + fontPx + "px " + font;
+      ctx.font = cssFont;
+      var w = Math.ceil(ctx.measureText(text).width) + pad * 2, h = Math.round(fontPx * 1.45);
+      c.width = Math.max(16, w); c.height = h;
+      ctx = c.getContext("2d"); ctx.font = cssFont; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      var css = hexToCss(colour);
+      if (S.box) { /* a white box with a border in the measurement colour, as in SHELX GUI */
+        var bx = 3, by = 3, bw = c.width - 6, bh = h - 6, r = 12;
+        ctx.beginPath();
+        ctx.moveTo(bx + r, by); ctx.lineTo(bx + bw - r, by); ctx.arcTo(bx + bw, by, bx + bw, by + r, r);
+        ctx.lineTo(bx + bw, by + bh - r); ctx.arcTo(bx + bw, by + bh, bx + bw - r, by + bh, r);
+        ctx.lineTo(bx + r, by + bh); ctx.arcTo(bx, by + bh, bx, by + bh - r, r);
+        ctx.lineTo(bx, by + r); ctx.arcTo(bx, by, bx + r, by, r); ctx.closePath();
+        ctx.fillStyle = "rgba(255,255,255,0.92)"; ctx.fill();
+        ctx.strokeStyle = css; ctx.lineWidth = 4; ctx.stroke();
+      }
+      if (S.halo) { /* a halo: an outline in the contrasting shade keeps the figures legible over atoms (as for atom labels) */
+        var lum = ((colour >> 16 & 255) * 0.299 + (colour >> 8 & 255) * 0.587 + (colour & 255) * 0.114) / 255;
+        ctx.strokeStyle = lum > 0.5 ? "rgba(20,18,12,0.85)" : "rgba(255,255,255,0.92)"; ctx.lineWidth = fontPx * 0.14; ctx.lineJoin = "round";
+        ctx.strokeText(text, c.width / 2, h / 2 + 2);
+      }
+      ctx.fillStyle = css; ctx.fillText(text, c.width / 2, h / 2 + 2);
+      var tex = makeLabelTexture(c, S.halo ? (lum2(colour) > 0.5 ? 0x14120C : 0xFFFFFF) : colour);
+      entry = { tex: tex, aspect: c.width / c.height }; measLabelCache[key] = entry;
+    }
+    /* with "Scale with the model" the sprite has a size in the scene (it gets bigger as the view is zoomed in); otherwise it keeps one size on screen */
+    var mat = new THREE.SpriteMaterial({ map: entry.tex, transparent: true, depthTest: false, depthWrite: false, sizeAttenuation: !!S.scaleModel, fog: false });
+    measRenderMats.push(mat);
+    var sp = new THREE.Sprite(mat); sp.userData.aspect = entry.aspect; sp.renderOrder = 100002; sp.frustumCulled = false;
+    return sp;
+  }
+  /* The pointer of a moved label runs from its measurement to the EDGE of the label's rectangle, not into the text. The label is a screen-size sprite (its height
+     is labelSize per cent of the view height whatever the zoom), so where its edge is in the scene depends on the view: this is redone at every render. */
+  var measPointers = [];
+  function updateMeasurePointers() {
+    if (!measPointers.length || !renderer || !activeCam) return;
+    var cv = renderer.domElement, W = cv.clientWidth, H = cv.clientHeight; if (!W || !H) return;
+    activeCam.updateMatrixWorld();
+    var up = new THREE.Vector3().setFromMatrixColumn(activeCam.matrixWorld, 1);
+    measPointers.forEach(function (p) {
+      var C = p.sprite.position.clone().project(activeCam), F = p.from.clone().project(activeCam), hh;
+      if (state.measSet.scaleModel) { /* a label with a size in the scene: its half height on the screen is found by projecting a point half a height above its centre */
+        var T = p.sprite.position.clone().addScaledVector(up, p.sprite.scale.y / 2).project(activeCam);
+        hh = Math.abs(T.y - C.y) * H / 2 + 2;
+      } else hh = state.measSet.labelSize / 100 * H / 2 + 2; /* half the label's height in pixels, and a gap of 2 px */
+      var vx = (F.x - C.x) * W / 2, vy = (F.y - C.y) * H / 2, hw = (hh - 2) * (p.sprite.userData.aspect || 1) + 2;
+      var tx = Math.abs(vx) > 1e-6 ? hw / Math.abs(vx) : Infinity, ty = Math.abs(vy) > 1e-6 ? hh / Math.abs(vy) : Infinity, t = Math.min(tx, ty);
+      if (!isFinite(t) || t >= 1) { p.line.visible = false; return; } /* the measurement is under the label: no pointer */
+      p.line.visible = true;
+      var E = new THREE.Vector3(C.x + vx * t * 2 / W, C.y + vy * t * 2 / H, C.z).unproject(activeCam), a = p.line.geometry.attributes.position;
+      a.setXYZ(0, p.from.x, p.from.y, p.from.z); a.setXYZ(1, E.x, E.y, E.z); a.needsUpdate = true;
+    });
+  }
+  function measClearScene() {
+    measPointers = [];
+    if (!measureGroup) return;
+    while (measureGroup.children.length) { var c = measureGroup.children.pop(); if (c.geometry && !c.userData.sharedGeo) c.geometry.dispose(); }
+    measRenderMats.forEach(function (m) { m.dispose(); }); measRenderMats = [];
+  }
+  /* The measurements in the scene: lines (dashed or solid, thin GL lines or capped cylinders when a thickness is set), an arc at the vertex of an
+     angle, the value as a label sprite (boxed or not), and what is picked so far while a measuring mode is on. Called from renderStructure(), so it
+     is redone whenever atoms move, appear or go. */
+  function renderMeasurements() {
+    if (!measureGroup) return;
+    measClearScene();
+    var S = state.measSet, off = centroid(), V = function (a) { return new THREE.Vector3(a.x + off[0], a.y + off[1], a.z + off[2]); };
+    var mats = {};
+    function matsFor(col) { /* materials by colour: the default colour, the selected colour, or a measurement's own */
+      var key = String(col);
+      if (!mats[key]) {
+        var solid = new THREE.LineBasicMaterial({ color: col, depthTest: false, transparent: true, fog: false });
+        var dash = (S.style === "solid") ? solid : new THREE.LineDashedMaterial({ color: col, dashSize: S.dash, gapSize: S.gap, depthTest: false, transparent: true, fog: false });
+        var rod = new THREE.MeshBasicMaterial({ color: col, depthTest: false, transparent: true, fog: false });
+        mats[key] = { solid: solid, dash: dash, rod: rod };
+        measRenderMats.push(solid, rod); if (dash !== solid) measRenderMats.push(dash);
+      }
+      return mats[key];
+    }
+    function addRod(A, B, mat) {
+      var d = B.clone().sub(A), L = d.length(); if (L < 1e-4) return;
+      if (!measRodGeo) measRodGeo = new THREE.CylinderGeometry(1, 1, 1, 12, 1, false);
+      var mesh = new THREE.Mesh(measRodGeo, mat); mesh.scale.set(S.thick, L, S.thick);
+      mesh.quaternion.setFromUnitVectors(YAXIS, d.normalize()); mesh.position.copy(A).add(B).multiplyScalar(0.5);
+      mesh.renderOrder = 100000; mesh.frustumCulled = false; mesh.userData.sharedGeo = true; measureGroup.add(mesh);
+    }
+    function addSegments(pts, col, dashed) { /* pts: end points in pairs */
+      var mm = matsFor(col), i;
+      if (S.thick > 0) {
+        var dash = Math.max(0.02, S.dash), gap = Math.max(0.02, S.gap);
+        for (i = 0; i + 1 < pts.length; i += 2) {
+          var A = pts[i], B = pts[i + 1], L = A.distanceTo(B); if (L < 1e-4) continue;
+          if (!dashed) { addRod(A, B, mm.rod); continue; }
+          var U1 = B.clone().sub(A).divideScalar(L), n = Math.max(1, Math.floor((L + gap) / (dash + gap))), o = (L - (n * dash + (n - 1) * gap)) / 2;
+          for (var j = 0; j < n; j++) addRod(A.clone().addScaledVector(U1, o + j * (dash + gap)), A.clone().addScaledVector(U1, o + j * (dash + gap) + dash), mm.rod);
+        }
+      } else {
+        var ln = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), dashed ? mm.dash : mm.solid);
+        if (dashed) ln.computeLineDistances();
+        ln.frustumCulled = false; ln.renderOrder = 100000; measureGroup.add(ln);
+      }
+    }
+    var all = measCalcAll();
+    all.calcs.forEach(function (c) {
+      if (c.gone || !c.vis || c.val === null || c.m.visible === false) return;
+      var m = c.m, sel = (m.id === state.measureSelId), P = c.A.map(V), seg = [], lab, from, dashed = (S.style !== "solid"); /* from: the point ON the measurement's own line that a pointer starts at */
+      var col = sel ? S.selColour : ((!S.sameColour && m.colour !== undefined) ? m.colour : S.colour); /* the highlight wins; then the measurement's own colour (unless "Same colour for all" is ticked), else the common one */
+      if (m.k === "d") { seg.push(P[0], P[1]); lab = P[0].clone().add(P[1]).multiplyScalar(0.5); from = lab.clone(); }
+      else if (m.k === "a") {
+        seg.push(P[1], P[0], P[1], P[2]);
+        var u = P[0].clone().sub(P[1]), v = P[2].clone().sub(P[1]), lu = u.length(), lv = v.length(); u.normalize(); v.normalize();
+        var th = Math.acos(Math.max(-1, Math.min(1, u.dot(v)))), r = Math.min(0.6, 0.3 * Math.min(lu, lv)), arc = [];
+        var w = u.clone().add(v); if (w.length() < 1e-3) { w.copy(u).cross(new THREE.Vector3(1, 0, 0)); if (w.length() < 1e-3) w.set(0, 1, 0); } w.normalize();
+        if (th > 1e-3 && th < Math.PI - 1e-3) for (var ai = 0; ai <= 24; ai++) { var t = ai / 24; arc.push(P[1].clone().addScaledVector(u, Math.sin((1 - t) * th) / Math.sin(th) * r).addScaledVector(v, Math.sin(t * th) / Math.sin(th) * r)); }
+        if (arc.length && !m.noLine) { var pr = []; for (var pi = 0; pi + 1 < arc.length; pi++) pr.push(arc[pi], arc[pi + 1]); addSegments(pr, col, false); }
+        lab = P[1].clone().addScaledVector(w, r * 1.3 + 0.04);
+        from = P[1].clone().addScaledVector(w, r); /* the middle of the arc */
+      } else {
+        seg.push(P[0], P[1], P[1], P[2], P[2], P[3]);
+        var w2 = P[1].clone().sub(P[0]).add(P[2].clone().sub(P[3]));
+        if (w2.length() < 1e-3) w2.copy(P[2]).sub(P[1]).cross(new THREE.Vector3(0, 0, 1));
+        if (w2.length() < 1e-3) w2.set(0, 1, 0);
+        w2.normalize(); from = P[1].clone().add(P[2]).multiplyScalar(0.5); /* the middle of the central bond, which is on the drawn line */
+        lab = from.clone().addScaledVector(w2, 0.3);
+      }
+      if (!m.noLine) addSegments(seg, col, dashed); /* a measurement can be left without its line (a bond, an H bond, a contact that is drawn anyway): only the value shows */
+      if (state.measureShowLabels) {
+        var anchor = lab.clone(), pos = lab.clone();
+        if (m.labelPinned && m.labelOffset) pos.set(lab.x + m.labelOffset.x, lab.y + m.labelOffset.y, lab.z + m.labelOffset.z);
+        var sp = measMakeLabel(c.txt, col);
+        sp.position.copy(pos); sp.userData.measId = m.id; sp.userData.anchor = anchor;
+        measureGroup.add(sp);
+        if (S.leader && !m.noLine && m.labelPinned && pos.distanceTo(from) > 0.15) { /* a label moved away stays tied to its measurement by a thin line that starts on the measurement itself and stops at the edge of the label */
+          var pg = new THREE.BufferGeometry().setFromPoints([from, pos]), pl = new THREE.LineSegments(pg, matsFor(col).solid);
+          pl.frustumCulled = false; pl.renderOrder = 100000; measureGroup.add(pl);
+          measPointers.push({ line: pl, from: from.clone(), sprite: sp });
+        }
+      }
+    });
+    /* atoms picked so far while a measuring mode is on */
+    if (state.measureMode && state.measurePick.length) {
+      if (!selSphereGeo) selSphereGeo = new THREE.SphereGeometry(1, 20, 16);
+      var pm = new THREE.MeshBasicMaterial({ color: 0x00BCD4, wireframe: true, transparent: true, opacity: 0.9 }); measRenderMats.push(pm);
+      state.measurePick.forEach(function (a) {
+        var inHost = state.atoms && state.atoms.indexOf(a) >= 0, bondRadius = inHost ? state.hostBondRadius : state.guestBondRadius, scaleMult = inHost ? state.atomScale : state.guestScale;
+        var dispR = a.isCentroid ? 0.2 : atomDisplayRadius("ballstick", a.r, a.el, bondRadius, scaleMult, a);
+        var mesh = new THREE.Mesh(selSphereGeo, pm); mesh.scale.setScalar(dispR * 1.15 + 0.03); mesh.position.copy(V(a)); mesh.userData.sharedGeo = true; measureGroup.add(mesh);
+      });
+    }
+    updateLabelScales();
+    measureRefreshList(); /* the list follows what is drawn (a value that changed, a hidden atom) */
+  }
+  /* ---- the list, the buttons and the picking ---- */
+  function measureRefreshList() {
+    var box = measUI.list; if (!box) return;
+    var all = measCalcAll();
+    /* rebuilt only when something it shows has changed (this is also called from renderMeasurements(), i.e. on every redraw while an atom is dragged) */
+    /* (a measurement's own colour is left out on purpose: the colour box in its row keeps the open colour picker alive while it is dragged) */
+    var sig = JSON.stringify([all.calcs.map(function (c) { return [c.m.id, c.name, c.txt, c.vis, !!c.gone, c.m.visible !== false, !!c.m.noLine]; }), state.measureSelId, state.measureMode, all.legend, state.measSet.colour, state.measSet.sameColour]);
+    if (sig === measUI.sig) return;
+    measUI.sig = sig; box.innerHTML = "";
+    if (!all.calcs.length) box.appendChild(el("div", "measempty", "No measurements yet."));
+    else {
+      /* laid out like the Molecular Surface list: a tick box that shows or hides it, its name and value, a colour box (unless "Same colour for all" is on), and an x that deletes it */
+      var tbl = document.createElement("table"); tbl.id = "measResultsTable"; var tb = document.createElement("tbody"); tbl.appendChild(tb);
+      all.calcs.forEach(function (c) {
+        var m = c.m, on = m.visible !== false, tr = document.createElement("tr");
+        function rowClass() { return "void-row" + (m.id === state.measureSelId ? " sel" : "") + ((m.visible === false || c.gone || !c.vis) ? " dim" : ""); }
+        tr.className = rowClass();
+        var tdChk = document.createElement("td"), chk = document.createElement("input"); chk.type = "checkbox"; chk.checked = on; chk.title = "Show or hide this measurement";
+        chk.addEventListener("change", function () { if (chk.checked) delete m.visible; else m.visible = false; renderMeasurements(); });
+        chk.addEventListener("click", function (e) { e.stopPropagation(); });
+        tdChk.appendChild(chk); tr.appendChild(tdChk);
+        var tdName = document.createElement("td"); tdName.className = "measname"; tdName.title = "Click to highlight this measurement; click again, or click the empty space below the list, to highlight none";
+        var nameLine = el("div"); nameLine.appendChild(el("span", null, c.name)); nameLine.appendChild(el("b", null, c.gone ? "atom removed" : (c.vis ? c.txt : c.txt + " (hidden)"))); tdName.appendChild(nameLine);
+        tdName.addEventListener("click", function () { state.measureSelId = (state.measureSelId === m.id) ? 0 : m.id; measureRefreshList(); renderMeasurements(); });
+        tr.appendChild(tdName);
+        /* this measurement's line on or off (off: just the value, as for a bond or an H bond that is drawn anyway) */
+        var tdLine = document.createElement("td"), lineBtn = el("button", "measline" + (m.noLine ? "" : " on")); lineBtn.type = "button"; lineBtn.innerHTML = MEAS_LINE_ICON;
+        lineBtn.title = m.noLine ? "Show the line of this measurement" : "Hide the line of this measurement (its value stays)";
+        lineBtn.addEventListener("click", function (e) { e.stopPropagation(); if (m.noLine) delete m.noLine; else m.noLine = true; renderMeasurements(); });
+        tdLine.appendChild(lineBtn); tr.appendChild(tdLine);
+        var tdCol = document.createElement("td");
+        if (!state.measSet.sameColour) {
+          var sw = colorSwatch(m.colour !== undefined ? m.colour : state.measSet.colour, function (col) { m.colour = col; renderMeasurements(); });
+          sw.title = "Colour of this measurement (its lines and its value)"; sw.addEventListener("click", function (e) { e.stopPropagation(); });
+          tdCol.appendChild(sw);
+        }
+        tr.appendChild(tdCol);
+        var tdDel = document.createElement("td"), del = el("button", "btn mini", "×"); del.title = "Delete this measurement";
+        del.addEventListener("click", function (e) { e.stopPropagation(); measureDelete(m.id); });
+        tdDel.appendChild(del); tr.appendChild(tdDel);
+        tb.appendChild(tr);
+      });
+      box.appendChild(tbl);
+    }
+    if (measUI.legend) { measUI.legend.textContent = all.legend.join("\n"); measUI.legend.style.display = all.legend.length ? "" : "none"; }
+    ["d", "a", "t"].forEach(function (k) { var b = measUI.btns[k]; if (b) b.className = "btn mode-btn measbtn" + (state.measureMode === k ? " grow-active" : " ghost"); });
+  }
+  function measureAdd(k, atoms) {
+    var uids = atoms.map(function (a) { return a.uid; }), seen = {};
+    for (var i = 0; i < uids.length; i++) { if (seen[uids[i]]) { setStatus("Pick different atoms.", true); return null; } seen[uids[i]] = true; }
+    var m = { id: ++state.measureSeq, k: k, uids: uids, names: atoms.map(atomLabelText) };
+    state.measurements.push(m); /* a new measurement is NOT highlighted: nothing is selected unless the user clicks a row, so all measurements show in the same colour */
+    measureRefreshList(); renderMeasurements();
+    var c = measCalcAll().calcs.filter(function (x) { return x.m === m; })[0];
+    setStatus(MEAS_KINDS[k].name + " " + c.name + ": " + c.txt, false);
+    return m;
+  }
+  function setMeasureMode(k) {
+    state.measureMode = k || null; state.measurePick = [];
+    var vp = document.getElementById("viewport");
+    if (state.measureMode) {
+      exitGrowMode(); exitBondEditMode(); exitAtomEditMode(); exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode(); fcfExitMode(); /* the click-hijacking modes are mutually exclusive */
+      if (state.voidUiMode) setVoidUiMode(null);
+      if (vp) vp.style.cursor = "crosshair";
+      setStatus(MEAS_KINDS[k].name + ": click " + MEAS_KINDS[k].need + " atoms" + (k === "a" ? " (the second is the vertex)" : "") + ". Esc or Space clears a half-finished pick.", false);
+    } else if (vp) vp.style.cursor = "";
+    measureRefreshList(); renderMeasurements();
+  }
+  function exitMeasureMode() { if (state.measureMode) setMeasureMode(null); }
+  function measureButton(k) {
+    var sel = getSelectedAtomsInClickOrder();
+    if (!state.measureMode && sel.length === MEAS_KINDS[k].need) { if (measureAdd(k, sel)) clearSelection(); return; } /* exactly that many atoms selected: measure them at once, in the order they were clicked */
+    setMeasureMode(state.measureMode === k ? null : k);
+  }
+  function measureClick(hit) {
+    if (!hit || !hit.atom) return;
+    var a = hit.atom, kind = MEAS_KINDS[state.measureMode], at = state.measurePick.indexOf(a);
+    if (at >= 0) { state.measurePick.splice(at, 1); renderMeasurements(); setStatus("Pick removed.", false); return; }
+    state.measurePick.push(a);
+    if (state.measurePick.length < kind.need) { renderMeasurements(); setStatus(kind.name + ": pick atom " + (state.measurePick.length + 1) + " of " + kind.need + ".", false); return; }
+    var list = state.measurePick; state.measurePick = [];
+    measureAdd(state.measureMode, list);
+  }
+  function measureDelete(id) {
+    state.measurements = state.measurements.filter(function (m) { return m.id !== id; });
+    if (state.measureSelId === id) state.measureSelId = 0;
+    measureRefreshList(); renderMeasurements();
+  }
+  function measureClearAll() {
+    if (!state.measurements.length) { setStatus("No measurements to clear.", true); return; }
+    state.measurements = []; state.measureSelId = 0; state.measurePick = [];
+    measureRefreshList(); renderMeasurements(); setStatus("Measurements cleared.", false);
+  }
+  function measureCopy() {
+    var all = measCalcAll(), rows = all.calcs.filter(function (c) { return !c.gone; });
+    if (!rows.length) { setStatus("No measurements to copy.", true); return; }
+    var t = rows.map(function (c) { return c.name + "\t" + c.txt; }).join("\n") + (all.legend.length ? "\n\n" + all.legend.join("\n") : "");
+    function done() { setStatus("Copied " + rows.length + " measurement" + (rows.length > 1 ? "s" : "") + " to the clipboard.", false); }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(done, function () { setStatus("The clipboard refused the copy.", true); });
+    else { var ta = document.createElement("textarea"); ta.value = t; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); done(); } catch (e) { setStatus("The clipboard refused the copy.", true); } ta.remove(); }
+  }
+  function measSetChange(key, v) {
+    if (typeof v === "number" && !isFinite(v)) return;
+    var o = {}; o[key] = v; state.measSet = measSanitizeSettings(o, state.measSet);
+    state.measPrefs = measSanitizeSettings(o, state.measPrefs); /* the one choice made here is remembered for the next session (and for the next model); the rest of an open model's own look is not */
+    persistPreferences(); measureRefreshList(); renderMeasurements();
+  }
+  function measureSyncUI() { if (measUI.sync) measUI.sync(); measureRefreshList(); }
+  function buildMeasureUI(body) {
+    var grid = el("div", "measgrid");
+    [["d", "Distance"], ["a", "Angle"], ["t", "Torsion"]].forEach(function (d) {
+      var b = el("button", "btn mode-btn measbtn ghost"); b.type = "button"; b.id = "measBtn_" + d[0];
+      b.title = MEAS_KINDS[d[0]].name + ": click " + MEAS_KINDS[d[0]].need + " atoms" + (d[0] === "a" ? " (the second is the vertex)" : "") + "; with exactly that many atoms selected it measures them at once";
+      b.innerHTML = MEAS_ICONS[d[0]]; b.appendChild(el("span", null, d[1]));
+      b.addEventListener("click", function () { measureButton(d[0]); });
+      grid.appendChild(b); measUI.btns[d[0]] = b;
+    });
+    body.appendChild(grid);
+    /* one shared colour for every measurement, as in the Molecular Surface list: with it ticked the per-row colour boxes go and this one colour is used */
+    var linkRow = el("div", "ctl-inline"); linkRow.style.margin = "4px 0";
+    var linkLbl = el("label", "toggle"), linkChk = document.createElement("input"); linkChk.type = "checkbox"; linkChk.checked = state.measSet.sameColour;
+    linkChk.addEventListener("change", function () { measSetChange("sameColour", linkChk.checked); });
+    linkLbl.appendChild(linkChk); linkLbl.appendChild(el("span", null, "Same colour for all")); linkRow.appendChild(linkLbl);
+    var linkSw = colorSwatch(state.measSet.colour, function (c) { measSetChange("colour", c); });
+    linkSw.title = "The common colour: used by every measurement when \"Same colour for all\" is ticked, and by any measurement without a colour of its own";
+    linkRow.appendChild(linkSw); body.appendChild(linkRow);
+    measUI.list = el("div", "measlist");
+    measUI.list.addEventListener("click", function (e) { /* a click on the empty space (not on a row) leaves nothing highlighted, so every measurement shows in the same colour */
+      if (e.target.closest("tr") || !state.measureSelId) return;
+      state.measureSelId = 0; measureRefreshList(); renderMeasurements();
+    });
+    body.appendChild(measUI.list);
+    measUI.legend = el("div", "readout measlegend"); measUI.legend.style.display = "none"; body.appendChild(measUI.legend);
+    var row = el("div", "btnrow");
+    button(row, "Clear all", "ghost", measureClearAll).title = "Remove every measurement";
+    button(row, "Copy", "ghost", measureCopy).title = "Copy the list to the clipboard";
+    body.appendChild(row);
+    var labelsCb = toggle(body, "Show labels on model", state.measureShowLabels, function (v) { state.measureShowLabels = state.measShowPref = v; persistPreferences(); renderMeasurements(); });
+    body.appendChild(el("hr", "divider"));
+    body.appendChild(el("div", "meashead", "Appearance"));
+    function colourRow(label, key) {
+      var w = el("div", "ctl-inline"); w.appendChild(el("label", "plain", label));
+      var sw = colorSwatch(state.measSet[key], function (c) { measSetChange(key, c); }); w.appendChild(sw); body.appendChild(w); return sw;
+    }
+    var swSel = colourRow("Highlight colour", "selColour");
+    swSel.title = "The colour of the measurement highlighted by clicking its name in the list (nothing is highlighted until one is clicked)";
+    swSel.previousSibling.title = swSel.title;
+    var selStyle = select(body, "Line style", [["dash", "Dashed"], ["solid", "Solid"]], state.measSet.style, function (v) { measSetChange("style", v); });
+    var slThick = slider(body, "Thickness (0 = thin)", 0, 0.1, 0.005, state.measSet.thick, "Å", function (v) { measSetChange("thick", v); });
+    var slDash = slider(body, "Dash length", 0.02, 0.5, 0.01, state.measSet.dash, "Å", function (v) { measSetChange("dash", v); });
+    var slGap = slider(body, "Gap length", 0.02, 0.5, 0.01, state.measSet.gap, "Å", function (v) { measSetChange("gap", v); });
+    body.appendChild(el("div", "meashead", "Labels"));
+    var fontOpts = [["", "Same as atom labels"]].concat(FONT_OPTIONS);
+    var selFont = select(body, "Font", fontOpts, state.measSet.font, function (v) { measSetChange("font", v); });
+    var boldCb = toggle(body, "Bold", state.measSet.bold, function (v) { measSetChange("bold", v); });
+    var haloCb = toggle(body, "Halo (contrasting outline)", state.measSet.halo, function (v) { measSetChange("halo", v); });
+    var boxCb = toggle(body, "Box around labels", state.measSet.box, function (v) { measSetChange("box", v); });
+    var slSize = slider(body, "Label size", 1, 6, 0.1, state.measSet.labelSize, "", function (v) { measSetChange("labelSize", v); });
+    var scaleCb = toggle(body, "Scale labels with the model", state.measSet.scaleModel, function (v) { measSetChange("scaleModel", v); });
+    scaleCb.parentNode.title = "On: the labels grow and shrink as the view is zoomed, like the model. Off: they keep one size on the screen.";
+    var leaderCb = toggle(body, "Pointer from a moved label to its measurement", state.measSet.leader, function (v) { measSetChange("leader", v); });
+    var esdCb = toggle(body, "Show esds when available", state.measSet.esd, function (v) { measSetChange("esd", v); });
+    var rrow = el("div", "btnrow");
+    button(rrow, "Restore default appearance", "ghost", function () { state.measSet = measDefaults(); state.measPrefs = measDefaults(); persistPreferences(); measureSyncUI(); renderMeasurements(); });
+    body.appendChild(rrow);
+    measUI.sync = function () {
+      var S = state.measSet;
+      linkSw.value = hexToCss(S.colour); linkChk.checked = S.sameColour; swSel.value = hexToCss(S.selColour); selStyle.value = S.style;
+      slThick.num.value = slThick.range.value = S.thick; slDash.num.value = slDash.range.value = S.dash; slGap.num.value = slGap.range.value = S.gap; slSize.num.value = slSize.range.value = S.labelSize;
+      boxCb.checked = S.box; esdCb.checked = S.esd; labelsCb.checked = state.measureShowLabels;
+      selFont.value = S.font; boldCb.checked = S.bold; haloCb.checked = S.halo; leaderCb.checked = S.leader; scaleCb.checked = S.scaleModel;
+    };
+    measureRefreshList();
+  }
+
   /* ---------------- macro recording ----------------
    * Command names, argument order, and the double-space between an atom's
    * name and its symmetry operator (e.g. "SELECT_FRAG H7A  1+X,1+Y,Z",
@@ -13772,7 +14294,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     state.bondEditMode = on;
     state.bondEditPair = [];
     renderBondEditHighlight();
-    if (on) { exitGrowMode(); exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode(); fcfExitMode(); } /* the interactive click-hijacking modes are mutually exclusive */
+    if (on) { exitGrowMode(); exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode(); fcfExitMode(); exitMeasureMode(); } /* the interactive click-hijacking modes are mutually exclusive */
     var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = on ? "crosshair" : "";
     updateBondEditModeBtnLabel();
   }
@@ -16505,6 +17027,9 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
   /* Everything that belongs to the structure being replaced and means nothing for the next one: the undo history (its snapshots hold the old atoms but not the old cell), and every bond override and bond selection (keyed by atom ids). */
   function resetStructureHistory() {
     state.undoStack = []; state.selectedBonds = {}; state.bondEditPair = []; orcaBridgeReset();
+    state.measurements = []; state.measureSelId = 0; state.measurePick = []; /* the measurements belong to the structure being replaced */
+    state.measSet = Object.assign({}, state.measPrefs); state.measureShowLabels = state.measShowPref; /* and a model's own look goes with it: back to the remembered choices */
+    measureSyncUI();
     state.cutBonds = {}; state.cutBondSignatures = {}; state.extraBonds = {}; state.extraBondSignatures = {};
   }
   function clearStructure() {
@@ -17708,7 +18233,8 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
         rimEnabled: state.rimEnabled, rimIntensity: state.rimIntensity,
         atomRoughness: state.atomRoughness, atomMetalness: state.atomMetalness, atomReflectivity: state.atomReflectivity,
         materialApplyCoordPoly: state.materialApplyCoordPoly, materialApplyMolSurface: state.materialApplyMolSurface, materialApplyVoid: state.materialApplyVoid,
-        labelSize: state.labelSize, labelColor: state.labelColor, labelHalo: state.labelHalo, labelFont: state.labelFont,
+        labelSize: state.labelSize, labelColor: state.labelColor, labelHalo: state.labelHalo, labelFont: state.labelFont, labelScaleModel: state.labelScaleModel,
+        measSet: state.measPrefs, measureShowLabels: state.measShowPref,
         dontWarnAviSize: state.dontWarnAviSize,
         clipPlanes: clipPlanesSnapshot(),
         radiiBondiMigrated: state._radiiBondiMigrated, walkCollision: state.walkCollision,
@@ -17784,6 +18310,10 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       if (typeof data.labelColor === "number") state.labelColor = data.labelColor;
       if (typeof data.labelHalo === "boolean") state.labelHalo = data.labelHalo;
       if (typeof data.labelFont === "string") state.labelFont = data.labelFont;
+      if (typeof data.labelScaleModel === "boolean") state.labelScaleModel = data.labelScaleModel;
+      if (data.measSet) state.measPrefs = measSanitizeSettings(data.measSet, state.measPrefs);
+      if (typeof data.measureShowLabels === "boolean") state.measShowPref = data.measureShowLabels;
+      state.measSet = Object.assign({}, state.measPrefs); state.measureShowLabels = state.measShowPref;
       if (typeof data.dontWarnAviSize === "boolean") state.dontWarnAviSize = data.dontWarnAviSize;
       clipPlanesLoad(data);
       if (typeof data.radiiBondiMigrated === "boolean") state._radiiBondiMigrated = data.radiiBondiMigrated;
@@ -18722,6 +19252,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       atoms: state.atoms, guestAtoms: state.guestAtoms,
       guestGroups: state.guestGroups, guestBatch: state.guestBatch, nextUid: nextUid,
       selectionGroups: state.selectionGroups, selectionGroupSeq: state.selectionGroupSeq,
+      measurements: state.measurements, measureSeq: state.measureSeq, measurementSettings: state.measSet, measureShowLabels: state.measureShowLabels,
       isCif: state.isCif, cifCell: state.cifCell, cifSymops: state.cifSymops,
       cifAsymUnit: state.cifAsymUnit, cifFracToCart: state.cifFracToCart, cifTags: state.cifTags,
       symmetryForgotten: state.symmetryForgotten, showOnlyAsu: state.showOnlyAsu,
@@ -18912,6 +19443,14 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
        state already defaults to [] / 0, so an old file just loads with no
        selection groups, same as if this were a brand new one. */
     state.selectionGroups = data.selectionGroups || []; state.selectionGroupSeq = data.selectionGroupSeq || 0;
+    /* the measurements kept with the model (absent in a project saved before they existed), and how they were drawn -- unlike the atom-label look
+       these are part of the saved figure, so a file restores them as they were */
+    state.measurements = measSanitizeList(data.measurements); state.measureSelId = 0; state.measurePick = [];
+    state.measureSeq = Math.max(typeof data.measureSeq === "number" ? data.measureSeq : 0, state.measurements.reduce(function (mx, m) { return Math.max(mx, m.id); }, 0));
+    /* the model's own look is used while it is open; the remembered choices (measPrefs) are not touched, so opening a model never changes them */
+    state.measSet = data.measurementSettings ? measSanitizeSettings(data.measurementSettings, state.measPrefs) : Object.assign({}, state.measPrefs);
+    state.measureShowLabels = (typeof data.measureShowLabels === "boolean") ? data.measureShowLabels : state.measShowPref;
+    measureSyncUI();
     nextUid = Math.max(data.nextUid || 1, maxUid(state.atoms) + 1, maxUid(state.guestAtoms) + 1, 1);
     state.isCif = !!data.isCif; state.cifCell = data.cifCell || null; state.cifSymops = data.cifSymops || null;
     state.cifAsymUnit = data.cifAsymUnit || null; state.cifFracToCart = data.cifFracToCart || null;
@@ -23017,6 +23556,10 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     labelSlider(labelsBody, "Size", 1.0, 6.0, 0.1, state.labelSize, function (v) {
       state.labelSize = v; updateLabelScales(); persistPreferences();
     });
+    var labelScaleTg = toggle(labelsBody, "Scale labels with the model", state.labelScaleModel, function (v) {
+      state.labelScaleModel = v; renderLabels(); persistPreferences();
+    });
+    labelScaleTg.parentNode.title = "On: the labels grow and shrink as the view is zoomed, like the model. Off: they keep one size on the screen.";
     var labelBtnRow = el("div", "btnrow");
     button(labelBtnRow, "Label selected", "ghost", function () { setLabelVisibilityForSelected(true); });
     button(labelBtnRow, "Unlabel selected", "ghost", function () { setLabelVisibilityForSelected(false); });
@@ -24152,7 +24695,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
 
     var growModeBtn = button(mouseTab, "", "prominent", function () {
       state.growMode = !state.growMode;
-      if (state.growMode) { exitBondEditMode(); exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode(); fcfExitMode(); }
+      if (state.growMode) { exitBondEditMode(); exitGuestDragMode(); exitMolNeighborMode(); exitWalkMode(); fcfExitMode(); exitMeasureMode(); }
       var vp = document.getElementById("viewport"); if (vp) vp.style.cursor = state.growMode ? "crosshair" : "";
       updateGrowModeBtnLabel();
     });
@@ -24389,6 +24932,10 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     var molVolRow = el("div", "btnrow");
     var molVolBtn = button(molVolRow, "Calculate molecular volume", "ghost", calculateMolecularVolume); molVolBtn.id = "molVolBtn"; molVolBtn.disabled = true;
     sgC.appendChild(molVolRow);
+
+    /* Distances, angles and torsion angles kept in the model (see the Measure block). Closing the submenu leaves the measuring mode. */
+    var measureC = subsection(sgC, "Measure", false, function (isOpen) { if (!isOpen) exitMeasureMode(); });
+    buildMeasureUI(measureC);
 
     /* Named, reusable selections -- save whatever's currently selected
        (host and/or guest together) under a name, so it can be picked out
@@ -24869,6 +25416,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
           return;
         }
       }
+      if ((e.code === "Escape" || e.code === "Space") && state.measureMode && state.measurePick.length) { e.preventDefault(); state.measurePick = []; renderMeasurements(); setStatus("Pending pick cleared.", false); return; }
       if (e.code === "Escape") { e.preventDefault(); clearSelection(); return; }
       if (e.ctrlKey && e.code === "Space") { e.preventDefault(); invertBondSelection(); return; }
       if (e.shiftKey && e.code === "Space") { e.preventDefault(); invertSelection(); return; }
@@ -25112,7 +25660,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<p>The <b>Display</b> section, just below Grow, is always available. Its own general settings hold <b>Show ASU only</b> paired with <b>Show atom labels</b>, then <b>Show unit cell</b> paired with <b>Show axis key</b>, then <b>Show hydrogen atoms</b> paired with <b>Show H bonds</b>, then <b>Immobilise view</b> (see View controls) paired with <b>Show bond lengths</b>; a <b>Background colour</b> swatch; <b>Centering</b> (All/Visible/Selected atoms, with an Apply button that only appears for \"Selected atoms\", since that mode is otherwise frozen at whatever it was last applied to, plus a <b>Recenter</b> button that returns the rotation centre to its default position after any Shift + Ctrl + left-drag panning); <b>Set scale</b>, an arbitrary whole-number reference for the current zoom level -- bigger means more zoomed in, updates live as you zoom, and can be typed into directly (it carries no physical unit; its purpose is matching the same apparent zoom between different structures rather than measuring anything); and duplicate <b>Select all</b> / <b>Clear selection</b> / <b>Hide selection</b> / <b>Unhide all</b> buttons for convenience, identical to the ones in Structure &gt; Edit atoms. Nested inside Display: <b>Direction</b>, a <b>View direction</b> set of crystallographic view shortcuts -- buttons for looking straight down each cell axis (a, b, c) and perpendicular to each pair-wise plane (bc, ac, ab), a general <b>[hkl]</b> field for viewing along any specific direction entered as its own three numbers, and <b>View along vector</b> / <b>View perpendicular to plane</b> (see \"Viewing along a vector or a plane\" below), which orient the camera from a selection of atoms instead. The appearance of the unit cell, the axis key and the atom labels lives in Style (see \"Unit cell, axis key and atomic labels (Style)\" below).</p>" +
       "<h3>Unit cell, axis key and atomic labels (Style)</h3>" +
       "<p><b>Style &gt; Unit cell</b> starts with a <b>Show unit cell</b> checkbox that echoes Display's checkbox of the same name and the <b>c</b> key -- change any one and the others follow. Below it: a <b>Label axes</b> toggle for the a/b/c corner labels, a <b>RGB axes</b> option to colour the a/b/c edges red/green/blue, the cell's own <b>Cell colour</b>, and <b>line thickness</b> -- all of these, plus whether the cell is shown, are remembered between structures and when the app is closed and reopened. Each corner label sits genuinely at that corner in 3D and is occluded normally by anything nearer the camera (an atom, an L.S. plane, ...), not painted on top of everything regardless of what's actually in front of it. A divider then separates the cell's settings from the <b>axis key's</b> own: a <b>Show axis key</b> checkbox (echoing Display's, and the <b>k</b> key), the key's <b>zoom</b> (scales the whole key -- arrow length and thickness, arrowheads and letters alike), <b>proportional lengths</b> (arrow lengths follow the real a/b/c edge lengths, or all equal when off), <b>show labels a, b, c</b> (a letter beside each arrow tip, in the arrow's own red/green/blue on a transparent background, scaling with the key's zoom and positioned smoothly so it never jumps as the model rotates; on by default, remembered between sessions, and included in exported images along with the key itself), and <b>Reset key position</b>. All of the key's settings -- whether it is shown, where you dragged it, its zoom, proportional lengths and labels -- are remembered between structures and when the app is closed and reopened (a saved project file still restores its own).</p>" +
-      "<p><b>Style &gt; Atomic labels</b> (moved here from Display, where it was called Labels) holds <b>Show atom labels</b> -- again echoing Display's checkbox of the same name and the <b>l</b> key -- plus <b>Contrasting outline</b>, <b>Font</b>, <b>Colour</b>, <b>Size</b>, and the buttons that label or unlabel the selected atoms and unfix dragged labels.</p>" +
+      "<p><b>Style &gt; Atomic labels</b> (moved here from Display, where it was called Labels) holds <b>Show atom labels</b> -- again echoing Display's checkbox of the same name and the <b>l</b> key -- plus <b>Contrasting outline</b>, <b>Font</b>, <b>Colour</b>, <b>Size</b>, <b>Scale labels with the model</b> (on, the default: the labels grow and shrink as the view is zoomed, like the model, and are placed again among the atoms once a zoom stops; off: they keep one size on the screen), and the buttons that label or unlabel the selected atoms and unfix dragged labels.</p>" +
       "<p>Growing by clicking (atom or fragment), by sphere of inclusion, by an explicit packing range (Pack), and by a specific chosen symmetry operation or translation (Symmetry) are all implemented, as described above. Only CIFs with an explicit list of symmetry operators are supported -- one that gives only a space group name or number, with no operator list, is read as P1 (no symmetry) since looking up operators from thousands of possible space group settings isn't implemented.</p>" +
       "<h3>Host and guest are independent layers</h3>" +
       "<p>Loading a new host CIF starts fresh, clearing any guest along with the old host. Within one loaded structure, though, host and guest stay independent: deleting or hiding atoms in one layer (Structure &gt; Edit atoms) never affects the other. \"Remove host\" and \"Remove all guests\" each ask for confirmation first, since for a CIF-based structure they permanently delete the relevant asymmetric unit atoms along with everything grown from them by symmetry, not just what happens to be currently displayed. Each only ever clears its own layer.</p>" +
@@ -25130,6 +25678,10 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<h3>Selection &amp; geometry</h3>" +
       "<p>The <b>Selection &amp; geometry</b> section shows a live readout for whatever is currently selected. More than 4 atoms selected shows just a count and an element breakdown (C, H, O, ...), since geometry stops meaning anything specific once a selection is a bulk fragment or element rather than a handful of atoms picked in order. For 1 to 4 atoms it shows the last-selected atom's element, fractional coordinates (CIF-based structures only) and Cartesian coordinates, then builds up cumulatively: 2 atoms adds the distance between them; 3 adds the second distance and the angle at the middle atom; 4 adds the third distance, the second angle, and the torsion angle through all four -- sighting from the second atom to the third, positive means the near bond needs a clockwise turn to eclipse the far bond (the standard IUPAC convention, matching Mercury, Olex2, PLATON, and SHELX). Order follows the order the atoms were actually selected in -- click them one at a time in the sequence that gives the reading you want (e.g. along a bond chain for a meaningful torsion); deselecting one and reselecting it moves it to the end of the order, and a bulk selection (Shift/Ctrl/Alt-click, a macro's SELECT_* commands) that lands on 4 or fewer atoms at once orders them however they happen to be found rather than in any deliberate sequence. The readout's own labelling always shows which element ended up in which position, so a selection that isn't what was intended is visible directly in the row labels. Where a CIF gives coordinate uncertainties (esds) in parentheses, e.g. <span class='mono'>0.51180(12)</span>, a distance, angle, or torsion is shown in standard notation too, e.g. <span class='mono'>1.542(3)</span> -- propagated independently per coordinate (no cell-parameter or cross-atom covariance, which a CIF doesn't provide), and only for untransformed atoms (no symmetry operation or cell offset applied); a symmetry-grown copy, a SHELX .res/.ins load (which never carries esds at all), or a guest atom simply shows a plain number instead. A mixed selection shows the esd on whichever individual measurements have it and a plain number on the ones that don't.</p>" +
       "<p><b>Selection groups</b>, further down the same section, remembers a set of atoms under a name so it can be picked out again later without re-selecting them by hand. Select whatever's wanted (host and guest atoms can be mixed together in one group), type an optional name, and press <b>Save selection as group</b> -- leaving the name blank just calls it \"Selection 1\", \"Selection 2\", and so on. Saving clears the selection that was just saved (the atoms aren't going anywhere -- the new group's own <b>Select</b> button, right below, brings them straight back whenever they're wanted again). Each saved group appears as its own row, showing its name (click into it to rename at any time), how many of its atoms are still actually present in parentheses, and <b>Select</b> / <b>Deselect</b> buttons: <b>Select</b> adds that group's atoms to whatever's already selected, <b>Deselect</b> removes just that group's atoms, so several groups can be combined by selecting each in turn without ever clobbering an unrelated selection already in progress. The small <b>&times;</b> deletes the saved group itself -- the atoms it referred to are completely untouched either way. An atom can belong to any number of groups at once, or none, entirely independent of host/guest membership; if an atom belonging to a group is later deleted from the structure, the group simply carries fewer atoms from then on (the count in parentheses drops to match) -- the rest of the group is unaffected, and once every atom it ever referred to has been deleted, the empty group itself disappears from the list automatically rather than sitting there at &ldquo;(0)&rdquo;. Selection groups are saved as part of the project file, the same as guest groups.</p>" +
+      "<h3>Measure</h3>" +
+      "<p><b>Measure</b>, the first submenu of <b>Selection &amp; geometry</b>, keeps distances, angles and torsion angles in the model. Press <b>Distance</b>, <b>Angle</b> or <b>Torsion</b> (the button turns red) and click 2, 3 or 4 atoms: for an angle the second atom is the vertex, and for a torsion the order is the order along the chain. Clicking a picked atom again unpicks it, and <b>Esc</b> or <b>Space</b> clears a half-finished pick. Or select exactly that many atoms first, in the order wanted, and press the button: they are measured at once. Each measurement is drawn in the 3D view as a dashed line (an arc at the vertex of an angle; the three bonds of a torsion) with its value in a label. Where the atoms carry coordinate esds (atoms read from a CIF; not symmetry copies, SHELX files or guests) the value has its esd, e.g. <span class='mono'>1.965(3)</span>. A symmetry copy of an atom is written <span class='mono'>NAME_$1</span> in the list and <span class='mono'>$1</span> is explained under the list. Because the measurements are part of the scene they are in every exported image, in the copied image and in the rotation videos; because they follow their atoms they change when atoms are moved, and they are hidden while one of their atoms is hidden. They are saved in the model (.json) file together with how they are drawn, and are cleared when another structure is loaded.</p>" +
+      "<p>The list is laid out like the Molecular Surface list. The <b>tick box</b> shows or hides that measurement. The <b>colour box</b> sets its colour, for its line and its value together; <b>Same colour for all</b> ticks one common colour (its box is beside the tick box) in place of the separate ones, and the common colour is also what a measurement without a colour of its own uses. The <b>line button</b> (a dashed line; struck through when off) takes away that measurement's line and leaves only its value, which suits a bond or a hydrogen bond that is drawn anyway. The <b>&times;</b> deletes it. Click a measurement's name to highlight it in the highlight colour; click it again, or click the empty space below the list, to highlight none, so that all show in their own colours. <b>Clear all</b> removes every measurement and <b>Copy</b> puts the list on the clipboard, tab-separated, with the symmetry operators. <b>Show labels on model</b> hides or shows all the values. A value can be dragged to a better place like an atom label (a thin line keeps it tied to its measurement); double-click it to put it back.</p>" +
+      "<p><b>Appearance</b>, at the foot of the submenu: <b>Highlight colour</b> (the colour of the measurement highlighted by clicking its name in the list; nothing is highlighted until one is clicked, so changing it shows nothing until then); <b>Line style</b> (dashed or solid); <b>Thickness</b> (0 draws the usual thin one-pixel line; above 0 the lines are drawn as cylinders of that radius in &Aring;); <b>Dash length</b> and <b>Gap length</b> (&Aring;). Under <b>Labels</b>: <b>Font</b> (the same choices as the atom labels, or &ldquo;Same as atom labels&rdquo;); <b>Bold</b>; <b>Halo</b> (an outline in the contrasting shade around the figures); <b>Box around labels</b> (a white box with a border in the measurement colour); <b>Label size</b>; <b>Scale labels with the model</b> (on, the default: the values grow and shrink as the view is zoomed, like the model; off: they keep one size on the screen, like atom labels); <b>Pointer from a moved label to its measurement</b> (the thin line that ties a dragged label to its measurement; off leaves the label free-standing); <b>Show esds when available</b>; and <b>Restore default appearance</b>. These choices are remembered between sessions, and are also saved with a model, so a saved model comes back as it looked. Opening a model shows it with its own saved look; that does not change your remembered choices, which come back for the next structure or the next session. The length of a bond is also shown by pointing at it when Display &rsaquo; Show bond lengths is on.</p>" +
       "<h3>Moving atoms between host and guest</h3>" +
       "<p>A structure can be loaded as a single combined file and split afterwards, instead of always requiring separate host and guest files: select the atoms that belong on the other side, choose a destination from the dropdown (Host, an existing guest component, or \"New guest group\"), and press \"Move selection to\". This is exactly the same selection mechanism used for deletion, so the same click and ctrl-click rules apply. A moved atom keeps its radius but takes on its new layer's colour rules, snapshotting whatever the current host or guest default is at the moment it arrives.</p>" +
       "<p>This is also how disordered guests with more than one component are separated: select one component's atoms and move them to a new guest group, then repeat for each remaining component. Guest components are listed in the <b>Guest</b> tab with an atom count and their own show/hide checkbox, and \"Select\" there re-selects all of a component's atoms at once -- useful for correcting a mistake by moving atoms out of the wrong group. If deleting or moving atoms empties a component completely, it disappears from the list and the remaining ones are renumbered so there's no gap -- the numbers are just labels and aren't used for anything else, so this has no other effect. Ctrl-click's whole-fragment shortcut can mis-select across two disorder components that happen to sit close together, since that's indistinguishable from a real bond by geometry alone; when that happens, select atom by atom instead.</p>" +
