@@ -3034,8 +3034,14 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     videoAxis: "y", videoSteps: 120, videoScale: 100, videoExporting: false, videoDirection: 1, videoFormat: "avi", dontWarnAviSize: false,
     autoRotateAxis: "y", autoRotateDir: 1, autoRotateSpeed: 30, autoRotating: false,
     /* rocking (a smooth swing back and forth, see rockProfile): Display > Autorotate and Export > Video */
-    autoRotateMode: "spin", autoRockAngle: 30, autoRockPeriod: 4, autoRockBoth: false, autoRockMomentum: true,
-    videoType: "spin", rockAxis: "y", rockDir: 1, rockAngle: 30, rockSteps: 120, rockBoth: false, rockMomentum: true, rockCycles: 1,
+    autoRotateMode: "spin", autoRockAngle: 15, autoRockPeriod: 4, autoRockBoth: true, autoRockMomentum: true,
+    videoType: "spin", rockAxis: "y", rockDir: 1, rockAngle: 15, rockSteps: 120, rockBoth: true, rockMomentum: true, rockCycles: 1,
+    /* precession (the model's own viewing axis circles on a cone about the view axis, without turning: see precQuat): Display > Animate and Export > Video */
+    autoPrecAngle: 5, autoPrecPeriod: 6, autoPrecDir: 1,
+    precAngle: 5, precDir: 1, precSteps: 120, precCycles: 1,
+    /* sway (the view axis traces a Lissajous figure, a figure-eight by default, about the starting view: see swayQuat): Display > Animate and Export > Video */
+    autoSwayAngle: 10, autoSwayAspect: 50, autoSwayPeriod: 6, autoSwayShape: "eight",
+    swayAngle: 10, swayAspect: 50, swayShape: "eight", swaySteps: 180, swayCycles: 1,
     videoFps: 30,
     /* the cutaway planes (Display > Clipping Planes): a list of independent planes, each with all its own settings (see clipDefaults); clipSel is the one shown in the menu. The first plane is added just after this object. */
     clipPlanes: [], clipSel: 0,
@@ -5160,11 +5166,11 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
        otherwise identical for both formats. */
     if (state.videoExporting) { setStatus("A video export is already running.", true); return; }
     /* kind is "rock" for the rocking video; the Export button passes its own click event to the plain rotation video, which must never read as "rock", hence the strict test */
-    var isRock = (kind === "rock"), rockCfg = isRock ? videoRockConfig() : null, frameKind = isRock ? "rocking" : "rotation";
+    var isRock = (kind === "rock"), isPrec = (kind === "prec"), isSway = (kind === "sway"), rockCfg = isRock ? videoRockConfig() : null, precCfg = isPrec ? videoPrecConfig() : null, swayCfg = isSway ? videoSwayConfig() : null, loopCfg = rockCfg || precCfg || swayCfg, frameKind = isRock ? "rocking" : (isPrec ? "precession" : (isSway ? "sway" : "rotation"));
     var isMp4 = state.videoFormat === "mp4";
     var fmt = isMp4 ? { ext: "mp4", blobType: "video/mp4" } : { ext: "avi", blobType: "video/avi" };
     var base = state.name ? state.name.replace(/\.[^./\\]+$/, "") : "CrystalVista";
-    var suggestedName = base + (isRock ? "_rocking_" + state.rockAxis : "_rotation_" + state.videoAxis) + "." + fmt.ext;
+    var suggestedName = base + (isRock ? "_rocking_" + state.rockAxis : (isPrec ? "_precession" : (isSway ? "_sway" : "_rotation_" + state.videoAxis))) + "." + fmt.ext;
     /* request the save location FIRST, before ANYTHING else -- including,
        for MP4, the encoder-cache check and confirm() dialog just below.
        showSaveFilePicker() itself consumes the click's transient user-
@@ -5213,9 +5219,9 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
        produce a right-hand-rule-positive APPARENT rotation of the model
        (what the user watches), rather than of the otherwise-invisible
        camera doing the orbiting. */
-    var dir = isRock ? rockCfg.sign : ((state.videoDirection === -1) ? 1 : -1);
+    var dir = isRock ? rockCfg.sign : ((state.videoDirection === -1) ? 1 : -1); /* (a precession ignores dir and axisVec: it goes by precQuat) */
     var axisVec = isRock ? rockCfg.axisVec : state.videoAxis === "x" ? new THREE.Vector3(1, 0, 0) : state.videoAxis === "z" ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
-    var steps = isRock ? rockCfg.steps : Math.max(4, Math.min(1440, Math.round(state.videoSteps)));
+    var steps = loopCfg ? loopCfg.steps : Math.max(4, Math.min(1440, Math.round(state.videoSteps)));
     var scalePct = Math.max(0.1, Math.min(2, state.videoScale / 100));
     var fps = Math.max(1, Math.min(60, Math.round(state.videoFps) || 30));
 
@@ -5297,7 +5303,9 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
           var ft = i / steps;
           /* rocking: the cycle phase ft = i/steps puts frame i at theta = A * profile(i/steps), the exact samples of a periodic curve -- see rockProfile */
           var frameAngle = isRock ? dir * rockCfg.amp * rockProfile(ft, rockCfg.both, rockCfg.momentum) : dir * 2 * Math.PI * ft;
-          camOrient.copy(savedOrient).multiply(new THREE.Quaternion().setFromAxisAngle(axisVec, frameAngle));
+          if (isSway) camOrient.copy(savedOrient).multiply(swayQuat(2 * Math.PI * ft, swayCfg.A, swayCfg.B, swayCfg.hx, swayCfg.vy)); /* one trip round the figure in the cycle: see swayQuat */
+          else if (isPrec) camOrient.copy(savedOrient).multiply(precQuat(2 * Math.PI * ft, precCfg.mu, precCfg.dir)); /* the tilt goes once round the view axis in the cycle: see precQuat */
+          else camOrient.copy(savedOrient).multiply(new THREE.Quaternion().setFromAxisAngle(axisVec, frameAngle));
           camOrient.normalize();
           applyController();
           updateVoidMeshRenderOrder(); /* this loop renders directly, bypassing animate()'s own per-frame call -- see updateVoidMeshRenderOrder's comment */
@@ -5335,8 +5343,8 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
             return s;
           }
           var sFirst = sampleBitmap(frames[0]);
-          var midIdx = (isRock && rockCfg.both) ? Math.floor(frames.length / 4) : Math.floor(frames.length / 2); /* a rocking cycle sits at its turning point, not at the view, half way round */
-          var lastIdx = (isRock && rockCfg.both) ? Math.floor(frames.length * 3 / 4) : frames.length - 1;
+          var midIdx = ((isRock && rockCfg.both) || isSway) ? Math.floor(frames.length / 4) : Math.floor(frames.length / 2); /* a sway is back at the starting view half way round, so the quarter points are the ones that differ */ /* a rocking cycle sits at its turning point, not at the view, half way round */
+          var lastIdx = ((isRock && rockCfg.both) || isSway) ? Math.floor(frames.length * 3 / 4) : frames.length - 1;
           var sMid = sampleBitmap(frames[midIdx]);
           var sLast = sampleBitmap(frames[lastIdx]);
           var dFirstMid = sampleDiff(sFirst, sMid);
@@ -5348,7 +5356,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
 
         /* cycles in file: the same rendered frames, repeated */
         var outFrames = frames;
-        if (isRock && rockCfg.cycles > 1) { outFrames = []; for (var cy = 0; cy < rockCfg.cycles; cy++) for (var fi = 0; fi < frames.length; fi++) outFrames.push(frames[fi]); }
+        if (loopCfg && loopCfg.cycles > 1) { outFrames = []; for (var cy = 0; cy < loopCfg.cycles; cy++) for (var fi = 0; fi < frames.length; fi++) outFrames.push(frames[fi]); }
         var blob;
         if (isMp4) {
           blob = await encodeFramesToMp4(ffmpeg, outFrames, targetW, targetH, fps, function (frac) {
@@ -5374,7 +5382,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
            quietly fallen back to a plain Downloads-folder download instead
            of the picker they asked for. */
         handlePromise.then(function (h) {
-          writeToSaveHandle(h, blob, suggestedName, null, null, outFrames.length + " frames" + (isRock ? " (" + steps + " per cycle x " + rockCfg.cycles + ")" : "") + ", " + (blob.size / 1024).toFixed(0) + " KB" + rotationWarning, !!rotationWarning);
+          writeToSaveHandle(h, blob, suggestedName, null, null, outFrames.length + " frames" + (loopCfg ? " (" + steps + " per " + (isPrec ? "revolution" : "cycle") + " x " + loopCfg.cycles + ")" : "") + ", " + (blob.size / 1024).toFixed(0) + " KB" + rotationWarning, !!rotationWarning);
         });
       } catch (e) {
         setStatus("Video export failed: " + (e && e.message ? e.message : e), true);
@@ -6204,7 +6212,71 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     return both ? ("swings from −" + a + " to +" + a + " about " + axisLabel + ", passing through the starting view")
                 : ("rocks from the starting view to +" + a + " about " + axisLabel + " and back");
   }
-  var rockRun = null; /* the live swing (preview or autorotate), or null */
+  /* ---------------- precession: the model wobbles about the view axis ----------------
+   * The viewing axis (the line of sight) stays where it is; the MODEL's own axis that points along it circles on a cone of half-angle mu about it, once per
+   * revolution, WITHOUT the model turning about the view axis (the way a crystal moves in a precession camera): the model's orientation is
+   *     R(phi) = Rz(phi) Rx(mu) Rz(-phi)        (z = the view axis, phi = the azimuth of the tilt, growing by 360 degrees per revolution)
+   * so every picture is the starting view tilted by mu towards the azimuth phi, and the net turn about the view axis stays zero. The camera is what really
+   * moves, so the quaternion handed back is the inverse, Rz(phi) Rx(-mu) Rz(-phi), applied in the camera's own axes (x right, y up, z towards the viewer),
+   * the same way rocking is. dir = +1 makes the tilt go round anticlockwise as seen by the viewer, -1 clockwise. It is periodic in phi with period 2 pi,
+   * so a video of N frames phi = 2 pi i / N loops without a repeated frame, exactly as for rocking. */
+  function precQuat(phi, mu, dir) {
+    var z = new THREE.Vector3(0, 0, 1), x = new THREE.Vector3(1, 0, 0), p = (dir === -1 ? -phi : phi);
+    var q = new THREE.Quaternion().setFromAxisAngle(z, p);
+    q.multiply(new THREE.Quaternion().setFromAxisAngle(x, -mu));
+    q.multiply(new THREE.Quaternion().setFromAxisAngle(z, -p));
+    return q.normalize();
+  }
+  /* the quaternion the run has applied to camOrient so far is run.curQ; moving to q is camOrient * curQ^-1 * q, which stays right even if the view was turned by hand meanwhile */
+  function precApply(run, q) {
+    camOrient.multiply(run.curQ.clone().invert()).multiply(q);
+    camOrient.normalize();
+    applyController();
+    run.curQ = q;
+  }
+  function startPrec(kind, cfg) {
+    stopRock(true);
+    if (kind === "preview") stopAutoRotate(true);
+    rockRun = { kind: kind, prec: true, mu: cfg.mu, period: Math.max(0.5, cfg.period), dir: cfg.dir === -1 ? -1 : 1, t0: performance.now(), tStart: performance.now(), curQ: new THREE.Quaternion(), fade: 0, ret: null };
+    syncRockButtons();
+  }
+  function precStep(run, now) {
+    var t = (now - run.t0) / 1000, fade, finished = false;
+    if (run.ret) {
+      var s = (now - run.ret.t0) / 1000 / ROCK_RETURN;
+      if (s >= 1) { fade = 0; finished = true; } else fade = run.ret.f0 * 0.5 * (1 + Math.cos(Math.PI * s)); /* the cone closes while the tilt keeps going round, so the view ends exactly where it began */
+    } else {
+      var f = Math.min(1, (now - run.tStart) / 1000 / ROCK_FADE_IN);
+      fade = f * f * (3 - 2 * f);
+    }
+    run.fade = fade;
+    precApply(run, run.sway ? swayQuat(2 * Math.PI * t / run.period, run.A * fade, run.B * fade, run.hx, run.vy) : precQuat(2 * Math.PI * t / run.period, run.mu * fade, run.dir));
+    if (finished) { precApply(run, new THREE.Quaternion()); rockRun = null; syncRockButtons(); }
+  }
+  /* ---------------- sway: the view axis traces a Lissajous figure about the starting view ----------------
+   * The camera is swung, a little, so that the line of sight moves along the curve (a, b) = (A sin(hx phi), B sin(vy phi)), a and b being the left-right and
+   * up-down tilts of the view axis, phi = 2 pi t / period. With hx : vy = 1 : 2 it is a figure-eight lying on its side, 2 : 1 a figure-eight standing up,
+   * 3 : 2 a three-lobed loop. The tilt (a, b) is made as ONE rotation about an axis in the screen plane, through the angle sqrt(a^2 + b^2), a pure swing of
+   * the view axis with no twist about it (turning about two axes in turn would add a small roll). phi = 0 is the starting view and the curve is periodic
+   * in phi with period 2 pi, so a video of N frames phi = 2 pi i / N loops without a repeated frame. The model keeps its scale and centre throughout. */
+  var SWAY_SHAPES = { eight: { hx: 1, vy: 2, name: "Figure-eight" }, eightv: { hx: 2, vy: 1, name: "Upright figure-eight" }, three2: { hx: 3, vy: 2, name: "Three-lobed loop" } };
+  function swayQuat(phi, A, B, hx, vy) {
+    var a = A * Math.sin(hx * phi), b = B * Math.sin(vy * phi), th = Math.sqrt(a * a + b * b);
+    if (th < 1e-12) return new THREE.Quaternion();
+    return new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(b / th, a / th, 0), th);
+  }
+  /* angle = the wider swing (degrees), aspect = the narrower one as a percentage of it; the wide direction is left-right, except for the upright figure-eight */
+  function swayAmps(angleDeg, aspectPct, shape) {
+    var s = SWAY_SHAPES[shape] || SWAY_SHAPES.eight, w = Math.max(0.1, angleDeg) * Math.PI / 180, n = w * Math.max(0.05, Math.min(1, aspectPct / 100));
+    return shape === "eightv" ? { A: n, B: w, hx: s.hx, vy: s.vy } : { A: w, B: n, hx: s.hx, vy: s.vy };
+  }
+  function startSway(kind, cfg) {
+    stopRock(true);
+    if (kind === "preview") stopAutoRotate(true);
+    rockRun = { kind: kind, prec: true, sway: true, A: cfg.A, B: cfg.B, hx: cfg.hx, vy: cfg.vy, period: Math.max(0.5, cfg.period), t0: performance.now(), tStart: performance.now(), curQ: new THREE.Quaternion(), fade: 0, ret: null };
+    syncRockButtons();
+  }
+  var rockRun = null; /* the live swing (preview or autorotate), or null; a precession is the same object with prec: true */
   var ROCK_FADE_IN = 0.5, ROCK_RETURN = 0.5; /* seconds: easing in at the start of a live swing, gliding back to the starting view at Stop */
   function rockApply(run, target) {
     var d = target - run.applied;
@@ -6223,6 +6295,12 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
   /* immediate = true puts the view back at once (exports, starting something else); otherwise it glides back */
   function stopRock(immediate) {
     if (!rockRun) return;
+    if (rockRun.prec) {
+      if (immediate === true || rockRun.fade < 1e-4) { precApply(rockRun, new THREE.Quaternion()); rockRun = null; }
+      else if (!rockRun.ret) rockRun.ret = { t0: performance.now(), f0: rockRun.fade };
+      syncRockButtons();
+      return;
+    }
     if (immediate === true || Math.abs(rockRun.applied) < 1e-4) { rockApply(rockRun, 0); rockRun = null; }
     else if (!rockRun.ret) rockRun.ret = { t0: performance.now(), th0: rockRun.applied };
     syncRockButtons();
@@ -6230,6 +6308,14 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
   /* changes the settings of a swing that is already running without a jump in its phase (the sliders of Autorotate and the fields of the video preview) */
   function rockRetune(p) {
     if (!rockRun || rockRun.ret) return;
+    if (rockRun.prec) { /* the phase of the tilt is kept when the speed changes */
+      var pn = performance.now(), pph = (((pn - rockRun.t0) / 1000) / rockRun.period) % 1;
+      if (p.period !== undefined) { rockRun.period = Math.max(0.5, p.period); rockRun.t0 = pn - pph * rockRun.period * 1000; }
+      if (rockRun.sway && p.A !== undefined) { rockRun.A = p.A; rockRun.B = p.B; }
+      if (p.mu !== undefined) rockRun.mu = p.mu;
+      if (p.dir !== undefined && p.dir !== rockRun.dir) { rockRun.dir = p.dir === -1 ? -1 : 1; rockRun.t0 = pn - ((1 - pph) % 1) * rockRun.period * 1000; } /* the same azimuth, now going the other way */
+      return;
+    }
     var now = performance.now(), ph = (((now - rockRun.t0) / 1000) / rockRun.period) % 1;
     if (p.period !== undefined) { rockRun.period = Math.max(0.2, p.period); rockRun.t0 = now - ph * rockRun.period * 1000; }
     if (p.amp !== undefined) rockRun.amp = p.amp;
@@ -6238,6 +6324,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
   function rockStep(now) {
     var run = rockRun, target, finished = false;
     if (!run) return;
+    if (run.prec) { precStep(run, now); return; }
     if (run.ret) {
       var s = (now - run.ret.t0) / 1000 / ROCK_RETURN;
       if (s >= 1) { target = 0; finished = true; } else target = run.ret.th0 * 0.5 * (1 + Math.cos(Math.PI * s));
@@ -6260,8 +6347,30 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     var both = state.rockBoth === true, n = rockLegalSteps(state.rockSteps, both), fps = Math.max(1, Math.min(60, Math.round(state.videoFps) || 30));
     return { axis: state.rockAxis, dir: state.rockDir, axisVec: rockAxisVector(state.rockAxis), sign: rockSignFor(state.rockDir), amp: Math.max(0.1, Math.min(180, state.rockAngle)) * Math.PI / 180, ampDeg: Math.max(0.1, Math.min(180, state.rockAngle)), both: both, momentum: state.rockMomentum !== false, steps: n, fps: fps, period: n / fps, cycles: Math.max(1, Math.min(20, Math.round(state.rockCycles) || 1)) };
   }
+  /* what the Export > Video precession settings describe: one revolution of the tilt is one cycle of N frames, phi = 2 pi i / N */
+  function videoPrecConfig() {
+    var n = Math.max(8, Math.min(1440, Math.round(state.precSteps) || 120)), fps = Math.max(1, Math.min(60, Math.round(state.videoFps) || 30)), deg = Math.max(0.1, Math.min(60, state.precAngle));
+    return { dir: state.precDir === -1 ? -1 : 1, mu: deg * Math.PI / 180, muDeg: deg, steps: n, fps: fps, period: n / fps, cycles: Math.max(1, Math.min(20, Math.round(state.precCycles) || 1)) };
+  }
+  function videoSwayConfig() {
+    var n = Math.max(8, Math.min(1440, Math.round(state.swaySteps) || 180)), fps = Math.max(1, Math.min(60, Math.round(state.videoFps) || 30)), deg = Math.max(0.1, Math.min(45, state.swayAngle));
+    var m = swayAmps(deg, state.swayAspect, state.swayShape);
+    return { A: m.A, B: m.B, hx: m.hx, vy: m.vy, angleDeg: deg, steps: n, fps: fps, period: n / fps, cycles: Math.max(1, Math.min(20, Math.round(state.swayCycles) || 1)) };
+  }
   function previewVideoRocking() {
     if (state.videoExporting) { setStatus("A video export is in progress.", true); return; }
+    if (state.videoType === "sway") {
+      var sc = videoSwayConfig();
+      startSway("preview", sc);
+      setStatus("Previewing the sway (" + sc.steps + " frames per cycle at " + sc.fps + " fps = " + sc.period.toFixed(2) + " s per cycle, up to " + sc.angleDeg + "°). Press Stop to go back to the starting view.", false);
+      return;
+    }
+    if (state.videoType === "prec") {
+      var pc = videoPrecConfig();
+      startPrec("preview", pc);
+      setStatus("Previewing the precession (" + pc.steps + " frames per revolution at " + pc.fps + " fps = " + pc.period.toFixed(2) + " s per revolution, cone angle " + pc.muDeg + "°). Press Stop to go back to the starting view.", false);
+      return;
+    }
     var c = videoRockConfig();
     startRock("preview", c);
     setStatus("Previewing the rocking motion (" + c.steps + " frames per cycle at " + c.fps + " fps = " + c.period.toFixed(2) + " s per swing). Press Stop to go back to the starting view.", false);
@@ -6270,8 +6379,21 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     if (rockRun && rockRun.kind === "preview") { stopRock(false); setStatus("Preview stopped; the view is returning to where it started.", false); }
   }
   function startAutoRotate() {
-    if (state.videoExporting) { setStatus("A video export is in progress -- can't autorotate at the same time.", true); return; }
+    if (state.videoExporting) { setStatus("A video export is in progress -- can't animate at the same time.", true); return; }
     stopRock(true); /* a running preview or an earlier rocking swing hands the view back first */
+    if (state.autoRotateMode === "sway") {
+      state.autoRotating = true; autoRotateLastT = null;
+      var swm = swayAmps(state.autoSwayAngle, state.autoSwayAspect, state.autoSwayShape);
+      startSway("auto", { A: swm.A, B: swm.B, hx: swm.hx, vy: swm.vy, period: state.autoSwayPeriod });
+      syncAutoRotateButtons();
+      return;
+    }
+    if (state.autoRotateMode === "prec") {
+      state.autoRotating = true; autoRotateLastT = null;
+      startPrec("auto", { mu: Math.max(0.1, state.autoPrecAngle) * Math.PI / 180, period: state.autoPrecPeriod, dir: state.autoPrecDir });
+      syncAutoRotateButtons();
+      return;
+    }
     if (state.autoRotateMode === "rock") {
       state.autoRotating = true; autoRotateLastT = null;
       startRock("auto", { axisVec: rockAxisVector(state.autoRotateAxis), sign: rockSignFor(state.autoRotateDir), amp: Math.max(0.5, state.autoRockAngle) * Math.PI / 180, period: state.autoRockPeriod, both: state.autoRockBoth === true, momentum: state.autoRockMomentum !== false });
@@ -6316,7 +6438,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
        redraft while an export is running leaves the canvas showing only
        what the export explicitly rendered, eliminating the race. */
     if (rockRun && !state.videoExporting) rockStep(performance.now()); /* a live rocking swing (video preview or autorotate rocking) */
-    if (state.autoRotating && state.autoRotateMode !== "rock" && !state.videoExporting) {
+    if (state.autoRotating && state.autoRotateMode === "spin" && !state.videoExporting) {
       var arNow = performance.now();
       var arDt = (autoRotateLastT !== null) ? (arNow - autoRotateLastT) / 1000 : 0;
       autoRotateLastT = arNow;
@@ -19888,7 +20010,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       videoAxis: state.videoAxis, videoSteps: state.videoSteps, videoScale: state.videoScale,
       videoDirection: state.videoDirection, videoFormat: state.videoFormat,
       videoFps: state.videoFps,
-      videoType: state.videoType, rockAxis: state.rockAxis, rockDir: state.rockDir, rockAngle: state.rockAngle, rockSteps: state.rockSteps, rockBoth: state.rockBoth, rockMomentum: state.rockMomentum, rockCycles: state.rockCycles,
+      videoType: state.videoType, rockAxis: state.rockAxis, rockDir: state.rockDir, rockAngle: state.rockAngle, rockSteps: state.rockSteps, rockBoth: state.rockBoth, rockMomentum: state.rockMomentum, rockCycles: state.rockCycles, precAngle: state.precAngle, precDir: state.precDir, precSteps: state.precSteps, precCycles: state.precCycles, swayAngle: state.swayAngle, swayAspect: state.swayAspect, swayShape: state.swayShape, swaySteps: state.swaySteps, swayCycles: state.swayCycles,
       showUnitCell: state.showUnitCell, unitCellColor: state.unitCellColor,
       unitCellThickness: state.unitCellThickness, unitCellAxisColors: state.unitCellAxisColors,
       showAxisKey: state.showAxisKey, axisKeyZoom: state.axisKeyZoom,
@@ -20134,7 +20256,16 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     if (data.videoDirection === 1 || data.videoDirection === -1) state.videoDirection = data.videoDirection;
     if (data.videoFormat === "avi" || data.videoFormat === "mp4") state.videoFormat = data.videoFormat;
     if (typeof data.videoFps === "number" && isFinite(data.videoFps)) state.videoFps = data.videoFps;
-    if (data.videoType === "spin" || data.videoType === "rock") state.videoType = data.videoType;
+    if (data.videoType === "spin" || data.videoType === "rock" || data.videoType === "prec" || data.videoType === "sway") state.videoType = data.videoType;
+    if (typeof data.swayAngle === "number" && isFinite(data.swayAngle)) state.swayAngle = data.swayAngle;
+    if (typeof data.swayAspect === "number" && isFinite(data.swayAspect)) state.swayAspect = data.swayAspect;
+    if (typeof data.swayShape === "string" && SWAY_SHAPES[data.swayShape]) state.swayShape = data.swayShape;
+    if (typeof data.swaySteps === "number" && isFinite(data.swaySteps)) state.swaySteps = data.swaySteps;
+    if (typeof data.swayCycles === "number" && isFinite(data.swayCycles)) state.swayCycles = data.swayCycles;
+    if (typeof data.precAngle === "number" && isFinite(data.precAngle)) state.precAngle = data.precAngle;
+    if (data.precDir === 1 || data.precDir === -1) state.precDir = data.precDir;
+    if (typeof data.precSteps === "number" && isFinite(data.precSteps)) state.precSteps = data.precSteps;
+    if (typeof data.precCycles === "number" && isFinite(data.precCycles)) state.precCycles = data.precCycles;
     if (data.rockAxis === "x" || data.rockAxis === "y" || data.rockAxis === "z") state.rockAxis = data.rockAxis;
     if (data.rockDir === 1 || data.rockDir === -1) state.rockDir = data.rockDir;
     if (typeof data.rockAngle === "number" && isFinite(data.rockAngle)) state.rockAngle = data.rockAngle;
@@ -23844,10 +23975,12 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<li><b>Apply to</b> chooses host, guest, voids, channels, molecular surface and unit cell. A surface that is not cut still hides what it encloses, so tick Molecular surface, or hide the surface, to see inside it.</li>" +
       "<li><b>Solid cut faces</b> closes the cut ends with a flat colour instead of leaving hollow shells; the tick boxes below it choose which kinds of object get one.</li></ul>" },
     video: { title: "Video", html:
-      "<p>Records the current view as a video, either a full turn or a rocking swing made to play on a loop.</p>" +
+      "<p>Records the current view as a video: a full turn, a rocking swing, a precession, or a sway, the last three made to play on a loop.</p>" +
       "<h3>Choose a kind</h3><ul>" +
-      "<li><b>Rotation</b> is one full 360&deg; turn about a view axis, in the number of steps you give.</li>" +
-      "<li><b>Rocking</b> swings back and forth. <b>Rock about</b> picks the axis (its sign is the first direction) and <b>Angle</b> the swing in degrees.</li>" +
+      "<li><b>Spin</b> is one full 360&deg; turn about a view axis, in the number of steps you give.</li>" +
+      "<li><b>Rock</b> swings back and forth. <b>Rock about</b> picks the axis (its sign is the first direction) and <b>Angle</b> the swing in degrees.</li>" +
+      "<li><b>Precess</b> circles the viewing axis of the model on a cone about the line of sight, without the model turning. Set the <b>Cone angle</b>, the direction, the <b>Frames per revolution</b> and the <b>Revolutions in the file</b>; one revolution is the loop.</li>" +
+      "<li><b>Sway</b> moves the line of sight along a figure-eight (or another pattern) about the starting view. Set the <b>Pattern</b>, the <b>Angle</b> (the wider swing), the <b>Height</b> (the narrower swing as a percentage of it), the <b>Frames per cycle</b> and the <b>Cycles in the file</b>; one cycle is the loop.</li>" +
       "<li><b>One side</b> goes out and back; <b>Both sides</b> swings from minus the angle to plus the angle.</li>" +
       "<li><b>Momentum</b> slows the swing at each end, like a pendulum; off gives constant speed.</li>" +
       "<li><b>Frames per cycle</b> sets the smoothness and length of one swing, and the note under the settings gives the seconds. One cycle is enough for a loop.</li></ul>" +
@@ -25147,11 +25280,12 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     }
     refreshClipList(); syncClipUi(); updateClipPlane(true);
 
-    var autorotateBody = subsection(cifDispC, "Autorotate", false, function (isOpen) { if (!isOpen) stopAutoRotate(); });
-    var autoModeRadios = radioRow(autorotateBody, "autoRotateMode", [["spin", "Continuous spin"], ["rock", "Rocking"]], state.autoRotateMode, function (v) {
+    var autorotateBody = subsection(cifDispC, "Animate", false, function (isOpen) { if (!isOpen) stopAutoRotate(); });
+    var autoModeRadios = radioRow(autorotateBody, "autoRotateMode", [["spin", "Spin"], ["rock", "Rock"], ["prec", "Precess"], ["sway", "Sway"]], state.autoRotateMode, function (v) {
       stopAutoRotate(true); state.autoRotateMode = v; syncAutoRotateModeUi();
     });
-    autoModeRadios.inputs.spin.parentNode.title = "Turn the model round and round."; autoModeRadios.inputs.rock.parentNode.title = "Swing the model back and forth.";
+    autoModeRadios.inputs.spin.parentNode.title = "Turn the model round and round."; autoModeRadios.inputs.rock.parentNode.title = "Swing the model back and forth."; autoModeRadios.inputs.prec.parentNode.title = "The viewing axis of the model circles on a cone about the line of sight, without the model turning."; autoModeRadios.inputs.sway.parentNode.title = "A gentle sway: the line of sight traces a figure-eight (or another Lissajous figure) about the starting view.";
+    autoModeRadios.wrap.style.justifyContent = "space-between"; /* the four kinds span the width of the panel */
     var autoRotateAxisRow = radioRow(autorotateBody, "autoRotateAxisDir",
       [["+x", "+X"], ["-x", "−X"], ["+y", "+Y"], ["-y", "−Y"], ["+z", "+Z"], ["-z", "−Z"]],
       (state.autoRotateDir === -1 ? "-" : "+") + state.autoRotateAxis,
@@ -25168,7 +25302,22 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     autoSwingRadios.inputs.one.parentNode.title = "Starting view → +angle → back to the starting view."; autoSwingRadios.inputs.both.parentNode.title = "−angle ⇄ +angle, through the starting view.";
     var autoRockMomCb = toggle(autoRockWrap, "Momentum (ease at the ends)", state.autoRockMomentum, function (b) { state.autoRockMomentum = b; rockRetune({ momentum: b }); });
     autoRockMomCb.id = "autoRockMomentumTg"; autoRockMomCb.title = "On: slow down to a stop at each limit, start back slowly, fastest in the middle (a pendulum). Off: constant speed, reversing at once at each limit.";
-    function syncAutoRotateModeUi() { autoSpinWrap.style.display = state.autoRotateMode === "rock" ? "none" : ""; autoRockWrap.style.display = state.autoRotateMode === "rock" ? "" : "none"; }
+    var autoPrecWrap = el("div", "subwrap"); autorotateBody.appendChild(autoPrecWrap);
+    slider(autoPrecWrap, "cone angle", 0.5, 45, 0.5, state.autoPrecAngle, "°", function (v) { state.autoPrecAngle = v; rockRetune({ mu: Math.max(0.1, v) * Math.PI / 180 }); }).num.title = "Half-angle of the cone: how far the view axis of the model is tilted away from the line of sight.";
+    slider(autoPrecWrap, "time per revolution", 1, 30, 0.5, state.autoPrecPeriod, "s", function (v) { state.autoPrecPeriod = v; rockRetune({ period: v }); });
+    var autoPrecDirRadios = radioRow(autoPrecWrap, "autoPrecDir", [["ccw", "Anticlockwise"], ["cw", "Clockwise"]], state.autoPrecDir === -1 ? "cw" : "ccw", function (v) { state.autoPrecDir = (v === "cw") ? -1 : 1; rockRetune({ dir: state.autoPrecDir }); });
+    autoPrecDirRadios.inputs.ccw.parentNode.title = "The tilt goes round anticlockwise as you look at the screen."; autoPrecDirRadios.inputs.cw.parentNode.title = "The tilt goes round clockwise as you look at the screen.";
+    var autoSwayWrap = el("div", "subwrap"); autorotateBody.appendChild(autoSwayWrap);
+    function swayLiveAuto() { var m = swayAmps(state.autoSwayAngle, state.autoSwayAspect, state.autoSwayShape); rockRetune({ A: m.A, B: m.B }); }
+    var autoSwayShapeSel = select(autoSwayWrap, "pattern", Object.keys(SWAY_SHAPES).map(function (k) { return [k, SWAY_SHAPES[k].name]; }), state.autoSwayShape, function (v) { state.autoSwayShape = v; if (state.autoRotating && state.autoRotateMode === "sway") startAutoRotate(); });
+    slider(autoSwayWrap, "angle", 1, 45, 1, state.autoSwayAngle, "°", function (v) { state.autoSwayAngle = v; swayLiveAuto(); }).num.title = "The wider swing of the line of sight, in degrees.";
+    slider(autoSwayWrap, "height", 20, 100, 5, state.autoSwayAspect, "%", function (v) { state.autoSwayAspect = v; swayLiveAuto(); }).num.title = "The narrower swing as a percentage of the wider one: 100 makes the figure as tall as it is wide.";
+    slider(autoSwayWrap, "time per cycle", 2, 30, 0.5, state.autoSwayPeriod, "s", function (v) { state.autoSwayPeriod = v; rockRetune({ period: v }); });
+    function syncAutoRotateModeUi() {
+      var m = state.autoRotateMode;
+      autoSpinWrap.style.display = m === "spin" ? "" : "none"; autoRockWrap.style.display = m === "rock" ? "" : "none"; autoPrecWrap.style.display = m === "prec" ? "" : "none"; autoSwayWrap.style.display = m === "sway" ? "" : "none";
+      autoRotateAxisRow.wrap.style.display = (m === "prec" || m === "sway") ? "none" : ""; /* a precession and a sway are about the view itself, so there is no axis to choose */
+    }
     syncAutoRotateModeUi();
     var autoRotatePlayRow = el("div", "btnrow");
     var autoRotatePlayBtn = button(autoRotatePlayRow, "Play", "ghost", function () { startAutoRotate(); });
@@ -25797,9 +25946,10 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       row.appendChild(inp); return inp;
     }
     /* what kind of video: one choice that decides which settings are shown and what the button below exports */
-    var videoTypeRadios = radioRow(videoBody, "videoType", [["spin", "Rotation (360°)"], ["rock", "Rocking"]], state.videoType, function (v) { state.videoType = v; syncVideoTypeUi(); });
-    videoTypeRadios.inputs.spin.parentNode.title = "One full turn about a view axis."; videoTypeRadios.inputs.rock.parentNode.title = "A smooth swing back and forth, made to loop.";
+    var videoTypeRadios = radioRow(videoBody, "videoType", [["spin", "Spin"], ["rock", "Rock"], ["prec", "Precess"], ["sway", "Sway"]], state.videoType, function (v) { state.videoType = v; syncVideoTypeUi(); });
+    videoTypeRadios.inputs.spin.parentNode.title = "One full turn about a view axis."; videoTypeRadios.inputs.rock.parentNode.title = "A smooth swing back and forth, made to loop."; videoTypeRadios.inputs.prec.parentNode.title = "The viewing axis of the model circles on a cone about the line of sight, without the model turning; one revolution makes a loop."; videoTypeRadios.inputs.sway.parentNode.title = "The line of sight traces a figure-eight (or another Lissajous figure) about the starting view; one cycle makes a loop.";
 
+    videoTypeRadios.wrap.style.justifyContent = "space-between";
     /* --- rotation settings --- */
     var videoSpinWrap = el("div", "subwrap"); videoBody.appendChild(videoSpinWrap);
     var spinRow1 = el("div", "ctl-inline");
@@ -25815,7 +25965,9 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     var videoRockWrap = el("div", "subwrap"); videoBody.appendChild(videoRockWrap);
     function rockLive(partial) { /* a running preview follows the settings as they change */
       updateRockInfo();
-      if (rockRun && rockRun.kind === "preview" && !rockRun.ret) {
+      if (rockRun && rockRun.kind === "preview" && !rockRun.ret && rockRun.sway) { var scl = videoSwayConfig(); rockRetune({ A: scl.A, B: scl.B, period: scl.period }); }
+      else if (rockRun && rockRun.kind === "preview" && !rockRun.ret && rockRun.prec) { var pcl = videoPrecConfig(); rockRetune({ mu: pcl.mu, period: pcl.period, dir: pcl.dir }); }
+      else if (rockRun && rockRun.kind === "preview" && !rockRun.ret) {
         if (partial === "restart") previewVideoRocking();
         else { var c = videoRockConfig(); rockRetune({ amp: c.amp, period: c.period, momentum: c.momentum }); }
       }
@@ -25848,7 +26000,54 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     function updateRockInfo() {
       var c = videoRockConfig(), asked = Math.round(state.rockSteps);
       videoRockInfo.textContent = c.steps + " frames" + (c.steps !== asked ? " (from " + asked + ")" : "") + " · " + c.period.toFixed(2) + " s per cycle";
+      var pc = videoPrecConfig(); videoPrecInfo.textContent = pc.steps + " frames per revolution · " + pc.period.toFixed(2) + " s per revolution";
+      var sw = videoSwayConfig(); videoSwayInfo.textContent = sw.steps + " frames per cycle · " + sw.period.toFixed(2) + " s per cycle";
     }
+    /* --- sway settings --- */
+    var videoSwayWrap = el("div", "subwrap"); videoBody.appendChild(videoSwayWrap);
+    var swayShapeSel = select(videoSwayWrap, "pattern", Object.keys(SWAY_SHAPES).map(function (k) { return [k, SWAY_SHAPES[k].name]; }), state.swayShape, function (v) { state.swayShape = v; rockLive("restart"); });
+    var swayRow1 = el("div", "ctl-inline");
+    swayRow1.appendChild(el("label", "plain", "angle"));
+    var swayAngleInp = numField(swayRow1, state.swayAngle, 0.1, 45, 0.5, function (v) { state.swayAngle = v; rockLive(); });
+    swayAngleInp.id = "swayAngleInput"; swayAngleInp.title = "The wider swing of the line of sight, in degrees.";
+    swayRow1.appendChild(el("span", "unit", "°"));
+    swayRow1.appendChild(el("label", "plain", "height"));
+    var swayAspectInp = numField(swayRow1, state.swayAspect, 5, 100, 5, function (v) { state.swayAspect = v; rockLive(); });
+    swayAspectInp.id = "swayAspectInput"; swayAspectInp.title = "The narrower swing as a percentage of the wider one: 100 makes the figure as tall as it is wide.";
+    swayRow1.appendChild(el("span", "unit", "%"));
+    videoSwayWrap.appendChild(swayRow1);
+    var swayRow2 = el("div", "ctl-inline");
+    swayRow2.appendChild(el("label", "plain", "frames per cycle"));
+    var swayStepsInp = numField(swayRow2, state.swaySteps, 8, 1440, 1, function (v) { state.swaySteps = v; rockLive(); });
+    swayStepsInp.id = "swayStepsInput"; swayStepsInp.title = "Frames in one trip round the figure; with the frame rate this sets the speed.";
+    videoSwayWrap.appendChild(swayRow2);
+    var swayRow3 = el("div", "ctl-inline");
+    swayRow3.appendChild(el("label", "plain", "cycles in the file"));
+    var swayCyclesInp = numField(swayRow3, state.swayCycles, 1, 20, 1, function (v) { state.swayCycles = v; updateRockInfo(); });
+    swayCyclesInp.id = "swayCyclesInput"; swayCyclesInp.title = "One cycle is enough for a video that is played on a loop; more repeat the same frames for a player that does not loop.";
+    videoSwayWrap.appendChild(swayRow3);
+    var videoSwayInfo = el("div", "hint"); videoSwayInfo.style.color = "var(--ink-mid)"; videoSwayInfo.id = "videoSwayInfo"; videoSwayWrap.appendChild(videoSwayInfo);
+    /* --- precession settings --- */
+    var videoPrecWrap = el("div", "subwrap"); videoBody.appendChild(videoPrecWrap);
+    var precDirRadios = radioRow(videoPrecWrap, "precDir", [["ccw", "Anticlockwise"], ["cw", "Clockwise"]], state.precDir === -1 ? "cw" : "ccw", function (v) { state.precDir = (v === "cw") ? -1 : 1; rockLive(); });
+    precDirRadios.inputs.ccw.parentNode.title = "The tilt goes round anticlockwise as you look at the screen."; precDirRadios.inputs.cw.parentNode.title = "The tilt goes round clockwise as you look at the screen.";
+    var precRow1 = el("div", "ctl-inline");
+    precRow1.appendChild(el("label", "plain", "cone angle"));
+    var precAngleInp = numField(precRow1, state.precAngle, 0.1, 60, 0.5, function (v) { state.precAngle = v; rockLive(); });
+    precAngleInp.id = "precAngleInput"; precAngleInp.title = "Half-angle of the cone: how far the view axis of the model is tilted away from the line of sight, in degrees.";
+    precRow1.appendChild(el("span", "unit", "°"));
+    videoPrecWrap.appendChild(precRow1);
+    var precRow2 = el("div", "ctl-inline");
+    precRow2.appendChild(el("label", "plain", "frames per revolution"));
+    var precStepsInp = numField(precRow2, state.precSteps, 8, 1440, 1, function (v) { state.precSteps = v; rockLive(); });
+    precStepsInp.id = "precStepsInput"; precStepsInp.title = "Frames in one complete revolution of the tilt; with the frame rate this sets the speed.";
+    videoPrecWrap.appendChild(precRow2);
+    var precRow3 = el("div", "ctl-inline");
+    precRow3.appendChild(el("label", "plain", "revolutions in the file"));
+    var precCyclesInp = numField(precRow3, state.precCycles, 1, 20, 1, function (v) { state.precCycles = v; updateRockInfo(); });
+    precCyclesInp.id = "precCyclesInput"; precCyclesInp.title = "One revolution is enough for a video that is played on a loop; more repeat the same frames for a player that does not loop.";
+    videoPrecWrap.appendChild(precRow3);
+    var videoPrecInfo = el("div", "hint"); videoPrecInfo.style.color = "var(--ink-mid)"; videoPrecInfo.id = "videoPrecInfo"; videoPrecWrap.appendChild(videoPrecInfo);
 
     /* --- settings common to both kinds --- */
     videoBody.appendChild(el("div", "subdiv"));
@@ -25889,15 +26088,15 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     var rockPreviewWrap = el("div", "subwrap"); videoBody.appendChild(rockPreviewWrap);
     rockPreviewWrap.appendChild(el("div", "subdiv"));
     var rockPreviewRow = el("div", "btnrow");
-    var rockPreviewBtn = button(rockPreviewRow, "Preview", "ghost", previewVideoRocking); rockPreviewBtn.title = "Rock the view on screen with these settings until you press Stop; it then glides back to where it started."; rockPreviewBtn.id = "rockPreviewBtn";
+    var rockPreviewBtn = button(rockPreviewRow, "Preview", "ghost", previewVideoRocking); rockPreviewBtn.title = "Show the motion on screen with these settings until you press Stop; the view then glides back to where it started."; rockPreviewBtn.id = "rockPreviewBtn";
     var rockStopBtn = button(rockPreviewRow, "Stop", "ghost", stopVideoRockingPreview); rockStopBtn.id = "rockStopBtn"; rockStopBtn.disabled = true;
     rockPreviewWrap.appendChild(rockPreviewRow);
-    var videoRow = el("div", "btnrow"); var videoBtn = button(videoRow, "Export rotation video", "ghost", function () { exportRotationVideo(state.videoType === "rock" ? "rock" : "spin"); }); videoBtn.id = "exportVideoBtn"; videoBody.appendChild(videoRow);
+    var videoRow = el("div", "btnrow"); var videoBtn = button(videoRow, "Export rotation video", "ghost", function () { exportRotationVideo(state.videoType === "rock" ? "rock" : (state.videoType === "prec" ? "prec" : (state.videoType === "sway" ? "sway" : "spin"))); }); videoBtn.id = "exportVideoBtn"; videoBody.appendChild(videoRow);
     function syncVideoTypeUi() {
-      var rock = state.videoType === "rock";
-      videoSpinWrap.style.display = rock ? "none" : ""; videoRockWrap.style.display = rock ? "" : "none"; rockPreviewWrap.style.display = rock ? "" : "none";
-      videoBtn.textContent = rock ? "Export rocking video" : "Export rotation video";
-      if (!rock) stopRock(false);
+      var rock = state.videoType === "rock", prec = state.videoType === "prec", sway = state.videoType === "sway", other = rock || prec || sway;
+      videoSpinWrap.style.display = other ? "none" : ""; videoRockWrap.style.display = rock ? "" : "none"; videoPrecWrap.style.display = prec ? "" : "none"; videoSwayWrap.style.display = sway ? "" : "none"; rockPreviewWrap.style.display = other ? "" : "none";
+      videoBtn.textContent = rock ? "Export rocking video" : (prec ? "Export precession video" : (sway ? "Export sway video" : "Export rotation video"));
+      if (rockRun && rockRun.kind === "preview" && (rockRun.sway ? !sway : (rockRun.prec ? !prec : !rock))) stopRock(false); /* a preview of the other kind of motion ends */
       updateRockInfo();
     }
     syncVideoTypeUi();
@@ -26284,11 +26483,13 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<p>Atoms don't emit any light themselves -- <b>atom roughness</b>, <b>atom metalness</b>, and <b>reflection strength</b> (Material panel) control how they respond to the scene's lighting instead. Lower roughness gives a glossier, more reflective surface; higher metalness moves it from a plastic-like look toward bare metal (useful for a striking cover-art render, less so for a conventional scientific figure); reflection strength scales how much the environment map contributes, which mainly shows up once metalness is raised. If a selected atom's highlight is hard to make out, a glossy, brightly lit atom is usually why -- the highlight itself doesn't respond to lighting at all, but a very bright, reflective atom underneath it can still make thin highlight lines harder to see by contrast.</p>" +
       "<p><b>Export image (PNG)</b> always renders at full tessellation regardless of the high detail toggle, at the chosen <b>export resolution</b> multiple of the current view size, then restores the interactive settings afterward -- so a quick figure never requires manually maxing out quality settings first. In Chrome or Edge it opens a normal save dialog, defaulting to the folder of whichever host CIF was most recently dropped onto the app (not one opened via the file browser button, since only a genuine drag hands over that information) -- other browsers fall back to a plain download instead. That last-used folder is only remembered for the current session, not saved between visits. If <b>Show axis key</b> (Display) is on, the key is drawn into the exported image at its current on-screen position, size, and orientation, same as it appears in the live view -- a part currently overlapping the sidebar or header is clipped out of the export too, matching what's actually visible on screen.</p>" +
       "<p><b>Transparent background</b> drops the background colour (and briefly suspends fog, which would otherwise leave a visible tint) for that one exported frame, then restores both immediately afterward -- normal interactive display is never affected. Images are made one at a time: a Copy or Export pressed while the previous image is still being prepared waits for it, so the background and fog are always put back as they were. It applies to both Export image and <b>Copy image to clipboard</b>, which renders the same way but places the PNG directly on the system clipboard for pasting into another document instead of saving a file; transparency survives that route too; wherever it lands, whether it stays transparent from there depends on the receiving application. Clipboard copying needs a recent click to work (this triggers it) and isn't available in every browser -- Export image (PNG) always works as the fallback.</p>" +
-      "<p><b>Video</b> (Export panel) records the view as a video file, either as <b>Rotation</b> (one full 360&deg; turn about a view axis, in the number of <i>steps</i> you give) or as <b>Rocking</b>, a swing back and forth that is made to be played on a loop. Pick the kind with the radio buttons at the top; only the settings that belong to it are shown, and the button at the bottom exports that kind. <b>fps</b>, <b>size</b> and <b>format</b> (AVI uncompressed, or the much smaller MP4) apply to both. The axis is a view axis: +Y is the turntable (vertical) axis, +X tumbles the model forwards, +Z rolls it, and a plus sign always means the right-hand-rule rotation of the model.</p>" +
-      "<p><b>Rocking video.</b> The recording starts at the view you have now. Choose <b>rock about</b> (the axis, and with its sign the direction of the first swing), the <b>angle</b> (degrees, fractions allowed), <b>frames per cycle</b> and <b>cycles in the file</b>. <b>One side</b> swings from the starting view to +angle and back; <b>Both sides</b> swings from &minus;angle to +angle through the starting view. With <b>Momentum</b> ticked (the default) the swing slows as it nears a limit, stops there and starts back slowly, and is fastest in the middle, exactly like a pendulum (a sinusoid); unticked, it moves at constant speed and turns round at once at each limit. The line under the settings states in words what will be recorded, the length of a cycle in seconds, and the largest step per frame.</p>" +
+      "<p><b>Video</b> (Export panel) records the view as a video file, either as <b>Spin</b> (one full 360&deg; turn about a view axis, in the number of <i>steps</i> you give), as <b>Rock</b>, a swing back and forth that is made to be played on a loop, as <b>Precess</b> (the model wobbles about the view axis), or as <b>Sway</b> (the line of sight traces a gentle figure-eight). Pick the kind with the radio buttons at the top; only the settings that belong to it are shown, and the button at the bottom exports that kind. <b>fps</b>, <b>size</b> and <b>format</b> (AVI uncompressed, or the much smaller MP4) apply to both. The axis is a view axis: +Y is the turntable (vertical) axis, +X tumbles the model forwards, +Z rolls it, and a plus sign always means the right-hand-rule rotation of the model.</p>" +
+      "<p><b>Rocking video.</b> The recording starts at the view you have now. Choose <b>rock about</b> (the axis, and with its sign the direction of the first swing), the <b>angle</b> (degrees, fractions allowed; 15 by default), <b>frames per cycle</b> and <b>cycles in the file</b>. <b>One side</b> swings from the starting view to +angle and back; <b>Both sides</b> swings from &minus;angle to +angle through the starting view and is the default, as is Display > Animate. With <b>Momentum</b> ticked (the default) the swing slows as it nears a limit, stops there and starts back slowly, and is fastest in the middle, exactly like a pendulum (a sinusoid); unticked, it moves at constant speed and turns round at once at each limit. The line under the settings states in words what will be recorded, the length of a cycle in seconds, and the largest step per frame.</p>" +
       "<p><b>Why it loops without a hitch.</b> The cycle is the N samples at phase k/N (k = 0 &hellip; N&minus;1) of a periodic curve, so the last frame is one ordinary step <i>before</i> the first and is never a copy of it; the first frame is not shown twice at the join, and the speed is continuous across it in the second and every later cycle (with momentum, so is the acceleration). To make the turning points fall exactly on a frame, so that the angle you asked for is exactly the angle reached, the number of frames is moved to the nearest multiple of 2 (one side) or 4 (both sides); the line under the settings says when it has done so. One cycle is enough for a video that is played on a loop; <i>cycles in the file</i> only repeats the same frames for a player that does not loop.</p>" +
+      "<p><b>Precession video.</b> The model wobbles about the view axis: the line of the model that points along your line of sight circles on a cone of half-angle <b>cone angle</b> (degrees) around it, once per revolution, while the model itself does not turn about the view axis, so every frame is the starting view tilted towards a direction that goes steadily round (the motion of a crystal in a precession camera). Choose the <b>direction</b> (anticlockwise or clockwise as seen on the screen), the <b>cone angle</b>, the <b>frames per revolution</b> (with the frame rate this sets the speed) and the <b>revolutions in the file</b>. The view you have when you press Export is the centre of the cone, and one revolution is the loop: the frames are the samples at phase k/N of a periodic motion, so it plays on a loop with no repeated frame, exactly as for rocking. <b>Preview</b> and <b>Stop</b> work as for rocking.</p>" +
+      "<p><b>Sway video.</b> The line of sight traces a gentle Lissajous figure about the starting view, by default a figure-eight lying on its side, without the model changing scale or centre and without twisting about the view axis. Choose the <b>pattern</b> (figure-eight, upright figure-eight, or a three-lobed loop), the <b>angle</b> (the wider swing, in degrees), the <b>height</b> (the narrower swing as a percentage of the wider one), the <b>frames per cycle</b> and the <b>cycles in the file</b>. The recording starts at the view you have now, which the figure passes through at the start and half way round; one cycle is the loop, and the frames are the samples at phase k/N of a periodic curve, so it plays on a loop with no repeated frame. <b>Preview</b> and <b>Stop</b> work as for rocking.</p>" +
       "<p><b>Preview and Stop.</b> <b>Preview</b> rocks the view on the screen with exactly these settings (at the tempo of the video: frames per cycle divided by fps), following any setting you change while it runs, until you press <b>Stop</b>, when it glides back to the view you started from. Closing the Video panel stops it too, and so does starting an export.</p>" +
-      "<p><b>Autorotate</b> (Display panel) turns the model on the screen without recording anything. <b>Continuous spin</b> is the original behaviour (axis, direction and speed in degrees per second). <b>Rocking</b> swings back and forth with the same options as the rocking video (one side or both sides, momentum), set by the <b>angle</b> and the <b>time per cycle</b> in seconds; the axis and direction above apply to it (the sign is the direction of the first swing). <b>Play</b> rocks about the view you start from, <b>Stop</b> glides back to that view, and dragging the model while it rocks moves the centre of the swing.</p>" +
+      "<p><b>Animate</b> (Display panel; it used to be called Autorotate) moves the model on the screen without recording anything. <b>Spin</b> is the original behaviour (axis, direction and speed in degrees per second). <b>Rock</b> swings back and forth with the same options as the rocking video (one side or both sides, momentum), set by the <b>angle</b> and the <b>time per cycle</b> in seconds; the axis and direction above apply to it (the sign is the direction of the first swing). <b>Precess</b> circles the viewing axis of the model on a cone about the line of sight without the model turning, as in a precession camera; set the <b>cone angle</b>, the <b>time per revolution</b> in seconds and the direction (anticlockwise or clockwise as seen on the screen); it needs no axis, since it goes about the view axis itself. <b>Sway</b> moves the line of sight along a figure-eight (or another pattern) about the starting view: choose the <b>pattern</b>, the <b>angle</b> (the wider swing), the <b>height</b> (the narrower swing as a percentage of it) and the <b>time per cycle</b> in seconds; like precession it needs no axis. <b>Play</b> moves the model about the view you start from, <b>Stop</b> glides back to that view, and dragging the model while it rocks, precesses or sways moves the centre of the motion.</p>" +
       "<p><b>Save model...</b> and <b>Load model...</b>, at the bottom of the <b>Export</b> panel, save or restore the complete working state to a single file -- every atom including everything Grow has added, the CIF symmetry data, colour and radius overrides, bond and display settings, and the camera's exact position -- so a session can be closed and reopened later exactly where it was left, without repeating the grow steps. This is a separate, deliberate snapshot of one specific piece of work, distinct from the automatic per-browser memory of element radii and display settings described below -- a saved model file is portable and permanent, and is the one to keep if the work needs to survive a change of computer or browser. Manually added and cut bonds are saved with it. The original CIF text is not part of it, so <b>Save CIF</b> is not available after a project has been loaded. <b>Compress as zip</b>, just above Save model, saves that same project data as a single JSON file inside a .zip archive instead of a plain .json -- text compresses well, so a large, heavily-grown project can end up considerably smaller on disk; remembered like any other setting. Load model... reads a .zip archive back regardless of this checkbox either way. A zip containing more than one .json file -- created by hand, one file per version of a model (e.g. <span class='mono'>Figure 1a.json</span>, <span class='mono'>Figure 1b.json</span>) then zipped together -- loads with the same prev/next/dropdown <b>Navigator</b> a multi-structure CIF uses (see \"Loading structures\" below), labelled by each .json file's own name rather than anything stored inside it, so those file names are exactly what shows up to choose between.</p>" +
       "<h3>Loading structures</h3>" +
       "<p>The <b>name of the loaded file</b> is shown in the header, in line with the left edge of the model panel (shortened with an ellipsis if it is too long for the window; hover for the full name). It follows whatever is loaded: a CIF, a saved model, another structure of a multi-structure file, and it clears when the structure is closed. The same name is listed as <i>File</i> under Structure &gt; Metadata.</p>" +
