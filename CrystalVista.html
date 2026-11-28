@@ -12488,7 +12488,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     return function (a) { return a.batch === comp; };
   }
   function handleLeftClick(clientX, clientY, mods) {
-    if (FCF.erase.on && FCF.data && IFACE.features.fcf) { fcfEraseClick(clientX, clientY); return; } /* Difference density > Erase mode */
+    if (FCF.erase.on && FCF.data) { fcfEraseClick(clientX, clientY); return; } /* Difference density > Erase mode */
     if (state.molNeighborMode) { molecularNeighborhoodClick(clientX, clientY); return; }
     if (state.voidUiMode) { handleVoidSelectClick(clientX, clientY, mods); return; }
     if (state.atomEditUiMode === "create") { createAtomAtClick(clientX, clientY); return; }
@@ -14708,6 +14708,16 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
         sp2 = rest.indexOf(" ");
         if (sp2 < 0) return false;
         return runNeighbourhoodHBMacro(rest.slice(sp2 + 1).trim(), parseFloat(rest.slice(0, sp2)));
+      case "EXPAND_ALL": /* unit (ATOM, FRAG, ASU), method (BONDS, HB, SPHERE) and, for SPHERE, the radius */
+        parts = rest.split(/\s+/);
+        if (!/^(ATOM|FRAG|ASU)$/i.test(parts[0] || "") || !/^(BONDS|HB|SPHERE)$/i.test(parts[1] || "")) return false;
+        return growExpandAll(parts[0].toLowerCase(), parts[1].toLowerCase() === "hb" ? "hb" : parts[1].toLowerCase(), parts[2] ? parseFloat(parts[2]) : undefined);
+      case "NEIGHBOURHOOD_EXPAND_ALL": case "NEIGHBORHOOD_EXPAND_ALL": /* HB, or SPHERE and its radius */
+        if (!state.isCif || state.symmetryForgotten) return false;
+        parts = rest.split(/\s+/);
+        if (/^HB$/i.test(parts[0])) return neighbourhoodExpandAll(neighbourhoodPreviewFor(true), "HB");
+        if (/^SPHERE$/i.test(parts[0]) && isFinite(parseFloat(parts[1])) && parseFloat(parts[1]) > 0) return neighbourhoodExpandAll(neighbourhoodPreviewFor(false, parseFloat(parts[1])), "SPHERE " + parseFloat(parts[1]));
+        return false;
       case "GROW_SPHERE_ATOM": case "GROW_SPHERE_FRAG": case "GROW_SPHERE_ASU":
         if (!state.isCif || state.symmetryForgotten) return false;
         sp2 = rest.indexOf(" ");
@@ -15422,7 +15432,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     }
     return false;
   }
-  function findGrowthCandidates(seedAtom, cellRange, existingOverride) {
+  function findGrowthCandidates(seedAtom, cellRange, existingOverride, marginOverride) {
     /* every not-yet-displayed symmetry image, of every asymmetric unit atom,
        within covalent bonding distance of the seed -- same distance test
        K.bonds() uses, so "connected" means the same thing everywhere in the app */
@@ -15433,7 +15443,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
        cell offsets worth trying are the few nearest the one that would put
        this (au, op) copy closest to the seed -- computed directly from the
        fractional-coordinate difference rather than searching everywhere */
-    var margin = 2;
+    var margin = marginOverride || 2;
     for (var auI = 0; auI < au.length; auI++) {
       if (au[auI].deleted) continue;
       for (var opI = 0; opI < symops.length; opI++) {
@@ -15445,14 +15455,14 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
         for (var ci = ciLo; ci <= ciHi; ci++) for (var cj = cjLo; cj <= cjHi; cj++) for (var ck = ckLo; ck <= ckHi; ck++) {
           var key = auI + ":" + opI + ":" + ci + ":" + cj + ":" + ck;
           if (existing[key]) continue;
-          var cand = generateSymmetryAtom(auI, opI, ci, cj, ck);
+          var cand = generateSymmetryPosition(auI, opI, ci, cj, ck); /* the cheap copy (no ADP) is enough to test the distance */
           var dx = cand.x - seedAtom.x, dy = cand.y - seedAtom.y, dz = cand.z - seedAtom.z;
           var d2 = dx * dx + dy * dy + dz * dz;
           if (d2 < 1e-6) continue; /* coincides with the seed itself */
           var lim = bondLimit(cand, seedAtom);
           var minD = (cand.el === "H" || seedAtom.el === "H") ? 0.4 : 1.0;
           var naturallyBonded = d2 > minD * minD && d2 < lim * lim && partsCanBond(cand, seedAtom);
-          if (naturallyBonded || enforcedGrowthBondMatches(seedAtom.auIndex, cand.auIndex, Math.sqrt(d2))) out.push(cand);
+          if (naturallyBonded || enforcedGrowthBondMatches(seedAtom.auIndex, cand.auIndex, Math.sqrt(d2))) out.push(generateSymmetryAtom(auI, opI, ci, cj, ck));
         }
       }
     }
@@ -16616,6 +16626,75 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     else { toAdd = expandToFragments(deduped); label2 = " (whole asymmetric units)"; }
     var n = commitGrownAtoms(toAdd);
     setStatus("Sphere of inclusion added " + n + " atom" + (n === 1 ? "" : "s") + " within " + radius.toFixed(2) + " " + U.ang + label2 + ".", false);
+  }
+  /* ---------------- Expand all (Grow > Mouse, Grow > Molecular neighbourhood) ----------------
+   * Every atom that is displayed now is grown as a click on it would be, with the settings of Grow > Mouse (Bonds, H-bonds or Sphere of inclusion; Atoms,
+   * Fragment or ASU), in one step and one undo; the atoms that this adds are NOT expanded in turn (press again for the next layer). In the Molecular
+   * neighbourhood the same button adds the fragment of every preview atom shown now, as if each had been clicked. The candidates found from all the atoms are
+   * gathered first (each position once) and expanded and committed together, so the result does not depend on the order of the atoms. */
+  function growBondMargin() { /* cells to try either side of the nearest one: enough for a 3.5 A reach in this cell */
+    var rc = K.cellReciprocalLengths(state.cifCell);
+    return Math.max(1, Math.min(2, Math.ceil(3.5 * Math.max(rc.astar, rc.bstar, rc.cstar))));
+  }
+  function expandAllSeeds() { /* the atoms that are drawn now */
+    var out = [];
+    if (state.showHost) out = out.concat(hydrogenFilter(hideFilter(asuFilter(state.atoms || []))));
+    if (state.showGuest) out = out.concat(hydrogenFilter(hideFilter(asuFilter(visibleGuestAtoms() || []))) || []);
+    return out.filter(function (a) { return a && !a.isCentroid && a.auIndex !== undefined; });
+  }
+  function growKeyOf(a) { return a.auIndex + ":" + a.opIndex + ":" + a.cellI + ":" + a.cellJ + ":" + a.cellK; }
+  /* the preview of the molecular neighbourhood for the given kind, computed whether or not the mode is on (the user's own settings are put back) */
+  function neighbourhoodPreviewFor(hbonds, radius) {
+    var sv = [state.molNeighborMode, state.molNeighborHBonds, state.molNeighborRadius], list;
+    state.molNeighborMode = true; state.molNeighborHBonds = !!hbonds; if (!hbonds && radius) state.molNeighborRadius = radius;
+    try { list = computeMolecularNeighborhood(); } finally { state.molNeighborMode = sv[0]; state.molNeighborHBonds = sv[1]; state.molNeighborRadius = sv[2]; }
+    return list;
+  }
+  function growExpandAll(unit, method, radius) {
+    if (!state.isCif || state.symmetryForgotten) { setStatus("Expand all needs a CIF-based structure that still has its symmetry information.", true); return false; }
+    unit = unit || state.growUnit; method = method || (state.growByHBonds ? "hb" : (state.growBySphere ? "sphere" : "bonds")); radius = radius || state.sphereRadius;
+    if (method === "sphere" && !(isFinite(radius) && radius > 0)) { setStatus("Enter a valid sphere radius first.", true); return false; }
+    var seeds = expandAllSeeds();
+    if (!seeds.length) { setStatus("There are no displayed atoms to expand.", true); return false; }
+    syncGuestAsuRootsFromCurrentPositions();
+    var cands = [], seen = {}, i;
+    function take(list) { for (var k = 0; k < list.length; k++) { var key = growKeyOf(list[k]); if (!seen[key]) { seen[key] = true; cands.push(list[k]); } } }
+    if (method === "bonds") { var mg = growBondMargin(); for (i = 0; i < seeds.length; i++) take(findGrowthCandidates(seeds[i], undefined, undefined, mg)); }
+    else { /* the preview of the neighbourhood finds, in bulk, what a click on each atom would */
+      var prev = neighbourhoodPreviewFor(method === "hb", radius);
+      take(prev.map(function (e) { return generateSymmetryAtom(e.atom.auIndex, e.atom.opIndex, e.atom.cellI, e.atom.cellJ, e.atom.cellK); }));
+    }
+    var what = method === "hb" ? "H-bonded to" : (method === "sphere" ? "within " + radius.toFixed(2) + " " + U.ang + " of" : "bonded to");
+    var deduped = [];
+    for (i = 0; i < cands.length; i++) if (!positionOccupied(cands[i].x, cands[i].y, cands[i].z, deduped)) deduped.push(cands[i]);
+    if (!deduped.length) { setStatus("Nothing new to add: no displayed atom has further symmetry-generated atoms " + what + " it.", true); return false; }
+    var added = unit === "atom" ? deduped : (unit === "frag" ? expandToConnectedFragment(deduped) : expandToFragments(deduped));
+    var n = commitGrownAtoms(added);
+    if (!n) { setStatus("Nothing new to add.", true); return false; }
+    recordMacroCommand("EXPAND_ALL " + unit.toUpperCase() + " " + (method === "hb" ? "HB" : method.toUpperCase()) + (method === "sphere" ? " " + radius : ""));
+    setStatus("Expanded all " + seeds.length + " displayed atoms: grew " + n + " atom" + (n === 1 ? "" : "s") + " " + what + " them" + (unit === "frag" ? " (connected fragments)" : (unit === "asu" ? " (whole asymmetric units)" : "")) + ".", false);
+    return true;
+  }
+  /* list: the preview entries ({atom, contacts}); the fragment of each, as molNeighborCommit would add it */
+  function neighbourhoodExpandAll(list, macroTail) {
+    if (!list.length) { setStatus("There are no preview atoms to expand.", true); return false; }
+    syncGuestAsuRootsFromCurrentPositions();
+    var cands = [], seen = {}, mg = growBondMargin();
+    list.forEach(function (e) {
+      var seed = e.atom, found = findGrowthCandidates(seed, undefined, undefined, mg).concat([seed]);
+      for (var k = 0; k < found.length; k++) { var key = growKeyOf(found[k]); if (!seen[key]) { seen[key] = true; cands.push(found[k]); } }
+    });
+    var n = commitGrownAtoms(expandToConnectedFragment(cands));
+    if (!n) { setStatus("Nothing new to add.", true); return false; }
+    recordMacroCommand("NEIGHBOURHOOD_EXPAND_ALL " + macroTail);
+    if (state.molNeighborMode) { molNeighborAtoms = computeMolecularNeighborhood(); renderStructure(); }
+    setStatus("Expanded all " + list.length + " preview atom" + (list.length === 1 ? "" : "s") + ": added " + n + " atom" + (n === 1 ? "" : "s") + " (connected fragments)." + (state.molNeighborMode ? " Molecular neighbourhood: " + molNeighborStatusText() : ""), false);
+    return true;
+  }
+  function neighbourhoodExpandAllButton() {
+    if (!state.isCif || state.symmetryForgotten) { setStatus("Expand all needs a CIF-based structure that still has its symmetry information.", true); return false; }
+    if (!state.molNeighborMode) { setStatus("Turn on Interactive grow mode (Molecular neighbourhood) first, so that the preview atoms are displayed.", true); return false; }
+    return neighbourhoodExpandAll(molNeighborAtoms.slice(), state.molNeighborHBonds ? "HB" : "SPHERE " + state.molNeighborRadius);
   }
   /* ---------------- Grow > Molecular neighbourhood ----------------
    * A Mercury-style "what's nearby" preview: every symmetry-generated
@@ -22378,7 +22457,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
   }
   function fcfBuildSurfaces() {
     fcfClearMeshes();
-    var D = FCF.data, C = FCF.cfg; if (!D || !D.map || !C.show || !IFACE.features.fcf) { FCF.last = null; if (FCF.erase.on) fcfSetEraseMode(false); fcfSyncStatus(""); return; } /* nothing is drawn while the menu is switched off in Settings */
+    var D = FCF.data, C = FCF.cfg; if (!D || !D.map || !C.show) { FCF.last = null; if (FCF.erase.on) fcfSetEraseMode(false); fcfSyncStatus(""); return; } /* nothing is drawn without a loaded .fcf; the menu comes with it (see featureInUse) */
     if (!FCF.group) { FCF.group = new THREE.Group(); scene.add(FCF.group); }
     var reg = fcfRegionAtoms(), atoms = reg.atoms; if (!atoms.length) { fcfSyncStatus("No atoms in view to place the map around."); return; }
     var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], mg = Math.max(0.5, C.margin);
@@ -22454,7 +22533,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     if (!d.peaks) d.peaks = fcfFindPeaks(d.diffMap, 8, 5);
     FCF.data = d; refreshFeatures(); fcfSyncUi(); fcfRedraw();
     var m = d.map, tg = state.cifTags || {}, sh = tg["_refine_diff_density_max"] != null ? " (SHELXL: " + tg["_refine_diff_density_max"] + ", " + tg["_refine_diff_density_min"] + ", rms " + tg["_refine_diff_density_rms"] + ")" : "";
-    if (!quiet) setStatus("Loaded " + d.name + ": " + d.n + " reflections (LIST " + (d.list || "?") + "), difference map max " + m.max.toFixed(2) + ", min " + m.min.toFixed(2) + ", rms " + m.rms.toFixed(3) + " e/Å³" + sh + " (" + (Date.now() - t0) + " ms)." + (IFACE.features.fcf ? "" : " Switch on \"Difference density\" in Settings to show it."), false);
+    if (!quiet) setStatus("Loaded " + d.name + ": " + d.n + " reflections (LIST " + (d.list || "?") + "), difference map max " + m.max.toFixed(2) + ", min " + m.min.toFixed(2) + ", rms " + m.rms.toFixed(3) + " e/Å³" + sh + " (" + (Date.now() - t0) + " ms).", false);
     return true;
   }
   function fcfAttachText(text, name) {
@@ -23911,7 +23990,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<h3>The other tabs</h3><ul>" +
       "<li><b>Pack</b> grows by a range of fractional coordinates instead of a click; it can keep only the copies that are H-bonded to the structure, and repeat until none more are.</li>" +
       "<li><b>Symmetry</b> applies one chosen symmetry operation to the selected atoms.</li>" +
-      "<li><b>Molecular neighbourhood</b> shows small preview spheres for what lies within a radius, or for what is H-bonded to the structure; clicking one adds its whole fragment.</li></ul>" +
+      "<li><b>Molecular neighbourhood</b> shows small preview spheres for what lies within a radius, or for what is H-bonded to the structure; clicking one adds its whole fragment, and <b>Expand all</b> adds them all.</li></ul>" +
       "<h3>Helpers</h3><ul>" +
       "<li><b>Extend fragment(s)</b> and <b>Complete molecule(s)</b> grow every atom in view at once; Extend fragment(s) and Complete molecule(s) can follow H-bonds instead of covalent bonds.</li>" +
       "<li><b>Delete all symmetry-generated atoms</b> returns to the bare asymmetric unit.</li>" +
@@ -23993,7 +24072,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<h3>Getting the data in</h3><ul>" +
       "<li>Refine the structure <b>without</b> the guest, with <b>LIST 6</b> in the instructions (a LIST 4 .fcf has no phases and is refused).</li>" +
       "<li>Drop the <b>CIF and the .fcf together</b> on the 3D view. A .fcf dropped alone goes with the structure that is loaded.</li>" +
-      "<li>The menu shows only when <b>Difference density (FCF)</b> is on in Settings and a .fcf is loaded.</li></ul>" +
+      "<li>The menu appears by itself (and blinks once) as soon as a .fcf is loaded with the structure, whatever Settings says, and goes with the structure.</li></ul>" +
       "<h3>Using it</h3><ul>" +
       "<li><b>levels</b>: three surfaces, each with its own checkbox, value, colour and <b>style</b> (mesh, or solid with an opacity, so that nested surfaces show through each other), a <b>spacing</b> for the openness of the mesh and a <b>line width</b> slider for its lines.</li>" +
       "<li>Levels are in multiples of the r.m.s. of the map (3 is the usual start) or in e/&Aring;&sup3;. The highest, lowest and r.m.s. values are shown beside SHELXL's own.</li>" +
@@ -24069,7 +24148,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     { key: "macro", label: "Macro and batch", desc: "The Macro menu.", titles: ["Macro"] },
     { key: "orca", label: "Quantum chemistry (Orca)", desc: "The Orca bridge and Cube &amp; ESP menus.", titles: ["Orca bridge", "Cube & ESP"] },
     { key: "qe", label: "Quantum ESPRESSO", desc: "The Quantum ESPRESSO menu: writes pw.x inputs (single point, relax, vc-relax, convergence tests) and reads the results.", titles: ["Quantum ESPRESSO"] },
-    { key: "fcf", label: "Difference density (FCF)", desc: "The Difference density menu: electron density maps from a SHELXL .fcf file. It appears only while a .fcf has been loaded with the structure.", titles: ["Difference density"], needs: function () { return !!FCF.data; } }
+    { key: "fcf", label: "Difference density (FCF)", desc: "The Difference density menu: electron density maps from a SHELXL .fcf file. It appears by itself whenever a .fcf is loaded with the structure, whatever this box says.", titles: ["Difference density"], needs: function () { return !!FCF.data; } }
   ];
   var FEATURE_PRESETS = [
     { name: "Viewer", on: {} },
@@ -24106,6 +24185,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     if (key === "walk") return !!state.walkMode;
     if (key === "macro") { var ta = document.getElementById("macroMemo"); return !!(state.macroRecording || state.macroPlaying || (ta && ta.value.trim())); }
     if (key === "orca") return !!((ORB.cubes && ORB.cubes.length) || ORB.dimers || ORB.results || ORB.esp);
+    if (key === "fcf") return !!FCF.data; /* a loaded .fcf brings its menu with it, whatever Settings says */
     return false;
   }
   function collectFeatureEls() {
@@ -24172,7 +24252,6 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       var cb = document.getElementById("setFeat_" + f.key), us = document.getElementById("setUse_" + f.key); if (!cb) return;
       cb.checked = !!IFACE.features[f.key];
       us.textContent = (!IFACE.features[f.key] && featureInUse(f.key)) ? "Shown for now because the loaded model uses it." : "";
-      if (f.key === "fcf" && !IFACE.features.fcf && FCF.data) us.textContent = "A reflection file is loaded with the structure: tick this to show the menu.";
     });
     Array.prototype.forEach.call(document.querySelectorAll("#setPresets button"), function (b, i) {
       b.classList.toggle("on", FEATURES.every(function (f) { return !!IFACE.features[f.key] === !!FEATURE_PRESETS[i].on[f.key]; }));
@@ -25495,6 +25574,10 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     var molNeighborBtn = button(molNeighborTab, "", "prominent", function () { setMolNeighborMode(); });
     molNeighborBtn.id = "molNeighborBtn";
     updateMolNeighborBtnLabel();
+    var nbExpandRow = el("div", "btnrow");
+    var nbExpandBtn = button(nbExpandRow, "Expand all", "ghost", function () { neighbourhoodExpandAllButton(); });
+    nbExpandBtn.id = "molNeighborExpandAllBtn"; nbExpandBtn.title = "While Interactive grow mode is on: add the fragment of every preview atom that is displayed now, as if each had been clicked. The new preview atoms that appear afterwards are not expanded: press again for the next layer. One undo step.";
+    molNeighborTab.appendChild(nbExpandRow);
 
     var growModeBtn = button(mouseTab, "", "prominent", function () {
       state.growMode = !state.growMode;
@@ -25543,6 +25626,10 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
     growCols.appendChild(el("div", "vdivider"));
     growCols.appendChild(growConnCol);
     mouseTab.appendChild(growCols);
+    var expandAllRow = el("div", "btnrow");
+    var expandAllBtn = button(expandAllRow, "Expand all", "ghost", function () { growExpandAll(); });
+    expandAllBtn.id = "growExpandAllBtn"; expandAllBtn.title = "Grow from every atom that is displayed now, as a click on each would (with the settings above). The atoms this adds are not expanded in turn: press again for the next layer. One undo step.";
+    mouseTab.appendChild(expandAllRow);
 
     var packLayout = el("div", "pack-layout");
     var packRanges = el("div", "pack-ranges");
@@ -26459,7 +26546,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<h3>Help buttons</h3>" +
       "<p>A small <b>?</b> in the title bar of some menus and submenus (Structure Navigator, Add guest, Clipping Planes, Walk mode, Grow, Void / Channel Analysis, Molecular Surface, Orca bridge, Cube &amp; ESP, Quantum ESPRESSO, Macro and Video) opens a short help panel for just that menu: what it is for, the steps, and the common snags. The panel floats beside the 3D view without dimming it, so it can stay open while you work. Drag its title bar to move it; press the <b>?</b> again, the &times; or <b>Esc</b> to close it; the link at its foot opens this full Guide. Clicking the <b>?</b> does not open or close the menu, and clicking in the panel does not cancel an interactive mode that is on.</p>" +
       "<h3>Settings</h3>" +
-      "<p>The <b>Settings</b> button in the title bar (next to Elements) chooses which menus are shown, so the panel can stay simple. <b>Void / channel analysis</b>, <b>Molecular surface</b>, <b>Clipping planes</b>, <b>Host&ndash;guest tools</b> (the Host, Guest and Add guest submenus), <b>Walk mode</b>, <b>Macro and batch</b>, <b>Quantum chemistry (Orca)</b> (Orca bridge and Cube &amp; ESP), <b>Quantum ESPRESSO</b> and <b>Difference density (FCF)</b> (shown only while a .fcf reflection file is loaded with the structure) can each be switched on or off, or set together with the presets <b>Viewer</b>, <b>Void / channel</b> and <b>Everything</b>. Every other menu is always shown. Hiding only removes the menu: nothing is switched off, shortcuts and macros keep working, and a menu that the loaded model uses (void results, molecular surfaces, a clipping plane that is on, guests, a cube, a macro, Walk mode) is shown again for as long as it is needed, with a brief highlight, whatever the setting. Settings also holds the <b>default probe radius</b> for molecular surfaces and a switch for the ? help buttons. A browser with no saved choice starts with the Void / channel preset, except that a browser that already holds CrystalVista preferences keeps Everything. The choices are remembered in the browser and are not saved in model files. Menus always start collapsed, and when several structures are loaded (a folder, a zip or a CIF with several structures) the Structure Navigator opens by itself.</p>" +
+      "<p>The <b>Settings</b> button in the title bar (next to Elements) chooses which menus are shown, so the panel can stay simple. <b>Void / channel analysis</b>, <b>Molecular surface</b>, <b>Clipping planes</b>, <b>Host&ndash;guest tools</b> (the Host, Guest and Add guest submenus), <b>Walk mode</b>, <b>Macro and batch</b>, <b>Quantum chemistry (Orca)</b> (Orca bridge and Cube &amp; ESP), <b>Quantum ESPRESSO</b> and <b>Difference density (FCF)</b> (appears by itself whenever a .fcf reflection file is loaded with the structure) can each be switched on or off, or set together with the presets <b>Viewer</b>, <b>Void / channel</b> and <b>Everything</b>. Every other menu is always shown. Hiding only removes the menu: nothing is switched off, shortcuts and macros keep working, and a menu that the loaded model uses (void results, molecular surfaces, a clipping plane that is on, guests, a cube, a macro, Walk mode) is shown again for as long as it is needed, with a brief highlight, whatever the setting. Settings also holds the <b>default probe radius</b> for molecular surfaces and a switch for the ? help buttons. A browser with no saved choice starts with the Void / channel preset, except that a browser that already holds CrystalVista preferences keeps Everything. The choices are remembered in the browser and are not saved in model files. Menus always start collapsed, and when several structures are loaded (a folder, a zip or a CIF with several structures) the Structure Navigator opens by itself.</p>" +
       "<h3>View controls</h3>" +
       "<ul>" +
       "<li><b>Left drag</b> &mdash; rotate. Free rotation about the camera's own axes; there is no limit, and it stops the instant the mouse does. \"Rotation sensitivity\" (Visual Effects panel, Scene tab) can slow this down for lining up a precise view -- it only ever slows down, never speeds up past the default, and resets to full speed the next time the file is opened rather than being remembered.</li>" +
@@ -26500,7 +26587,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<h3>CIF and symmetry (Symmetry panel)</h3>" +
       "<p>Dropping a CIF reads the unit cell, the symmetry operators (from the file's own symmetry loop), and the asymmetric unit, then displays just the asymmetric unit -- not a complete molecule -- as the starting point. If the file actually contains more atoms than the true asymmetric unit (Mercury sometimes exports a whole completed molecule this way), the extra symmetry-equivalent copies are automatically detected and removed first, so what's displayed is always just the independent set. An atom sitting exactly on a special position (a mirror plane, an inversion centre, a rotation axis) is never duplicated when a symmetry operation maps it onto itself or onto another copy already present -- this is handled automatically throughout, not something to manage by hand.</p>" +
       "<p>The <b>Grow</b> section appears once a CIF has been loaded, with the asymmetric unit and current atom count shown at the top, and its controls split into four submenus -- <b>Mouse</b>, <b>Pack</b>, <b>Symmetry</b>, and <b>Molecular neighbourhood</b>.</p>" +
-      "<p>On the <b>Mouse</b> tab, the large button turns grow mode on or off -- solid when on, a visual reminder alongside the crosshair cursor that a plain click will grow rather than select. Two independent radio choices control how: <b>Bonds</b> requires the new atom to be covalently bonded to the one clicked, searched up to 5 unit cells away; <b>H-bonds</b> adds the symmetry-related atoms that are hydrogen-bonded to the one clicked (click a donor N, O, S or Cl, or its H, for the acceptors around it; click an acceptor for the donors that H-bond to it), by the criterion of Show H bonds; <b>Sphere of inclusion</b> adds every symmetry-equivalent atom within the radius given next to it, regardless of bonding -- useful for filling out a coordination sphere or a solvent shell that isn't covalently continuous. Separately, <b>Atoms</b> adds just the one newly-connected atom; <b>Fragment</b> (the default) adds the whole covalently-connected molecule the new atom belongs to within its asymmetric unit, leaving the rest of that asymmetric unit alone; <b>ASU</b> adds the entire asymmetric unit instead, generated under whatever symmetry operation connects it -- everything in it, not just the connected molecule. The Fragment/ASU distinction matters when the asymmetric unit contains more than one physically separate molecule (say, a host and a guest together, or two independent solvent molecules): ASU would grow both together since they share the same symmetry transform, where Fragment grows only the one actually connected to what was clicked. Whether you click a host or a guest atom makes no difference to any of this.</p>" +
+      "<p>On the <b>Mouse</b> tab, the large button turns grow mode on or off -- solid when on, a visual reminder alongside the crosshair cursor that a plain click will grow rather than select. Two independent radio choices control how: <b>Bonds</b> requires the new atom to be covalently bonded to the one clicked, searched up to 5 unit cells away; <b>H-bonds</b> adds the symmetry-related atoms that are hydrogen-bonded to the one clicked (click a donor N, O, S or Cl, or its H, for the acceptors around it; click an acceptor for the donors that H-bond to it), by the criterion of Show H bonds; <b>Sphere of inclusion</b> adds every symmetry-equivalent atom within the radius given next to it, regardless of bonding -- useful for filling out a coordination sphere or a solvent shell that isn't covalently continuous. Separately, <b>Atoms</b> adds just the one newly-connected atom; <b>Fragment</b> (the default) adds the whole covalently-connected molecule the new atom belongs to within its asymmetric unit, leaving the rest of that asymmetric unit alone; <b>ASU</b> adds the entire asymmetric unit instead, generated under whatever symmetry operation connects it -- everything in it, not just the connected molecule. The Fragment/ASU distinction matters when the asymmetric unit contains more than one physically separate molecule (say, a host and a guest together, or two independent solvent molecules): ASU would grow both together since they share the same symmetry transform, where Fragment grows only the one actually connected to what was clicked. Whether you click a host or a guest atom makes no difference to any of this. <b>Expand all</b>, under the options, grows from every atom that is displayed now, as a click on each would, with the settings above (Bonds, H-bonds or Sphere of inclusion; Atoms, Fragment or ASU). It works whether or not grow mode is on, all in one step and one undo, and the atoms it adds are not expanded in turn: press it again for the next layer.</p>" +
       "<p>The <b>Pack</b> tab grows by an explicit fractional-coordinate range instead of a click: set limits for a, b, and c (each defaults to 0 to 1, one full unit cell, and can range from -5 to 5), choose whether a fragment qualifies when <b>a fragment atom</b> falls within those limits or only when its <b>centroid</b> does, then press <b>Pack</b>. Every symmetry-related copy of the asymmetric unit meeting that condition is added in one step, each still a whole covalently-connected fragment (not split by Atoms/Fragment/ASU, which are Mouse-tab-only concepts). With <b>Only copies H-bonded to the structure</b> ticked, a copy inside the limits is added only if it has a hydrogen bond (the criterion of <b>Show H bonds</b>: an H on a donor N, O, S or Cl, an acceptor 1.2 to 2.8&nbsp;&Aring; from the H, D&ndash;H&middot;&middot;&middot;A angle of at least 120&deg;) to an atom already in the view; with <b>Repeat until no more are found</b> as well, each copy just chosen counts as part of the structure and the search is run again, round after round, until no further copy inside the limits is H-bonded to anything &mdash; an H-bonded chain or network confined to the box. The status line gives the number of rounds. One Undo reverts the whole Pack.</p>" +
       "<p>The <b>Symmetry</b> tab applies one specific, explicitly chosen symmetry operation to whichever atoms are currently selected, rather than growing by proximity or by range. The dropdown lists every operator of this structure's space group exactly as the CIF itself expresses them (e.g. <span class='mono'>x,y,z</span> for identity, <span class='mono'>-x,y+0.5,-z</span> for a 2-fold screw axis parallel to b); choosing one fills in the 3x4 matrix beside it -- three rows of a rotation coefficient triple plus a translation, e.g. a c-glide perpendicular to b would read as rows (1,0,0,0), (0,-1,0,0), (0,0,-1,0.5). The rotation coefficients (always -1, 0, or 1 for any real symmetry operation) step through those three values with the small up/down arrows; the translations accept any typed value, since a screw or glide component is usually a fraction but there's no reason to restrict it to one. Apply doesn't reset any of this afterwards -- the matrix stays exactly as set until deliberately changed again, whether by picking a different operator from the dropdown or editing a box directly. Each row also has its own <b>-a/+a</b>, <b>-b/+b</b>, or <b>-c/+c</b> pair alongside it; pressing one always applies a fresh, plain +1 or -1 cell translation along that one axis to whatever's currently selected -- not a further nudge on top of whatever the matrix happened to already show -- and, unlike the rest of the matrix, does so immediately without needing Apply, since the point of a cell shift is usually to walk straight to a neighbouring copy one step at a time (it does overwrite the displayed matrix to show that plain translation, though, so what's about to happen is always visible first). With <b>Use M<sup>-1</sup></b> checked, Apply and the shift buttons alike carry out the matrix as given in reverse instead. Each selected atom is mapped through the operation to find its image; if that image is a position not already displayed, the atom is added there (correctly tracked for further growth or symmetry-aware deletion, exactly like any other grown atom), and if it's already present, that one atom is simply left alone rather than duplicated. With <b>Select new</b> checked, the originally-selected atoms are deselected once Apply runs and each one's image -- newly added or already there -- is selected in their place, which is what makes stepping a shift button repeatedly walk outward one cell at a time rather than needing to reselect anything by hand in between. With <b>Keep source format</b> checked, each newly-generated image copies the exact display colour and radius of the specific selected atom it was generated from, atom-by-atom, instead of whatever the \"Settings for new host/guest atoms\" dropdown would otherwise give it -- distinct from that dropdown's generic brush, and scoped only to Symmetry's own Apply and shift buttons, never Mouse or Pack growth.</p>" +
       "<p>All of this only ever adds atoms; nothing is removed automatically, and everything added this way can be deleted, selected, or undone exactly like any other atom in the app. <b>Extend fragment(s)</b>, visible above the tabs regardless of which one is open, applies the Mouse tab's Bonds+Frag behaviour all at once: it snapshots every atom currently displayed and grows the connected fragment attached to each one that has a new symmetry-connected neighbour, in a single step. Only atoms present at the moment it's pressed are used as starting points -- atoms it adds during that same pass are never themselves used to grow further, which is what keeps something like a polymer or chain from running away indefinitely. With <b>Extend through H-bonds</b> ticked (the checkbox just above the button), it follows hydrogen bonds instead of covalent bonds: every symmetry-related atom that is H-bonded to anything in view (the criterion of <b>Show H bonds</b>) is found, and each is completed to its whole connected fragment. As with bonds it is one step outward from what is there when the button is pressed; press it again for the next shell. \"Delete all symmetry-generated atoms\", just below it, removes everything growth has added in one step back to just the original asymmetric unit -- a guest designation on an asymmetric unit atom survives this, only the grown copies are removed.</p>" +
@@ -26513,7 +26600,7 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<p>The unit cell's colour and line thickness are both adjustable; edges are drawn the same way bonds are (as shaded cylinders, not flat lines), so they respond to lighting rather than looking flat. Its three edges from the origin can optionally be coloured in the deepest possible red/green/blue for a, b, c respectively, following the usual crystallographic convention, instead of the single default colour. The a, b, c edges are always labelled in italic, in whichever of black or white contrasts better with the current background (the same approach the lasso outline uses), so the labels stay readable regardless of colour scheme. All of this is purely visual and has no effect on growth.</p>" +
       "<h3>Molecular neighbourhood</h3>" +
       "<p>A different way of growing: rather than adding atoms outright, it previews what's nearby first, so a direction can be chosen before committing to it -- useful for a framework or polymer that could otherwise be extended in several different directions at once. Choose <b>Sphere of inclusion</b> (and enter its radius in the box beside it) or <b>H-bonds</b>, then press the button below (solid red while active, exactly like Mouse's own grow-mode button). With the sphere, every symmetry-generated atom not currently displayed, but within that radius of at least one atom that already is (host or guest, whichever layer it would belong to), is shown as a small unbonded sphere, joined by a dotted line to each real atom it's close enough to. With H-bonds the spheres are instead the symmetry-generated atoms that are hydrogen-bonded to an atom already in the view (the criterion of Show H bonds): the acceptors around each displayed donor H, and the H and donor atoms that point at each displayed acceptor, each joined by a dotted line to the atom it bonds to. These are a preview only, never added to the model, and cost nothing to leave on screen since they're recomputed only when the mode is turned on, the radius changes, or a fragment is added, not on every frame. <b>Black nodes</b> (ticked by default) shows every one of these preview spheres in plain black, keeping them visually distinct from anything already in the model; unticking it instead colours each one the same as the real atom it represents (its usual CPK or custom colour), which makes it far easier to judge what a given preview position actually is -- e.g. picking out a lone counter-ion's own colour among a crowd of hydrogens -- at the cost of that “obviously still just a preview” distinctness black gives. Either way, the dotted contact lines themselves stay black, and the preview spheres' own radii still scale with each atom's own display radius, exactly like a real atom would.</p>" +
-      "<p>Clicking one of these black spheres adds the whole connected fragment it belongs to -- the same Fragment-unit growth Mouse's own grow mode uses -- and the preview then refreshes around the newly-larger structure: any black sphere the new fragment happened to reach simply stops being previewed (it's a real atom now), and a fresh ring of black spheres appears around whatever's now the edge of the structure. Repeating this lets a structure be built out one fragment at a time, following whichever direction actually looks interesting, rather than growing everything within reach at once. Leaving Molecular neighbourhood -- pressing its button again, closing its own tab, switching to Mouse/Pack/Symmetry, or opening a different section entirely -- discards whatever black spheres are still on screen; nothing about them is ever kept. Like grow mode, it needs a CIF that still has its symmetry information.</p>" +
+      "<p>Clicking one of these black spheres adds the whole connected fragment it belongs to -- the same Fragment-unit growth Mouse's own grow mode uses -- and the preview then refreshes around the newly-larger structure: any black sphere the new fragment happened to reach simply stops being previewed (it's a real atom now), and a fresh ring of black spheres appears around whatever's now the edge of the structure. Repeating this lets a structure be built out one fragment at a time, following whichever direction actually looks interesting, rather than growing everything within reach at once. Leaving Molecular neighbourhood -- pressing its button again, closing its own tab, switching to Mouse/Pack/Symmetry, or opening a different section entirely -- discards whatever black spheres are still on screen; nothing about them is ever kept. Like grow mode, it needs a CIF that still has its symmetry information. <b>Expand all</b> adds the fragment of every preview sphere that is displayed now, as if each had been clicked (grow mode must be on, so that the previews exist); the new previews that appear afterwards are not expanded, so press it again for the next layer. It is one undo step.</p>" +
       "<p>The <b>Display</b> section, just below Grow, is always available. Its own general settings hold <b>Show ASU only</b> paired with <b>Show atom labels</b>, then <b>Show unit cell</b> paired with <b>Show axis key</b>, then <b>Show hydrogen atoms</b> paired with <b>Show H bonds</b>, then <b>Immobilise view</b> (see View controls) paired with <b>Show bond lengths</b>; a <b>Background colour</b> swatch; <b>Centering</b> (All/Visible/Selected atoms, with an Apply button that only appears for \"Selected atoms\", since that mode is otherwise frozen at whatever it was last applied to, plus a <b>Recenter</b> button that returns the rotation centre to its default position after any Shift + Ctrl + left-drag panning); <b>Set scale</b>, an arbitrary whole-number reference for the current zoom level -- bigger means more zoomed in, updates live as you zoom, and can be typed into directly (it carries no physical unit; its purpose is matching the same apparent zoom between different structures rather than measuring anything); and duplicate <b>Select all</b> / <b>Clear selection</b> / <b>Hide selection</b> / <b>Unhide all</b> buttons for convenience, identical to the ones in Structure &gt; Edit atoms. Nested inside Display: <b>Direction</b>, a <b>View direction</b> set of crystallographic view shortcuts -- buttons for looking straight down each cell axis (a, b, c) and perpendicular to each pair-wise plane (bc, ac, ab), a general <b>[hkl]</b> field for viewing along any specific direction entered as its own three numbers, and <b>View along vector</b> / <b>View perpendicular to plane</b> (see \"Viewing along a vector or a plane\" below), which orient the camera from a selection of atoms instead. The appearance of the unit cell, the axis key and the atom labels lives in Style (see \"Unit cell, axis key and atomic labels (Style)\" below).</p>" +
       "<h3>Unit cell, axis key and atomic labels (Style)</h3>" +
       "<p><b>Style &gt; Unit cell</b> starts with a <b>Show unit cell</b> checkbox that echoes Display's checkbox of the same name and the <b>c</b> key -- change any one and the others follow. Below it: a <b>Label axes</b> toggle for the a/b/c corner labels, a <b>RGB axes</b> option to colour the a/b/c edges red/green/blue, the cell's own <b>Cell colour</b>, and <b>line thickness</b> -- all of these, plus whether the cell is shown, are remembered between structures and when the app is closed and reopened. Each corner label sits genuinely at that corner in 3D and is occluded normally by anything nearer the camera (an atom, an L.S. plane, ...), not painted on top of everything regardless of what's actually in front of it. A divider then separates the cell's settings from the <b>axis key's</b> own: a <b>Show axis key</b> checkbox (echoing Display's, and the <b>k</b> key), the key's <b>zoom</b> (scales the whole key -- arrow length and thickness, arrowheads and letters alike), <b>proportional lengths</b> (arrow lengths follow the real a/b/c edge lengths, or all equal when off), <b>show labels a, b, c</b> (a letter beside each arrow tip, in the arrow's own red/green/blue on a transparent background, scaling with the key's zoom and positioned smoothly so it never jumps as the model rotates; on by default, remembered between sessions, and included in exported images along with the key itself), and <b>Reset key position</b>. All of the key's settings -- whether it is shown, where you dragged it, its zoom, proportional lengths and labels -- are remembered between structures and when the app is closed and reopened (a saved project file still restores its own).</p>" +
@@ -26647,6 +26734,8 @@ body.nohelp .helpbtn,body.nohelp #helpPanel{display:none !important}
       "<li><span class='mono'>SELECTED_TO_ASU</span> &mdash; \"Move to ASU\".</li>" +
       "<li><span class='mono'>DELETE_SELECTED_ATOMS</span> &mdash; \"Delete selection\".</li>" +
       "<li><span class='mono'>CREATE_CENTROID</span> &mdash; \"Generate centroid\" (or Ctrl-C).</li>" +
+      "<li><span class='mono'>EXPAND_ALL unit method [radius]</span> &mdash; Grow &gt; Mouse &gt; \"Expand all\" (<span class='mono'>unit</span> is ATOM, FRAG or ASU; <span class='mono'>method</span> is BONDS, HB or SPHERE, with the radius for SPHERE).</li>" +
+      "<li><span class='mono'>NEIGHBOURHOOD_EXPAND_ALL HB</span> / <span class='mono'>NEIGHBOURHOOD_EXPAND_ALL SPHERE radius</span> &mdash; Grow &gt; Molecular neighbourhood &gt; \"Expand all\".</li>" +
       "<li><span class='mono'>ADD_MISSING_H</span> &mdash; \"Add missing H atoms\" (the automatic button).</li>" +
       "<li><span class='mono'>ADD_H_MODEL #</span> &mdash; one of the model buttons of Add missing H atoms, on the selected atoms (<span class='mono'>#</span> is 13, 23, 43, 137, 123, 93, 163, 153, 83 or 147: tertiary C-H, CH2, aromatic, methyl, methyl in two positions, =CH2, acetylenic, B-H, O-H staggered, O-H towards an acceptor).</li>" +
       "<li><span class='mono'>ADD_H_REMOVE</span> &mdash; \"Remove H from selection\".</li>" +
